@@ -242,6 +242,37 @@ class CustomField(CustomFieldBase):
     updated_at: datetime
 
 
+# P0-8：库（PatentDatabase）相关 schema
+class PatentDatabaseBase(BaseSchema):
+    name: str
+    code: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    sort_order: Optional[int] = 0
+
+
+class PatentDatabaseCreate(PatentDatabaseBase):
+    pass
+
+
+class PatentDatabaseUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class PatentDatabase(PatentDatabaseBase):
+    id: int
+    is_default: Optional[bool] = False
+    is_archived: Optional[bool] = False
+    patent_count: Optional[int] = 0
+    created_at: datetime
+    updated_at: datetime
+
+
 class PersonBase(BaseSchema):
     name: str
     email: Optional[str] = None

@@ -1,5 +1,5 @@
 from app.database import SessionLocal, init_db
-from app.models import Department, TagGroup, CustomField, CustomFieldType
+from app.models import Department, TagGroup, CustomField, CustomFieldType, PatentDatabase
 
 
 def init_default_data():
@@ -12,6 +12,19 @@ def init_default_data():
                 Department(name="撰写组", description="负责专利申请撰写、答复审查意见"),
             ]
             db.add_all(departments)
+            db.flush()
+
+        # P0-11：默认数据库（库是顶层品类容器）
+        if db.query(PatentDatabase).count() == 0:
+            default_db = PatentDatabase(
+                name="默认数据库",
+                code="DEFAULT",
+                description="未指定库的专利会归入此库",
+                color="#1890ff",
+                is_default=True,
+                sort_order=0,
+            )
+            db.add(default_db)
             db.flush()
 
         if db.query(TagGroup).count() == 0:
@@ -151,8 +164,9 @@ def init_default_data():
                 db.add(CustomField(**f))
 
         db.commit()
-        print("✅ 默认数据初始化完成！")
+        print("[OK] 默认数据初始化完成！")
         print("   - 3个默认部门：检索组、分析组、撰写组")
+        print("   - 1个默认数据库：默认数据库（DEFAULT）")
         print("   - 4个标签组：技术领域、风险等级、项目状态、质量标签")
         print(f"   - {len(default_ai_fields)}个AI字段模板")
     finally:

@@ -55,6 +55,7 @@ class PatentService:
         page: int = 1,
         page_size: int = 50,
         search: Optional[str] = None,
+        database_id: Optional[int] = None,
         product_id: Optional[int] = None,
         project_id: Optional[int] = None,
         tag_ids: Optional[list[int]] = None,
@@ -87,6 +88,10 @@ class PatentService:
                     Patent.inventor.ilike(search_term),
                 )
             )
+
+        # 库筛选：P0-11 新增，限定查询范围到某个库
+        if database_id is not None:
+            query = query.filter(Patent.database_id == database_id)
 
         if product_id:
             query = query.filter(Patent.product_id == product_id)

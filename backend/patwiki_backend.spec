@@ -37,7 +37,7 @@ a = Analysis(
         "pandas",
         "openpyxl",
         "xlrd",
-        # 本项目模块
+        # 本项目模块 - API
         "app",
         "app.api",
         "app.api.api",
@@ -48,11 +48,27 @@ a = Analysis(
         "app.api.deps",
         "app.api.fields",
         "app.api.settings",
+        "app.api.databases",
+        # 本项目模块 - models（P0-8 拆分为子模块）
         "app.models",
+        "app.models.enums",
+        "app.models.association",
+        "app.models.organization",
+        "app.models.project",
+        "app.models.tag",
+        "app.models.field",
+        "app.models.database",
+        "app.models.patent",
+        "app.models.ai",
+        "app.models.importing",
+        # 本项目模块 - schemas/services
         "app.schemas.schemas",
         "app.services.import_service",
         "app.services.patent_service",
         "app.services.field_registry",
+        "app.services.merge_service",
+        "app.services.relation_service",
+        "app.services.database_service",
         "app.ai.fields.engine",
         "init_data",
         # openai SDK 及其依赖

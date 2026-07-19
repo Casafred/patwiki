@@ -16,6 +16,13 @@ from app.database import get_db, SessionLocal
 from app.schemas.schemas import StatsResponse, PatentCreate as _PatentCreate
 from app.services.import_service import ImportService
 from app.services.patent_service import PatentService
+from app.services.merge_service import merge_patent_data
+from app.services.relation_service import (
+    process_family_members,
+    process_citations,
+    process_citing_patents,
+)
+from app.services.database_service import DatabaseService
 from app.config import settings
 
 router = APIRouter(tags=["import"])
@@ -36,6 +43,7 @@ class ConfirmImportRequest(BaseModel):
     update_on_duplicate: bool = True
     product_id: Optional[int] = None
     project_id: Optional[int] = None
+    database_id: Optional[int] = None  # P0-10：导入必须指定库
 
 
 @router.post("/import/preview")
@@ -63,12 +71,18 @@ async def preview_import(
         TEMP_FILENAMES.pop(import_id, None)
     threading.Thread(target=cleanup, daemon=True).start()
 
+    # P0-11：返回当前库列表供前端选择
+    databases = DatabaseService.list_databases(db)
+    default_db = DatabaseService.get_default_database(db)
+
     return {
         "import_id": import_id,
         "detected_columns": columns,
         "preview_rows": preview_rows_list,
         "total_rows": len(df),
         "suggested_mapping": suggested_mapping,
+        "databases": [DatabaseService.to_dict(d) for d in databases],
+        "default_database_id": default_db.id if default_db else None,
     }
 
 
@@ -79,6 +93,17 @@ async def confirm_import(
 ):
     if req.import_id not in TEMP_FILES:
         raise HTTPException(status_code=400, detail="导入会话已过期，请重新上传文件")
+
+    # P0-11：必须指定库；未指定则使用默认库
+    database_id = req.database_id
+    if database_id is None:
+        default_db = DatabaseService.get_default_database(db)
+        if not default_db:
+            raise HTTPException(status_code=400, detail="未指定库且系统无默认库，请先创建库")
+        database_id = default_db.id
+    else:
+        if not DatabaseService.get_database(db, database_id):
+            raise HTTPException(status_code=400, detail=f"库不存在：{database_id}")
 
     content = TEMP_FILES[req.import_id]
     filename = TEMP_FILENAMES[req.import_id]
@@ -95,6 +120,8 @@ async def confirm_import(
     duplicates_count = 0
     skipped = 0
     error_count = 0
+    family_links = 0
+    citation_links = 0
 
     try:
         df, _ = ImportService.parse_excel(content, filename)
@@ -102,11 +129,15 @@ async def confirm_import(
         for idx, (_, row) in enumerate(df.iterrows()):
             try:
                 row_dict = row.to_dict()
-                patent_data = ImportService._row_to_patent_data(row_dict, mapping, db)
+                # P0-10：_row_to_patent_data 返回 (patent_data, virtual_data)
+                patent_data, virtual = ImportService._row_to_patent_data(row_dict, mapping, db)
 
                 if not patent_data.get("title"):
                     skipped += 1
                     continue
+
+                # 库归属
+                patent_data["database_id"] = database_id
 
                 if req.product_id:
                     patent_data["product_id"] = req.product_id
@@ -124,13 +155,43 @@ async def confirm_import(
                 if existing:
                     duplicates_count += 1
                     if req.update_on_duplicate:
-                        PatentService.update_patent(db, existing, patent_data)
+                        # P0-10：Wiki 式字段级合并，标注类字段非空才覆盖
+                        merged = merge_patent_data(existing, patent_data)
+                        PatentService.update_patent(db, existing, merged)
                         updated += 1
+                        current_patent = existing
                     else:
                         skipped += 1
+                        current_patent = None
                 else:
                     patent = PatentService.create_patent(db, _PatentCreate(**patent_data))
                     inserted += 1
+                    current_patent = patent
+
+                # P0-10：同族/引用关系入库
+                if current_patent is not None:
+                    try:
+                        if virtual["family_numbers"]:
+                            result = process_family_members(
+                                db, current_patent, virtual["family_numbers"],
+                                database_id=database_id,
+                            )
+                            family_links += result.get("members_linked", 0)
+                        if virtual["cited_numbers"]:
+                            result = process_citations(
+                                db, current_patent, virtual["cited_numbers"],
+                                database_id=database_id,
+                            )
+                            citation_links += result.get("links", 0)
+                        if virtual["citing_numbers"]:
+                            result = process_citing_patents(
+                                db, current_patent, virtual["citing_numbers"],
+                                database_id=database_id,
+                            )
+                            citation_links += result.get("links", 0)
+                    except Exception:
+                        # 关系入库失败不影响主表导入
+                        pass
 
             except Exception as e:
                 errors.append({
@@ -140,6 +201,10 @@ async def confirm_import(
                 error_count += 1
 
         db.commit()
+
+        # 刷新库内专利计数
+        if database_id is not None:
+            DatabaseService.refresh_patent_count(db, database_id)
     finally:
         TEMP_FILES.pop(req.import_id, None)
         TEMP_FILENAMES.pop(req.import_id, None)
@@ -151,6 +216,9 @@ async def confirm_import(
         "skipped": skipped,
         "errors": error_count,
         "error_details": errors[:20] if errors else [],
+        "database_id": database_id,
+        "family_links": family_links,
+        "citation_links": citation_links,
     }
 
 

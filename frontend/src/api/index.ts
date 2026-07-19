@@ -2,11 +2,36 @@ import api from '../lib/api'
 import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
-  AITask, FieldMeta, CellUpdateRequest,
+  AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
 } from '../types'
 
 export const fieldApi = {
   list: (): Promise<FieldMeta[]> => api.get('/fields'),
+}
+
+// P0-11：库（Database）API
+export const databaseApi = {
+  list: (includeArchived = false): Promise<PatentDatabase[]> =>
+    api.get('/databases', { params: { include_archived: includeArchived } }),
+
+  getDefault: (): Promise<PatentDatabase> => api.get('/databases/default'),
+
+  get: (id: number): Promise<PatentDatabase> => api.get(`/databases/${id}`),
+
+  create: (data: { name: string; code?: string; description?: string; color?: string; icon?: string }): Promise<PatentDatabase> =>
+    api.post('/databases', data),
+
+  update: (id: number, data: Partial<PatentDatabase>): Promise<PatentDatabase> =>
+    api.put(`/databases/${id}`, data),
+
+  archive: (id: number): Promise<PatentDatabase> =>
+    api.post(`/databases/${id}/archive`),
+
+  delete: (id: number): Promise<{ success: boolean }> =>
+    api.delete(`/databases/${id}`),
+
+  refreshCount: (id: number): Promise<{ success: boolean; patent_count: number }> =>
+    api.post(`/databases/${id}/refresh-count`),
 }
 
 export const patentApi = {
@@ -77,6 +102,7 @@ export const importApi = {
     updateOnDuplicate: boolean = true,
     productId?: number,
     projectId?: number,
+    databaseId?: number,
   ): Promise<ImportResult> => {
     return api.post('/import/confirm', {
       import_id: importId,
@@ -85,6 +111,7 @@ export const importApi = {
       update_on_duplicate: updateOnDuplicate,
       product_id: productId,
       project_id: projectId,
+      database_id: databaseId,
     })
   },
 

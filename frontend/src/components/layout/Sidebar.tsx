@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { productApi } from '../../api'
+import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 
 interface SidebarProps {
@@ -8,9 +8,15 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
-  const { products, currentProductId, setCurrentProductId } = useAppStore()
+  const {
+    products, currentProductId, setCurrentProductId,
+    databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
+  } = useAppStore()
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [newProductName, setNewProductName] = useState('')
+  const [showAddDatabase, setShowAddDatabase] = useState(false)
+  const [newDbName, setNewDbName] = useState('')
+  const [newDbDesc, setNewDbDesc] = useState('')
 
   const handleProductClick = (productId: number | null) => {
     setCurrentProductId(productId)
@@ -30,6 +36,29 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     }
   }
 
+  // P0-11：库切换
+  const handleDatabaseChange = (id: number) => {
+    setCurrentDatabaseId(id)
+    setCurrentProductId(null)
+    onNavigate('patents')
+  }
+
+  // P0-11：新建库
+  const handleAddDatabase = async () => {
+    if (!newDbName.trim()) return
+    try {
+      const db = await databaseApi.create({ name: newDbName.trim(), description: newDbDesc.trim() || undefined })
+      const refreshed = await databaseApi.list()
+      setDatabases(refreshed)
+      setCurrentDatabaseId(db.id)
+      setNewDbName('')
+      setNewDbDesc('')
+      setShowAddDatabase(false)
+    } catch (e) {
+      alert('创建库失败')
+    }
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -38,6 +67,63 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="sidebar-nav">
+        {/* P0-11：库切换器 - 顶部 */}
+        <div className="nav-section">专利库</div>
+        <div style={{ padding: '0 12px 12px', borderBottom: '1px solid #1e293b', marginBottom: 8 }}>
+          <select
+            className="form-input"
+            style={{ width: '100%', fontSize: 13, padding: '6px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
+            value={currentDatabaseId ?? ''}
+            onChange={(e) => handleDatabaseChange(Number(e.target.value))}
+          >
+            {databases.length === 0 && <option value="">无可用库</option>}
+            {databases.map(d => (
+              <option key={d.id} value={d.id}>
+                {d.name}{d.patent_count !== undefined ? ` (${d.patent_count})` : ''}
+              </option>
+            ))}
+          </select>
+          {showAddDatabase ? (
+            <div style={{ marginTop: 8 }}>
+              <input
+                className="form-input"
+                style={{ fontSize: 12, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', marginBottom: 4 }}
+                placeholder="库名称（如：电钻专利库）"
+                value={newDbName}
+                onChange={(e) => setNewDbName(e.target.value)}
+                autoFocus
+              />
+              <input
+                className="form-input"
+                style={{ fontSize: 12, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', marginBottom: 4 }}
+                placeholder="描述（可选）"
+                value={newDbDesc}
+                onChange={(e) => setNewDbDesc(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button className="btn btn-primary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={handleAddDatabase}>
+                  创建
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 11, padding: '3px 8px', background: 'transparent', border: '1px solid #475569', color: '#cbd5e1' }}
+                  onClick={() => { setShowAddDatabase(false); setNewDbName(''); setNewDbDesc('') }}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="product-item"
+              style={{ color: '#64748b', fontStyle: 'italic', marginTop: 4 }}
+              onClick={() => setShowAddDatabase(true)}
+            >
+              + 新建库
+            </div>
+          )}
+        </div>
+
         <div
           className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`}
           onClick={() => handleProductClick(null)}

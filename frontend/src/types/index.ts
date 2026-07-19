@@ -24,6 +24,7 @@ export interface Patent {
   ipc_all?: string
   cpc_main?: string
   cpc_all?: string
+  database_id?: number
   product_id?: number
   category?: string
   subcategory?: string
@@ -43,6 +44,22 @@ export interface Patent {
   projects?: Project[]
   created_at: string
   updated_at: string
+}
+
+// P0-8：库（PatentDatabase）类型
+export interface PatentDatabase {
+  id: number
+  name: string
+  code?: string
+  description?: string
+  color?: string
+  icon?: string
+  is_default?: boolean
+  is_archived?: boolean
+  patent_count?: number
+  sort_order?: number
+  created_at?: string
+  updated_at?: string
 }
 
 export interface PatentListResponse {
@@ -137,6 +154,9 @@ export interface ImportPreview {
   preview_rows: Record<string, string>[]
   total_rows: number
   suggested_mapping: Record<string, string>
+  // P0-11：返回库列表供选择
+  databases?: PatentDatabase[]
+  default_database_id?: number | null
 }
 
 export interface FieldMapping {
@@ -151,6 +171,10 @@ export interface ImportResult {
   skipped: number
   errors: number
   error_details?: { row: number; error: string }[]
+  // P0-10：关系入库统计
+  database_id?: number
+  family_links?: number
+  citation_links?: number
 }
 
 export interface Stats {

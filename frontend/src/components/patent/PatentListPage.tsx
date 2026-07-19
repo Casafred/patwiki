@@ -13,7 +13,7 @@ const DEFAULT_COLUMN_WIDTH = 150
 
 export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const {
-    patents, totalPatents, currentProductId, loading,
+    patents, totalPatents, currentProductId, currentDatabaseId, loading,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
   } = useAppStore()
 
@@ -75,6 +75,10 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
         sort_order: sortOrder,
       }
       if (searchText) params.search = searchText
+      // P0-11：库筛选（限定当前库）
+      if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
+        params.database_id = currentDatabaseId
+      }
       if (currentProductId) params.product_id = currentProductId
 
       const customFilters: Record<string, any> = {}
@@ -99,7 +103,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, sortField, sortOrder, filterValues, fields, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, fields, setPatents, setLoading])
 
   useEffect(() => {
     loadFields()
