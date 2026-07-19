@@ -67,25 +67,25 @@ function App() {
         <header className="header">
           <div className="header-actions">
             <button className="btn btn-primary" onClick={() => setShowImport(true)}>
-              📥 导入Excel
+              导入Excel
             </button>
             <button
               className="btn btn-secondary"
               onClick={() => { setCurrentPage('ai-tasks'); setSelectedPatentId(null) }}
             >
-              🤖 AI任务
+              AI任务
             </button>
             <button
               className="btn btn-secondary"
               onClick={() => { setCurrentPage('stats'); setSelectedPatentId(null) }}
             >
-              📊 统计
+              统计
             </button>
             <button
               className="btn btn-secondary"
               onClick={() => { setCurrentPage('settings'); setSelectedPatentId(null) }}
             >
-              ⚙️ 设置
+              设置
             </button>
           </div>
         </header>

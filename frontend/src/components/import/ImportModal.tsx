@@ -131,7 +131,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
             {step === 'processing' && '正在导入...'}
             {step === 'complete' && '导入完成'}
           </h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#94a3b8' }}>×</button>
         </div>
 
         <div style={{ padding: 24 }}>
@@ -170,7 +170,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   input.click()
                 }}
               >
-                <div style={{ fontSize: 48, marginBottom: 12 }}>📁</div>
+
                 {file ? (
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{file.name}</div>
@@ -271,7 +271,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <button className="btn btn-secondary" onClick={() => setStep('upload')}>← 返回</button>
+                <button className="btn btn-secondary" onClick={() => setStep('upload')}>返回</button>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn btn-secondary" onClick={onClose}>取消</button>
                   <button className="btn btn-primary" disabled={importing} onClick={handleImport}>
@@ -292,7 +292,6 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
 
           {step === 'complete' && importResult && (
             <div style={{ textAlign: 'center', padding: 20 }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
               <h4 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>导入完成！</h4>
               <div style={{ display: 'flex', justifyContent: 'center', gap: 24, marginBottom: 24 }}>
                 <div style={{ textAlign: 'center' }}>

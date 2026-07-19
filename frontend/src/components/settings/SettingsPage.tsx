@@ -98,7 +98,7 @@ export default function SettingsPage() {
   return (
     <div style={{ maxWidth: 700 }}>
       <div className="page-header">
-        <h2 className="page-title">⚙️ 设置</h2>
+        <h2 className="page-title">设置</h2>
         <p className="page-subtitle">配置 LLM API 以启用 AI 字段抽取功能</p>
       </div>
 
@@ -111,7 +111,7 @@ export default function SettingsPage() {
         marginBottom: 20,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>🤖 LLM 配置</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>LLM 配置</h3>
           {hasApiKey ? (
             <span style={{ padding: '2px 8px', background: '#dcfce7', color: '#16a34a', borderRadius: 12, fontSize: 11 }}>已配置</span>
           ) : (
@@ -217,10 +217,10 @@ export default function SettingsPage() {
 
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button className="btn btn-secondary" onClick={handleTest} disabled={testing || (!hasApiKey && !apiKeyEdited)}>
-              {testing ? '测试中...' : '🔌 测试连接'}
+              {testing ? '测试中...' : '测试连接'}
             </button>
             <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? '保存中...' : '💾 保存设置'}
+              {saving ? '保存中...' : '保存设置'}
             </button>
           </div>
 
@@ -233,7 +233,7 @@ export default function SettingsPage() {
               fontSize: 13,
               color: testResult.success ? '#15803d' : '#b91c1c',
             }}>
-              {testResult.success ? '✅ ' : '❌ '}{testResult.message}
+              {testResult.message}
             </div>
           )}
 
@@ -260,7 +260,7 @@ export default function SettingsPage() {
         padding: 24,
         marginBottom: 20,
       }}>
-        <h3 style={{ margin: '0 0 16 0', fontSize: 16, fontWeight: 600 }}>⚡ AI 高级配置</h3>
+        <h3 style={{ margin: '0 0 16 0', fontSize: 16, fontWeight: 600 }}>AI 高级配置</h3>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
@@ -296,7 +296,7 @@ export default function SettingsPage() {
           </div>
 
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? '保存中...' : '💾 保存'}
+            {saving ? '保存中...' : '保存'}
           </button>
         </div>
       </div>
@@ -308,7 +308,7 @@ export default function SettingsPage() {
         borderRadius: 8,
         padding: 16,
       }}>
-        <h3 style={{ margin: '0 0 8 0', fontSize: 14, fontWeight: 600, color: '#475569' }}>📁 数据目录</h3>
+        <h3 style={{ margin: '0 0 8 0', fontSize: 14, fontWeight: 600, color: '#475569' }}>数据目录</h3>
         <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
           数据库、AI 缓存、设置文件等均存储在用户数据目录下，卸载应用不会删除。
           <br />

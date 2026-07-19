@@ -197,3 +197,29 @@ export interface AITask {
   completed_at?: string
   created_at?: string
 }
+
+export interface FieldMeta {
+  key: string
+  name: string
+  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link'
+  group_name: string
+  options?: string[] | null
+  width?: number
+  sortable?: boolean
+  filterable?: boolean
+  editable?: boolean
+  frozen?: boolean
+  visible?: boolean
+  is_system?: boolean
+  ai_config?: Record<string, any> | null
+}
+
+export interface CellUpdateRequest {
+  value: any
+}
+
+export type FilterCondition = {
+  field: string
+  operator: 'eq' | 'contains' | 'gt' | 'lt' | 'gte' | 'lte' | 'in' | 'is_empty' | 'is_not_empty'
+  value?: any
+}

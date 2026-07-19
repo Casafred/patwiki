@@ -1,13 +1,14 @@
 from typing import Optional, Any
 from datetime import datetime, date
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, or_, and_, desc
+from sqlalchemy import func, or_, and_, desc, text, String
 
 from app.models import (
     Patent, Product, Project, Tag, CustomField,
     patent_tag, patent_project, LegalStatus, PatentType
 )
 from app.schemas.schemas import PatentCreate, PatentUpdate
+from app.services.field_registry import SYSTEM_FIELD_KEYS
 
 
 SYSTEM_FIELDS = {
@@ -67,6 +68,7 @@ class PatentService:
         filing_date_to: Optional[date] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = "asc",
+        custom_filters: Optional[dict[str, Any]] = None,
     ) -> tuple[list[Patent], int]:
         query = db.query(Patent).options(
             joinedload(Patent.tags),
@@ -120,15 +122,40 @@ class PatentService:
         if filing_date_to:
             query = query.filter(Patent.filing_date <= filing_date_to)
 
+        if custom_filters:
+            for key, value in custom_filters.items():
+                if value is None or value == "":
+                    continue
+                if isinstance(value, dict):
+                    if "contains" in value and value["contains"]:
+                        query = query.filter(
+                            func.json_extract(Patent.custom_fields, f'$.{key}').cast(String).ilike(f"%{value['contains']}%")
+                        )
+                    elif "eq" in value and value["eq"] is not None:
+                        query = query.filter(
+                            func.json_extract(Patent.custom_fields, f'$.{key}') == str(value["eq"])
+                        )
+                else:
+                    query = query.filter(
+                        func.json_extract(Patent.custom_fields, f'$.{key}').cast(String).ilike(f"%{value}%")
+                    )
+
         total = query.count()
 
-        if sort_by and sort_by in SYSTEM_FIELDS:
-            column = getattr(Patent, sort_by, None)
-            if column is not None:
+        if sort_by:
+            if sort_by in SYSTEM_FIELDS:
+                column = getattr(Patent, sort_by, None)
+                if column is not None:
+                    if sort_order == "desc":
+                        query = query.order_by(desc(column))
+                    else:
+                        query = query.order_by(column)
+            else:
+                json_path = f'$.{sort_by}'
                 if sort_order == "desc":
-                    query = query.order_by(desc(column))
+                    query = query.order_by(desc(func.json_extract(Patent.custom_fields, json_path)))
                 else:
-                    query = query.order_by(column)
+                    query = query.order_by(func.json_extract(Patent.custom_fields, json_path))
         else:
             query = query.order_by(desc(Patent.created_at))
 

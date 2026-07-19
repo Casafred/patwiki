@@ -110,7 +110,7 @@ export default function AITaskMonitor() {
   return (
     <div>
       <div className="page-header">
-        <h2 className="page-title">🤖 AI 任务监控</h2>
+        <h2 className="page-title">AI 任务监控</h2>
         <p className="page-subtitle">
           查看 AI 字段抽取任务进度
         </p>
@@ -141,7 +141,7 @@ export default function AITaskMonitor() {
         </label>
 
         <button className="btn btn-secondary" onClick={loadTasks} style={{ marginLeft: 'auto' }}>
-          🔄 刷新
+          刷新
         </button>
       </div>
 
@@ -152,7 +152,7 @@ export default function AITaskMonitor() {
         </div>
       ) : tasks.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state-icon">🤖</div>
+          <div className="empty-state-icon">[AI]</div>
           <div className="empty-state-title">暂无 AI 任务</div>
           <div className="empty-state-desc">
             在专利列表中选中专利后点击"AI批量处理"按钮，或在专利详情页的"AI 分析"Tab 中点击"生成"按钮，即可启动 AI 任务。

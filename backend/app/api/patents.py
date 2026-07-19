@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import date
+import json
 
 from app.database import get_db
 from app.api.deps import get_pagination_params
@@ -31,9 +32,16 @@ def list_patents(
     filing_date_to: Optional[date] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = "asc",
+    custom_filters: Optional[str] = Query(None, description="JSON string of custom field filters"),
     db: Session = Depends(get_db),
 ):
     tag_ids = [tag_id] if tag_id else None
+    cf = None
+    if custom_filters:
+        try:
+            cf = json.loads(custom_filters)
+        except (json.JSONDecodeError, TypeError):
+            cf = None
     patents, total = PatentService.list_patents(
         db,
         page=page,
@@ -52,6 +60,7 @@ def list_patents(
         filing_date_to=filing_date_to,
         sort_by=sort_by,
         sort_order=sort_order,
+        custom_filters=cf,
     )
     return {
         "total": total,

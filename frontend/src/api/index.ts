@@ -2,8 +2,12 @@ import api from '../lib/api'
 import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
-  AITask,
+  AITask, FieldMeta, CellUpdateRequest,
 } from '../types'
+
+export const fieldApi = {
+  list: (): Promise<FieldMeta[]> => api.get('/fields'),
+}
 
 export const patentApi = {
   list: (params: Record<string, any> = {}): Promise<PatentListResponse> =>
@@ -19,6 +23,9 @@ export const patentApi = {
 
   bulkUpdate: (ids: number[], updates: Partial<Patent>): Promise<{ success: boolean; updated_count: number }> =>
     api.post('/patents/bulk-update', { patent_ids: ids, updates }),
+
+  updateCell: (patentId: number, fieldKey: string, value: any): Promise<Patent> =>
+    api.patch(`/patents/${patentId}/field/${fieldKey}`, { value } as CellUpdateRequest),
 }
 
 export const productApi = {

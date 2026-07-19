@@ -156,7 +156,6 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   if (!patent) {
     return (
       <div className="empty-state">
-        <div className="empty-state-icon">❌</div>
         <div className="empty-state-title">专利不存在</div>
         <button className="btn btn-primary" onClick={onBack}>返回列表</button>
       </div>
@@ -176,7 +175,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     <div>
       {/* 顶部导航 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <button className="btn btn-secondary" onClick={onBack}>← 返回列表</button>
+        <button className="btn btn-secondary" onClick={onBack}>返回列表</button>
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#0f172a' }}>
             {patent.title}
@@ -190,14 +189,14 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         {editing ? (
           <>
             <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? '保存中...' : '💾 保存'}
+              {saving ? '保存中...' : '保存'}
             </button>
             <button className="btn btn-secondary" onClick={handleCancelEdit}>取消</button>
           </>
         ) : (
           <>
-            <button className="btn btn-primary" onClick={() => setEditing(true)}>✏️ 编辑</button>
-            <button className="btn btn-secondary" onClick={handleDelete} style={{ color: '#dc2626' }}>🗑️ 删除</button>
+            <button className="btn btn-primary" onClick={() => setEditing(true)}>编辑</button>
+            <button className="btn btn-secondary" onClick={handleDelete} style={{ color: '#dc2626' }}>删除</button>
           </>
         )}
       </div>
@@ -483,7 +482,7 @@ function RiskTab({ patent, formData, editing, updateField }: {
             <option value="false">无风险</option>
             <option value="true">有风险</option>
           </select>
-        ) : <div className="field-value">{patent.has_risk ? '⚠️ 有风险' : '✅ 无风险'}</div>}
+        ) : <div className="field-value">{patent.has_risk ? '有风险' : '无风险'}</div>}
       </Field>
 
       <Field label="风险等级">
@@ -544,9 +543,9 @@ function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
           border: `1px solid ${taskInfo.status === 'completed' ? '#bbf7d0' : taskInfo.status === 'failed' ? '#fecaca' : '#bfdbfe'}`,
         }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            {taskInfo.status === 'completed' ? '✅ AI 处理完成' :
-             taskInfo.status === 'failed' ? '❌ AI 处理失败' :
-             `⏳ 处理中... (${taskInfo.processed_items}/${taskInfo.total_items})`}
+            {taskInfo.status === 'completed' ? 'AI 处理完成' :
+             taskInfo.status === 'failed' ? 'AI 处理失败' :
+             `处理中... (${taskInfo.processed_items}/${taskInfo.total_items})`}
           </div>
           {taskInfo.status === 'completed' && (
             <div style={{ fontSize: 12, color: '#475569' }}>
@@ -558,7 +557,6 @@ function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
 
       {aiFields.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state-icon">🤖</div>
           <div className="empty-state-title">暂无 AI 字段</div>
           <div className="empty-state-desc">AI 字段模板在系统初始化时自动创建，若未生成请检查后端 init_data</div>
         </div>
@@ -588,7 +586,7 @@ function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
                     disabled={isProcessing || !!processing}
                     style={{ flexShrink: 0 }}
                   >
-                    {isProcessing ? '⏳ 处理中' : '🤖 生成'}
+                    {isProcessing ? '处理中' : '生成'}
                   </button>
                 </div>
                 {field.description && (
@@ -616,7 +614,6 @@ function CustomTab({ patent, editing, updateField }: {
     <div>
       {keys.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state-icon">📝</div>
           <div className="empty-state-title">暂无自定义字段数据</div>
           <div className="empty-state-desc">自定义字段可在"自定义字段管理"页面定义，导入时映射或手动填写</div>
         </div>
@@ -735,7 +732,7 @@ function RelationsTab({ patent, tags, projects, editing, updateField }: {
             {patentProjects.length === 0 ? <span style={{ color: '#94a3b8' }}>-</span> :
               patentProjects.map(proj => (
                 <div key={proj.id} style={{ fontSize: 13 }}>
-                  📁 {proj.name} {proj.module && <span style={{ color: '#94a3b8' }}>· {proj.module}</span>}
+                  {proj.name} {proj.module && <span style={{ color: '#94a3b8' }}>· {proj.module}</span>}
                 </div>
               ))
             }

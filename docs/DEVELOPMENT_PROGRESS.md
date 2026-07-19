@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-07-19（P0 已完成，Tauri 打包构建进行中）
+最近更新：2026-07-20（P0-6 多维表格核心完成）
 
 ---
 
@@ -18,6 +18,7 @@
 | P0-3 | AI 批量处理入口 + 任务进度页 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 全栈 | 列表页批量AI按钮 + AITaskMonitor 页面 + GET /ai/tasks + DELETE /ai/tasks/{id} |
 | P0-4 | 修 PatentListPage 装饰性按钮 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 前端 | 全选/批量编辑/批量打标签/AI批量/行点击进详情/排序/分类筛选全部接入 |
 | P0-5 | Tauri 桌面应用打包构建 | 高 | 进行中 | 2026-07-19 | - | CI | tauri.conf.json 路径修复 + TS 编译错误清零，等待 Rust 编译产出 MSI/NSIS |
+| P0-6 | 多维表格核心（字段系统+动态列+内联编辑+筛选） | 高 | 已完成 | 2026-07-20 | 2026-07-20 | 全栈 | 字段元数据API/单元格PATCH/自定义字段筛选排序；前端动态列渲染/列宽拖拽/列头菜单/内联编辑/高级筛选面板/字段显隐配置/新建自定义字段 |
 
 ## 二、下一迭代（P1 - 管理功能）
 
@@ -58,3 +59,4 @@
 | 2026-07-19 | P0-4 | 重构 PatentListPage：表头全选 checkbox、行 onClick 进详情、6 列可排序、分类筛选 input、批量编辑弹窗（模块+风险等级）、批量打标签入口、AI 批量处理入口全部接入真实逻辑 |
 | 2026-07-19 | - | App.tsx 接入详情页/设置页/AI任务页路由；Sidebar 增加 AI 任务和设置入口；移除顶部死控件搜索框（搜索已在列表页内） |
 | 2026-07-19 | P0-5 | 修复 Tauri 构建链路：tauri.conf.json 的 beforeBuildCommand 路径由 `cd frontend` 改为 `cd ../frontend`（tauri 从 src-tauri/ 目录执行命令）；identifier 改为 com.patwiki.desktop；修复 6 个 TS 编译错误（AITask 类型补字段、AIFieldInfo 本地类型替代 CustomField、清理未使用 import/参数、显式 (id: number) 类型注解、删除 StatsPage typeMap 死代码）；本地 `npm run build` 通过 |
+| 2026-07-20 | P0-6 | 实现多维表格核心：1) 后端新增 GET /fields 字段元数据API（整合系统字段+自定义字段）、PATCH /patents/{id}/field/{key} 单元格快速更新API、PatentService.list_patents 支持 custom_filters 和自定义字段排序（SQLite json_extract）；2) 前端重构 types/api 层新增 FieldMeta/CellUpdateRequest 类型和 fieldApi/patentApi.updateCell；3) 重构 PatentListPage 为多维表格：动态列渲染、列宽拖拽调整、列头菜单（排序/筛选/隐藏列）、可编辑单元格内联编辑（text/select/boolean/date/longtext）、高级筛选面板、字段配置弹窗（显隐切换/新建自定义字段/删除自定义字段）、选中行高亮、冻结列；4) 全面清理所有页面EMOJI（Sidebar/App/Stats/Settings/Import/Detail/AITaskMonitor）；5) CSS 重构为专业多维表格风格（datagrid-toolbar/datagrid-footer/col-header-menu/status-badge/risk-badge等样式类） |

@@ -33,7 +33,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <h1>📋 PatWiki</h1>
+        <h1>PatWiki</h1>
         <p>专利多维知识管理系统</p>
       </div>
 
@@ -42,25 +42,25 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`}
           onClick={() => handleProductClick(null)}
         >
-          📄 全部专利
+          全部专利
         </div>
         <div
           className={`nav-item ${currentPage === 'stats' ? 'active' : ''}`}
           onClick={() => onNavigate('stats')}
         >
-          📊 数据看板
+          数据看板
         </div>
         <div
           className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`}
           onClick={() => onNavigate('ai-tasks')}
         >
-          🤖 AI 任务
+          AI 任务
         </div>
         <div
           className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
           onClick={() => onNavigate('settings')}
         >
-          ⚙️ 设置
+          设置
         </div>
 
         <div className="nav-section">产品分类</div>
