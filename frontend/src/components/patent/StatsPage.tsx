@@ -40,10 +40,6 @@ export default function StatsPage() {
     expired: '终止', abandoned: '放弃', pending: '待审', unknown: '未知',
   }
 
-  const typeMap: Record<string, string> = {
-    invention: '发明', utility_model: '实用新型', design: '外观设计', pct: 'PCT',
-  }
-
   const riskMap: Record<string, string> = {
     none: '无风险', low: '低风险', medium: '中风险', high: '高风险', critical: '极高风险',
   }

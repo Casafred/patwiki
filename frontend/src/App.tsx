@@ -62,7 +62,6 @@ function App() {
           setCurrentPage(p)
           setSelectedPatentId(null)
         }}
-        onImport={() => setShowImport(true)}
       />
       <div className="main-content">
         <header className="header">

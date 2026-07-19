@@ -226,7 +226,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.detected_columns.map((col, i) => (
+                    {preview.detected_columns.map((col) => (
                       <tr key={col} style={{ borderTop: '1px solid #f1f5f9' }}>
                         <td style={{ padding: '8px 12px', fontWeight: 500 }}>{col}</td>
                         <td style={{ padding: '6px 12px' }}>

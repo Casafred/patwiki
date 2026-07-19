@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { aiApi } from '../../api'
-import type { AITask, CustomField } from '../../types'
+import type { AITask } from '../../types'
+
+type AIFieldInfo = { key: string; name: string; description: string; ai_config: any }
 
 export default function AITaskMonitor() {
   const [tasks, setTasks] = useState<AITask[]>([])
-  const [aiFields, setAiFields] = useState<CustomField[]>([])
+  const [aiFields, setAiFields] = useState<AIFieldInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
   const [autoRefresh, setAutoRefresh] = useState(true)

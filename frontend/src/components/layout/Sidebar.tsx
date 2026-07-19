@@ -1,15 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { productApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { Product } from '../../types'
 
 interface SidebarProps {
   currentPage: string
   onNavigate: (page: 'patents' | 'stats' | 'settings' | 'ai-tasks') => void
-  onImport: () => void
 }
 
-export default function Sidebar({ currentPage, onNavigate, onImport }: SidebarProps) {
+export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const { products, currentProductId, setCurrentProductId } = useAppStore()
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [newProductName, setNewProductName] = useState('')

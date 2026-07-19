@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-import { patentApi, productApi, projectApi, tagApi, aiApi, customFieldApi } from '../../api'
-import { useAppStore } from '../../store'
+import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
 import type { Patent, Product, Project, Tag, CustomField, AITask } from '../../types'
 
 interface PatentDetailPageProps {
@@ -235,7 +234,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           <TechnicalTab patent={patent} formData={formData} editing={editing} updateField={updateField} />
         )}
         {activeTab === 'risk' && (
-          <RiskTab patent={patent} formData={formData} editing={editing} updateField={updateField} projects={projects} />
+          <RiskTab patent={patent} formData={formData} editing={editing} updateField={updateField} />
         )}
         {activeTab === 'ai' && (
           <AITab
@@ -470,12 +469,11 @@ function TechnicalTab({ patent, formData, editing, updateField }: {
 }
 
 // ============ 风险与应用 Tab ============
-function RiskTab({ patent, formData, editing, updateField, projects }: {
+function RiskTab({ patent, formData, editing, updateField }: {
   patent: Patent
   formData: Partial<Patent>
   editing: boolean
   updateField: (key: keyof Patent, value: any) => void
-  projects: Project[]
 }) {
   return (
     <div className="detail-grid">
@@ -681,7 +679,7 @@ function RelationsTab({ patent, tags, projects, editing, updateField }: {
                     onChange={e => {
                       const next = e.target.checked
                         ? [...currentTagIds, tag.id]
-                        : currentTagIds.filter(id => id !== tag.id)
+                        : currentTagIds.filter((id: number) => id !== tag.id)
                       ;(patent as any)._editTagIds = next
                       updateField('tag_ids' as any, next)
                     }}
@@ -722,7 +720,7 @@ function RelationsTab({ patent, tags, projects, editing, updateField }: {
                     onChange={e => {
                       const next = e.target.checked
                         ? [...currentProjectIds, proj.id]
-                        : currentProjectIds.filter(id => id !== proj.id)
+                        : currentProjectIds.filter((id: number) => id !== proj.id)
                       ;(patent as any)._editProjectIds = next
                       updateField('project_ids' as any, next)
                     }}

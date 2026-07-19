@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { patentApi, exportApi, aiApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { Patent, CustomField } from '../../types'
+import type { Patent } from '../../types'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -9,12 +9,12 @@ interface PatentListPageProps {
 
 type SortField = 'filing_date' | 'application_number' | 'title' | 'applicant' | 'legal_status' | 'created_at'
 type SortOrder = 'asc' | 'desc'
+type AIFieldInfo = { key: string; name: string; description: string; ai_config: any }
 
 export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, loading,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
-    customFields,
   } = useAppStore()
 
   const [page, setPage] = useState(1)
@@ -31,7 +31,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [bulkModule, setBulkModule] = useState('')
   const [bulkRiskLevel, setBulkRiskLevel] = useState('')
   const [aiFieldKey, setAiFieldKey] = useState('')
-  const [aiFields, setAiFields] = useState<CustomField[]>([])
+  const [aiFields, setAiFields] = useState<AIFieldInfo[]>([])
 
   const loadPatents = useCallback(async () => {
     setLoading(true)

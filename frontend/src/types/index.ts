@@ -186,11 +186,14 @@ export interface AITask {
   id: number
   task_type: string
   field_key?: string
+  model_name?: string
   status: string
   total_items: number
   processed_items: number
   success_count: number
   failed_count: number
+  errors?: any[] | null
   started_at?: string
   completed_at?: string
+  created_at?: string
 }
