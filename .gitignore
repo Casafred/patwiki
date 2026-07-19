@@ -63,6 +63,12 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/WixTools/
 src-tauri/.cargo/
+# 图标由 scripts/generate_icon.py 自动生成
+src-tauri/icons/
+# PyInstaller 产物
+backend/dist/
+backend/build/
+backend/*.spec.bak
 
 # ========== 运行时数据 / 数据库 ==========
 data/

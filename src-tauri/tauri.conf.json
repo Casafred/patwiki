@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PatWiki",
+  "version": "0.1.0",
+  "identifier": "com.patwiki.app",
+  "build": {
+    "frontendDist": "../frontend/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "cd frontend && npm run dev",
+    "beforeBuildCommand": "cd frontend && npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PatWiki - 专利数据库管理系统",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../backend/dist/patwiki-backend": "patwiki-backend/"
+    },
+    "copyright": "© 2026 PatWiki",
+    "category": "Productivity",
+    "shortDescription": "专利数据库管理系统",
+    "longDescription": "PatWiki 是一个面向专利部门的本地优先数据库管理工具，支持 Excel 导入、AI 字段抽取、多维统计与风险管控。"
+  }
+}

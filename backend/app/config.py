@@ -1,8 +1,31 @@
-from pydantic_settings import BaseSettings
+import sys
+import os
 from pathlib import Path
+from pydantic_settings import BaseSettings
 
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+def _get_app_data_dir() -> Path:
+    """获取应用数据目录。
+    - 开发模式：项目根目录 / data
+    - 打包模式（PyInstaller frozen）：用户数据目录 / PatWiki
+      * Windows: %LOCALAPPDATA%/PatWiki
+      * macOS:   ~/Library/Application Support/PatWiki
+      * Linux:   ~/.local/share/PatWiki
+    """
+    if getattr(sys, "frozen", False):
+        # PyInstaller 打包后
+        if sys.platform == "win32":
+            base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        elif sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support"
+        else:
+            base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+        return base / "PatWiki"
+    # 开发模式：项目根目录
+    return Path(__file__).parent.parent.parent.resolve() / "data"
+
+
+PROJECT_ROOT = _get_app_data_dir()
 
 
 class Settings(BaseSettings):
@@ -10,7 +33,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = True
 
-    DATA_DIR: Path = PROJECT_ROOT / "data"
+    DATA_DIR: Path = PROJECT_ROOT
     DATABASE_PATH: Path = DATA_DIR / "patwiki.db"
     VECTORS_DIR: Path = DATA_DIR / "vectors"
     FILES_DIR: Path = DATA_DIR / "files"
@@ -39,7 +62,8 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.DATABASE_URL = f"sqlite:///{self.DATABASE_PATH}"
+        # SQLite URL 在 Windows 需要用正斜杠或四斜杠
+        self.DATABASE_URL = f"sqlite:///{self.DATABASE_PATH.as_posix()}"
         self._ensure_dirs()
 
     def _ensure_dirs(self):
