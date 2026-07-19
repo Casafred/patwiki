@@ -1,0 +1,303 @@
+from typing import Optional, Any
+from datetime import datetime, date
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, or_, and_, desc
+
+from app.models import (
+    Patent, Product, Project, Tag, CustomField,
+    patent_tag, patent_project, LegalStatus, PatentType
+)
+from app.schemas.schemas import PatentCreate, PatentUpdate
+
+
+SYSTEM_FIELDS = {
+    "id", "application_number", "publication_number", "grant_number",
+    "title", "abstract", "claims", "description_full",
+    "applicant", "inventor", "assignee", "agent",
+    "filing_date", "publication_date", "grant_date",
+    "priority_date", "priority_number", "priority_country",
+    "country", "patent_type", "legal_status", "legal_status_date", "legal_status_details",
+    "ipc_main", "ipc_all", "cpc_main", "cpc_all",
+    "product_id", "category", "subcategory",
+    "technical_problem", "technical_effect", "technical_solution",
+    "has_risk", "risk_level", "risk_description",
+    "module", "application_status", "scope_description", "notes",
+    "created_at", "updated_at", "tags", "projects"
+}
+
+
+class PatentService:
+    @staticmethod
+    def get_patent(db: Session, patent_id: int) -> Optional[Patent]:
+        return db.query(Patent).options(
+            joinedload(Patent.tags),
+            joinedload(Patent.projects),
+        ).filter(Patent.id == patent_id).first()
+
+    @staticmethod
+    def get_patent_by_application_number(db: Session, app_num: str, country: str = "CN") -> Optional[Patent]:
+        return db.query(Patent).filter(
+            Patent.application_number == app_num,
+            Patent.country == country,
+        ).first()
+
+    @staticmethod
+    def get_patent_by_publication_number(db: Session, pub_num: str, country: str = "CN") -> Optional[Patent]:
+        return db.query(Patent).filter(
+            Patent.publication_number == pub_num,
+            Patent.country == country,
+        ).first()
+
+    @staticmethod
+    def list_patents(
+        db: Session,
+        page: int = 1,
+        page_size: int = 50,
+        search: Optional[str] = None,
+        product_id: Optional[int] = None,
+        project_id: Optional[int] = None,
+        tag_ids: Optional[list[int]] = None,
+        legal_status: Optional[str] = None,
+        category: Optional[str] = None,
+        has_risk: Optional[bool] = None,
+        risk_level: Optional[str] = None,
+        patent_type: Optional[str] = None,
+        country: Optional[str] = None,
+        filing_date_from: Optional[date] = None,
+        filing_date_to: Optional[date] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc",
+    ) -> tuple[list[Patent], int]:
+        query = db.query(Patent).options(
+            joinedload(Patent.tags),
+            joinedload(Patent.projects),
+        )
+
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Patent.title.ilike(search_term),
+                    Patent.abstract.ilike(search_term),
+                    Patent.application_number.ilike(search_term),
+                    Patent.publication_number.ilike(search_term),
+                    Patent.applicant.ilike(search_term),
+                    Patent.inventor.ilike(search_term),
+                )
+            )
+
+        if product_id:
+            query = query.filter(Patent.product_id == product_id)
+
+        if project_id:
+            query = query.join(patent_project).filter(patent_project.c.project_id == project_id)
+
+        if tag_ids:
+            for tag_id in tag_ids:
+                query = query.join(patent_tag).filter(patent_tag.c.tag_id == tag_id)
+
+        if legal_status:
+            query = query.filter(Patent.legal_status == legal_status)
+
+        if category:
+            query = query.filter(Patent.category == category)
+
+        if has_risk is not None:
+            query = query.filter(Patent.has_risk == has_risk)
+
+        if risk_level:
+            query = query.filter(Patent.risk_level == risk_level)
+
+        if patent_type:
+            query = query.filter(Patent.patent_type == patent_type)
+
+        if country:
+            query = query.filter(Patent.country == country)
+
+        if filing_date_from:
+            query = query.filter(Patent.filing_date >= filing_date_from)
+
+        if filing_date_to:
+            query = query.filter(Patent.filing_date <= filing_date_to)
+
+        total = query.count()
+
+        if sort_by and sort_by in SYSTEM_FIELDS:
+            column = getattr(Patent, sort_by, None)
+            if column is not None:
+                if sort_order == "desc":
+                    query = query.order_by(desc(column))
+                else:
+                    query = query.order_by(column)
+        else:
+            query = query.order_by(desc(Patent.created_at))
+
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        patents = query.all()
+
+        return patents, total
+
+    @staticmethod
+    def create_patent(db: Session, patent_in: PatentCreate) -> Patent:
+        data = patent_in.model_dump(exclude_unset=True)
+        custom_fields = data.pop("custom_fields", {}) or {}
+
+        patent = Patent(**data)
+        patent.custom_fields = custom_fields
+
+        db.add(patent)
+        db.commit()
+        db.refresh(patent)
+        return patent
+
+    @staticmethod
+    def update_patent(db: Session, patent: Patent, patent_in: PatentUpdate | dict) -> Patent:
+        if isinstance(patent_in, dict):
+            update_data = patent_in
+        else:
+            update_data = patent_in.model_dump(exclude_unset=True)
+
+        tag_ids = update_data.pop("tag_ids", None)
+        project_ids = update_data.pop("project_ids", None)
+        custom_fields_data = update_data.pop("custom_fields", None)
+
+        for field, value in update_data.items():
+            if field in SYSTEM_FIELDS and hasattr(patent, field):
+                setattr(patent, field, value)
+
+        if custom_fields_data is not None:
+            current = patent.custom_fields or {}
+            current.update(custom_fields_data)
+            patent.custom_fields = current
+
+        if tag_ids is not None:
+            tags = db.query(Tag).filter(Tag.id.in_(tag_ids)).all()
+            patent.tags = tags
+
+        if project_ids is not None:
+            projects = db.query(Project).filter(Project.id.in_(project_ids)).all()
+            patent.projects = projects
+
+        db.add(patent)
+        db.commit()
+        db.refresh(patent)
+        return patent
+
+    @staticmethod
+    def bulk_update(db: Session, patent_ids: list[int], updates: dict) -> int:
+        count = 0
+        patents = db.query(Patent).filter(Patent.id.in_(patent_ids)).all()
+        for patent in patents:
+            PatentService.update_patent(db, patent, updates)
+            count += 1
+        return count
+
+    @staticmethod
+    def delete_patent(db: Session, patent_id: int) -> bool:
+        patent = db.query(Patent).filter(Patent.id == patent_id).first()
+        if not patent:
+            return False
+        db.delete(patent)
+        db.commit()
+        return True
+
+    @staticmethod
+    def get_stats(db: Session) -> dict:
+        total = db.query(func.count(Patent.id)).scalar()
+
+        status_counts = dict(
+            db.query(Patent.legal_status, func.count(Patent.id))
+            .group_by(Patent.legal_status)
+            .all()
+        )
+
+        type_counts = dict(
+            db.query(Patent.patent_type, func.count(Patent.id))
+            .group_by(Patent.patent_type)
+            .all()
+        )
+
+        products = db.query(
+            Product.id,
+            Product.name,
+            func.count(Patent.id).label("count"),
+        ).outerjoin(Patent, Patent.product_id == Product.id) \
+            .group_by(Product.id, Product.name) \
+            .order_by(desc("count")) \
+            .limit(20) \
+            .all()
+        product_counts = [{"id": p.id, "name": p.name, "count": p.count} for p in products]
+
+        category_counts = dict(
+            db.query(Patent.category, func.count(Patent.id))
+            .filter(Patent.category.isnot(None))
+            .group_by(Patent.category)
+            .all()
+        )
+
+        risk_counts = dict(
+            db.query(Patent.risk_level, func.count(Patent.id))
+            .group_by(Patent.risk_level)
+            .all()
+        )
+
+        inventors = db.query(
+            Patent.inventor,
+            func.count(Patent.id).label("count"),
+        ).filter(Patent.inventor.isnot(None)) \
+            .group_by(Patent.inventor) \
+            .order_by(desc("count")) \
+            .limit(20) \
+            .all()
+        top_inventors = [{"name": i.inventor, "count": i.count} for i in inventors]
+
+        applicants = db.query(
+            Patent.applicant,
+            func.count(Patent.id).label("count"),
+        ).filter(Patent.applicant.isnot(None)) \
+            .group_by(Patent.applicant) \
+            .order_by(desc("count")) \
+            .limit(20) \
+            .all()
+        top_applicants = [{"name": a.applicant, "count": a.count} for a in applicants]
+
+        filing_trend_raw = db.query(
+            func.strftime("%Y", Patent.filing_date).label("year"),
+            func.count(Patent.id).label("count"),
+        ).filter(Patent.filing_date.isnot(None)) \
+            .group_by("year") \
+            .order_by("year") \
+            .all()
+        filing_trend = [{"year": r.year, "count": r.count} for r in filing_trend_raw]
+
+        return {
+            "total_patents": total,
+            "by_legal_status": {str(k): v for k, v in status_counts.items()},
+            "by_patent_type": {str(k): v for k, v in type_counts.items()},
+            "by_product": product_counts,
+            "by_category": {str(k): v for k, v in category_counts.items() if k},
+            "by_risk_level": {str(k): v for k, v in risk_counts.items()},
+            "top_inventors": top_inventors,
+            "top_applicants": top_applicants,
+            "filing_trend": filing_trend,
+        }
+
+    @staticmethod
+    def find_duplicate(
+        db: Session,
+        application_number: Optional[str] = None,
+        publication_number: Optional[str] = None,
+        country: str = "CN",
+        title: Optional[str] = None,
+    ) -> Optional[Patent]:
+        if application_number:
+            existing = PatentService.get_patent_by_application_number(db, application_number.strip(), country)
+            if existing:
+                return existing
+
+        if publication_number:
+            existing = PatentService.get_patent_by_publication_number(db, publication_number.strip(), country)
+            if existing:
+                return existing
+
+        return None

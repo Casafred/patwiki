@@ -1,66 +1,140 @@
-# ===== OS =====
-.DS_Store
-._*
-Thumbs.db
-Desktop.ini
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.eggs/
+build/
+develop-eggs/
+downloads/
+parts/
+sdist/
+var/
+wheels/
+*.whl
 
-# ===== IDE/Editor =====
-.vscode/
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ========== Node.js / 前端 ==========
+node_modules/
+.pnp
+.pnp.js
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 构建产物
+dist/
+dist-electron/
+dist-tauri/
+build/
+out/
+release/
+*.app
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
+*.snap
+
+# Vite 缓存
+*.local
+.vite/
+
+# ========== 桌面打包 (Electron / Tauri) ==========
+# Electron
+electron-builder/
+electron/out/
+electron/dist/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+src-tauri/.cargo/
+
+# ========== 运行时数据 / 数据库 ==========
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# 上传文件 / 缓存
+backend/data/
+backend/uploads/
+backend/cache/
+backend/logs/
+backend/backups/
+backend/files/
+backend/vectors/
+
+# ========== 配置 / 密钥 ==========
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.json
+
+# 保留示例
+!.env.example
+
+# ========== IDE / 编辑器 ==========
 .idea/
+.vscode/
+*.swp
+*.swo
+*~
 .project
 .classpath
 .settings/
 *.sublime-*
 
-# ===== Node.js/Frontend =====
-node_modules/
-.pnpm-store/
-.next/
-.nuxt/
-.vite/
-.cache/
-.eslintcache
-*.tsbuildinfo
+# ========== 操作系统 ==========
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# ===== Python =====
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.ipynb_checkpoints/
-*.egg-info/
-
-# ===== Rust =====
-target/
-
-# ===== Java/JVM =====
-.gradle/
-*.class
-*.jar
-*.war
-*.ear
-
-# ===== Ruby =====
-.bundle/
-
-# ===== Logs/Temp =====
+# ========== 日志 / 临时 ==========
 *.log
 logs/
 *.tmp
-*.temp
-*.swp
-*.swo
-*~
+*.bak
+*.cache
 
-# ===== Test Coverage =====
-coverage/
-.nyc_output/
-htmlcov/
+# ========== 测试 / 覆盖率 ==========
 .coverage
+.coverage.*
+htmlcov/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
 *.lcov
 
-# ===== Internal =====
-/.work/
+# ========== Jupyter ==========
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ========== 其他 ==========
+.history/
+*.tar
+*.tar.gz
+*.zip
