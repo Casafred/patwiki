@@ -5,7 +5,7 @@ import type { Product } from '../../types'
 
 interface SidebarProps {
   currentPage: string
-  onNavigate: (page: 'patents' | 'stats' | 'settings') => void
+  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'ai-tasks') => void
   onImport: () => void
 }
 
@@ -51,6 +51,18 @@ export default function Sidebar({ currentPage, onNavigate, onImport }: SidebarPr
           onClick={() => onNavigate('stats')}
         >
           📊 数据看板
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`}
+          onClick={() => onNavigate('ai-tasks')}
+        >
+          🤖 AI 任务
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
+          onClick={() => onNavigate('settings')}
+        >
+          ⚙️ 设置
         </div>
 
         <div className="nav-section">产品分类</div>

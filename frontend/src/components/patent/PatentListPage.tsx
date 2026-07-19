@@ -1,13 +1,20 @@
 import { useState, useEffect, useCallback } from 'react'
-import { patentApi, exportApi } from '../../api'
+import { patentApi, exportApi, aiApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { Patent } from '../../types'
+import type { Patent, CustomField } from '../../types'
 
-export default function PatentListPage() {
+interface PatentListPageProps {
+  onPatentClick: (id: number) => void
+}
+
+type SortField = 'filing_date' | 'application_number' | 'title' | 'applicant' | 'legal_status' | 'created_at'
+type SortOrder = 'asc' | 'desc'
+
+export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, loading,
-    setPatents, setLoading, filters, setFilters,
-    selectedIds, toggleSelect, clearSelection,
+    setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
+    customFields,
   } = useAppStore()
 
   const [page, setPage] = useState(1)
@@ -16,6 +23,15 @@ export default function PatentListPage() {
   const [legalStatusFilter, setLegalStatusFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [riskFilter, setRiskFilter] = useState('')
+  const [sortField, setSortField] = useState<SortField>('filing_date')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [showBulkEdit, setShowBulkEdit] = useState(false)
+  const [showBulkTag, setShowBulkTag] = useState(false)
+  const [showAIBatch, setShowAIBatch] = useState(false)
+  const [bulkModule, setBulkModule] = useState('')
+  const [bulkRiskLevel, setBulkRiskLevel] = useState('')
+  const [aiFieldKey, setAiFieldKey] = useState('')
+  const [aiFields, setAiFields] = useState<CustomField[]>([])
 
   const loadPatents = useCallback(async () => {
     setLoading(true)
@@ -23,12 +39,14 @@ export default function PatentListPage() {
       const params: Record<string, any> = {
         page,
         page_size: pageSize,
+        sort_by: sortField,
+        sort_order: sortOrder,
       }
       if (searchText) params.search = searchText
       if (currentProductId) params.product_id = currentProductId
       if (legalStatusFilter) params.legal_status = legalStatusFilter
       if (categoryFilter) params.category = categoryFilter
-      if (riskFilter) params.has_risk = riskFilter === 'true' ? true : undefined
+      if (riskFilter) params.has_risk = riskFilter === 'true' ? true : riskFilter === 'false' ? false : undefined
 
       const result = await patentApi.list(params)
       setPatents(result.items, result.total)
@@ -37,11 +55,16 @@ export default function PatentListPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, legalStatusFilter, categoryFilter, riskFilter, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, legalStatusFilter, categoryFilter, riskFilter, sortField, sortOrder, setPatents, setLoading])
 
   useEffect(() => {
     loadPatents()
   }, [loadPatents])
+
+  useEffect(() => {
+    // 加载 AI 字段列表供批量处理使用
+    aiApi.listAIFields().then(setAiFields).catch(() => {})
+  }, [])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -65,6 +88,64 @@ export default function PatentListPage() {
     }
   }
 
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedIds(patents.map(p => p.id))
+    } else {
+      clearSelection()
+    }
+  }
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortOrder('desc')
+    }
+  }
+
+  const handleBulkEditSave = async () => {
+    const updates: Partial<Patent> = {}
+    if (bulkModule) updates.module = bulkModule
+    if (bulkRiskLevel) {
+      updates.risk_level = bulkRiskLevel
+      if (bulkRiskLevel !== 'none') updates.has_risk = true
+      else updates.has_risk = false
+    }
+    if (Object.keys(updates).length === 0) {
+      alert('请至少填写一个要修改的字段')
+      return
+    }
+    try {
+      await patentApi.bulkUpdate(selectedIds, updates)
+      alert(`成功更新 ${selectedIds.length} 条专利`)
+      setShowBulkEdit(false)
+      setBulkModule('')
+      setBulkRiskLevel('')
+      clearSelection()
+      loadPatents()
+    } catch (e: any) {
+      alert('批量更新失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    }
+  }
+
+  const handleAIBatchProcess = async () => {
+    if (!aiFieldKey) {
+      alert('请选择要处理的 AI 字段')
+      return
+    }
+    try {
+      const task = await aiApi.process(selectedIds, aiFieldKey)
+      alert(`AI 任务已启动（任务ID: ${task.id}），可在"AI 任务"页面查看进度`)
+      setShowAIBatch(false)
+      setAiFieldKey('')
+      clearSelection()
+    } catch (e: any) {
+      alert('启动 AI 任务失败: ' + (e?.response?.data?.detail || e?.message || '请先在设置页配置 LLM API'))
+    }
+  }
+
   const getStatusClass = (status?: string) => {
     if (!status) return 'status-unknown'
     return `status-${status}`
@@ -85,6 +166,19 @@ export default function PatentListPage() {
   }
 
   const totalPages = Math.ceil(totalPatents / pageSize)
+  const allSelected = patents.length > 0 && selectedIds.length === patents.length
+
+  const SortHeader = ({ field, label, style }: { field: SortField; label: string; style?: React.CSSProperties }) => (
+    <th
+      style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', ...style }}
+      onClick={() => handleSort(field)}
+    >
+      {label}
+      {sortField === field && (
+        <span style={{ marginLeft: 4 }}>{sortOrder === 'asc' ? '▲' : '▼'}</span>
+      )}
+    </th>
+  )
 
   return (
     <div>
@@ -130,14 +224,23 @@ export default function PatentListPage() {
           <option value="true">有风险</option>
           <option value="false">无风险</option>
         </select>
+
+        <input
+          type="text"
+          className="form-input"
+          style={{ maxWidth: 200 }}
+          placeholder="分类筛选"
+          value={categoryFilter}
+          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}
+        />
       </div>
 
       {selectedIds.length > 0 && (
         <div className="toolbar" style={{ background: '#eff6ff', padding: 10, borderRadius: 6, marginBottom: 12 }}>
           <span style={{ fontSize: 13, color: '#1e40af' }}>已选中 {selectedIds.length} 件专利</span>
-          <button className="btn btn-secondary" style={{ fontSize: 12 }}>批量编辑</button>
-          <button className="btn btn-secondary" style={{ fontSize: 12 }}>批量打标签</button>
-          <button className="btn btn-primary" style={{ fontSize: 12 }}>AI批量处理</button>
+          <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => setShowBulkEdit(true)}>批量编辑</button>
+          <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => setShowBulkTag(true)}>批量打标签</button>
+          <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => setShowAIBatch(true)}>AI批量处理</button>
           <button className="btn btn-secondary" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={clearSelection}>取消选择</button>
         </div>
       )}
@@ -166,14 +269,14 @@ export default function PatentListPage() {
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                   <th style={{ width: 36, padding: '10px 8px' }}>
-                    <input type="checkbox" />
+                    <input type="checkbox" checked={allSelected} onChange={handleSelectAll} />
                   </th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>申请号</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, minWidth: 300 }}>标题</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>申请人</th>
+                  <SortHeader field="application_number" label="申请号" />
+                  <SortHeader field="title" label="标题" style={{ minWidth: 300 }} />
+                  <SortHeader field="applicant" label="申请人" />
                   <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>发明人</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>申请日</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>法律状态</th>
+                  <SortHeader field="filing_date" label="申请日" />
+                  <SortHeader field="legal_status" label="法律状态" />
                   <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>分类</th>
                   <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>风险</th>
                 </tr>
@@ -186,6 +289,7 @@ export default function PatentListPage() {
                     className="hover:bg-gray-50"
                     onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                    onClick={() => onPatentClick(p.id)}
                   >
                     <td style={{ padding: '8px' }}>
                       <input
@@ -243,6 +347,95 @@ export default function PatentListPage() {
           <span>第 {page} / {totalPages || 1} 页</span>
           <button disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
         </div>
+      </div>
+
+      {/* 批量编辑弹窗 */}
+      {showBulkEdit && (
+        <Modal title={`批量编辑 ${selectedIds.length} 条专利`} onClose={() => setShowBulkEdit(false)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 400 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>关联模块</label>
+              <input className="form-input" value={bulkModule} onChange={e => setBulkModule(e.target.value)} placeholder="如：摄像头模块" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>风险等级</label>
+              <select className="form-input" value={bulkRiskLevel} onChange={e => setBulkRiskLevel(e.target.value)}>
+                <option value="">不修改</option>
+                <option value="none">无风险</option>
+                <option value="low">低风险</option>
+                <option value="medium">中风险</option>
+                <option value="high">高风险</option>
+                <option value="critical">严重风险</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="btn btn-secondary" onClick={() => setShowBulkEdit(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleBulkEditSave}>保存</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* 批量打标签弹窗（简化版：直接清空提示，后续 P1 接入标签管理） */}
+      {showBulkTag && (
+        <Modal title={`批量打标签 ${selectedIds.length} 条专利`} onClose={() => setShowBulkTag(false)}>
+          <div style={{ minWidth: 400 }}>
+            <p style={{ color: '#64748b', fontSize: 13 }}>
+              标签管理功能将在 P1 阶段完善。当前可在专利详情页的"关联关系"Tab 中为单条专利设置标签。
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="btn btn-secondary" onClick={() => setShowBulkTag(false)}>关闭</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* AI 批量处理弹窗 */}
+      {showAIBatch && (
+        <Modal title={`AI 批量处理 ${selectedIds.length} 条专利`} onClose={() => setShowAIBatch(false)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 400 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>选择 AI 字段</label>
+              <select className="form-input" value={aiFieldKey} onChange={e => setAiFieldKey(e.target.value)}>
+                <option value="">请选择...</option>
+                {aiFields.map(f => (
+                  <option key={f.key} value={f.key}>{f.name}</option>
+                ))}
+              </select>
+            </div>
+            {aiFields.length === 0 && (
+              <p style={{ color: '#dc2626', fontSize: 12 }}>
+                未找到 AI 字段。请确认后端已初始化 AI 字段模板，且已在设置页配置 LLM API。
+              </p>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="btn btn-secondary" onClick={() => setShowAIBatch(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleAIBatchProcess}>启动 AI 任务</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+// 通用 Modal 组件
+function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'white', borderRadius: 8, padding: 20, maxWidth: 600,
+        boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{title}</h3>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 20, cursor: 'pointer', color: '#64748b' }}>×</button>
+        </div>
+        {children}
       </div>
     </div>
   )

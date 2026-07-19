@@ -15,8 +15,16 @@ class AIFieldEngine:
         self.db = db
 
     def _get_llm(self):
+        # 优先从 settings.json 读取最新配置（用户可能通过设置页修改过）
+        try:
+            from app.api.settings import get_app_settings, apply_llm_to_settings
+            app_settings = get_app_settings()
+            apply_llm_to_settings(app_settings)
+        except Exception:
+            pass
+
         if not settings.LLM_API_KEY:
-            raise ValueError("LLM API key not configured. Please set LLM_API_KEY in settings.")
+            raise ValueError("LLM API key not configured. 请在设置页配置 LLM API Key。")
 
         try:
             from langchain_openai import ChatOpenAI
@@ -29,7 +37,26 @@ class AIFieldEngine:
                 kwargs["base_url"] = settings.LLM_BASE_URL
             return ChatOpenAI(**kwargs)
         except ImportError:
-            raise ImportError("langchain-openai not installed")
+            # 兜底：直接用 openai SDK
+            try:
+                from openai import OpenAI
+                class _OpenAICompat:
+                    def __init__(self):
+                        self._client = OpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL or None)
+                        self._model = settings.LLM_MODEL
+                    def invoke(self, prompt: str):
+                        resp = self._client.chat.completions.create(
+                            model=self._model,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.0,
+                        )
+                        class _R:
+                            def __init__(self, content):
+                                self.content = content
+                        return _R(resp.choices[0].message.content or "")
+                return _OpenAICompat()
+            except ImportError:
+                raise ImportError(" neither langchain-openai nor openai installed，请安装其中一个")
 
     def _build_prompt(self, patent: Patent, field_def: CustomField) -> str:
         ai_config = field_def.ai_config or {}

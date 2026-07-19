@@ -107,6 +107,11 @@ export const aiApi = {
 
   getTask: (id: number): Promise<AITask> => api.get(`/ai/tasks/${id}`),
 
+  listTasks: (params: { status?: string; limit?: number } = {}): Promise<AITask[]> =>
+    api.get('/ai/tasks', { params }),
+
+  deleteTask: (id: number): Promise<{ success: boolean }> => api.delete(`/ai/tasks/${id}`),
+
   listAIFields: (): Promise<{ key: string; name: string; description: string; ai_config: any }[]> =>
     api.get('/ai/fields'),
 }
@@ -114,4 +119,14 @@ export const aiApi = {
 export const exportApi = {
   exportPatents: (params: Record<string, any> = {}): Promise<Blob> =>
     api.get('/export', { params, responseType: 'blob' }),
+}
+
+export const settingsApi = {
+  get: (): Promise<any> => api.get('/settings'),
+
+  update: (payload: any): Promise<{ success: boolean; message: string }> =>
+    api.put('/settings', payload),
+
+  testLLM: (payload: { api_key?: string; base_url?: string; model?: string }): Promise<{ success: boolean; message: string }> =>
+    api.post('/settings/test-llm', payload),
 }

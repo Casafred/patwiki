@@ -56,6 +56,50 @@ def get_task_status(task_id: int, db: Session = Depends(get_db)):
     return task
 
 
+@router.get("/tasks")
+def list_tasks(
+    status: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """列出所有 AI 任务，按创建时间倒序"""
+    q = db.query(AITask)
+    if status:
+        q = q.filter(AITask.status == status)
+    tasks = q.order_by(AITask.id.desc()).limit(limit).all()
+    return [
+        {
+            "id": t.id,
+            "task_type": t.task_type,
+            "field_key": t.field_key,
+            "model_name": t.model_name,
+            "status": t.status,
+            "total_items": t.total_items,
+            "processed_items": t.processed_items,
+            "success_count": t.success_count,
+            "failed_count": t.failed_count,
+            "errors": t.errors,
+            "started_at": t.started_at,
+            "completed_at": t.completed_at,
+            "created_at": t.created_at,
+        }
+        for t in tasks
+    ]
+
+
+@router.delete("/tasks/{task_id}")
+def delete_task(task_id: int, db: Session = Depends(get_db)):
+    """删除任务记录（仅允许删除已完成/失败的任务）"""
+    task = db.query(AITask).filter(AITask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status in ("pending", "processing", "running"):
+        raise HTTPException(status_code=400, detail="运行中的任务不能删除")
+    db.delete(task)
+    db.commit()
+    return {"success": True}
+
+
 @router.get("/fields")
 def list_ai_fields(db: Session = Depends(get_db)):
     fields = db.query(CustomField).filter(

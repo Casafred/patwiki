@@ -2,8 +2,14 @@
 用 Pillow 生成一个简洁的蓝色圆角方块 + "P" 字母图标。
 输出: src-tauri/icons/icon.ico (多尺寸: 16,32,48,64,128,256)
 """
+import sys
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+
+# 强制 stdout/stderr 用 utf-8，避免 Windows cp1252 无法编码中文/emoji
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 
 def make_icon(size: int = 256) -> Image.Image:
@@ -46,12 +52,12 @@ def main():
     # 保存 ICO（多尺寸打包在一个文件里）
     ico_path = out_dir / "icon.ico"
     images[-1].save(ico_path, format="ICO", sizes=[(s, s) for s in sizes])
-    print(f"✅ 图标已生成: {ico_path}")
+    print(f"[OK] icon generated: {ico_path}")
 
     # 同时保存 PNG（某些 Tauri 版本需要）
     png_path = out_dir / "icon.png"
     images[-1].save(png_path, format="PNG")
-    print(f"✅ PNG 已生成: {png_path}")
+    print(f"[OK] png generated: {png_path}")
 
 
 if __name__ == "__main__":

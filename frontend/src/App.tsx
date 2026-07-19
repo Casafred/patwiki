@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react'
 import Sidebar from './components/layout/Sidebar'
 import PatentListPage from './components/patent/PatentListPage'
+import PatentDetailPage from './components/patent/PatentDetailPage'
 import StatsPage from './components/patent/StatsPage'
+import SettingsPage from './components/settings/SettingsPage'
 import ImportModal from './components/import/ImportModal'
-import { productApi, customFieldApi, tagApi } from './api'
+import AITaskMonitor from './components/ai/AITaskMonitor'
+import { productApi, customFieldApi, tagApi, projectApi } from './api'
 import { useAppStore } from './store'
-import type { Product, CustomField, Tag } from './types'
 import './index.css'
 
-type Page = 'patents' | 'stats' | 'settings'
+type Page = 'patents' | 'stats' | 'settings' | 'ai-tasks'
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('patents')
   const [showImport, setShowImport] = useState(false)
+  const [selectedPatentId, setSelectedPatentId] = useState<number | null>(null)
   const { setProducts, setCustomFields, setTags, setProjects } = useAppStore()
 
   useEffect(() => {
@@ -25,7 +28,7 @@ function App() {
         productApi.list(),
         customFieldApi.list(),
         tagApi.list(),
-        fetch('/api/projects').then(r => r.json()),
+        projectApi.list(),
       ])
       setProducts(products)
       setCustomFields(fields)
@@ -43,31 +46,62 @@ function App() {
     }
   }
 
+  const handlePatentClick = (id: number) => {
+    setSelectedPatentId(id)
+  }
+
+  const handleBackToList = () => {
+    setSelectedPatentId(null)
+  }
+
   return (
     <div className="app-container">
       <Sidebar
         currentPage={currentPage}
-        onNavigate={setCurrentPage}
+        onNavigate={(p) => {
+          setCurrentPage(p)
+          setSelectedPatentId(null)
+        }}
         onImport={() => setShowImport(true)}
       />
       <div className="main-content">
         <header className="header">
-          <div className="header-search">
-            <span className="search-icon">🔍</span>
-            <input placeholder="搜索专利号、标题、申请人、发明人..." />
-          </div>
           <div className="header-actions">
             <button className="btn btn-primary" onClick={() => setShowImport(true)}>
               📥 导入Excel
             </button>
-            <button className="btn btn-secondary" onClick={() => setCurrentPage('stats')}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => { setCurrentPage('ai-tasks'); setSelectedPatentId(null) }}
+            >
+              🤖 AI任务
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => { setCurrentPage('stats'); setSelectedPatentId(null) }}
+            >
               📊 统计
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => { setCurrentPage('settings'); setSelectedPatentId(null) }}
+            >
+              ⚙️ 设置
             </button>
           </div>
         </header>
         <div className="content-area">
-          {currentPage === 'patents' && <PatentListPage />}
-          {currentPage === 'stats' && <StatsPage />}
+          {selectedPatentId ? (
+            <PatentDetailPage patentId={selectedPatentId} onBack={handleBackToList} />
+          ) : currentPage === 'patents' ? (
+            <PatentListPage onPatentClick={handlePatentClick} />
+          ) : currentPage === 'stats' ? (
+            <StatsPage />
+          ) : currentPage === 'settings' ? (
+            <SettingsPage />
+          ) : currentPage === 'ai-tasks' ? (
+            <AITaskMonitor />
+          ) : null}
         </div>
       </div>
 
