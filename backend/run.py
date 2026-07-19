@@ -65,10 +65,19 @@ def main():
     _write_port_file(port)
     print(f"[PatWiki] Backend listening on http://127.0.0.1:{port}", flush=True)
 
-    # 启动 uvicorn
+    # 直接传入 app 对象，避免 uvicorn 用字符串导入时掩盖真实导入错误
+    # （字符串方式遇到任何 ImportError 都只会报 "Could not import module"）
+    try:
+        from app.main import app as asgi_app
+    except Exception as e:
+        import traceback
+        print(f"[PatWiki] FATAL: failed to import app.main: {e}", flush=True)
+        traceback.print_exc()
+        sys.exit(1)
+
     import uvicorn
     uvicorn.run(
-        "app.main:app",
+        asgi_app,
         host="127.0.0.1",
         port=port,
         log_level="warning",
