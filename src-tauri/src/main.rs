@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use sysinfo::System;
+use sysinfo::{ProcessesToUpdate, System};
 use tauri::Manager;
 
 const BACKEND_PORT: u16 = 8765;
@@ -107,7 +107,7 @@ fn kill_backend(child: &mut Child) {
 /// 扫描并杀掉遗留的 patwiki-backend 进程
 fn kill_orphaned_backend() {
     let mut sys = System::new_all();
-    sys.refresh_processes();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
 
     let target_name = if cfg!(windows) {
         "patwiki-backend.exe"
