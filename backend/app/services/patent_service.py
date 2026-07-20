@@ -252,7 +252,24 @@ class PatentService:
         return patent
 
     @staticmethod
-    def update_patent(db: Session, patent: Patent, patent_in: PatentUpdate | dict, source: str = "manual", changed_by: Optional[str] = None) -> Patent:
+    def update_patent(
+        db: Session,
+        patent: Patent,
+        patent_in: PatentUpdate | dict,
+        source: str = "manual",
+        changed_by: Optional[str] = None,
+        source_view_id: Optional[int] = None,
+        source_view_name: Optional[str] = None,
+    ) -> Patent:
+        """更新专利字段并写入历史记录。
+
+        参数:
+            source: 修改来源（manual/import/ai/bulk/api/promote）
+            changed_by: 修改人用户名
+            source_view_id: 来源小表视图 ID（P0-13）：在某个视图中编辑时传入，
+                            用于追溯"这个值是从哪个小表改的"
+            source_view_name: 来源视图名（冗余存储，视图删除后仍可读）
+        """
         if isinstance(patent_in, dict):
             update_data = patent_in
         else:
@@ -272,6 +289,23 @@ class PatentService:
 
         history_entries: list[PatentHistory] = []
 
+        def _make_history(field: str, old_value, new_value) -> PatentHistory:
+            """构造历史记录（自动注入来源视图信息）。"""
+            return PatentHistory(
+                patent_id=patent.id,
+                field_key=field,
+                field_display_name=field_display_map.get(
+                    field.replace("custom_fields.", "") if field.startswith("custom_fields.") else field,
+                    field,
+                ),
+                old_value=_stringify_value(old_value),
+                new_value=_stringify_value(new_value),
+                source=source,
+                changed_by=changed_by,
+                source_view_id=source_view_id,
+                source_view_name=source_view_name,
+            )
+
         # 系统字段修改
         for field, value in update_data.items():
             if field in SYSTEM_FIELDS and hasattr(patent, field):
@@ -280,15 +314,7 @@ class PatentService:
                 if not _is_value_changed(old_value, value):
                     continue
                 setattr(patent, field, value)
-                history_entries.append(PatentHistory(
-                    patent_id=patent.id,
-                    field_key=field,
-                    field_display_name=field_display_map.get(field, field),
-                    old_value=_stringify_value(old_value),
-                    new_value=_stringify_value(value),
-                    source=source,
-                    changed_by=changed_by,
-                ))
+                history_entries.append(_make_history(field, old_value, value))
 
         # 自定义字段修改
         if custom_fields_data is not None:
@@ -297,15 +323,7 @@ class PatentService:
                 old_v = current.get(k)
                 if not _is_value_changed(old_v, v):
                     continue
-                history_entries.append(PatentHistory(
-                    patent_id=patent.id,
-                    field_key=f"custom_fields.{k}",
-                    field_display_name=field_display_map.get(k, k),
-                    old_value=_stringify_value(old_v),
-                    new_value=_stringify_value(v),
-                    source=source,
-                    changed_by=changed_by,
-                ))
+                history_entries.append(_make_history(f"custom_fields.{k}", old_v, v))
             current.update(custom_fields_data)
             patent.custom_fields = current
 

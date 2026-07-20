@@ -14,6 +14,9 @@
 - patent:         Patent / PatentFamily / Citation
 - ai:             AITask / AIFieldValue
 - importing:      FieldMapping / ImportBatch
+- user:           User / DatabaseMembership
+- view:           PatentView / ViewLocalField / PatentViewFieldValue（P0-13 新增）
+- history:        PatentHistory
 """
 # 枚举
 from app.models.enums import (
@@ -56,6 +59,9 @@ from app.models.importing import FieldMapping, ImportBatch
 # 用户与协作（权限管理 MVP）
 from app.models.user import User, DatabaseMembership
 
+# 视图（小表）—— P0-13 新增
+from app.models.view import PatentView, ViewLocalField, PatentViewFieldValue
+
 # 修改历史
 from app.models.history import PatentHistory
 
@@ -85,6 +91,8 @@ __all__ = [
     "FieldMapping", "ImportBatch",
     # user / membership
     "User", "DatabaseMembership",
+    # view (P0-13)
+    "PatentView", "ViewLocalField", "PatentViewFieldValue",
     # history
     "PatentHistory",
 ]

@@ -1,6 +1,7 @@
 """专利库（Database）API 路由——P0-11 新增。
 
 库是专利数据的顶层品类容器。
+P0-13：新增 /databases/{id}/master-view 端点，获取或创建部门总表视图。
 """
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.database_service import DatabaseService
+from app.services.view_service import ViewService
 from app.models import User
 
 router = APIRouter(prefix="/databases", tags=["database"])
@@ -160,3 +162,30 @@ def refresh_patent_count(
 ):
     count = DatabaseService.refresh_patent_count(db, database_id)
     return {"success": True, "patent_count": count}
+
+
+@router.get("/{database_id}/master-view")
+def get_or_create_master_view(database_id: int, db: Session = Depends(get_db)):
+    """获取或创建某库的部门总表视图。
+
+    每个库应有且仅有一个 is_department_master=True 的视图。
+    若不存在则自动创建，使用全字段、全专利的默认配置。
+    """
+    database = DatabaseService.get_database(db, database_id)
+    if not database:
+        raise HTTPException(status_code=404, detail="数据库不存在")
+
+    view = ViewService.get_department_master_view(db, database_id)
+    if not view:
+        view = ViewService.create_view(
+            db,
+            name=f"{database.name} - 部门总表",
+            database_id=database_id,
+            description="部门级综合全属性总表视图，汇总所有专利",
+            view_type="department_master",
+            is_department_master=True,
+            filter_config={},
+            column_config=[],
+            sort_config={"sort_by": "filing_date", "sort_order": "desc"},
+        )
+    return ViewService.to_dict(view)

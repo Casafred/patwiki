@@ -49,6 +49,7 @@ a = Analysis(
         "app.api.fields",
         "app.api.settings",
         "app.api.databases",
+        "app.api.views",  # P0-13 新增
         # 本项目模块 - models（P0-8 拆分为子模块）
         "app.models",
         "app.models.enums",
@@ -61,6 +62,7 @@ a = Analysis(
         "app.models.patent",
         "app.models.ai",
         "app.models.importing",
+        "app.models.view",  # P0-13 新增
         # 本项目模块 - schemas/services
         "app.schemas.schemas",
         "app.services.import_service",
@@ -69,6 +71,7 @@ a = Analysis(
         "app.services.merge_service",
         "app.services.relation_service",
         "app.services.database_service",
+        "app.services.view_service",  # P0-13 新增
         "app.ai.fields.engine",
         "init_data",
         # openai SDK 及其依赖

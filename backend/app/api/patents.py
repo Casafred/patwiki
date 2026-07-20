@@ -10,6 +10,7 @@ from app.schemas.schemas import (
     Patent, PatentCreate, PatentUpdate, PatentListResponse
 )
 from app.services.patent_service import PatentService
+from app.services.view_service import ViewService
 from app.models import PatentHistory
 
 router = APIRouter(prefix="/patents", tags=["patents"])
@@ -147,7 +148,21 @@ def get_patent_history(
             "new_value": h.new_value,
             "source": h.source,
             "changed_by": h.changed_by,
+            "source_view_id": h.source_view_id,
+            "source_view_name": h.source_view_name,
             "created_at": h.created_at.isoformat() if h.created_at else None,
         }
         for h in records
     ]
+
+
+@router.get("/{patent_id}/field-sources")
+def get_field_sources(patent_id: int, db: Session = Depends(get_db)):
+    """字段来源追溯：返回该专利每个字段的最后一次修改来源信息。
+
+    用于详情页展示"这个值是从哪个小表/导入/AI 来的"。
+    """
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+    return ViewService.get_field_sources(db, patent_id)

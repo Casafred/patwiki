@@ -62,6 +62,11 @@ def _ensure_column_migration():
         # 权限管理 MVP：库的所有者
         ("patent_databases", "owner_id",
          "ALTER TABLE patent_databases ADD COLUMN owner_id INTEGER REFERENCES users(id)"),
+        # P0-13：PatentHistory 增加来源视图字段
+        ("patent_histories", "source_view_id",
+         "ALTER TABLE patent_histories ADD COLUMN source_view_id INTEGER REFERENCES patent_views(id)"),
+        ("patent_histories", "source_view_name",
+         "ALTER TABLE patent_histories ADD COLUMN source_view_name VARCHAR(200)"),
     ]
 
     with engine.begin() as conn:
@@ -85,6 +90,13 @@ def _ensure_column_migration():
         if not has_index("patent_databases", "ix_patent_databases_owner_id"):
             try:
                 conn.execute(text("CREATE INDEX ix_patent_databases_owner_id ON patent_databases (owner_id)"))
+            except Exception:
+                pass
+
+        # P0-13：patent_histories.source_view_id 索引
+        if not has_index("patent_histories", "ix_patent_histories_source_view_id"):
+            try:
+                conn.execute(text("CREATE INDEX ix_patent_histories_source_view_id ON patent_histories (source_view_id)"))
             except Exception:
                 pass
 

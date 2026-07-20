@@ -34,6 +34,8 @@ class PatentBase(BaseSchema):
     ipc_all: Optional[str] = None
     cpc_main: Optional[str] = None
     cpc_all: Optional[str] = None
+    # P0-13：允许创建专利时直接指定库归属（之前 schema 漏掉此字段导致只能通过导入设置）
+    database_id: Optional[int] = None
     product_id: Optional[int] = None
     category: Optional[str] = None
     subcategory: Optional[str] = None
@@ -386,6 +388,114 @@ class StatsResponse(BaseSchema):
     filing_trend: list[dict[str, Any]]
     top_ipcs: list[dict[str, Any]] = []
     by_country: dict[str, int] = {}
+
+
+# ===== P0-13：部门级总表与小表（视图）相关 schema =====
+
+class ViewColumnConfig(BaseSchema):
+    """视图列配置项。"""
+    key: str
+    visible: Optional[bool] = True
+    width: Optional[int] = None
+    order: Optional[int] = 0
+
+
+class PatentViewBase(BaseSchema):
+    name: str
+    description: Optional[str] = None
+    database_id: int
+    view_type: Optional[str] = "personal"  # personal / shared / department_master
+    filter_config: Optional[dict[str, Any]] = {}
+    column_config: Optional[list[dict[str, Any]]] = []
+    sort_config: Optional[dict[str, Any]] = {}
+
+
+class PatentViewCreate(PatentViewBase):
+    is_department_master: Optional[bool] = False
+
+
+class PatentViewUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    view_type: Optional[str] = None
+    filter_config: Optional[dict[str, Any]] = None
+    column_config: Optional[list[dict[str, Any]]] = None
+    sort_config: Optional[dict[str, Any]] = None
+    is_archived: Optional[bool] = None
+
+
+class ViewLocalFieldBase(BaseSchema):
+    key: str
+    name: str
+    field_type: str  # text/number/date/select/boolean/textarea
+    options: Optional[list[str]] = None
+    description: Optional[str] = None
+    default_value: Optional[str] = None
+    is_required: Optional[bool] = False
+    sort_order: Optional[int] = 0
+
+
+class ViewLocalFieldCreate(ViewLocalFieldBase):
+    pass
+
+
+class ViewLocalFieldUpdate(BaseSchema):
+    name: Optional[str] = None
+    field_type: Optional[str] = None
+    options: Optional[list[str]] = None
+    description: Optional[str] = None
+    default_value: Optional[str] = None
+    is_required: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class ViewLocalField(ViewLocalFieldBase):
+    id: int
+    view_id: int
+    is_promoted: bool = False
+    promoted_field_key: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PatentView(PatentViewBase):
+    id: int
+    owner_id: Optional[int] = None
+    is_department_master: bool = False
+    is_archived: bool = False
+    created_at: datetime
+    updated_at: datetime
+    local_fields: list[ViewLocalField] = []
+
+
+class ViewFieldValueUpdate(BaseSchema):
+    """小表本地字段值更新请求。"""
+    value: Optional[Any] = None
+    changed_by: Optional[str] = None
+
+
+class ViewPatentCellUpdate(BaseSchema):
+    """在小表中编辑共享字段的请求（会写入大表并记录来源视图）。"""
+    value: Optional[Any] = None
+    changed_by: Optional[str] = None
+
+
+class PromoteFieldRequest(BaseSchema):
+    """将视图本地字段提升为全局 CustomField。"""
+    global_name: Optional[str] = None  # 提升后的全局字段名（默认用原名）
+    global_group: Optional[str] = "从小表提升"
+
+
+class FieldSourceInfo(BaseSchema):
+    """字段来源信息。"""
+    field_key: str
+    field_display_name: Optional[str] = None
+    current_value: Optional[str] = None
+    last_source: Optional[str] = None  # manual/import/ai/bulk/api
+    last_changed_by: Optional[str] = None
+    last_changed_at: Optional[datetime] = None
+    last_source_view_id: Optional[int] = None
+    last_source_view_name: Optional[str] = None
 
 
 Patent.model_rebuild()

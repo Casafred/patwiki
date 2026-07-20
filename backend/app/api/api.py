@@ -9,6 +9,7 @@ from app.api.fields import router as fields_router
 from app.api.databases import router as databases_router
 from app.api.analytics import router as analytics_router
 from app.api.sharing import router as sharing_router
+from app.api.views import router as views_router  # P0-13 新增
 
 api_router = APIRouter()
 api_router.include_router(databases_router)
@@ -20,3 +21,4 @@ api_router.include_router(settings_router)
 api_router.include_router(fields_router)
 api_router.include_router(analytics_router)
 api_router.include_router(sharing_router)
+api_router.include_router(views_router)
