@@ -517,6 +517,37 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     setPage(1)
   }
 
+  // P2-9：清理无效占位专利（早期同族号解析 BUG 产生的垃圾数据）
+  const handleCleanupPlaceholders = async () => {
+    try {
+      // 第一步：dry_run 看有多少
+      const dry = await patentApi.cleanupInvalidPlaceholders(true)
+      if (dry.deleted_count === 0) {
+        alert('扫描完成：未发现无效占位专利。')
+        return
+      }
+      const preview = dry.deleted_items
+        .slice(0, 10)
+        .map((it, i) => `${i + 1}. id=${it.id} | 申请号: ${it.application_number ?? '-'} | 公开号: ${it.publication_number ?? '-'}`)
+        .join('\n')
+      const more = dry.deleted_count > 10 ? `\n...（共 ${dry.deleted_count} 条，仅显示前 10 条）` : ''
+      const ok = confirm(
+        `扫描到 ${dry.deleted_count} 条无效占位专利（因早期同族号解析 BUG 把多个号合并为一个乱码字符串而建）。\n\n` +
+        `预览：\n${preview}${more}\n\n` +
+        `点击"确定"立即删除，点击"取消"放弃。删除后不可恢复。`
+      )
+      if (!ok) return
+      const real = await patentApi.cleanupInvalidPlaceholders(false)
+      alert(`已删除 ${real.deleted_count} 条无效占位专利。`)
+      // 刷新列表
+      setPage(1)
+      loadPatents()
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail
+      alert(detail || e?.message || '清理失败')
+    }
+  }
+
   // 从 prompt 模板解析引用的列名（{xxx} 占位符）
   const parseReferencedColumns = (prompt: string): string[] => {
     if (!prompt) return []
@@ -1310,6 +1341,14 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
               {groupByFamily && <span style={{ fontSize: 10, opacity: 0.85 }}>ON</span>}
             </button>
           )}
+          {/* P2-9：清理无效占位专利（早期同族号解析 BUG 产生的垃圾数据） */}
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={handleCleanupPlaceholders}
+            title="扫描并清理因早期同族号解析 BUG（不识别 | 竖线、连续空格）而产生的非法占位专利"
+          >
+            🧹 清理无效占位
+          </button>
           <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
             列管理
           </button>

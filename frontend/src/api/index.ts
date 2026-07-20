@@ -65,6 +65,13 @@ export const patentApi = {
   bulkUpdate: (ids: number[], updates: Partial<Patent>): Promise<{ success: boolean; updated_count: number }> =>
     api.post('/patents/bulk-update', { patent_ids: ids, updates }),
 
+  // P2-9：清理因同族/引用号解析 BUG 而产生的非法占位专利
+  cleanupInvalidPlaceholders: (dryRun: boolean = true): Promise<{
+    deleted_count: number
+    deleted_items: Array<{ id: number; application_number: string | null; publication_number: string | null; notes: string | null; created_at: string | null }>
+    dry_run: boolean
+  }> => api.post('/patents/cleanup/invalid-placeholders', null, { params: { dry_run: dryRun } }),
+
   // P2-6：搜索自动补全
   searchSuggest: (q: string, limit: number = 10, databaseId?: number): Promise<{ suggestions: SearchSuggestion[] }> => {
     const params: Record<string, any> = { q, limit }

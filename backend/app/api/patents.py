@@ -199,6 +199,87 @@ def delete_patent(patent_id: int, db: Session = Depends(get_db)):
     return {"success": True}
 
 
+# ============================================================
+# P2-9：清理因同族/引用号解析 BUG 而产生的非法占位专利
+# ============================================================
+
+@router.post("/cleanup/invalid-placeholders")
+def cleanup_invalid_placeholders(
+    dry_run: bool = Query(True, description="dry_run=True 仅返回将被删除的列表，不真正删除；dry_run=False 执行删除"),
+    db: Session = Depends(get_db),
+):
+    """P2-9：清理 title='待补全' 但 application_number/publication_number 都不符合
+    专利号基本格式的占位专利。
+
+    背景：早期 relation_service.parse_patent_numbers 的分隔符正则不识别 |（竖线）和
+    连续空格，导致一个 cell 里的多个号被错误地合并为单个字符串（如
+    "WO2024028131A1 | EP4316738A1 | ..."），并以此建占位专利。修复后这些垃圾数据
+    需要清理。
+
+    判定规则（同时满足才删除）：
+    1. title == "待补全"
+    2. application_number 或 publication_number 任一不为空时，该号不符合
+       _PATENT_NUM_RE 正则（不含字母+数字组合，或含非法字符，或长度不在 5-30）
+
+    返回: { deleted_count, deleted_items: [{id, application_number, publication_number}], dry_run }
+    """
+    from app.services.relation_service import _PATENT_NUM_RE
+    from app.models.patent import Patent as PatentModel
+
+    candidates = (
+        db.query(PatentModel)
+        .filter(PatentModel.title == "待补全")
+        .all()
+    )
+
+    def _is_invalid(num) -> bool:
+        if not num:
+            return False  # 空值不算非法（可能只是没填）
+        num = num.strip() if isinstance(num, str) else num
+        if not num:
+            return False
+        if len(num) < 5 or len(num) > 30:
+            return True
+        if not _PATENT_NUM_RE.match(num):
+            return True
+        return False
+
+    to_delete = []
+    for p in candidates:
+        app_invalid = _is_invalid(p.application_number)
+        pub_invalid = _is_invalid(p.publication_number)
+        # 两个号都不为空且都非法 → 删除
+        # 或一个为空、另一个非法 → 删除
+        if app_invalid and pub_invalid:
+            to_delete.append(p)
+        elif app_invalid and not p.publication_number:
+            to_delete.append(p)
+        elif pub_invalid and not p.application_number:
+            to_delete.append(p)
+
+    items = [
+        {
+            "id": p.id,
+            "application_number": p.application_number,
+            "publication_number": p.publication_number,
+            "notes": p.notes,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in to_delete
+    ]
+
+    if not dry_run:
+        for p in to_delete:
+            db.delete(p)
+        db.commit()
+
+    return {
+        "deleted_count": len(items),
+        "deleted_items": items,
+        "dry_run": dry_run,
+    }
+
+
 @router.post("/bulk-update")
 def bulk_update_patents(
     req: BulkUpdateRequest,
