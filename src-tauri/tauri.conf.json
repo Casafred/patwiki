@@ -32,7 +32,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis"],
+    "targets": ["nsis"],
     "icon": [
       "icons/icon.ico"
     ],
@@ -42,6 +42,11 @@
     "copyright": "© 2026 PatWiki",
     "category": "Productivity",
     "shortDescription": "专利数据库管理系统",
-    "longDescription": "PatWiki 是一个面向专利部门的本地优先数据库管理工具，支持 Excel 导入、AI 字段抽取、多维统计与风险管控。"
+    "longDescription": "PatWiki 是一个面向专利部门的本地优先数据库管理工具，支持 Excel 导入、AI 字段抽取、多维统计与风险管控。",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
