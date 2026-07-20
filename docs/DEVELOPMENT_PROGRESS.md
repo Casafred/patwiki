@@ -135,13 +135,13 @@
 
 | ID | 任务 | 优先级 | 状态 | 备注 |
 |----|------|-------|------|------|
-| P2-1 | 统计看板补齐 4 个维度 | 低 | 未开始 | 申请趋势/类型分布/按产品/按分类 |
-| P2-2 | 导入历史页 + 后端 /import/batches 端点 | 低 | 未开始 | |
-| P2-3 | AI 值人工覆盖端点 + UI | 中 | 未开始 | GET/PUT/DELETE /patents/{id}/ai-values |
-| P2-4 | 单专利 wiki 分享页 | 低 | 未开始 | 技术主题分享 |
-| P2-5 | 修 /products N+1 查询 | 低 | 未开始 | |
-| P2-6 | 搜索自动补全 | 低 | 未开始 | GET /search/suggest |
-| P2-7 | 专利引用/专利族关系图谱 | 低 | 未开始 | AntV G6 |
+| P2-1 | 统计看板补齐 4 个维度 | 低 | ✅ 完成 | 申请趋势(近10年/全部) + 专利类型 DonutChart + 按产品 + 按分类 |
+| P2-2 | 导入历史页 + 后端 /import/batches 端点 | 低 | ✅ 完成 | ImportBatch 新增 database_id/view_id/dedupe_by 等字段；GET /import/batches (list) + GET /import/batches/{id} (detail)；ImportHistoryPage 含库/状态筛选与详情抽屉 |
+| P2-3 | AI 值人工覆盖端点 + UI | 中 | ✅ 完成 | GET/PUT/DELETE /patents/{id}/ai-values；AITab 重写支持 inline 编辑、覆盖徽章、AI 原值对照；同步 patent.ai_fields；记一条 PatentHistory |
+| P2-4 | 单专利 wiki 分享页 | 低 | ✅ 完成 | PatentShareModal：基础/技术/风险/自定义/AI 6 段，支持复制 Markdown 与打印 PDF |
+| P2-5 | 修 /products 与 /projects N+1 查询 | 低 | ✅ 完成 | 单条聚合 SQL 替换 len(p.patents)；新增 database_id 过滤参数 |
+| P2-6 | 搜索自动补全 | 低 | ✅ 完成 | GET /patents/search/suggest (5 类匹配+database_id 过滤)；PatentListPage 300ms 防抖 + AbortController + 键盘导航 + 彩色图标下拉 |
+| P2-7 | 专利引用/专利族关系图谱 | 低 | ✅ 完成 | GET /patents/{id}/graph (depth 1/2) + POST/DELETE /patents/{id}/citations；PatentGraphTab SVG 径向布局 + 3 扇区（同族/被引/引用）+ 悬浮卡片 + 引用列表可删 |
 
 ---
 

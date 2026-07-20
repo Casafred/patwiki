@@ -107,7 +107,7 @@ function App() {
         </header>
         <div className="content-area">
           {selectedPatentId ? (
-            <PatentDetailPage patentId={selectedPatentId} onBack={handleBackToList} />
+            <PatentDetailPage patentId={selectedPatentId} onBack={handleBackToList} onNavigatePatent={handlePatentClick} />
           ) : currentPage === 'patents' ? (
             <PatentListPage onPatentClick={handlePatentClick} />
           ) : currentPage === 'stats' ? (

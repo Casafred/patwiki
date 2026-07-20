@@ -83,6 +83,92 @@ def list_patents(
     }
 
 
+@router.get("/search/suggest")
+def search_suggest(
+    q: str = Query(..., min_length=1, max_length=100, description="搜索前缀"),
+    limit: int = Query(10, ge=1, le=50),
+    database_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """P2-6：搜索自动补全。
+
+    根据用户输入的前缀 q，返回匹配的：
+    - 标题（title）含 q 的专利标题片段
+    - 申请号（application_number）以 q 开头或含 q
+    - 公开号（publication_number）以 q 开头或含 q
+    - 申请人（applicant）含 q 的去重值
+    - 发明人（inventor）含 q 的去重值
+
+    返回结构：{ suggestions: [{type, value, label, patent_id?}] }
+    """
+    from sqlalchemy import or_, literal_column, func
+    from app.models.patent import Patent as PatentModel
+    keyword = f"%{q}%"
+    prefix = f"{q}%"
+
+    suggestions: list[dict] = []
+    seen_values: set[tuple[str, str]] = set()
+
+    def _add(stype: str, value: str, label: str, patent_id: int | None = None):
+        key = (stype, value)
+        if key in seen_values or not value:
+            return
+        seen_values.add(key)
+        suggestions.append({
+            "type": stype,
+            "value": value,
+            "label": label,
+            "patent_id": patent_id,
+        })
+
+    base_q = db.query(PatentModel)
+    if database_id is not None:
+        base_q = base_q.filter(PatentModel.database_id == database_id)
+
+    # 1) 申请号 / 公开号（前缀匹配优先，limit/2 条）
+    id_q = base_q.filter(
+        or_(
+            PatentModel.application_number.like(prefix),
+            PatentModel.publication_number.like(prefix),
+            PatentModel.application_number.like(keyword),
+            PatentModel.publication_number.like(keyword),
+        )
+    ).limit(limit)
+    for p in id_q.all():
+        if p.application_number and q.upper() in p.application_number.upper():
+            _add("application_number", p.application_number, f"申请号：{p.application_number}", p.id)
+        if p.publication_number and q.upper() in p.publication_number.upper():
+            _add("publication_number", p.publication_number, f"公开号：{p.publication_number}", p.id)
+        if len(suggestions) >= limit:
+            return {"suggestions": suggestions[:limit]}
+
+    # 2) 标题（含 q，limit/2 条）
+    title_q = base_q.filter(PatentModel.title.like(keyword)).limit(max(limit // 2, 3))
+    for p in title_q.all():
+        if p.title:
+            label = p.title if len(p.title) <= 60 else p.title[:60] + "..."
+            _add("title", p.title, f"标题：{label}", p.id)
+        if len(suggestions) >= limit:
+            return {"suggestions": suggestions[:limit]}
+
+    # 3) 申请人 / 发明人（去重聚合，含 q）
+    applicant_q = base_q.filter(PatentModel.applicant.like(keyword)).with_entities(
+        PatentModel.applicant, func.count(PatentModel.id).label("cnt")
+    ).group_by(PatentModel.applicant).order_by(literal_column("cnt").desc()).limit(max(limit // 3, 3))
+    for row in applicant_q.all():
+        if row.applicant:
+            _add("applicant", row.applicant, f"申请人：{row.applicant}（{row.cnt}）")
+
+    inventor_q = base_q.filter(PatentModel.inventor.like(keyword)).with_entities(
+        PatentModel.inventor, func.count(PatentModel.id).label("cnt")
+    ).group_by(PatentModel.inventor).order_by(literal_column("cnt").desc()).limit(max(limit // 3, 3))
+    for row in inventor_q.all():
+        if row.inventor:
+            _add("inventor", row.inventor, f"发明人：{row.inventor}（{row.cnt}）")
+
+    return {"suggestions": suggestions[:limit]}
+
+
 @router.get("/{patent_id}", response_model=Patent)
 def get_patent(patent_id: int, db: Session = Depends(get_db)):
     patent = PatentService.get_patent(db, patent_id)
@@ -125,6 +211,230 @@ def bulk_update_patents(
         source=req.source or "bulk",
     )
     return {"success": True, "updated_count": count}
+
+
+# ============================================================
+# P2-7：专利引用 / 同族关系图谱
+# ============================================================
+
+@router.get("/{patent_id}/graph")
+def get_patent_graph(
+    patent_id: int,
+    depth: int = Query(1, ge=1, le=2, description="展开深度（1=直接相邻，2=二度）"),
+    db: Session = Depends(get_db),
+):
+    """P2-7：返回以 patent_id 为中心的关系图谱数据。
+
+    图谱节点：
+    - 中心节点：当前专利
+    - 同族节点：与中心专利 family_id 相同的其他专利
+    - 引用节点（向后 citing_patents）：被本专利引用的专利
+    - 引用节点（向前 cited_patents）：引用本专利的专利
+
+    边类型：
+    - 'family'：同族关系（无方向，但 source=较小 id, target=较大 id）
+    - 'citation'：引用关系，source=citing_patent_id → target=cited_patent_id
+
+    当 depth=2 时，把一度邻居的邻居也展开（避免中心节点爆炸，二度仅取引用，不含 family 横向扩散）。
+    """
+    from app.models.patent import Patent as PatentModel, Citation, PatentFamily
+
+    center = PatentService.get_patent(db, patent_id)
+    if not center:
+        raise HTTPException(status_code=404, detail="Patent not found")
+
+    def _node_dict(p: PatentModel, distance: int, relation: str, is_center: bool = False) -> dict:
+        return {
+            "id": p.id,
+            "title": p.title or "",
+            "application_number": p.application_number,
+            "publication_number": p.publication_number,
+            "applicant": p.applicant,
+            "filing_date": p.filing_date.isoformat() if p.filing_date else None,
+            "country": p.country,
+            "patent_type": p.patent_type.value if p.patent_type else None,
+            "legal_status": p.legal_status.value if p.legal_status else None,
+            "family_id": p.family_id,
+            "module": p.module,
+            "risk_level": p.risk_level.value if p.risk_level else None,
+            "distance": distance,
+            "relation": relation,
+            "is_center": is_center,
+        }
+
+    nodes: dict[int, dict] = {
+        center.id: _node_dict(center, 0, "center", is_center=True)
+    }
+    edges: list[dict] = []
+    seen_edge_keys: set[tuple] = set()
+
+    def _add_edge(source: int, target: int, etype: str, citation_type: str | None = None):
+        # family 用无向去重 (min,max)；citation 用有向去重 (source,target)
+        if etype == "family":
+            key = ("family", min(source, target), max(source, target))
+        else:
+            key = ("citation", source, target)
+        if key in seen_edge_keys or source == target:
+            return
+        seen_edge_keys.add(key)
+        edge: dict = {"source": source, "target": target, "type": etype}
+        if citation_type:
+            edge["citation_type"] = citation_type
+        edges.append(edge)
+
+    # 1) 同族节点（family_id 非空时）
+    if center.family_id is not None:
+        siblings = (
+            db.query(PatentModel)
+            .filter(
+                PatentModel.family_id == center.family_id,
+                PatentModel.id != center.id,
+            )
+            .all()
+        )
+        for sib in siblings:
+            if sib.id not in nodes:
+                nodes[sib.id] = _node_dict(sib, 1, "family")
+            _add_edge(center.id, sib.id, "family")
+
+    # 2) 中心节点的引用：本专利引用了谁（向后引）
+    cited_rows = (
+        db.query(Citation, PatentModel)
+        .join(PatentModel, PatentModel.id == Citation.cited_patent_id)
+        .filter(Citation.citing_patent_id == center.id)
+        .all()
+    )
+    for cit, p in cited_rows:
+        if p.id not in nodes:
+            nodes[p.id] = _node_dict(p, 1, "cited")
+        _add_edge(center.id, p.id, "citation", cit.citation_type)
+
+    # 3) 中心节点被引用：谁引用了本专利（向前引）
+    citing_rows = (
+        db.query(Citation, PatentModel)
+        .join(PatentModel, PatentModel.id == Citation.citing_patent_id)
+        .filter(Citation.cited_patent_id == center.id)
+        .all()
+    )
+    for cit, p in citing_rows:
+        if p.id not in nodes:
+            nodes[p.id] = _node_dict(p, 1, "citing")
+        _add_edge(p.id, center.id, "citation", cit.citation_type)
+
+    # 4) 二度展开（depth=2）：仅对一度引用邻居再做一次引用展开（避免 N² 爆炸）
+    if depth >= 2:
+        first_hop_ids = [
+            nid for nid, n in nodes.items()
+            if n["distance"] == 1 and n["relation"] in ("cited", "citing")
+        ]
+        for nid in first_hop_ids:
+            # 该节点引用了谁
+            rows = (
+                db.query(Citation, PatentModel)
+                .join(PatentModel, PatentModel.id == Citation.cited_patent_id)
+                .filter(Citation.citing_patent_id == nid)
+                .all()
+            )
+            for cit, p in rows:
+                if p.id not in nodes:
+                    nodes[p.id] = _node_dict(p, 2, "cited")
+                _add_edge(nid, p.id, "citation", cit.citation_type)
+            # 该节点被谁引用
+            rows = (
+                db.query(Citation, PatentModel)
+                .join(PatentModel, PatentModel.id == Citation.citing_patent_id)
+                .filter(Citation.cited_patent_id == nid)
+                .all()
+            )
+            for cit, p in rows:
+                if p.id not in nodes:
+                    nodes[p.id] = _node_dict(p, 2, "citing")
+                _add_edge(p.id, nid, "citation", cit.citation_type)
+
+    return {
+        "center_id": center.id,
+        "depth": depth,
+        "nodes": list(nodes.values()),
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "family_count": sum(1 for n in nodes.values() if n["relation"] == "family"),
+            "cited_count": sum(1 for n in nodes.values() if n["relation"] == "cited"),
+            "citing_count": sum(1 for n in nodes.values() if n["relation"] == "citing"),
+        },
+    }
+
+
+class CitationCreateRequest(BaseModel):
+    """P2-7：手动添加引用关系。"""
+    cited_patent_id: int
+    citation_type: str = "citation"
+
+
+@router.post("/{patent_id}/citations")
+def add_citation(
+    patent_id: int,
+    req: CitationCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """P2-7：为 patent_id 添加一条引用关系（patent_id → cited_patent_id）。"""
+    from app.models.patent import Patent as PatentModel, Citation
+
+    if patent_id == req.cited_patent_id:
+        raise HTTPException(status_code=400, detail="不能引用自身")
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+    cited = PatentService.get_patent(db, req.cited_patent_id)
+    if not cited:
+        raise HTTPException(status_code=404, detail=f"Cited patent {req.cited_patent_id} not found")
+
+    # 幂等：若已存在则返回已存在
+    existing = (
+        db.query(Citation)
+        .filter(
+            Citation.citing_patent_id == patent_id,
+            Citation.cited_patent_id == req.cited_patent_id,
+        )
+        .first()
+    )
+    if existing:
+        return {"success": True, "id": existing.id, "already_exists": True}
+
+    cit = Citation(
+        citing_patent_id=patent_id,
+        cited_patent_id=req.cited_patent_id,
+        citation_type=req.citation_type,
+    )
+    db.add(cit)
+    db.commit()
+    db.refresh(cit)
+    return {"success": True, "id": cit.id, "already_exists": False}
+
+
+@router.delete("/{patent_id}/citations/{cited_patent_id}")
+def remove_citation(
+    patent_id: int,
+    cited_patent_id: int,
+    db: Session = Depends(get_db),
+):
+    """P2-7：删除 patent_id → cited_patent_id 的引用关系。"""
+    from app.models.patent import Citation
+
+    cit = (
+        db.query(Citation)
+        .filter(
+            Citation.citing_patent_id == patent_id,
+            Citation.cited_patent_id == cited_patent_id,
+        )
+        .first()
+    )
+    if not cit:
+        raise HTTPException(status_code=404, detail="Citation not found")
+    db.delete(cit)
+    db.commit()
+    return {"success": True}
 
 
 @router.get("/{patent_id}/history")

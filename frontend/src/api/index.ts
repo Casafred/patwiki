@@ -5,7 +5,8 @@ import type {
   AITask, FieldMetaWithView, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory,
   PatentView, ViewLocalField, ViewPatentListResponse, ViewFilterRule,
-  ViewColumnConfig, ViewSortConfig, FieldSource, AIFieldValueInfo,
+  ViewColumnConfig, ViewSortConfig, FieldSource, AIFieldValueInfo, SearchSuggestion,
+  PatentGraph,
 } from '../types'
 
 export const fieldApi = {
@@ -64,6 +65,13 @@ export const patentApi = {
   bulkUpdate: (ids: number[], updates: Partial<Patent>): Promise<{ success: boolean; updated_count: number }> =>
     api.post('/patents/bulk-update', { patent_ids: ids, updates }),
 
+  // P2-6：搜索自动补全
+  searchSuggest: (q: string, limit: number = 10, databaseId?: number): Promise<{ suggestions: SearchSuggestion[] }> => {
+    const params: Record<string, any> = { q, limit }
+    if (databaseId != null) params.database_id = databaseId
+    return api.get('/patents/search/suggest', { params })
+  },
+
   // P1-10：合并后的单字段更新端点，支持 source_view_id（在视图内编辑时传入）
   updateCell: (
     patentId: number,
@@ -104,6 +112,23 @@ export const patentApi = {
 
   clearAIOverride: (patentId: number, fieldKey: string): Promise<AIFieldValueInfo> =>
     api.delete(`/patents/${patentId}/ai-values/${fieldKey}/override`),
+
+  // P2-7：专利关系图谱
+  getGraph: (patentId: number, depth: number = 1): Promise<PatentGraph> =>
+    api.get(`/patents/${patentId}/graph`, { params: { depth } }),
+
+  addCitation: (
+    patentId: number,
+    citedPatentId: number,
+    citationType: string = 'citation',
+  ): Promise<{ success: boolean; id: number; already_exists: boolean }> =>
+    api.post(`/patents/${patentId}/citations`, {
+      cited_patent_id: citedPatentId,
+      citation_type: citationType,
+    }),
+
+  removeCitation: (patentId: number, citedPatentId: number): Promise<{ success: boolean }> =>
+    api.delete(`/patents/${patentId}/citations/${citedPatentId}`),
 }
 
 export const productApi = {

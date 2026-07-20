@@ -1,19 +1,25 @@
 import { useState, useEffect, useCallback } from 'react'
 import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
 import type { Patent, Product, Project, Tag, CustomField, AITask, PatentHistory, FieldSource, AIFieldValueInfo } from '../../types'
+import PatentShareModal from './PatentShareModal'
+import PatentGraphTab from './PatentGraphTab'
 
 interface PatentDetailPageProps {
   patentId: number
   onBack: () => void
+  /** P2-7：在详情页中点击其他专利跳转（用于关系图谱） */
+  onNavigatePatent?: (patentId: number) => void
 }
 
-type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'history' | 'sources'
+type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'graph' | 'history' | 'sources'
 
-export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageProps) {
+export default function PatentDetailPage({ patentId, onBack, onNavigatePatent }: PatentDetailPageProps) {
   const [patent, setPatent] = useState<Patent | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(false)
+  // P2-4：单专利 wiki 分享页
+  const [showShareModal, setShowShareModal] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('basic')
   const [aiFields, setAIFields] = useState<CustomField[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -210,6 +216,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     { key: 'ai', label: 'AI 分析' },
     { key: 'custom', label: '自定义字段' },
     { key: 'relations', label: '关联关系' },
+    { key: 'graph', label: '关系图谱' },
     { key: 'sources', label: '字段来源' },
     { key: 'history', label: `修改历史${history.length > 0 ? ` (${history.length})` : ''}` },
   ]
@@ -304,6 +311,9 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         {activeTab === 'relations' && (
           <RelationsTab patent={patent} tags={tags} projects={projects} editing={editing} updateField={updateField} />
         )}
+        {activeTab === 'graph' && (
+          <PatentGraphTab patentId={patent.id} onNavigatePatent={onNavigatePatent} />
+        )}
         {activeTab === 'sources' && (
           <FieldSourcesTab
             sources={fieldSources}
@@ -316,6 +326,11 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
         )}
       </div>
+
+      {/* P2-4：单专利 wiki 分享页 */}
+      {showShareModal && (
+        <PatentShareModal patent={patent} onClose={() => setShowShareModal(false)} />
+      )}
     </div>
   )
 }

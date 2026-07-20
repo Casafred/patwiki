@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { Patent, FieldMeta, CustomField, AITask, ViewPatent } from '../../types'
+import type { Patent, FieldMeta, CustomField, AITask, ViewPatent, SearchSuggestion } from '../../types'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -33,6 +33,14 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
   const [headerFilterText, setHeaderFilterText] = useState<string>('')
+
+  // P2-6：搜索自动补全
+  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [suggestionLoading, setSuggestionLoading] = useState(false)
+  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState(-1)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const suggestAbortRef = useRef<AbortController | null>(null)
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
@@ -283,6 +291,90 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       document.removeEventListener('keydown', onKey)
     }
   }, [contextMenu])
+
+  // P2-6：搜索自动补全 —— 防抖拉取建议
+  useEffect(() => {
+    const q = searchInputText.trim()
+    if (!q) {
+      setSuggestions([])
+      setShowSuggestions(false)
+      setActiveSuggestionIdx(-1)
+      return
+    }
+    const timer = setTimeout(async () => {
+      // 取消上一个请求
+      if (suggestAbortRef.current) {
+        suggestAbortRef.current.abort()
+      }
+      const ctrl = new AbortController()
+      suggestAbortRef.current = ctrl
+      setSuggestionLoading(true)
+      try {
+        const resp = await patentApi.searchSuggest(q, 10, currentDatabaseId ?? undefined)
+        if (ctrl.signal.aborted) return
+        const items = (resp?.suggestions ?? []) as SearchSuggestion[]
+        setSuggestions(items)
+        setShowSuggestions(items.length > 0)
+        setActiveSuggestionIdx(-1)
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
+          // 静默失败，不打扰用户
+          setSuggestions([])
+          setShowSuggestions(false)
+        }
+      } finally {
+        if (!ctrl.signal.aborted) setSuggestionLoading(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInputText, currentDatabaseId])
+
+  // P2-6：点击搜索框外部时关闭下拉
+  useEffect(() => {
+    if (!showSuggestions) return
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.patent-search-suggest')) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [showSuggestions])
+
+  // P2-6：选择建议项
+  const applySuggestion = (s: SearchSuggestion) => {
+    setSearchInputText(s.value)
+    setSearchText(s.value)
+    setShowSuggestions(false)
+    setActiveSuggestionIdx(-1)
+    setPage(1)
+  }
+
+  // P2-6：搜索框键盘导航
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      if (!showSuggestions || suggestions.length === 0) return
+      e.preventDefault()
+      setActiveSuggestionIdx(prev => (prev + 1) % suggestions.length)
+    } else if (e.key === 'ArrowUp') {
+      if (!showSuggestions || suggestions.length === 0) return
+      e.preventDefault()
+      setActiveSuggestionIdx(prev => (prev - 1 + suggestions.length) % suggestions.length)
+    } else if (e.key === 'Enter') {
+      if (showSuggestions && activeSuggestionIdx >= 0 && suggestions[activeSuggestionIdx]) {
+        e.preventDefault()
+        applySuggestion(suggestions[activeSuggestionIdx])
+      }
+      // 否则交给 form onSubmit (handleSearch)
+    } else if (e.key === 'Escape') {
+      if (showSuggestions) {
+        e.preventDefault()
+        setShowSuggestions(false)
+        setActiveSuggestionIdx(-1)
+      }
+    }
+  }
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -1106,15 +1198,93 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <form onSubmit={handleSearch} style={{ display: 'flex', gap: 4 }}>
+          <form onSubmit={handleSearch} style={{ display: 'flex', gap: 4, position: 'relative' }} className="patent-search-suggest">
             <input
+              ref={searchInputRef}
               type="text"
               className="form-input"
               style={{ width: 260, height: 32, fontSize: 13 }}
               placeholder="搜索专利号、标题、申请人..."
               value={searchInputText}
               onChange={(e) => setSearchInputText(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true) }}
+              autoComplete="off"
             />
+            {suggestionLoading && (
+              <span style={{ position: 'absolute', right: 8, top: 9, fontSize: 11, color: '#9ca3af' }}>…</span>
+            )}
+            {showSuggestions && suggestions.length > 0 && (
+              <ul style={{
+                position: 'absolute',
+                top: 34,
+                left: 0,
+                width: 320,
+                margin: 0,
+                padding: 0,
+                listStyle: 'none',
+                background: '#fff',
+                border: '1px solid #e5e7eb',
+                borderRadius: 6,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                zIndex: 1000,
+                maxHeight: 360,
+                overflowY: 'auto',
+              }}>
+                {suggestions.map((s, idx) => {
+                  const iconMap: Record<string, string> = {
+                    application_number: '申',
+                    publication_number: '公',
+                    title: '题',
+                    applicant: '请',
+                    inventor: '发',
+                  }
+                  const colorMap: Record<string, string> = {
+                    application_number: '#3b82f6',
+                    publication_number: '#3b82f6',
+                    title: '#8b5cf6',
+                    applicant: '#f59e0b',
+                    inventor: '#10b981',
+                  }
+                  const icon = iconMap[s.type] || '·'
+                  const color = colorMap[s.type] || '#6b7280'
+                  return (
+                    <li
+                      key={`${s.type}-${idx}`}
+                      onMouseDown={(e) => { e.preventDefault(); applySuggestion(s) }}
+                      onMouseEnter={() => setActiveSuggestionIdx(idx)}
+                      style={{
+                        padding: '7px 10px',
+                        fontSize: 13,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        background: idx === activeSuggestionIdx ? '#f3f4f6' : '#fff',
+                        borderBottom: idx < suggestions.length - 1 ? '1px solid #f3f4f6' : 'none',
+                      }}
+                    >
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 22,
+                        height: 22,
+                        borderRadius: 4,
+                        background: color,
+                        color: '#fff',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        flexShrink: 0,
+                      }}>{icon}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#374151' }}>
+                        {s.label}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </form>
           <button
             className={`btn btn-sm ${hasActiveFilters ? 'btn-primary' : 'btn-secondary'}`}

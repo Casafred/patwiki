@@ -90,14 +90,35 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
 @router.get("/projects", response_model=list[ProjectSchema])
 def list_projects(
     product_id: Optional[int] = None,
+    database_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
+    """
+    列出项目。
+
+    P2-5：修复 N+1 — 用一条聚合 SQL 一次性拿到所有项目的专利计数，
+    避免每个项目都触发 `len(p.patents)` 的 lazy-load。
+    可选 database_id：按库过滤 patent_count（与 /products 行为一致）。
+    """
     query = db.query(Project)
     if product_id:
         query = query.filter(Project.product_id == product_id)
     projects = query.order_by(Project.name).all()
+
+    # P2-5：单条聚合查询，避免 N+1
+    from app.models.association import patent_project
+    count_query = db.query(
+        patent_project.c.project_id,
+        func.count(patent_project.c.patent_id).label("cnt"),
+    )
+    if database_id is not None:
+        count_query = count_query.join(
+            Patent, Patent.id == patent_project.c.patent_id
+        ).filter(Patent.database_id == database_id)
+    count_map = {pid: cnt for pid, cnt in count_query.group_by(patent_project.c.project_id).all()}
+
     for p in projects:
-        p.patent_count = len(p.patents)
+        p.patent_count = count_map.get(p.id, 0)
     return projects
 
 

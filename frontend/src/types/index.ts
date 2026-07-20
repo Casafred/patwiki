@@ -298,6 +298,56 @@ export interface AIFieldValueInfo {
   updated_at?: string
 }
 
+// P2-6：搜索自动补全建议项
+export interface SearchSuggestion {
+  type: 'application_number' | 'publication_number' | 'title' | 'applicant' | 'inventor'
+  value: string
+  label: string
+  patent_id?: number
+}
+
+// ============================================================
+// P2-7：专利引用 / 同族关系图谱
+// ============================================================
+export interface GraphNode {
+  id: number
+  title: string
+  application_number?: string | null
+  publication_number?: string | null
+  applicant?: string | null
+  filing_date?: string | null
+  country?: string | null
+  patent_type?: string | null
+  legal_status?: string | null
+  family_id?: number | null
+  module?: string | null
+  risk_level?: string | null
+  distance: number       // 0=中心, 1=直接相邻, 2=二度
+  relation: 'center' | 'family' | 'cited' | 'citing'
+  is_center: boolean
+}
+
+export interface GraphEdge {
+  source: number
+  target: number
+  type: 'family' | 'citation'
+  citation_type?: string
+}
+
+export interface PatentGraph {
+  center_id: number
+  depth: number
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  stats: {
+    total_nodes: number
+    total_edges: number
+    family_count: number
+    cited_count: number
+    citing_count: number
+  }
+}
+
 // ============================================================
 // P0-13/P0-14：视图（小表 / 部门总表）
 // ============================================================
