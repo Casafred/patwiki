@@ -327,12 +327,13 @@ class ImportService:
         row: dict,
         mapping: dict,
         db: Session,
+        custom_fields_cache: dict | None = None,
     ) -> tuple[dict, dict]:
         """把 Excel 单行 + 列映射 转换为 Patent 字段字典 + 虚拟字段字典。
 
         返回:
             (patent_data, virtual_data)
-            - patent_data: 可直接传给 PatentService.create_patent / merge_patent_data
+            - patent_data: 可直接用于创建/更新 Patent
             - virtual_data: {"family_numbers": [...], "cited_numbers": [...], "citing_numbers": [...]}
         """
         data: dict[str, Any] = {}
@@ -343,7 +344,10 @@ class ImportService:
             "citing_numbers": [],
         }
 
-        all_custom_fields = {cf.key: cf for cf in db.query(CustomField).all()}
+        if custom_fields_cache is None:
+            all_custom_fields = {cf.key: cf for cf in db.query(CustomField).all()}
+        else:
+            all_custom_fields = custom_fields_cache
 
         for excel_col, field_key in mapping.items():
             value = row.get(excel_col, "")

@@ -112,6 +112,8 @@ export const importApi = {
       product_id: productId,
       project_id: projectId,
       database_id: databaseId,
+    }, {
+      timeout: 600000,
     })
   },
 

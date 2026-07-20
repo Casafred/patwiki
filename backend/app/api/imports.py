@@ -13,10 +13,10 @@ from io import BytesIO
 from pydantic import BaseModel
 
 from app.database import get_db, SessionLocal
-from app.schemas.schemas import StatsResponse, PatentCreate as _PatentCreate
+from app.schemas.schemas import StatsResponse
 from app.services.import_service import ImportService
 from app.services.patent_service import PatentService
-from app.services.merge_service import merge_patent_data
+from app.services.merge_service import merge_patent_data, _is_empty
 from app.services.relation_service import (
     process_family_members,
     process_citations,
@@ -24,6 +24,7 @@ from app.services.relation_service import (
 )
 from app.services.database_service import DatabaseService
 from app.config import settings
+from app.models import Patent, CustomField
 
 router = APIRouter(tags=["import"])
 
@@ -86,15 +87,27 @@ async def preview_import(
     }
 
 
+def _apply_patent_update(patent: Patent, data: dict):
+    custom_fields_data = data.pop("custom_fields", None)
+    for field, value in data.items():
+        if hasattr(patent, field) and not _is_empty(value):
+            setattr(patent, field, value)
+    if custom_fields_data:
+        current = dict(patent.custom_fields or {})
+        for k, v in custom_fields_data.items():
+            if not _is_empty(v):
+                current[k] = v
+        patent.custom_fields = current
+
+
 @router.post("/import/confirm")
-async def confirm_import(
+def confirm_import(
     req: ConfirmImportRequest,
     db: Session = Depends(get_db),
 ):
     if req.import_id not in TEMP_FILES:
         raise HTTPException(status_code=400, detail="导入会话已过期，请重新上传文件")
 
-    # P0-11：必须指定库；未指定则使用默认库
     database_id = req.database_id
     if database_id is None:
         default_db = DatabaseService.get_default_database(db)
@@ -109,10 +122,6 @@ async def confirm_import(
     filename = TEMP_FILENAMES[req.import_id]
 
     mapping = {m.source_column: m.target_field for m in req.field_mappings if m.target_field}
-    options = {
-        "update_on_duplicate": req.update_on_duplicate,
-        "dedupe_by": req.dedupe_by,
-    }
 
     errors = []
     inserted = 0
@@ -122,76 +131,93 @@ async def confirm_import(
     error_count = 0
     family_links = 0
     citation_links = 0
+    BATCH_SIZE = 200
 
     try:
         df, _ = ImportService.parse_excel(content, filename)
+        total_rows = len(df)
+        print(f"[PatWiki] 开始导入 {total_rows} 条数据...", flush=True)
+
+        custom_fields_cache = {cf.key: cf for cf in db.query(CustomField).all()}
 
         for idx, (_, row) in enumerate(df.iterrows()):
             try:
-                row_dict = row.to_dict()
-                # P0-10：_row_to_patent_data 返回 (patent_data, virtual_data)
-                patent_data, virtual = ImportService._row_to_patent_data(row_dict, mapping, db)
+                with db.begin_nested():
+                    row_dict = row.to_dict()
+                    patent_data, virtual = ImportService._row_to_patent_data(
+                        row_dict, mapping, db, custom_fields_cache=custom_fields_cache
+                    )
 
-                if not patent_data.get("title"):
-                    skipped += 1
-                    continue
-
-                # 库归属
-                patent_data["database_id"] = database_id
-
-                if req.product_id:
-                    patent_data["product_id"] = req.product_id
-
-                country = patent_data.get("country", "CN")
-                app_num = patent_data.get("application_number", "")
-                pub_num = patent_data.get("publication_number", "")
-
-                existing = None
-                if req.dedupe_by in ("both", "application_number") and app_num:
-                    existing = PatentService.get_patent_by_application_number(db, app_num.strip(), country)
-                if not existing and req.dedupe_by in ("both", "publication_number") and pub_num:
-                    existing = PatentService.get_patent_by_publication_number(db, pub_num.strip(), country)
-
-                if existing:
-                    duplicates_count += 1
-                    if req.update_on_duplicate:
-                        # P0-10：Wiki 式字段级合并，标注类字段非空才覆盖
-                        merged = merge_patent_data(existing, patent_data)
-                        PatentService.update_patent(db, existing, merged)
-                        updated += 1
-                        current_patent = existing
-                    else:
+                    if not patent_data.get("title"):
                         skipped += 1
-                        current_patent = None
-                else:
-                    patent = PatentService.create_patent(db, _PatentCreate(**patent_data))
-                    inserted += 1
-                    current_patent = patent
+                    else:
+                        patent_data["database_id"] = database_id
+                        if req.product_id:
+                            patent_data["product_id"] = req.product_id
 
-                # P0-10：同族/引用关系入库
-                if current_patent is not None:
-                    try:
-                        if virtual["family_numbers"]:
-                            result = process_family_members(
-                                db, current_patent, virtual["family_numbers"],
-                                database_id=database_id,
-                            )
-                            family_links += result.get("members_linked", 0)
-                        if virtual["cited_numbers"]:
-                            result = process_citations(
-                                db, current_patent, virtual["cited_numbers"],
-                                database_id=database_id,
-                            )
-                            citation_links += result.get("links", 0)
-                        if virtual["citing_numbers"]:
-                            result = process_citing_patents(
-                                db, current_patent, virtual["citing_numbers"],
-                                database_id=database_id,
-                            )
-                            citation_links += result.get("links", 0)
-                    except Exception:
-                        # 关系入库失败不影响主表导入
-                        pass
+                        country = patent_data.get("country", "CN")
+                        app_num = patent_data.get("application_number", "")
+                        pub_num = patent_data.get("publication_number", "")
+
+                        existing = None
+                        if req.dedupe_by in ("both", "application_number") and app_num:
+                            existing = db.query(Patent).filter(
+                                Patent.application_number == app_num.strip(),
+                                Patent.country == country,
+                            ).first()
+                        if not existing and req.dedupe_by in ("both", "publication_number") and pub_num:
+                            existing = db.query(Patent).filter(
+                                Patent.publication_number == pub_num.strip(),
+                                Patent.country == country,
+                            ).first()
+
+                        current_patent = None
+                        if existing:
+                            duplicates_count += 1
+                            if req.update_on_duplicate:
+                                merged = merge_patent_data(existing, patent_data)
+                                _apply_patent_update(existing, merged)
+                                updated += 1
+                                current_patent = existing
+                            else:
+                                skipped += 1
+                        else:
+                            custom_fields = patent_data.pop("custom_fields", {}) or {}
+                            patent = Patent(**patent_data)
+                            patent.custom_fields = custom_fields
+                            db.add(patent)
+                            db.flush()
+                            inserted += 1
+                            current_patent = patent
+
+                        if current_patent is not None:
+                            try:
+                                if virtual["family_numbers"]:
+                                    result = process_family_members(
+                                        db, current_patent, virtual["family_numbers"],
+                                        database_id=database_id,
+                                    )
+                                    family_links += result.get("members_linked", 0)
+                                if virtual["cited_numbers"]:
+                                    result = process_citations(
+                                        db, current_patent, virtual["cited_numbers"],
+                                        database_id=database_id,
+                                    )
+                                    citation_links += result.get("links", 0)
+                                if virtual["citing_numbers"]:
+                                    result = process_citing_patents(
+                                        db, current_patent, virtual["citing_numbers"],
+                                        database_id=database_id,
+                                    )
+                                    citation_links += result.get("links", 0)
+                            except Exception as rel_err:
+                                print(f"[PatWiki] 关系处理警告: {rel_err}", flush=True)
+
+                if (idx + 1) % BATCH_SIZE == 0:
+                    db.commit()
+                    progress = idx + 1
+                    pct = int(progress / total_rows * 100) if total_rows > 0 else 100
+                    print(f"[PatWiki] 已处理 {progress}/{total_rows} ({pct}%) 新增:{inserted} 更新:{updated} 跳过:{skipped} 错误:{error_count}", flush=True)
 
             except Exception as e:
                 errors.append({
@@ -199,10 +225,12 @@ async def confirm_import(
                     "error": str(e),
                 })
                 error_count += 1
+                if error_count <= 10:
+                    print(f"[PatWiki] 第 {idx + 2} 行错误: {e}", flush=True)
 
         db.commit()
+        print(f"[PatWiki] 导入完成: 新增:{inserted} 更新:{updated} 跳过:{skipped} 错误:{error_count}", flush=True)
 
-        # 刷新库内专利计数
         if database_id is not None:
             DatabaseService.refresh_patent_count(db, database_id)
     finally:
