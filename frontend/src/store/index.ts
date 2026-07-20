@@ -3,6 +3,7 @@ import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, User, 
 
 const CURRENT_USER_STORAGE_KEY = 'patwiki_current_user'
 const CURRENT_VIEW_STORAGE_KEY_PREFIX = 'patwiki_current_view_'
+const GROUP_BY_FAMILY_STORAGE_KEY = 'patwiki_group_by_family'
 
 interface AppState {
   patents: Patent[]
@@ -28,6 +29,9 @@ interface AppState {
   // 权限管理 MVP：当前用户（localStorage 持久化）
   currentUser: User | null
   setCurrentUser: (user: User | null) => void
+  // P2-8：同族聚拢（列表页"一键聚拢同族"切换，localStorage 持久化）
+  groupByFamily: boolean
+  setGroupByFamily: (v: boolean) => void
   setPatents: (patents: Patent[], total: number) => void
   setProducts: (products: Product[]) => void
   setCustomFields: (fields: CustomField[]) => void
@@ -113,6 +117,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       try { localStorage.removeItem(CURRENT_USER_STORAGE_KEY) } catch {}
     }
     set({ currentUser: user })
+  },
+
+  // P2-8：同族聚拢 —— 默认关闭，localStorage 持久化用户偏好
+  groupByFamily: (() => {
+    try { return localStorage.getItem(GROUP_BY_FAMILY_STORAGE_KEY) === 'true' } catch { return false }
+  })(),
+  setGroupByFamily: (v) => {
+    try { localStorage.setItem(GROUP_BY_FAMILY_STORAGE_KEY, String(v)) } catch {}
+    set({ groupByFamily: v })
   },
 
   setPatents: (patents, total) => set({ patents, totalPatents: total }),

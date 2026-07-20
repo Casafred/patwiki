@@ -17,6 +17,8 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
     // P0-16：视图绑定
     currentViewId, views,
+    // P2-8：同族聚拢
+    groupByFamily, setGroupByFamily,
   } = useAppStore()
 
   // P0-16：当前视图对象（来自 store.views 缓存）
@@ -188,6 +190,8 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           params.database_id = currentDatabaseId
         }
         if (currentProductId) params.product_id = currentProductId
+        // P2-8：同族聚拢模式（后端会忽略 sort_by/sort_order，按 family_id 分组排序）
+        if (groupByFamily) params.group_by_family = true
 
         const allFilters: Record<string, any> = {}
         Object.entries(filterValues).forEach(([key, value]) => {
@@ -207,7 +211,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, setPatents, setLoading, isViewBound, currentViewId])
+  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, setPatents, setLoading, isViewBound, currentViewId, groupByFamily])
 
   useEffect(() => {
     loadFields()
@@ -1293,6 +1297,19 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           >
             清除筛选
           </button>
+          {/* P2-8：同族聚拢切换 —— 仅大表直查模式下显示，视图模式不适用 */}
+          {!isViewBound && (
+            <button
+              className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setGroupByFamily(!groupByFamily)}
+              title={groupByFamily ? '已开启：同族专利聚拢在一起，行首显示同族徽章。点击关闭' : '开启后同族专利会聚拢在一起，便于对比同族成员'}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              <span style={{ fontSize: 13 }}>🧲</span>
+              同族聚拢
+              {groupByFamily && <span style={{ fontSize: 10, opacity: 0.85 }}>ON</span>}
+            </button>
+          )}
           <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
             列管理
           </button>
@@ -1562,7 +1579,31 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
               </tr>
             </thead>
             <tbody>
-              {patents.map((p) => (
+              {patents.map((p, rowIdx) => {
+                // P2-8：同族聚拢模式下计算同族组背景色
+                // 相邻同 family_id 的行归为同一组（组号 +1 在 family_id 首次出现时），
+                // 组号 % 2 决定浅色背景，便于视觉区分不同的族。
+                let familyBg: string | undefined
+                let familyGroupIdx = -1
+                if (groupByFamily && p.family_id != null) {
+                  // 找当前行所属组的起始位置：往前找直到 family_id 不同
+                  let startIdx = rowIdx
+                  while (startIdx > 0 && patents[startIdx - 1].family_id === p.family_id) {
+                    startIdx--
+                  }
+                  // 组号 = 在 startIdx 之前有多少个不同的非 null family_id 组
+                  familyGroupIdx = 0
+                  let prevFid: number | null | undefined = null
+                  for (let i = 0; i < startIdx; i++) {
+                    const fid = patents[i].family_id
+                    if (fid != null && fid !== prevFid) {
+                      familyGroupIdx++
+                    }
+                    prevFid = fid
+                  }
+                  familyBg = familyGroupIdx % 2 === 0 ? '#f0f9ff' : '#fef3f2'
+                }
+                return (
                 <tr
                   key={p.id}
                   className={selectedIds.includes(p.id) ? 'row-selected' : ''}
@@ -1575,7 +1616,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     onPatentClick(p.id)
                   }}
                   onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id })}
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', background: familyBg }}
                 >
                   <td className="col-checkbox">
                     <input
@@ -1584,6 +1625,26 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                       onChange={() => toggleSelect(p.id)}
                       onClick={(e) => e.stopPropagation()}
                     />
+                    {/* P2-8：同族聚拢模式下，checkbox 下方显示同族徽章 */}
+                    {groupByFamily && p.family_id != null && p.family_size != null && p.family_size > 1 && (
+                      <div
+                        title={`同族 ${p.family_size} 件专利已聚拢在一起`}
+                        style={{
+                          marginTop: 2,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minWidth: 22,
+                          height: 16,
+                          padding: '0 5px',
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: '#fff',
+                          background: familyGroupIdx % 2 === 0 ? '#0284c7' : '#dc2626',
+                          borderRadius: 8,
+                        }}
+                      >族 {p.family_size}</div>
+                    )}
                   </td>
                   <td className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
@@ -1689,7 +1750,8 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     )
                   })}
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         )}

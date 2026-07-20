@@ -42,6 +42,9 @@ export interface Patent {
   ai_fields?: Record<string, any>
   tags?: Tag[]
   projects?: Project[]
+  // P2-8：同族信息（list_patents 在 group_by_family=True 时由后端填充）
+  family_id?: number | null
+  family_size?: number | null  // 同族成员数（含自身）；undefined/null 表示未计算或无同族
   created_at: string
   updated_at: string
 }

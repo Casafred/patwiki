@@ -96,6 +96,9 @@ class Patent(PatentBase):
     ai_fields: Optional[dict[str, Any]] = {}
     tags: list["Tag"] = []
     projects: list["Project"] = []
+    # 同族信息（list_patents 在 group_by_family=True 时填充）
+    family_id: Optional[int] = None
+    family_size: Optional[int] = None  # 同族成员数（含自身），None 表示未计算
 
 
 class PatentListResponse(BaseSchema):
