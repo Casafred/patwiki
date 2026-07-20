@@ -4,13 +4,14 @@ import PatentListPage from './components/patent/PatentListPage'
 import PatentDetailPage from './components/patent/PatentDetailPage'
 import StatsPage from './components/patent/StatsPage'
 import SettingsPage from './components/settings/SettingsPage'
+import FieldSettingsPage from './components/settings/FieldSettingsPage'
 import ImportModal from './components/import/ImportModal'
 import AITaskMonitor from './components/ai/AITaskMonitor'
 import { productApi, customFieldApi, tagApi, projectApi, databaseApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
 
-type Page = 'patents' | 'stats' | 'settings' | 'ai-tasks'
+type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks'
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('patents')
@@ -108,6 +109,8 @@ function App() {
             <StatsPage />
           ) : currentPage === 'settings' ? (
             <SettingsPage />
+          ) : currentPage === 'fields' ? (
+            <FieldSettingsPage />
           ) : currentPage === 'ai-tasks' ? (
             <AITaskMonitor />
           ) : null}

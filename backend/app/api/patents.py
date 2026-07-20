@@ -34,6 +34,7 @@ def list_patents(
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = "asc",
     custom_filters: Optional[str] = Query(None, description="JSON string of custom field filters"),
+    filters: Optional[str] = Query(None, description="JSON string of unified field filters, supports {field: {contains: 'xxx'}, field2: {eq: 'yyy'}}"),
     db: Session = Depends(get_db),
 ):
     tag_ids = [tag_id] if tag_id else None
@@ -43,6 +44,12 @@ def list_patents(
             cf = json.loads(custom_filters)
         except (json.JSONDecodeError, TypeError):
             cf = None
+    uf = None
+    if filters:
+        try:
+            uf = json.loads(filters)
+        except (json.JSONDecodeError, TypeError):
+            uf = None
     patents, total = PatentService.list_patents(
         db,
         page=page,
@@ -63,6 +70,7 @@ def list_patents(
         sort_by=sort_by,
         sort_order=sort_order,
         custom_filters=cf,
+        filters=uf,
     )
     return {
         "total": total,

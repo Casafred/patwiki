@@ -4,7 +4,7 @@ import { useAppStore } from '../../store'
 
 interface SidebarProps {
   currentPage: string
-  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'ai-tasks') => void
+  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks') => void
 }
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
@@ -141,6 +141,12 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           onClick={() => onNavigate('ai-tasks')}
         >
           AI 任务
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'fields' ? 'active' : ''}`}
+          onClick={() => onNavigate('fields')}
+        >
+          字段管理
         </div>
         <div
           className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}

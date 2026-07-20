@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { patentApi, fieldApi, exportApi, aiApi, customFieldApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Patent, FieldMeta, CustomField } from '../../types'
@@ -20,11 +20,13 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [page, setPage] = useState(1)
   const [pageSize] = useState(50)
   const [searchText, setSearchText] = useState('')
+  const [searchInputText, setSearchInputText] = useState('')
   const [sortField, setSortField] = useState<string>('filing_date')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
+  const [headerFilterText, setHeaderFilterText] = useState<string>('')
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
@@ -36,11 +38,13 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [aiFieldKey, setAiFieldKey] = useState('')
   const [aiFields, setAiFields] = useState<{ key: string; name: string; description: string; ai_config: any }[]>([])
   const [filterValues, setFilterValues] = useState<Record<string, string>>({})
-  const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [newFieldName, setNewFieldName] = useState('')
   const [newFieldType, setNewFieldType] = useState<string>('text')
   const [newFieldOptions, setNewFieldOptions] = useState('')
+  const [pageInputValue, setPageInputValue] = useState('')
+  const [aiProcessingRow, setAiProcessingRow] = useState<number | null>(null)
+  const headerMenuRef = useRef<HTMLDivElement>(null)
 
   const loadFields = useCallback(async () => {
     try {
@@ -75,25 +79,19 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
         sort_order: sortOrder,
       }
       if (searchText) params.search = searchText
-      // P0-11：库筛选（限定当前库）
       if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
         params.database_id = currentDatabaseId
       }
       if (currentProductId) params.product_id = currentProductId
 
-      const customFilters: Record<string, any> = {}
+      const allFilters: Record<string, any> = {}
       Object.entries(filterValues).forEach(([key, value]) => {
         if (value) {
-          const field = fields.find(f => f.key === key)
-          if (field && !field.is_system) {
-            customFilters[key] = { contains: value }
-          } else {
-            params[key] = value
-          }
+          allFilters[key] = { contains: value }
         }
       })
-      if (Object.keys(customFilters).length > 0) {
-        params.custom_filters = JSON.stringify(customFilters)
+      if (Object.keys(allFilters).length > 0) {
+        params.filters = JSON.stringify(allFilters)
       }
 
       const result = await patentApi.list(params)
@@ -103,7 +101,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, fields, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, setPatents, setLoading])
 
   useEffect(() => {
     loadFields()
@@ -119,6 +117,10 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   useEffect(() => {
     aiApi.listAIFields().then(setAiFields).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    setPageInputValue(String(page))
+  }, [page])
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -151,6 +153,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
         const target = e.target as HTMLElement
         if (!target.closest('.col-header-menu') && !target.closest('.col-header-trigger')) {
           setActiveHeaderMenu(null)
+          setHeaderFilterText('')
         }
       }
     }
@@ -160,6 +163,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
+    setSearchText(searchInputText)
     setPage(1)
   }
 
@@ -200,6 +204,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   }
 
   const handleCellClick = (patentId: number, fieldKey: string, e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.cell-action-btn')) return
     const field = fields.find(f => f.key === fieldKey)
     if (!field?.editable) {
       onPatentClick(patentId)
@@ -226,6 +231,59 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       f.key === fieldKey ? { ...f, visible: !f.visible } : f
     ))
     setActiveHeaderMenu(null)
+  }
+
+  const handleHeaderFilterApply = (fieldKey: string) => {
+    setFilterValues(prev => ({ ...prev, [fieldKey]: headerFilterText }))
+    setPage(1)
+    setActiveHeaderMenu(null)
+    setHeaderFilterText('')
+  }
+
+  const handleHeaderFilterClear = (fieldKey: string) => {
+    setFilterValues(prev => {
+      const next = { ...prev }
+      delete next[fieldKey]
+      return next
+    })
+    setHeaderFilterText('')
+    setPage(1)
+  }
+
+  const handleClearAllFilters = () => {
+    setFilterValues({})
+    setSearchText('')
+    setSearchInputText('')
+    setPage(1)
+  }
+
+  const handleQuickAI = async (patentId: number) => {
+    if (aiFields.length === 0) {
+      alert('未找到AI字段，请先在设置页配置LLM API')
+      return
+    }
+    const firstAiField = aiFields[0]
+    setAiProcessingRow(patentId)
+    try {
+      const task = await aiApi.process([patentId], firstAiField.key)
+      const poll = async () => {
+        try {
+          const t = await aiApi.getTask(task.id)
+          if (t.status === 'running' || t.status === 'pending') {
+            setTimeout(poll, 1500)
+          } else {
+            setAiProcessingRow(null)
+            loadPatents()
+          }
+        } catch {
+          setAiProcessingRow(null)
+        }
+      }
+      setTimeout(poll, 1500)
+    } catch (e: any) {
+      alert('AI处理失败: ' + (e?.response?.data?.detail || e?.message || ''))
+      setAiProcessingRow(null)
+    }
   }
 
   const handleCreateCustomField = async () => {
@@ -308,6 +366,15 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     }
   }
 
+  const handlePageJump = () => {
+    const p = parseInt(pageInputValue)
+    if (!isNaN(p) && p >= 1 && p <= totalPages) {
+      setPage(p)
+    } else {
+      setPageInputValue(String(page))
+    }
+  }
+
   const getFieldValue = (patent: Patent, fieldKey: string): any => {
     const field = fields.find(f => f.key === fieldKey)
     if (!field) return null
@@ -355,7 +422,24 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const visibleFields = fields.filter(f => f.visible !== false)
   const totalPages = Math.ceil(totalPatents / pageSize)
   const allSelected = patents.length > 0 && selectedIds.length === patents.length
-  const hasActiveFilters = Object.values(filterValues).some(v => v)
+  const hasActiveFilters = Object.values(filterValues).some(v => v) || !!searchText
+
+  const pageNumbers = () => {
+    const pages: (number | string)[] = []
+    const maxVisible = 5
+    if (totalPages <= maxVisible + 2) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i)
+    } else {
+      pages.push(1)
+      let start = Math.max(2, page - 2)
+      let end = Math.min(totalPages - 1, page + 2)
+      if (start > 2) pages.push('...')
+      for (let i = start; i <= end; i++) pages.push(i)
+      if (end < totalPages - 1) pages.push('...')
+      pages.push(totalPages)
+    }
+    return pages
+  }
 
   const renderCellEditor = (patent: Patent, field: FieldMeta, value: any) => {
     const save = (v: any) => handleCellSave(patent.id, field.key, v)
@@ -466,7 +550,13 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     if (field.key === 'title') {
       return (
         <div>
-          <div style={{ fontWeight: 500, color: '#0f172a' }}>{value || '-'}</div>
+          <div style={{ fontWeight: 500, color: '#2563eb', cursor: 'pointer' }}
+               onClick={(e) => { e.stopPropagation(); onPatentClick(patent.id) }}
+               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
+               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
+          >
+            {value || '-'}
+          </div>
           {(patent.category || patent.subcategory) && (
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
               {patent.category}{patent.subcategory ? ` / ${patent.subcategory}` : ''}
@@ -478,7 +568,12 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
 
     if (field.key === 'application_number' || field.key === 'publication_number') {
       return (
-        <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+        <span
+          style={{ fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', color: '#2563eb' }}
+          onClick={(e) => { e.stopPropagation(); onPatentClick(patent.id) }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
+        >
           {value || '-'}
         </span>
       )
@@ -520,15 +615,16 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
               className="form-input"
               style={{ width: 260, height: 32, fontSize: 13 }}
               placeholder="搜索专利号、标题、申请人..."
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
+              value={searchInputText}
+              onChange={(e) => setSearchInputText(e.target.value)}
             />
           </form>
           <button
             className={`btn btn-sm ${hasActiveFilters ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setShowFilterPanel(!showFilterPanel)}
+            onClick={handleClearAllFilters}
+            style={{ display: hasActiveFilters ? 'inline-flex' : 'none' }}
           >
-            筛选{hasActiveFilters ? ' (已激活)' : ''}
+            清除筛选
           </button>
           <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)}>
             字段
@@ -539,51 +635,18 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
         </div>
       </div>
 
-      {showFilterPanel && (
-        <div className="filter-panel">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, padding: 12 }}>
-            {visibleFields.filter(f => f.filterable).slice(0, 8).map(field => (
-              <div key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 140 }}>
-                <label style={{ fontSize: 11, color: '#6b7280', fontWeight: 500 }}>{field.name}</label>
-                {field.field_type === 'select' && field.options ? (
-                  <select
-                    className="form-input"
-                    style={{ height: 30, fontSize: 12 }}
-                    value={filterValues[field.key] || ''}
-                    onChange={(e) => {
-                      setFilterValues(prev => ({ ...prev, [field.key]: e.target.value }))
-                      setPage(1)
-                    }}
-                  >
-                    <option value="">全部</option>
-                    {field.options.map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    className="form-input"
-                    style={{ height: 30, fontSize: 12 }}
-                    placeholder={`搜索${field.name}...`}
-                    value={filterValues[field.key] || ''}
-                    onChange={(e) => {
-                      setFilterValues(prev => ({ ...prev, [field.key]: e.target.value }))
-                      setPage(1)
-                    }}
-                  />
-                )}
-              </div>
-            ))}
-            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-              <button
-                className="btn btn-sm btn-secondary"
-                onClick={() => { setFilterValues({}); setPage(1) }}
-              >
-                重置
-              </button>
-            </div>
-          </div>
+      {Object.keys(filterValues).length > 0 && (
+        <div style={{ display: 'flex', gap: 6, padding: '6px 20px', background: '#fff', borderBottom: '1px solid #e5e7eb', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: '#6b7280' }}>已筛选：</span>
+          {Object.entries(filterValues).filter(([_, v]) => v).map(([key, value]) => {
+            const field = fields.find(f => f.key === key)
+            return (
+              <span key={key} className="filter-chip">
+                {field?.name || key}: {value}
+                <span className="chip-remove" onClick={() => handleHeaderFilterClear(key)}>×</span>
+              </span>
+            )
+          })}
         </div>
       )}
 
@@ -622,109 +685,156 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                 <th className="col-checkbox" style={{ width: 40, minWidth: 40, maxWidth: 40 }}>
                   <input type="checkbox" checked={allSelected} onChange={handleSelectAll} />
                 </th>
-                {visibleFields.map(field => (
-                  <th
-                    key={field.key}
-                    className={`${field.frozen ? 'col-frozen' : ''} ${sortField === field.key ? 'col-sorted' : ''}`}
-                    style={{ width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH, minWidth: 80 }}
-                  >
-                    <div
-                      className="col-header-trigger"
-                      onClick={() => handleSort(field.key)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        height: '100%',
-                        padding: '0 10px',
-                        cursor: field.sortable ? 'pointer' : 'default',
-                      }}
+                <th style={{ width: 70, minWidth: 70, maxWidth: 70 }}>
+                  <span style={{ fontSize: 12, color: '#6b7280', padding: '0 10px' }}>操作</span>
+                </th>
+                {visibleFields.map(field => {
+                  const hasFilter = !!filterValues[field.key]
+                  const isFilterable = field.filterable !== false
+                  return (
+                    <th
+                      key={field.key}
+                      className={`${field.frozen ? 'col-frozen' : ''} ${sortField === field.key ? 'col-sorted' : ''} ${hasFilter ? 'col-filtered' : ''}`}
+                      style={{ width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH, minWidth: 80 }}
                     >
-                      <span style={{
-                        fontSize: 12,
-                        fontWeight: 500,
-                        color: sortField === field.key ? '#111827' : '#6b7280',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        {field.name}
-                        {sortField === field.key && (
-                          <span style={{ marginLeft: 4, fontSize: 10, color: '#3b82f6' }}>
-                            {sortOrder === 'asc' ? '↑' : '↓'}
-                          </span>
-                        )}
-                      </span>
-                      <button
-                        className="col-header-trigger"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setActiveHeaderMenu(activeHeaderMenu === field.key ? null : field.key)
-                        }}
+                      <div
                         style={{
-                          width: 20,
-                          height: 20,
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center',
-                          border: 'none',
-                          background: 'transparent',
-                          cursor: 'pointer',
-                          color: '#9ca3af',
-                          borderRadius: 3,
-                          fontSize: 14,
-                          flexShrink: 0,
-                          marginLeft: 4,
+                          justifyContent: 'space-between',
+                          height: '100%',
+                          padding: '0 10px',
+                          cursor: field.sortable ? 'pointer' : 'default',
+                          minHeight: 34,
                         }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#e5e7eb' }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                        onClick={() => handleSort(field.key)}
                       >
-                        ▾
-                      </button>
-                    </div>
-                    <div
-                      className="col-resize-handle"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setResizing({
-                          fieldKey: field.key,
-                          startX: e.clientX,
-                          startWidth: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
-                        })
-                      }}
-                    />
-                    {activeHeaderMenu === field.key && (
-                      <div className="col-header-menu">
-                        <div
-                          className="menu-item"
-                          onClick={() => handleSort(field.key)}
+                        <span style={{
+                          fontSize: 12,
+                          fontWeight: 500,
+                          color: sortField === field.key ? '#111827' : hasFilter ? '#2563eb' : '#6b7280',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          flex: 1,
+                        }}>
+                          {field.name}
+                          {sortField === field.key && (
+                            <span style={{ marginLeft: 4, fontSize: 10, color: '#3b82f6' }}>
+                              {sortOrder === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                          {hasFilter && (
+                            <span style={{ marginLeft: 4, fontSize: 10, color: '#2563eb' }}>●</span>
+                          )}
+                        </span>
+                        <button
+                          className="col-header-trigger"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (activeHeaderMenu === field.key) {
+                              setActiveHeaderMenu(null)
+                              setHeaderFilterText('')
+                            } else {
+                              setActiveHeaderMenu(field.key)
+                              setHeaderFilterText(filterValues[field.key] || '')
+                            }
+                          }}
+                          style={{
+                            width: 20,
+                            height: 20,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            color: hasFilter ? '#2563eb' : '#9ca3af',
+                            borderRadius: 3,
+                            fontSize: 14,
+                            flexShrink: 0,
+                            marginLeft: 4,
+                          }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#e5e7eb' }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                         >
-                          <span>{sortField === field.key && sortOrder === 'asc' ? '↓ 降序' : '↑ 升序'}</span>
-                        </div>
-                        {field.filterable && (
+                          ▾
+                        </button>
+                      </div>
+                      <div
+                        className="col-resize-handle"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setResizing({
+                            fieldKey: field.key,
+                            startX: e.clientX,
+                            startWidth: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
+                          })
+                        }}
+                      />
+                      {activeHeaderMenu === field.key && (
+                        <div className="col-header-menu" onClick={e => e.stopPropagation()}>
+                          {isFilterable && (
+                            <div style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6' }}>
+                              <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 4 }}>筛选 {field.name}</div>
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                <input
+                                  type="text"
+                                  placeholder="输入关键词..."
+                                  value={headerFilterText}
+                                  onChange={(e) => setHeaderFilterText(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleHeaderFilterApply(field.key)
+                                    if (e.key === 'Escape') { setActiveHeaderMenu(null); setHeaderFilterText('') }
+                                  }}
+                                  autoFocus
+                                  style={{
+                                    flex: 1,
+                                    padding: '4px 8px',
+                                    border: '1px solid #d1d5db',
+                                    borderRadius: 4,
+                                    fontSize: 12,
+                                    outline: 'none',
+                                    minWidth: 120,
+                                  }}
+                                />
+                                <button
+                                  className="btn btn-xs btn-primary"
+                                  onClick={() => handleHeaderFilterApply(field.key)}
+                                >
+                                  确定
+                                </button>
+                              </div>
+                              {filterValues[field.key] && (
+                                <button
+                                  className="btn btn-xs btn-ghost"
+                                  onClick={() => handleHeaderFilterClear(field.key)}
+                                  style={{ fontSize: 11, padding: '2px 0', marginTop: 4, color: '#dc2626' }}
+                                >
+                                  清除此列筛选
+                                </button>
+                              )}
+                            </div>
+                          )}
                           <div
                             className="menu-item"
-                            onClick={() => {
-                              setShowFilterPanel(true)
-                              setActiveHeaderMenu(null)
-                              setFilterValues(prev => ({ ...prev, [field.key]: prev[field.key] || '' }))
-                            }}
+                            onClick={() => handleSort(field.key)}
                           >
-                            <span>按此列筛选</span>
+                            <span>{sortField === field.key && sortOrder === 'asc' ? '↓ 降序排列' : '↑ 升序排列'}</span>
                           </div>
-                        )}
-                        <div className="menu-divider" />
-                        <div
-                          className="menu-item"
-                          onClick={() => handleToggleFieldVisible(field.key)}
-                        >
-                          <span>隐藏此列</span>
+                          <div className="menu-divider" />
+                          <div
+                            className="menu-item"
+                            onClick={() => handleToggleFieldVisible(field.key)}
+                          >
+                            <span>隐藏此列</span>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </th>
-                ))}
+                      )}
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>
@@ -736,9 +846,11 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     if ((e.target as HTMLElement).closest('input') ||
                         (e.target as HTMLElement).closest('select') ||
                         (e.target as HTMLElement).closest('textarea') ||
-                        (e.target as HTMLElement).closest('button')) return
+                        (e.target as HTMLElement).closest('button') ||
+                        (e.target as HTMLElement).closest('.cell-action-btn')) return
                     onPatentClick(p.id)
                   }}
+                  style={{ cursor: 'pointer' }}
                 >
                   <td className="col-checkbox">
                     <input
@@ -747,6 +859,35 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                       onChange={() => toggleSelect(p.id)}
                       onClick={(e) => e.stopPropagation()}
                     />
+                  </td>
+                  <td style={{ width: 70, padding: '4px 6px' }}>
+                    <div style={{ display: 'flex', gap: 2 }}>
+                      <button
+                        className="cell-action-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleQuickAI(p.id)
+                        }}
+                        disabled={aiProcessingRow === p.id}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          border: '1px solid #bfdbfe',
+                          background: aiProcessingRow === p.id ? '#dbeafe' : '#eff6ff',
+                          color: aiProcessingRow === p.id ? '#93c5fd' : '#2563eb',
+                          borderRadius: 4,
+                          cursor: aiProcessingRow === p.id ? 'wait' : 'pointer',
+                          fontSize: 12,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 0,
+                        }}
+                        title="AI快速分析"
+                      >
+                        {aiProcessingRow === p.id ? '⟳' : '✨'}
+                      </button>
+                    </div>
                   </td>
                   {visibleFields.map(field => (
                     <td
@@ -778,7 +919,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
         <span style={{ fontSize: 12, color: '#6b7280' }}>
           第 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, totalPatents)} 条，共 {totalPatents} 条
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <button
             className="btn btn-xs btn-secondary"
             disabled={page <= 1}
@@ -786,9 +927,27 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           >
             上一页
           </button>
-          <span style={{ fontSize: 12, color: '#374151', padding: '0 8px' }}>
-            {page} / {totalPages || 1}
-          </span>
+          {pageNumbers().map((p, idx) =>
+            typeof p === 'number' ? (
+              <button
+                key={idx}
+                className="btn btn-xs"
+                onClick={() => setPage(p)}
+                style={{
+                  padding: '2px 7px',
+                  minWidth: 24,
+                  background: p === page ? '#2563eb' : '#fff',
+                  color: p === page ? '#fff' : '#374151',
+                  border: `1px solid ${p === page ? '#2563eb' : '#d1d5db'}`,
+                  fontWeight: p === page ? 600 : 400,
+                }}
+              >
+                {p}
+              </button>
+            ) : (
+              <span key={idx} style={{ fontSize: 12, color: '#9ca3af', padding: '0 2px' }}>…</span>
+            )
+          )}
           <button
             className="btn btn-xs btn-secondary"
             disabled={page >= totalPages}
@@ -796,6 +955,29 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           >
             下一页
           </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
+            <span style={{ fontSize: 12, color: '#6b7280' }}>跳至</span>
+            <input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={pageInputValue}
+              onChange={(e) => setPageInputValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handlePageJump() }}
+              onBlur={handlePageJump}
+              style={{
+                width: 48,
+                height: 24,
+                padding: '0 6px',
+                border: '1px solid #d1d5db',
+                borderRadius: 4,
+                fontSize: 12,
+                textAlign: 'center',
+                outline: 'none',
+              }}
+            />
+            <span style={{ fontSize: 12, color: '#6b7280' }}>页</span>
+          </div>
         </div>
       </div>
 

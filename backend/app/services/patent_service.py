@@ -70,6 +70,7 @@ class PatentService:
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = "asc",
         custom_filters: Optional[dict[str, Any]] = None,
+        filters: Optional[dict[str, Any]] = None,
     ) -> tuple[list[Patent], int]:
         query = db.query(Patent).options(
             joinedload(Patent.tags),
@@ -127,6 +128,37 @@ class PatentService:
         if filing_date_to:
             query = query.filter(Patent.filing_date <= filing_date_to)
 
+        # 统一filters处理：支持系统字段和自定义字段
+        if filters:
+            for key, filter_val in filters.items():
+                if filter_val is None or filter_val == "":
+                    continue
+                if key in SYSTEM_FIELDS and hasattr(Patent, key):
+                    column = getattr(Patent, key)
+                    if isinstance(filter_val, dict):
+                        if "contains" in filter_val and filter_val["contains"]:
+                            query = query.filter(column.cast(String).ilike(f"%{filter_val['contains']}%"))
+                        elif "eq" in filter_val and filter_val["eq"] is not None:
+                            query = query.filter(column == filter_val["eq"])
+                    else:
+                        query = query.filter(column.cast(String).ilike(f"%{filter_val}%"))
+                else:
+                    # 自定义字段
+                    if isinstance(filter_val, dict):
+                        if "contains" in filter_val and filter_val["contains"]:
+                            query = query.filter(
+                                func.json_extract(Patent.custom_fields, f'$.{key}').cast(String).ilike(f"%{filter_val['contains']}%")
+                            )
+                        elif "eq" in filter_val and filter_val["eq"] is not None:
+                            query = query.filter(
+                                func.json_extract(Patent.custom_fields, f'$.{key}') == str(filter_val["eq"])
+                            )
+                    else:
+                        query = query.filter(
+                            func.json_extract(Patent.custom_fields, f'$.{key}').cast(String).ilike(f"%{filter_val}%")
+                        )
+
+        # 兼容旧custom_filters
         if custom_filters:
             for key, value in custom_filters.items():
                 if value is None or value == "":
