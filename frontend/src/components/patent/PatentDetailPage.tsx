@@ -172,7 +172,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   ]
 
   return (
-    <div>
+    <div style={{ padding: '16px 20px', maxWidth: 1100 }}>
       {/* 顶部导航 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <button className="btn btn-secondary" onClick={onBack}>返回列表</button>
@@ -225,7 +225,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       </div>
 
       {/* Tab 内容 */}
-      <div style={{ maxWidth: 900 }}>
+      <div>
         {activeTab === 'basic' && (
           <BasicInfoTab patent={patent} formData={formData} editing={editing} updateField={updateField} products={products} />
         )}

@@ -58,12 +58,34 @@ class AIFieldEngine:
             except ImportError:
                 raise ImportError(" neither langchain-openai nor openai installed，请安装其中一个")
 
+    def _resolve_field_value(self, patent: Patent, key: str) -> str:
+        """根据字段key从patent中解析出值，支持系统字段、custom_fields.xxx、ai_fields.xxx"""
+        if key.startswith("custom_fields."):
+            ck = key[len("custom_fields."):]
+            return str((patent.custom_fields or {}).get(ck, "") or "")
+        if key.startswith("ai_fields."):
+            ak = key[len("ai_fields."):]
+            return str((patent.ai_fields or {}).get(ak, "") or "")
+        # 系统字段
+        val = getattr(patent, key, None)
+        if val is None:
+            return ""
+        if hasattr(val, "isoformat"):  # date/datetime
+            return val.isoformat()
+        return str(val)
+
     def _build_prompt(self, patent: Patent, field_def: CustomField) -> str:
         ai_config = field_def.ai_config or {}
         template = ai_config.get("prompt_template", "")
 
         if template:
-            text = template
+            import re
+            # 支持任意 {field_key} 变量替换，包括 {title}/{abstract}/{applicant}/{custom_fields.xxx}/{ai_fields.xxx} 等
+            def _replace(m):
+                k = m.group(1).strip()
+                v = self._resolve_field_value(patent, k)
+                return v if v else ""
+            text = re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_.]*)\}", _replace, template)
         else:
             text = f"""请分析以下专利信息，完成任务：{field_def.description or field_def.name}
 
@@ -77,7 +99,15 @@ class AIFieldEngine:
         return text
 
     def _calculate_input_hash(self, patent: Patent, field_def: CustomField) -> str:
-        content = f"{patent.title}|{patent.abstract or ''}|{field_def.key}|{field_def.ai_config or ''}"
+        ai_config = field_def.ai_config or {}
+        template = ai_config.get("prompt_template", "")
+        # 收集 prompt 中引用的所有字段值参与 hash，保证引用值变化时重新计算
+        import re
+        keys = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_.]*)\}", template))
+        parts = [field_def.key, template]
+        for k in sorted(keys):
+            parts.append(f"{k}={self._resolve_field_value(patent, k)}")
+        content = "|".join(parts)
         return hashlib.sha256(content.encode()).hexdigest()[:32]
 
     def _get_cached_value(self, patent_id: int, field_key: str, input_hash: str) -> Optional[AIFieldValue]:
