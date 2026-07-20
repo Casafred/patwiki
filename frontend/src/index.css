@@ -550,8 +550,9 @@ input, select, textarea {
 
 .badge-ai { background: #ede9fe; color: #6d28d9; }
 
+.data-grid th .col-header-menu,
 .col-header-menu {
-  position: absolute;
+  position: absolute !important;
   top: 100%;
   left: 0;
   z-index: 100;
@@ -559,7 +560,7 @@ input, select, textarea {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   box-shadow: 0 10px 25px rgba(0,0,0,0.12);
-  min-width: 140px;
+  min-width: 200px;
   padding: 4px 0;
   font-size: 12px;
 }

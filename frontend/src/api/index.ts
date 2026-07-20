@@ -3,7 +3,7 @@ import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
   AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
-  User, DatabaseMember, SharedDatabase,
+  User, DatabaseMember, SharedDatabase, PatentHistory,
 } from '../types'
 
 export const fieldApi = {
@@ -56,6 +56,10 @@ export const patentApi = {
 
   updateCell: (patentId: number, fieldKey: string, value: any): Promise<Patent> =>
     api.patch(`/patents/${patentId}/field/${fieldKey}`, { value } as CellUpdateRequest),
+
+  // 修改历史
+  getHistory: (patentId: number, limit: number = 100): Promise<PatentHistory[]> =>
+    api.get(`/patents/${patentId}/history`, { params: { limit } }),
 }
 
 export const productApi = {

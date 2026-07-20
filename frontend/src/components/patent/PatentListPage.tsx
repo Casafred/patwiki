@@ -75,6 +75,14 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   }>>({})
   // 最近完成的任务（保留几秒用于显示成功提示）
   const [recentCompleted, setRecentCompleted] = useState<{ taskId: number; meta: typeof taskMeta[number] | undefined; task: AITask | undefined } | null>(null)
+  // 右键上下文菜单
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    type: 'row' | 'header'
+    patentId?: number
+    fieldKey?: string
+  } | null>(null)
 
   const loadFields = useCallback(async () => {
     try {
@@ -200,6 +208,31 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     document.addEventListener('click', handleClickOutside)
     return () => document.removeEventListener('click', handleClickOutside)
   }, [activeHeaderMenu])
+
+  // 右键菜单：点击其他位置或按 Esc 关闭
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.context-menu')) close()
+    }
+    document.addEventListener('click', onClick)
+    document.addEventListener('contextmenu', (e) => {
+      // 在菜单已打开时，右键其他位置应直接切换菜单位置而不是叠加
+      const target = e.target as HTMLElement
+      if (!target.closest('.context-menu')) {
+        // 让目标元素的 onContextMenu 重新接管
+        close()
+      }
+    })
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('click', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [contextMenu])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -613,6 +646,86 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     }
   }
 
+  // 通过 fieldKey 找到对应的 CustomField 并删除（用于右键菜单"删除此列"）
+  const handleDeleteColumnByKey = async (fieldKey: string) => {
+    const field = fields.find(f => f.key === fieldKey)
+    if (!field) {
+      alert('未找到该列信息')
+      return
+    }
+    if (field.is_system) {
+      alert(`系统字段"${field.name}"不能删除`)
+      return
+    }
+    const cf = customFields.find(c => c.key === fieldKey)
+    if (!cf) {
+      alert('该列无法删除（可能是系统内置列）')
+      return
+    }
+    const confirmText = `确定要删除列"${field.name}"吗？\n\n• 列定义将被删除\n• 已录入的列值（custom_fields['${fieldKey}']）将保留在数据库中但不再显示\n• 此操作不可撤销`
+    if (!confirm(confirmText)) return
+    try {
+      await customFieldApi.delete(cf.id)
+      await loadFields()
+      await loadCustomFields()
+      // 如果是 AI 列，刷新 aiFields
+      if (field.field_type === 'ai_field') {
+        try {
+          const refreshedAiFields = await aiApi.listAIFields()
+          setAiFields(refreshedAiFields)
+        } catch {}
+      }
+    } catch (e: any) {
+      alert('删除列失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    }
+  }
+
+  // 删除单行专利
+  const handleDeletePatent = async (patentId: number) => {
+    const patent = patents.find(p => p.id === patentId)
+    if (!patent) return
+    const title = patent.title || `#${patentId}`
+    const confirmText = `确定要删除专利"${title}"吗？\n\n• 申请号：${patent.application_number || '无'}\n• 公开号：${patent.publication_number || '无'}\n• 此操作不可撤销，删除后数据无法恢复`
+    if (!confirm(confirmText)) return
+    // 二次确认（防误删）
+    if (!confirm('再次确认删除？此操作不可撤销！')) return
+    try {
+      await patentApi.delete(patentId)
+      // 从已选中移除
+      if (selectedIds.includes(patentId)) {
+        setSelectedIds(selectedIds.filter(id => id !== patentId))
+      }
+      await loadPatents()
+    } catch (e: any) {
+      alert('删除失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    }
+  }
+
+  // 右键菜单触发（行/列）
+  const handleContextMenu = (e: React.MouseEvent, type: 'row' | 'header', data: { patentId?: number; fieldKey?: string }) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      type,
+      patentId: data.patentId,
+      fieldKey: data.fieldKey,
+    })
+  }
+
+  // 复制单元格值到剪贴板
+  const handleCopyCell = (patentId: number, fieldKey: string) => {
+    const patent = patents.find(p => p.id === patentId)
+    if (!patent) return
+    const value = getFieldValue(patent, fieldKey)
+    const text = value === null || value === undefined ? '' : String(value)
+    navigator.clipboard?.writeText(text).then(
+      () => { /* 复制成功，不弹窗 */ },
+      () => { alert('复制失败：' + text) }
+    )
+  }
+
   const handleBulkEditSave = async () => {
     const updates: Partial<Patent> = {}
     if (bulkModule) updates.module = bulkModule
@@ -1003,6 +1116,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                         minWidth: 80,
                         ...(isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 15, background: '#f9fafb' } : {}),
                       }}
+                      onContextMenu={(e) => handleContextMenu(e, 'header', { fieldKey: field.key })}
                     >
                       <div
                         style={{
@@ -1191,6 +1305,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                         (e.target as HTMLElement).closest('.cell-action-btn')) return
                     onPatentClick(p.id)
                   }}
+                  onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id })}
                   style={{ cursor: 'pointer' }}
                 >
                   <td className="col-checkbox">
@@ -1262,6 +1377,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                           handleCellClick(p.id, field.key, e)
                         }
                       }}
+                      onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id, fieldKey: field.key })}
                     >
                       {renderCellContent(p, field)}
                       {/* AI 列的拖动复用按钮（Excel 式填充柄） */}
@@ -1562,26 +1678,112 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       )}
 
       {showAIBatch && (
-        <Modal title={`AI 批量处理 ${selectedIds.length} 条专利`} onClose={() => setShowAIBatch(false)}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 360 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>选择 AI 字段</label>
-              <select className="form-input" value={aiFieldKey} onChange={e => setAiFieldKey(e.target.value)}>
-                <option value="">请选择...</option>
-                {aiFields.map(f => (
-                  <option key={f.key} value={f.key}>{f.name}</option>
-                ))}
-              </select>
+        <Modal title={`AI 批量处理 ${selectedIds.length} 条专利`} onClose={() => setShowAIBatch(false)} width={680}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{
+              padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe',
+              borderRadius: 6, fontSize: 12, color: '#1e40af', lineHeight: 1.6,
+            }}>
+              💡 选择下方任一 AI 字段，点击"运行"按钮即可对选中的 <strong>{selectedIds.length}</strong> 条专利批量执行 AI 分析。
+              结果将自动回填到对应列，并在右下角显示进度。
             </div>
-            {aiFields.length === 0 && (
-              <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
-                未找到 AI 字段。请确认后端已初始化 AI 字段模板，且已在设置页配置 LLM API。
-              </p>
+
+            {aiFields.length === 0 ? (
+              <div style={{
+                padding: 20, textAlign: 'center', color: '#6b7280',
+                border: '1px dashed #d1d5db', borderRadius: 6,
+              }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>🤖</div>
+                <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>暂无 AI 字段</div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>
+                  请先通过"+ 插入新列"创建一个 AI 列并配置 Prompt 模板
+                </div>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => { setShowAIBatch(false); openInsertAIDialog() }}
+                >
+                  + 插入 AI 列
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {aiFields.map(f => {
+                  const prompt = f.ai_config?.prompt_template || ''
+                  const referenced = parseReferencedColumns(prompt)
+                  const isSelected = aiFieldKey === f.key
+                  return (
+                    <div
+                      key={f.key}
+                      style={{
+                        border: `1px solid ${isSelected ? '#3b82f6' : '#e5e7eb'}`,
+                        borderRadius: 6,
+                        padding: 10,
+                        background: isSelected ? '#eff6ff' : '#fff',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => setAiFieldKey(f.key)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <span style={{
+                          fontSize: 16, padding: '2px 6px',
+                          background: '#ede9fe', color: '#6d28d9', borderRadius: 3,
+                        }}>✨</span>
+                        <strong style={{ flex: 1, fontSize: 13, color: '#1f2937' }}>{f.name}</strong>
+                        <button
+                          className="btn btn-xs btn-primary"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (!confirm(`将对选中的 ${selectedIds.length} 条专利运行 AI 字段"${f.name}"，是否继续？`)) return
+                            startAITask(selectedIds, f.key)
+                            setShowAIBatch(false)
+                            setAiFieldKey('')
+                            clearSelection()
+                          }}
+                        >
+                          ▶ 运行
+                        </button>
+                      </div>
+                      {f.description && (
+                        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>{f.description}</div>
+                      )}
+                      {prompt && (
+                        <details style={{ fontSize: 11 }}>
+                          <summary style={{ cursor: 'pointer', color: '#6b7280' }}>
+                            Prompt 预览 {referenced.length > 0 && `· 纳入 ${referenced.length} 列`}
+                          </summary>
+                          <pre style={{
+                            background: '#f9fafb', padding: 8, borderRadius: 3, marginTop: 4,
+                            fontSize: 11, maxHeight: 100, overflow: 'auto', whiteSpace: 'pre-wrap',
+                            border: '1px solid #e5e7eb',
+                          }}>
+                            {prompt}
+                          </pre>
+                          {referenced.length > 0 && (
+                            <div style={{ marginTop: 4, fontSize: 11, color: '#1e40af' }}>
+                              纳入的列：{referenced.join('、')}
+                            </div>
+                          )}
+                        </details>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             )}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-              <button className="btn btn-secondary" onClick={() => setShowAIBatch(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleAIBatchProcess}>启动 AI 任务</button>
-            </div>
+
+            {aiFields.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4, borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
+                <button className="btn btn-secondary" onClick={() => setShowAIBatch(false)}>取消</button>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleAIBatchProcess}
+                  disabled={!aiFieldKey}
+                  title={!aiFieldKey ? '请先点击上方任一 AI 字段以选中' : '对选中的专利运行选中的 AI 字段'}
+                >
+                  ▶ 启动 AI 任务{aiFieldKey ? `（${aiFields.find(f => f.key === aiFieldKey)?.name}）` : ''}
+                </button>
+              </div>
+            )}
           </div>
         </Modal>
       )}
@@ -1846,6 +2048,109 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
             )}
           </div>
         </Modal>
+      )}
+
+      {/* 右键上下文菜单 */}
+      {contextMenu && (
+        <div
+          className="context-menu"
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            zIndex: 1100,
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 8,
+            boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+            minWidth: 180,
+            padding: '4px 0',
+            fontSize: 12,
+          }}
+          onClick={() => setContextMenu(null)}
+        >
+          {contextMenu.type === 'row' && (() => {
+            const patent = patents.find(p => p.id === contextMenu.patentId)
+            const fieldName = contextMenu.fieldKey ? fields.find(f => f.key === contextMenu.fieldKey)?.name : null
+            return (
+              <>
+                {/* 行操作 */}
+                {patent && (
+                  <>
+                    <div style={{ padding: '6px 14px', fontSize: 11, color: '#9ca3af', borderBottom: '1px solid #f3f4f6' }}>
+                      {patent.title?.slice(0, 30) || `#${patent.id}`}
+                    </div>
+                    <div className="menu-item" onClick={() => onPatentClick(contextMenu.patentId!)}>
+                      📋 查看详情
+                    </div>
+                    {fieldName && (
+                      <div className="menu-item" onClick={() => handleCopyCell(contextMenu.patentId!, contextMenu.fieldKey!)}>
+                        📎 复制"{fieldName}"的值
+                      </div>
+                    )}
+                    <div className="menu-divider" />
+                    <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => handleDeletePatent(contextMenu.patentId!)}>
+                      🗑 删除此行
+                    </div>
+                  </>
+                )}
+              </>
+            )
+          })()}
+          {contextMenu.type === 'header' && (() => {
+            const field = fields.find(f => f.key === contextMenu.fieldKey)
+            if (!field) return null
+            const isCustom = !field.is_system
+            const cf = customFields.find(c => c.key === field.key)
+            const isFrozen = field.frozen || frozenFields.has(field.key)
+            const isAI = field.field_type === 'ai_field'
+            return (
+              <>
+                <div style={{ padding: '6px 14px', fontSize: 11, color: '#9ca3af', borderBottom: '1px solid #f3f4f6' }}>
+                  列：{field.name}
+                  <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', background: '#eff6ff', color: '#1e40af', borderRadius: 2 }}>
+                    {field.field_type}
+                  </span>
+                </div>
+                <div className="menu-item" onClick={() => { setActiveHeaderMenu(null); handleSort(field.key) }}>
+                  {sortField === field.key && sortOrder === 'asc' ? '↓ 降序排列' : '↑ 升序排列'}
+                </div>
+                <div className="menu-item" onClick={() => handleToggleFreeze(field.key)}>
+                  {isFrozen ? '🔓 取消冻结' : '🔒 冻结此列'}
+                </div>
+                <div className="menu-item" onClick={() => handleToggleFieldVisible(field.key)}>
+                  隐藏此列
+                </div>
+                <div className="menu-item" onClick={() => openColumnStats(field.key)}>
+                  📊 统计此列
+                </div>
+                <div className="menu-divider" />
+                <div className="menu-item" style={{ color: '#2563eb' }} onClick={() => openInsertAIDialog(field.key)}>
+                  ✨ 基于此列插入新列
+                </div>
+                {isAI && (
+                  <div className="menu-item" style={{ color: '#7c3aed' }} onClick={() => {
+                    if (patents.length === 0) { alert('当前列表为空'); return }
+                    if (!confirm(`将用此 AI 配置处理当前列表的 ${patents.length} 行，是否继续？`)) return
+                    startAITask(patents.map(p => p.id), field.key)
+                  }}>
+                    ⚡ 批量处理此列（所有可见行）
+                  </div>
+                )}
+                <div className="menu-divider" />
+                {isCustom && cf ? (
+                  <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => handleDeleteColumnByKey(field.key)}>
+                    🗑 删除此列
+                  </div>
+                ) : (
+                  <div className="menu-item" style={{ color: '#9ca3af', cursor: 'default' }}>
+                    系统列不可删除
+                  </div>
+                )}
+              </>
+            )
+          })()}
+        </div>
       )}
 
       {/* AI 任务透明化浮动面板 */}

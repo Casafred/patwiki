@@ -56,6 +56,9 @@ from app.models.importing import FieldMapping, ImportBatch
 # 用户与协作（权限管理 MVP）
 from app.models.user import User, DatabaseMembership
 
+# 修改历史
+from app.models.history import PatentHistory
+
 
 __all__ = [
     # enums
@@ -82,4 +85,6 @@ __all__ = [
     "FieldMapping", "ImportBatch",
     # user / membership
     "User", "DatabaseMembership",
+    # history
+    "PatentHistory",
 ]

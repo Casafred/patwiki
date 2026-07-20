@@ -244,6 +244,19 @@ export interface CellUpdateRequest {
   value: any
 }
 
+// 专利修改历史
+export interface PatentHistory {
+  id: number
+  patent_id: number
+  field_key: string
+  field_display_name?: string
+  old_value?: string | null
+  new_value?: string | null
+  source: string  // manual / bulk / ai / import / api
+  changed_by?: string | null
+  created_at?: string
+}
+
 // ============================================================
 // 权限管理与协作
 // ============================================================

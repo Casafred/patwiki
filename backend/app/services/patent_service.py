@@ -5,10 +5,11 @@ from sqlalchemy import func, or_, and_, desc, text, String
 
 from app.models import (
     Patent, Product, Project, Tag, CustomField,
-    patent_tag, patent_project, LegalStatus, PatentType
+    patent_tag, patent_project, LegalStatus, PatentType,
+    PatentHistory,
 )
 from app.schemas.schemas import PatentCreate, PatentUpdate
-from app.services.field_registry import SYSTEM_FIELD_KEYS
+from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
 
 
 SYSTEM_FIELDS = {
@@ -25,6 +26,42 @@ SYSTEM_FIELDS = {
     "module", "application_status", "scope_description", "notes",
     "created_at", "updated_at", "tags", "projects"
 }
+
+
+def _normalize_value(v: Any) -> Any:
+    """标准化值用于比较：date/datetime 转 ISO 字符串；None/空串 视为空。"""
+    if v is None:
+        return None
+    if isinstance(v, str):
+        s = v.strip()
+        return s if s else None
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    if isinstance(v, bool):
+        return v
+    return v
+
+
+def _is_value_changed(old: Any, new: Any) -> bool:
+    """判断值是否真正发生变化（空串/None 视为相等）。"""
+    return _normalize_value(old) != _normalize_value(new)
+
+
+def _stringify_value(v: Any) -> Optional[str]:
+    """把任意值转为字符串存储到历史记录；None 返回 None。"""
+    if v is None:
+        return None
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    if isinstance(v, (dict, list)):
+        import json
+        try:
+            return json.dumps(v, ensure_ascii=False)
+        except Exception:
+            return str(v)
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v)
 
 
 class PatentService:
@@ -215,7 +252,7 @@ class PatentService:
         return patent
 
     @staticmethod
-    def update_patent(db: Session, patent: Patent, patent_in: PatentUpdate | dict) -> Patent:
+    def update_patent(db: Session, patent: Patent, patent_in: PatentUpdate | dict, source: str = "manual", changed_by: Optional[str] = None) -> Patent:
         if isinstance(patent_in, dict):
             update_data = patent_in
         else:
@@ -225,12 +262,50 @@ class PatentService:
         project_ids = update_data.pop("project_ids", None)
         custom_fields_data = update_data.pop("custom_fields", None)
 
+        # 字段名 → 显示名映射（用于历史记录的可读性）
+        field_display_map: dict[str, str] = {}
+        try:
+            for fm in get_all_fields_meta(db):
+                field_display_map[fm["key"]] = fm.get("name") or fm["key"]
+        except Exception:
+            pass
+
+        history_entries: list[PatentHistory] = []
+
+        # 系统字段修改
         for field, value in update_data.items():
             if field in SYSTEM_FIELDS and hasattr(patent, field):
+                old_value = getattr(patent, field)
+                # 比较旧值/新值（标准化处理）
+                if not _is_value_changed(old_value, value):
+                    continue
                 setattr(patent, field, value)
+                history_entries.append(PatentHistory(
+                    patent_id=patent.id,
+                    field_key=field,
+                    field_display_name=field_display_map.get(field, field),
+                    old_value=_stringify_value(old_value),
+                    new_value=_stringify_value(value),
+                    source=source,
+                    changed_by=changed_by,
+                ))
 
+        # 自定义字段修改
         if custom_fields_data is not None:
             current = patent.custom_fields or {}
+            for k, v in custom_fields_data.items():
+                old_v = current.get(k)
+                if not _is_value_changed(old_v, v):
+                    continue
+                history_entries.append(PatentHistory(
+                    patent_id=patent.id,
+                    field_key=f"custom_fields.{k}",
+                    field_display_name=field_display_map.get(k, k),
+                    old_value=_stringify_value(old_v),
+                    new_value=_stringify_value(v),
+                    source=source,
+                    changed_by=changed_by,
+                ))
             current.update(custom_fields_data)
             patent.custom_fields = current
 
@@ -243,6 +318,9 @@ class PatentService:
             patent.projects = projects
 
         db.add(patent)
+        # 批量插入历史记录
+        for h in history_entries:
+            db.add(h)
         db.commit()
         db.refresh(patent)
         return patent
@@ -252,7 +330,7 @@ class PatentService:
         count = 0
         patents = db.query(Patent).filter(Patent.id.in_(patent_ids)).all()
         for patent in patents:
-            PatentService.update_patent(db, patent, updates)
+            PatentService.update_patent(db, patent, updates, source="bulk")
             count += 1
         return count
 

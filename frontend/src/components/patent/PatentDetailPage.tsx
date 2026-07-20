@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
-import type { Patent, Product, Project, Tag, CustomField, AITask } from '../../types'
+import type { Patent, Product, Project, Tag, CustomField, AITask, PatentHistory } from '../../types'
 
 interface PatentDetailPageProps {
   patentId: number
   onBack: () => void
 }
 
-type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations'
+type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'history'
 
 export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageProps) {
   const [patent, setPatent] = useState<Patent | null>(null)
@@ -22,10 +22,13 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   const [formData, setFormData] = useState<Partial<Patent>>({})
   const [aiProcessing, setAiProcessing] = useState<string | null>(null)
   const [aiTaskInfo, setAiTaskInfo] = useState<AITask | null>(null)
+  const [history, setHistory] = useState<PatentHistory[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   useEffect(() => {
     loadPatent()
     loadMeta()
+    loadHistory()
   }, [patentId])
 
   const loadPatent = async () => {
@@ -39,6 +42,18 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       alert('加载专利失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadHistory = async () => {
+    setHistoryLoading(true)
+    try {
+      const list = await patentApi.getHistory(patentId)
+      setHistory(list)
+    } catch (e) {
+      console.error('Failed to load history:', e)
+    } finally {
+      setHistoryLoading(false)
     }
   }
 
@@ -84,6 +99,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       delete (patent as any)._editProjectIds
       setEditing(false)
       await loadPatent()
+      await loadHistory()
     } catch (e: any) {
       alert('保存失败: ' + (e?.message || '未知错误'))
     } finally {
@@ -169,6 +185,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     { key: 'ai', label: 'AI 分析' },
     { key: 'custom', label: '自定义字段' },
     { key: 'relations', label: '关联关系' },
+    { key: 'history', label: `修改历史${history.length > 0 ? ` (${history.length})` : ''}` },
   ]
 
   return (
@@ -184,6 +201,15 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
             {patent.application_number && <span>申请号: {patent.application_number}</span>}
             {patent.publication_number && <span> | 公开号: {patent.publication_number}</span>}
             {patent.grant_number && <span> | 授权号: {patent.grant_number}</span>}
+          </div>
+          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+            {patent.created_at && <span>创建于 {new Date(patent.created_at).toLocaleString('zh-CN')}</span>}
+            {patent.updated_at && patent.updated_at !== patent.created_at && (
+              <span> · 最后修改于 {new Date(patent.updated_at).toLocaleString('zh-CN')}</span>
+            )}
+            {history.length > 0 && (
+              <span> · 共 {history.length} 次修改</span>
+            )}
           </div>
         </div>
         {editing ? (
@@ -249,6 +275,9 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         )}
         {activeTab === 'relations' && (
           <RelationsTab patent={patent} tags={tags} projects={projects} editing={editing} updateField={updateField} />
+        )}
+        {activeTab === 'history' && (
+          <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
         )}
       </div>
     </div>
@@ -739,6 +768,171 @@ function RelationsTab({ patent, tags, projects, editing, updateField }: {
           </div>
         )}
       </Field>
+    </div>
+  )
+}
+
+// ============ 修改历史 Tab ============
+const SOURCE_LABELS: Record<string, { label: string; color: string; bg: string }> = {
+  manual:  { label: '手动', color: '#1e40af', bg: '#dbeafe' },
+  bulk:    { label: '批量', color: '#6b21a8', bg: '#f3e8ff' },
+  ai:      { label: 'AI', color: '#065f46', bg: '#d1fae5' },
+  import:  { label: '导入', color: '#92400e', bg: '#fef3c7' },
+  api:     { label: 'API', color: '#475569', bg: '#e2e8f0' },
+}
+
+function formatValue(v: string | null | undefined): string {
+  if (v === null || v === undefined || v === '') return '（空）'
+  // 尝试解析为 JSON
+  try {
+    const parsed = JSON.parse(v)
+    if (typeof parsed === 'object') return JSON.stringify(parsed, null, 2)
+    return String(parsed)
+  } catch {
+    return v
+  }
+}
+
+function HistoryTab({ patent, history, loading, onReload }: {
+  patent: Patent
+  history: PatentHistory[]
+  loading: boolean
+  onReload: () => void
+}) {
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
+
+  const filtered = sourceFilter === 'all'
+    ? history
+    : history.filter(h => h.source === sourceFilter)
+
+  // 按日期分组
+  const groups: Record<string, PatentHistory[]> = {}
+  filtered.forEach(h => {
+    const day = h.created_at ? new Date(h.created_at).toLocaleDateString('zh-CN') : '未知日期'
+    if (!groups[day]) groups[day] = []
+    groups[day].push(h)
+  })
+
+  const sourceOptions = ['all', 'manual', 'bulk', 'ai', 'import', 'api']
+
+  return (
+    <div>
+      {/* 工具条 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+          <span style={{ color: '#64748b' }}>来源筛选：</span>
+          <select
+            className="form-input"
+            style={{ width: 'auto', padding: '4px 8px', fontSize: 13 }}
+            value={sourceFilter}
+            onChange={e => setSourceFilter(e.target.value)}
+          >
+            {sourceOptions.map(s => (
+              <option key={s} value={s}>
+                {s === 'all' ? '全部' : (SOURCE_LABELS[s]?.label || s)}
+              </option>
+            ))}
+          </select>
+          <span style={{ color: '#94a3b8' }}>·</span>
+          <span style={{ color: '#64748b' }}>共 {filtered.length} 条</span>
+        </div>
+        <button className="btn btn-secondary" onClick={onReload} disabled={loading} style={{ fontSize: 13, padding: '4px 12px' }}>
+          {loading ? '刷新中...' : '刷新'}
+        </button>
+      </div>
+
+      {loading && history.length === 0 ? (
+        <div className="loading-spinner">
+          <div className="spinner"></div>
+          加载中...
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-title">暂无修改记录</div>
+          <div className="empty-state-desc">
+            当此专利的任何字段被修改时（手动编辑、批量更新、AI 处理、导入），修改记录会自动写入此处。
+          </div>
+          <div style={{ marginTop: 12, fontSize: 12, color: '#94a3b8' }}>
+            <div>创建时间：{patent.created_at ? new Date(patent.created_at).toLocaleString('zh-CN') : '-'}</div>
+            <div style={{ marginTop: 2 }}>最后修改：{patent.updated_at ? new Date(patent.updated_at).toLocaleString('zh-CN') : '-'}</div>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {Object.entries(groups).map(([day, items]) => (
+            <div key={day}>
+              <div style={{
+                fontSize: 12, color: '#94a3b8', marginBottom: 8,
+                paddingBottom: 4, borderBottom: '1px solid #e2e8f0',
+              }}>
+                {day} · {items.length} 次修改
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {items.map(h => {
+                  const src = SOURCE_LABELS[h.source] || { label: h.source, color: '#475569', bg: '#e2e8f0' }
+                  const time = h.created_at ? new Date(h.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
+                  return (
+                    <div key={h.id} style={{
+                      display: 'flex', gap: 12, padding: 12,
+                      background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
+                    }}>
+                      {/* 时间轴圆点 */}
+                      <div style={{
+                        width: 8, height: 8, borderRadius: '50%', background: '#3b82f6',
+                        marginTop: 6, flexShrink: 0,
+                        boxShadow: '0 0 0 3px #dbeafe',
+                      }} />
+                      {/* 修改详情 */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, color: '#0f172a', fontSize: 13 }}>
+                            {h.field_display_name || h.field_key}
+                          </span>
+                          <span style={{
+                            padding: '1px 8px', borderRadius: 10, fontSize: 11,
+                            background: src.bg, color: src.color, fontWeight: 500,
+                          }}>
+                            {src.label}
+                          </span>
+                          {h.changed_by && (
+                            <span style={{ fontSize: 11, color: '#94a3b8' }}>· {h.changed_by}</span>
+                          )}
+                          <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>{time}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'stretch', fontSize: 12, flexWrap: 'wrap' }}>
+                          <div style={{
+                            flex: 1, minWidth: 120, padding: '6px 10px',
+                            background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6,
+                            color: '#7f1d1d',
+                          }}>
+                            <div style={{ fontSize: 10, color: '#dc2626', marginBottom: 2 }}>旧值</div>
+                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                              {formatValue(h.old_value)}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', color: '#94a3b8', fontSize: 16 }}>
+                            →
+                          </div>
+                          <div style={{
+                            flex: 1, minWidth: 120, padding: '6px 10px',
+                            background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6,
+                            color: '#065f46',
+                          }}>
+                            <div style={{ fontSize: 10, color: '#16a34a', marginBottom: 2 }}>新值</div>
+                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                              {formatValue(h.new_value)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -10,6 +10,7 @@ from app.schemas.schemas import (
     Patent, PatentCreate, PatentUpdate, PatentListResponse
 )
 from app.services.patent_service import PatentService
+from app.models import PatentHistory
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -116,3 +117,37 @@ def bulk_update_patents(
 ):
     count = PatentService.bulk_update(db, patent_ids, updates)
     return {"success": True, "updated_count": count}
+
+
+@router.get("/{patent_id}/history")
+def get_patent_history(
+    patent_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """查询专利的修改历史记录，按时间倒序。"""
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+
+    records = (
+        db.query(PatentHistory)
+        .filter(PatentHistory.patent_id == patent_id)
+        .order_by(PatentHistory.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": h.id,
+            "patent_id": h.patent_id,
+            "field_key": h.field_key,
+            "field_display_name": h.field_display_name,
+            "old_value": h.old_value,
+            "new_value": h.new_value,
+            "source": h.source,
+            "changed_by": h.changed_by,
+            "created_at": h.created_at.isoformat() if h.created_at else None,
+        }
+        for h in records
+    ]
