@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { patentApi, fieldApi, exportApi, aiApi, customFieldApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Patent, FieldMeta, CustomField } from '../../types'
@@ -44,7 +44,6 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [newFieldOptions, setNewFieldOptions] = useState('')
   const [pageInputValue, setPageInputValue] = useState('')
   const [aiProcessingRow, setAiProcessingRow] = useState<number | null>(null)
-  const headerMenuRef = useRef<HTMLDivElement>(null)
 
   const loadFields = useCallback(async () => {
     try {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { customFieldApi } from '../../api'
-import { CustomField } from '../../types'
+import type { CustomField } from '../../types'
 import { useAppStore } from '../../store'
 
 export default function FieldSettingsPage() {
