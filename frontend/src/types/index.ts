@@ -225,7 +225,7 @@ export interface AITask {
 export interface FieldMeta {
   key: string
   name: string
-  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link'
+  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating'
   group_name: string
   options?: string[] | null
   width?: number

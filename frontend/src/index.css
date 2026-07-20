@@ -360,8 +360,13 @@ input, select, textarea {
 }
 
 .data-grid th.col-checkbox {
-  z-index: 16;
+  z-index: 17;
   background: #f9fafb;
+}
+
+.data-grid th.col-action,
+.data-grid td.col-action {
+  box-shadow: 2px 0 4px rgba(0,0,0,0.05);
 }
 
 .data-grid th.col-checkbox input,
@@ -380,15 +385,11 @@ input, select, textarea {
 
 .data-grid td.col-frozen,
 .data-grid th.col-frozen {
-  position: sticky;
-  left: 40px;
-  z-index: 5;
   background: #fff;
   box-shadow: 2px 0 4px rgba(0,0,0,0.05);
 }
 
 .data-grid th.col-frozen {
-  z-index: 15;
   background: #f9fafb;
 }
 
@@ -447,9 +448,10 @@ input, select, textarea {
   padding: 0;
   border-bottom: 1px solid #f3f4f6;
   border-right: 1px solid #f9fafb;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  vertical-align: top;
 }
 
 .data-grid tr:hover td {

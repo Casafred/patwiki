@@ -34,9 +34,13 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [showBulkTag, setShowBulkTag] = useState(false)
   const [showAIBatch, setShowAIBatch] = useState(false)
   const [showInsertAIColumn, setShowInsertAIColumn] = useState(false)
+  const [insertColType, setInsertColType] = useState<'text' | 'longtext' | 'number' | 'date' | 'select' | 'boolean' | 'ai_field'>('text')
+  const [insertColFrozen, setInsertColFrozen] = useState(false)
   const [newAIColumnName, setNewAIColumnName] = useState('')
   const [newAIPrompt, setNewAIPrompt] = useState('')
+  const [newColumnOptions, setNewColumnOptions] = useState('')
   const [creatingAIColumn, setCreatingAIColumn] = useState(false)
+  const [frozenFields, setFrozenFields] = useState<Set<string>>(new Set())
   const [bulkModule, setBulkModule] = useState('')
   const [bulkRiskLevel, setBulkRiskLevel] = useState('')
   const [aiFieldKey, setAiFieldKey] = useState('')
@@ -294,44 +298,66 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       alert('请输入新列名称')
       return
     }
-    if (!newAIPrompt.trim()) {
-      alert('请填写AI分析提示词（Prompt）')
+    const isAI = insertColType === 'ai_field'
+    if (isAI && !newAIPrompt.trim()) {
+      alert('AI列必须填写分析提示词（Prompt）')
+      return
+    }
+    if ((insertColType === 'select') && !newColumnOptions.trim()) {
+      alert('单选列必须填写候选项（每行一个）')
       return
     }
     setCreatingAIColumn(true)
     try {
-      const key = 'ai_' + Date.now().toString(36)
-      await customFieldApi.create({
+      const key = (isAI ? 'ai_' : 'cf_') + Date.now().toString(36)
+      const payload: any = {
         key,
         name: newAIColumnName.trim(),
-        field_type: 'ai_field',
+        field_type: isAI ? 'ai_field' : insertColType,
         is_active: true,
         sort_order: fields.length,
-        ai_config: {
+      }
+      if (insertColType === 'select' && newColumnOptions.trim()) {
+        payload.options = newColumnOptions.split('\n').map(s => s.trim()).filter(Boolean)
+      }
+      if (isAI) {
+        payload.ai_config = {
           prompt_template: newAIPrompt.trim(),
           ai_enabled: true,
-        },
-      })
+        }
+      }
+      await customFieldApi.create(payload)
+      // 记录冻结状态
+      if (insertColFrozen) {
+        setFrozenFields(prev => new Set(prev).add(key))
+      }
       await loadFields()
       await loadCustomFields()
-      // 立即触发AI处理
-      const targetIds = processAll ? patents.map(p => p.id) : selectedIds
-      if (targetIds.length === 0) {
-        alert('字段已创建。选中专利后可点击行内 ✨ 按钮或使用"AI批量处理"运行该列')
-      } else {
-        try {
-          const task = await aiApi.process(targetIds, key)
-          alert(`AI列已创建，任务已启动（ID: ${task.id}），可在"AI 任务"页面查看进度`)
-        } catch (e: any) {
-          alert('字段已创建，但启动AI任务失败: ' + (e?.response?.data?.detail || e?.message || '请先在设置页配置 LLM API'))
+      // AI列立即触发处理
+      if (isAI) {
+        const targetIds = processAll ? patents.map(p => p.id) : selectedIds
+        if (targetIds.length === 0) {
+          alert('AI列已创建。选中专利后可点击行内 ✨ 按钮或使用"AI批量处理"运行该列')
+        } else {
+          try {
+            const task = await aiApi.process(targetIds, key)
+            alert(`AI列已创建，任务已启动（ID: ${task.id}），可在"AI 任务"页面查看进度`)
+          } catch (e: any) {
+            alert('AI列已创建，但启动AI任务失败: ' + (e?.response?.data?.detail || e?.message || '请先在设置页配置 LLM API'))
+          }
         }
+      } else {
+        alert(`新列"${newAIColumnName.trim()}"已创建`)
       }
       setShowInsertAIColumn(false)
       setNewAIColumnName('')
       setNewAIPrompt('')
+      setNewColumnOptions('')
+      setInsertColType('text')
+      setInsertColFrozen(false)
       loadPatents()
     } catch (e: any) {
-      alert('创建AI列失败: ' + (e?.response?.data?.detail || e?.message || ''))
+      alert('创建列失败: ' + (e?.response?.data?.detail || e?.message || ''))
     } finally {
       setCreatingAIColumn(false)
     }
@@ -343,10 +369,24 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     if (anchorFieldKey) {
       const f = fields.find(x => x.key === anchorFieldKey)
       if (f) {
+        setInsertColType('ai_field')
         setNewAIPrompt(`请基于以下内容进行分析：\n{${anchorFieldKey}}\n\n要求：简洁准确地输出结果。`)
       }
     }
     setShowInsertAIColumn(true)
+  }
+
+  const handleToggleFreeze = (fieldKey: string) => {
+    setActiveHeaderMenu(null)
+    setFrozenFields(prev => {
+      const next = new Set(prev)
+      if (next.has(fieldKey)) {
+        next.delete(fieldKey)
+      } else {
+        next.add(fieldKey)
+      }
+      return next
+    })
   }
 
   const handleCreateCustomField = async () => {
@@ -643,21 +683,19 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     }
 
     const displayValue = formatValue(value, field)
-    const isTruncated = typeof displayValue === 'string' && displayValue.length > 50
 
     return (
       <span
         style={{
           color: displayValue === '-' ? '#94a3b8' : '#374151',
           display: 'block',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: field.field_type === 'longtext' ? 'normal' : 'nowrap',
-          lineHeight: field.field_type === 'longtext' ? 1.5 : 1.4,
+          whiteSpace: 'normal',
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
+          lineHeight: 1.5,
         }}
-        title={typeof displayValue === 'string' ? displayValue : undefined}
       >
-        {isTruncated ? displayValue.slice(0, 50) + '...' : displayValue}
+        {displayValue}
       </span>
     )
   }
@@ -695,9 +733,9 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           <button
             className="btn btn-sm btn-primary"
             onClick={() => openInsertAIDialog()}
-            title="基于已有列通过AI生成新列"
+            title="插入新列（普通列或AI列）"
           >
-            ✨ 插入AI列
+            + 插入新列
           </button>
           <button className="btn btn-sm btn-secondary" onClick={handleExport}>
             导出
@@ -755,17 +793,32 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                 <th className="col-checkbox" style={{ width: 40, minWidth: 40, maxWidth: 40 }}>
                   <input type="checkbox" checked={allSelected} onChange={handleSelectAll} />
                 </th>
-                <th style={{ width: 70, minWidth: 70, maxWidth: 70 }}>
+                <th className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 16, background: '#f9fafb' }}>
                   <span style={{ fontSize: 12, color: '#6b7280', padding: '0 10px' }}>操作</span>
                 </th>
                 {visibleFields.map(field => {
                   const hasFilter = !!filterValues[field.key]
                   const isFilterable = field.filterable !== false
+                  const isFrozen = field.frozen || frozenFields.has(field.key)
+                  // 计算冻结列的 left 偏移：checkbox(40) + 操作(70) + 前面所有冻结列宽度
+                  let leftOffset = 40 + 70
+                  if (isFrozen) {
+                    for (const f of visibleFields) {
+                      if (f.key === field.key) break
+                      if (f.frozen || frozenFields.has(f.key)) {
+                        leftOffset += columnWidths[f.key] || DEFAULT_COLUMN_WIDTH
+                      }
+                    }
+                  }
                   return (
                     <th
                       key={field.key}
-                      className={`${field.frozen ? 'col-frozen' : ''} ${sortField === field.key ? 'col-sorted' : ''} ${hasFilter ? 'col-filtered' : ''}`}
-                      style={{ width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH, minWidth: 80 }}
+                      className={`${isFrozen ? 'col-frozen' : ''} ${sortField === field.key ? 'col-sorted' : ''} ${hasFilter ? 'col-filtered' : ''}`}
+                      style={{
+                        width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
+                        minWidth: 80,
+                        ...(isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 15, background: '#f9fafb' } : {}),
+                      }}
                     >
                       <div
                         style={{
@@ -898,7 +951,13 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                             className="menu-item"
                             onClick={() => openInsertAIDialog(field.key)}
                           >
-                            <span style={{ color: '#2563eb' }}>✨ 基于此列插入AI列</span>
+                            <span style={{ color: '#2563eb' }}>✨ 基于此列插入新列</span>
+                          </div>
+                          <div
+                            className="menu-item"
+                            onClick={() => handleToggleFreeze(field.key)}
+                          >
+                            <span>{frozenFields.has(field.key) ? '🔓 取消冻结' : '🔒 冻结此列'}</span>
                           </div>
                           <div
                             className="menu-item"
@@ -936,7 +995,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                       onClick={(e) => e.stopPropagation()}
                     />
                   </td>
-                  <td style={{ width: 70, padding: '4px 6px' }}>
+                  <td className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
                       <button
                         className="cell-action-btn"
@@ -965,14 +1024,30 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                       </button>
                     </div>
                   </td>
-                  {visibleFields.map(field => (
+                  {visibleFields.map(field => {
+                    const isFrozen = field.frozen || frozenFields.has(field.key)
+                    let leftOffset = 40 + 70
+                    if (isFrozen) {
+                      for (const f of visibleFields) {
+                        if (f.key === field.key) break
+                        if (f.frozen || frozenFields.has(f.key)) {
+                          leftOffset += columnWidths[f.key] || DEFAULT_COLUMN_WIDTH
+                        }
+                      }
+                    }
+                    return (
                     <td
                       key={field.key}
-                      className={`${field.frozen ? 'col-frozen' : ''} ${field.editable ? 'cell-editable' : ''}`}
+                      className={`${isFrozen ? 'col-frozen' : ''} ${field.editable ? 'cell-editable' : ''}`}
                       style={{
                         width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
                         maxWidth: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
                         padding: field.field_type === 'longtext' ? '8px 10px' : '6px 10px',
+                        whiteSpace: 'normal',
+                        wordBreak: 'break-word',
+                        overflowWrap: 'anywhere',
+                        verticalAlign: 'top',
+                        ...(isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 5, background: '#fff' } : {}),
                       }}
                       onClick={(e) => {
                         if (field.editable) {
@@ -983,7 +1058,8 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     >
                       {renderCellContent(p, field)}
                     </td>
-                  ))}
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>
@@ -1227,12 +1303,15 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
 
       {showInsertAIColumn && (
         <Modal
-          title="插入 AI 列"
-          width={640}
+          title="插入新列"
+          width={680}
           onClose={() => {
             setShowInsertAIColumn(false)
             setNewAIColumnName('')
             setNewAIPrompt('')
+            setNewColumnOptions('')
+            setInsertColType('text')
+            setInsertColFrozen(false)
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1245,69 +1324,117 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
               color: '#1e40af',
               lineHeight: 1.6,
             }}>
-              💡 像Excel一样创建新列：新列的值由 AI 根据你指定的 Prompt 和已有列内容自动生成。
-              在 Prompt 中使用 <code>{'{field_key}'}</code> 引用列，例如 <code>{'{title}'}</code>、<code>{'{abstract}'}</code>、<code>{'{applicant}'}</code>、<code>{'{claims}'}</code>，自定义字段用 <code>{'{custom_fields.xxx}'}</code>。
+              💡 像Excel一样插入新列。普通列可手动填值；<strong>AI列</strong>会根据你指定的 Prompt 和已有列内容自动生成。
+              在 Prompt 中使用 <code>{'{field_key}'}</code> 引用列，例如 <code>{'{title}'}</code>、<code>{'{abstract}'}</code>、<code>{'{applicant}'}</code>、<code>{'{claims}'}</code>。
             </div>
 
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>
-                新列名称 <span style={{ color: '#dc2626' }}>*</span>
-              </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>
+                  新列名称 <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <input
+                  className="form-input"
+                  value={newAIColumnName}
+                  onChange={e => setNewAIColumnName(e.target.value)}
+                  placeholder="例如：技术领域分类"
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>
+                  列类型
+                </label>
+                <select
+                  className="form-input"
+                  value={insertColType}
+                  onChange={e => setInsertColType(e.target.value as any)}
+                >
+                  <option value="text">文本（手动填写）</option>
+                  <option value="longtext">长文本（手动填写）</option>
+                  <option value="number">数字</option>
+                  <option value="date">日期</option>
+                  <option value="select">单选（下拉）</option>
+                  <option value="boolean">是/否</option>
+                  <option value="ai_field">✨ AI列（自动生成）</option>
+                </select>
+              </div>
+            </div>
+
+            {insertColType === 'select' && (
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>
+                  候选项 <span style={{ color: '#dc2626' }}>*</span>（每行一个）
+                </label>
+                <textarea
+                  className="form-input"
+                  style={{ minHeight: 80, fontSize: 12 }}
+                  value={newColumnOptions}
+                  onChange={e => setNewColumnOptions(e.target.value)}
+                  placeholder={'例如：\n机械\n电子\n软件\n化学'}
+                />
+              </div>
+            )}
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#475569', cursor: 'pointer' }}>
               <input
-                className="form-input"
-                value={newAIColumnName}
-                onChange={e => setNewAIColumnName(e.target.value)}
-                placeholder="例如：技术领域分类、侵权风险摘要、核心关键词..."
+                type="checkbox"
+                checked={insertColFrozen}
+                onChange={e => setInsertColFrozen(e.target.checked)}
               />
-            </div>
+              冻结此列（始终显示在左侧）
+            </label>
 
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>
-                AI 提示词 (Prompt) <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
-                点击下方列名按钮可快速插入变量到 Prompt 中：
-              </div>
-              <div style={{
-                display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8,
-                maxHeight: 80, overflowY: 'auto', padding: 6,
-                background: '#f8fafc', borderRadius: 4, border: '1px solid #e2e8f0',
-              }}>
-                {fields.filter(f => f.key !== 'id').map(f => (
-                  <button
-                    key={f.key}
-                    onClick={() => setNewAIPrompt(prev => prev + `{${f.key}}`)}
-                    style={{
-                      padding: '2px 8px', fontSize: 11,
-                      background: '#fff', border: '1px solid #cbd5e1',
-                      borderRadius: 3, cursor: 'pointer', color: '#334155',
-                    }}
-                    title={f.name}
-                  >
-                    {`{${f.key}}`}
-                  </button>
-                ))}
-              </div>
-              <textarea
-                className="form-input"
-                style={{ minHeight: 160, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5 }}
-                value={newAIPrompt}
-                onChange={e => setNewAIPrompt(e.target.value)}
-                placeholder={'例如：\n请阅读以下专利信息，提取该专利的核心技术关键词（5-8个），用英文逗号分隔。\n\n标题：{title}\n摘要：{abstract}\n权利要求：{claims}'}
-              />
-            </div>
+            {insertColType === 'ai_field' && (
+              <>
+                <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: 12, marginTop: 4 }}>
+                  <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>
+                    AI 提示词 (Prompt) <span style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
+                    点击下方列名按钮可快速插入变量到 Prompt 中：
+                  </div>
+                  <div style={{
+                    display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8,
+                    maxHeight: 80, overflowY: 'auto', padding: 6,
+                    background: '#f8fafc', borderRadius: 4, border: '1px solid #e2e8f0',
+                  }}>
+                    {fields.filter(f => f.key !== 'id').map(f => (
+                      <button
+                        key={f.key}
+                        onClick={() => setNewAIPrompt(prev => prev + `{${f.key}}`)}
+                        style={{
+                          padding: '2px 8px', fontSize: 11,
+                          background: '#fff', border: '1px solid #cbd5e1',
+                          borderRadius: 3, cursor: 'pointer', color: '#334155',
+                        }}
+                        title={f.name}
+                      >
+                        {`{${f.key}}`}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    className="form-input"
+                    style={{ minHeight: 160, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5 }}
+                    value={newAIPrompt}
+                    onChange={e => setNewAIPrompt(e.target.value)}
+                    placeholder={'例如：\n请阅读以下专利信息，提取该专利的核心技术关键词（5-8个），用英文逗号分隔。\n\n标题：{title}\n摘要：{abstract}\n权利要求：{claims}'}
+                  />
+                </div>
 
-            <div style={{
-              padding: '8px 10px', background: '#f8fafc', borderRadius: 4,
-              fontSize: 11, color: '#64748b',
-            }}>
-              处理范围：
-              {selectedIds.length > 0 ? (
-                <strong style={{ color: '#2563eb' }}>选中的 {selectedIds.length} 条专利</strong>
-              ) : (
-                <span>未选中专利，将仅创建字段。可在创建后通过行内 ✨ 按钮或"AI批量处理"运行。</span>
-              )}
-            </div>
+                <div style={{
+                  padding: '8px 10px', background: '#f8fafc', borderRadius: 4,
+                  fontSize: 11, color: '#64748b',
+                }}>
+                  处理范围：
+                  {selectedIds.length > 0 ? (
+                    <strong style={{ color: '#2563eb' }}>选中的 {selectedIds.length} 条专利</strong>
+                  ) : (
+                    <span>未选中专利，将仅创建字段。可在创建后通过行内 ✨ 按钮或"AI批量处理"运行。</span>
+                  )}
+                </div>
+              </>
+            )}
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
               <button
@@ -1316,6 +1443,9 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                   setShowInsertAIColumn(false)
                   setNewAIColumnName('')
                   setNewAIPrompt('')
+                  setNewColumnOptions('')
+                  setInsertColType('text')
+                  setInsertColFrozen(false)
                 }}
               >
                 取消
@@ -1325,7 +1455,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                 onClick={() => handleInsertAIColumn(false)}
                 disabled={creatingAIColumn}
               >
-                {creatingAIColumn ? '创建中...' : '创建并处理'}
+                {creatingAIColumn ? '创建中...' : (insertColType === 'ai_field' ? '创建并处理' : '创建列')}
               </button>
             </div>
           </div>

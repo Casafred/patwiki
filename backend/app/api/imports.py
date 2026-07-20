@@ -1,6 +1,8 @@
 import threading
 import uuid
 import tempfile
+import os
+import time
 from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -22,8 +24,33 @@ from app.models import Patent, CustomField
 
 router = APIRouter(tags=["import"])
 
-TEMP_FILES: dict[str, bytes] = {}
-TEMP_FILENAMES: dict[str, str] = {}
+# 持久化到磁盘，避免后端重启或内存清理导致会话过期
+TEMP_DIR = Path(tempfile.gettempdir()) / "patwiki_imports"
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
+# 内存索引：import_id -> {"path": str, "filename": str, "created_at": float}
+TEMP_FILES: dict[str, dict] = {}
+TEMP_TTL = 6 * 3600  # 6小时过期
+
+
+def _cleanup_expired():
+    """定期清理过期的临时文件"""
+    while True:
+        try:
+            now = time.time()
+            expired = [k for k, v in TEMP_FILES.items() if now - v["created_at"] > TEMP_TTL]
+            for k in expired:
+                info = TEMP_FILES.pop(k, None)
+                if info and os.path.exists(info["path"]):
+                    try:
+                        os.remove(info["path"])
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+        time.sleep(300)
+
+
+threading.Thread(target=_cleanup_expired, daemon=True).start()
 
 
 def _optimize_sqlite_connection(db: Session):
@@ -64,16 +91,15 @@ async def preview_import(
         preview_rows_list.append({str(k): str(v) for k, v in row.to_dict().items()})
 
     import_id = str(uuid.uuid4())
-    TEMP_FILES[import_id] = content
-    TEMP_FILENAMES[import_id] = file.filename or "upload.xlsx"
-
-    import os
-    def cleanup():
-        import time
-        time.sleep(1800)
-        TEMP_FILES.pop(import_id, None)
-        TEMP_FILENAMES.pop(import_id, None)
-    threading.Thread(target=cleanup, daemon=True).start()
+    # 持久化到磁盘文件，避免后端重启或内存清理导致会话过期
+    temp_path = TEMP_DIR / f"{import_id}.bin"
+    with open(temp_path, "wb") as f:
+        f.write(content)
+    TEMP_FILES[import_id] = {
+        "path": str(temp_path),
+        "filename": file.filename or "upload.xlsx",
+        "created_at": time.time(),
+    }
 
     from app.services.database_service import DatabaseService
     databases = DatabaseService.list_databases(db)
@@ -108,8 +134,29 @@ def confirm_import(
     req: ConfirmImportRequest,
     db: Session = Depends(get_db),
 ):
-    if req.import_id not in TEMP_FILES:
-        raise HTTPException(status_code=400, detail="导入会话已过期，请重新上传文件")
+    # 从内存索引或磁盘恢复会话
+    info = TEMP_FILES.get(req.import_id)
+    if not info:
+        # 尝试从磁盘恢复（后端可能重启过）
+        temp_path = TEMP_DIR / f"{req.import_id}.bin"
+        if temp_path.exists():
+            info = {
+                "path": str(temp_path),
+                "filename": "upload.xlsx",
+                "created_at": time.time(),
+            }
+            TEMP_FILES[req.import_id] = info
+        else:
+            raise HTTPException(status_code=400, detail="导入会话已过期，请重新上传文件")
+
+    # 过期检查
+    if time.time() - info["created_at"] > TEMP_TTL:
+        try:
+            os.remove(info["path"])
+        except OSError:
+            pass
+        TEMP_FILES.pop(req.import_id, None)
+        raise HTTPException(status_code=400, detail="导入会话已过期（超过6小时），请重新上传文件")
 
     database_id = req.database_id
     if database_id is None:
@@ -123,8 +170,9 @@ def confirm_import(
         if not DatabaseService.get_database(db, database_id):
             raise HTTPException(status_code=400, detail=f"库不存在：{database_id}")
 
-    content = TEMP_FILES[req.import_id]
-    filename = TEMP_FILENAMES[req.import_id]
+    with open(info["path"], "rb") as f:
+        content = f.read()
+    filename = info["filename"]
 
     mapping = {m.source_column: m.target_field for m in req.field_mappings if m.target_field}
 
@@ -312,8 +360,12 @@ def confirm_import(
             from app.services.database_service import DatabaseService
             DatabaseService.refresh_patent_count(db, database_id)
     finally:
-        TEMP_FILES.pop(req.import_id, None)
-        TEMP_FILENAMES.pop(req.import_id, None)
+        info = TEMP_FILES.pop(req.import_id, None)
+        if info and os.path.exists(info["path"]):
+            try:
+                os.remove(info["path"])
+            except OSError:
+                pass
 
     return {
         "total": inserted + updated + skipped + error_count,
