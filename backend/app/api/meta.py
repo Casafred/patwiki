@@ -6,7 +6,8 @@ from typing import Optional
 from app.database import get_db
 from app.models import (
     Product, ProductLine, Project, Tag, TagGroup,
-    CustomField, Department, Person, CustomFieldType
+    CustomField, Department, Person, CustomFieldType,
+    Patent,
 )
 from app.schemas.schemas import (
     Product as ProductSchema, ProductCreate, ProductUpdate,
@@ -25,17 +26,33 @@ router = APIRouter(tags=["meta"])
 @router.get("/products", response_model=list[ProductSchema])
 def list_products(
     active_only: bool = False,
+    database_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
+    """
+    列出产品分类。
+
+    打通产品分类与库（Database）的关联关系：
+    - 若指定 database_id，则 patent_count 返回该库下各产品的专利数；
+    - 否则 patent_count 返回跨所有库的专利总数。
+    - 产品本身仍是全局实体，不绑定到任何库，关联通过 Patent.product_id + Patent.database_id 体现。
+    """
     query = db.query(Product)
     if active_only:
         query = query.filter(Product.is_active == True)
     products = query.order_by(Product.name).all()
+
+    # 用一条聚合 SQL 一次性拿到所有 Product 的专利计数，避免 N+1
+    count_query = db.query(
+        Patent.product_id,
+        func.count(Patent.id).label("cnt"),
+    ).filter(Patent.product_id.isnot(None))
+    if database_id is not None:
+        count_query = count_query.filter(Patent.database_id == database_id)
+    count_map = {pid: cnt for pid, cnt in count_query.group_by(Patent.product_id).all()}
+
     for p in products:
-        p.patent_count = db.query(func.count(Product.id)).filter(
-            Product.id == p.id
-        ).scalar() or 0
-        p.patent_count = len(p.patents)
+        p.patent_count = count_map.get(p.id, 0)
     return products
 
 

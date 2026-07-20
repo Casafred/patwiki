@@ -1,15 +1,15 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 
 interface SidebarProps {
   currentPage: string
-  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks') => void
+  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis') => void
 }
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const {
-    products, currentProductId, setCurrentProductId,
+    products, currentProductId, setCurrentProductId, setProducts,
     databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
   } = useAppStore()
   const [showAddProduct, setShowAddProduct] = useState(false)
@@ -17,6 +17,24 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const [showAddDatabase, setShowAddDatabase] = useState(false)
   const [newDbName, setNewDbName] = useState('')
   const [newDbDesc, setNewDbDesc] = useState('')
+
+  // 打通关联：监听当前库切换，重新加载产品列表，patent_count 按当前库过滤
+  const reloadProducts = useCallback(async () => {
+    try {
+      const params: Record<string, any> = {}
+      if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
+        params.database_id = currentDatabaseId
+      }
+      const refreshed = await productApi.list(params)
+      setProducts(refreshed)
+    } catch (e) {
+      console.error('Failed to reload products:', e)
+    }
+  }, [currentDatabaseId, setProducts])
+
+  useEffect(() => {
+    reloadProducts()
+  }, [reloadProducts])
 
   const handleProductClick = (productId: number | null) => {
     setCurrentProductId(productId)
@@ -27,10 +45,12 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     if (!newProductName.trim()) return
     try {
       const product = await productApi.create({ name: newProductName.trim() })
+      // 不再整页刷新，只刷新产品列表
+      await reloadProducts()
       setCurrentProductId(product.id)
       setNewProductName('')
       setShowAddProduct(false)
-      window.location.reload()
+      onNavigate('patents')
     } catch (e) {
       alert('创建产品失败')
     }
@@ -135,6 +155,12 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           onClick={() => onNavigate('stats')}
         >
           数据看板
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`}
+          onClick={() => onNavigate('agent-analysis')}
+        >
+          AGENTAI 分析
         </div>
         <div
           className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { patentApi, fieldApi, exportApi, aiApi, customFieldApi } from '../../api'
+import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Patent, FieldMeta, CustomField } from '../../types'
 
@@ -41,6 +41,14 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [newColumnOptions, setNewColumnOptions] = useState('')
   const [creatingAIColumn, setCreatingAIColumn] = useState(false)
   const [frozenFields, setFrozenFields] = useState<Set<string>>(new Set())
+  const [showColumnStats, setShowColumnStats] = useState(false)
+  const [statsFieldKey, setStatsFieldKey] = useState('')
+  const [statsData, setStatsData] = useState<{ value: string; count: number; percentage: number }[]>([])
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [showStatsToTags, setShowStatsToTags] = useState(false)
+  const [tagGroupName, setTagGroupName] = useState('自动分类')
+  const [autoApplyTags, setAutoApplyTags] = useState(true)
+  const [convertingTags, setConvertingTags] = useState(false)
   const [bulkModule, setBulkModule] = useState('')
   const [bulkRiskLevel, setBulkRiskLevel] = useState('')
   const [aiFieldKey, setAiFieldKey] = useState('')
@@ -387,6 +395,47 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       }
       return next
     })
+  }
+
+  const openColumnStats = async (fieldKey: string) => {
+    setActiveHeaderMenu(null)
+    setStatsFieldKey(fieldKey)
+    setShowColumnStats(true)
+    setStatsLoading(true)
+    setStatsData([])
+    try {
+      const result = await analyticsApi.columnStats({
+        field_key: fieldKey,
+        database_id: currentDatabaseId ?? undefined,
+        product_id: currentProductId || undefined,
+      })
+      setStatsData(result.items)
+    } catch (e: any) {
+      alert('统计失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } finally {
+      setStatsLoading(false)
+    }
+  }
+
+  const handleStatsToTags = async () => {
+    if (!statsFieldKey) return
+    setConvertingTags(true)
+    try {
+      const result = await analyticsApi.statsToTags({
+        field_key: statsFieldKey,
+        group_name: tagGroupName.trim() || '自动分类',
+        auto_apply_to_patents: autoApplyTags,
+        database_id: currentDatabaseId ?? undefined,
+        product_id: currentProductId || undefined,
+      })
+      alert(`已创建标签组"${result.group.name}"，共 ${result.total_tags} 个标签${autoApplyTags ? `，已为 ${result.applied_count} 条专利打标` : ''}`)
+      setShowStatsToTags(false)
+      setShowColumnStats(false)
+    } catch (e: any) {
+      alert('转换失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } finally {
+      setConvertingTags(false)
+    }
   }
 
   const handleCreateCustomField = async () => {
@@ -961,6 +1010,12 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                           </div>
                           <div
                             className="menu-item"
+                            onClick={() => openColumnStats(field.key)}
+                          >
+                            <span style={{ color: '#0891b2' }}>📊 统计此列</span>
+                          </div>
+                          <div
+                            className="menu-item"
                             onClick={() => handleToggleFieldVisible(field.key)}
                           >
                             <span>隐藏此列</span>
@@ -1458,6 +1513,107 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                 {creatingAIColumn ? '创建中...' : (insertColType === 'ai_field' ? '创建并处理' : '创建列')}
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {showColumnStats && (
+        <Modal
+          title={`列统计：${fields.find(f => f.key === statsFieldKey)?.name || statsFieldKey}`}
+          width={680}
+          onClose={() => {
+            setShowColumnStats(false)
+            setShowStatsToTags(false)
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {statsLoading ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>
+                <div className="spinner" style={{ width: 32, height: 32, margin: '0 auto 12px', borderWidth: 3 }}></div>
+                统计中...
+              </div>
+            ) : statsData.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>无数据</div>
+            ) : (
+              <>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '8px 12px', background: '#f0f9ff', borderRadius: 6, fontSize: 12, color: '#0369a1',
+                }}>
+                  <span>共 {statsData.length} 个去重值</span>
+                  <button
+                    className="btn btn-sm btn-primary"
+                    style={{ fontSize: 12, padding: '4px 10px' }}
+                    onClick={() => setShowStatsToTags(true)}
+                  >
+                    🏷️ 转为分类标签
+                  </button>
+                </div>
+
+                {showStatsToTags && (
+                  <div style={{
+                    background: '#fefce8', border: '1px solid #fde68a', borderRadius: 6, padding: 12,
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>把统计结果转为标签体系</div>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <input
+                        className="form-input"
+                        style={{ flex: 1, fontSize: 12 }}
+                        value={tagGroupName}
+                        onChange={e => setTagGroupName(e.target.value)}
+                        placeholder="标签组名称"
+                      />
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#475569', whiteSpace: 'nowrap' }}>
+                        <input type="checkbox" checked={autoApplyTags} onChange={e => setAutoApplyTags(e.target.checked)} />
+                        自动给原专利打标
+                      </label>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={handleStatsToTags} disabled={convertingTags}>
+                        {convertingTags ? '转换中...' : '确认转换'}
+                      </button>
+                      <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => setShowStatsToTags(false)}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>
+                      <tr>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>值</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, width: 80, borderBottom: '1px solid #e2e8f0' }}>计数</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, width: 80, borderBottom: '1px solid #e2e8f0' }}>占比</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, width: 120, borderBottom: '1px solid #e2e8f0' }}>分布</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statsData.map((item, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '6px 10px', wordBreak: 'break-word' }}>{item.value}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{item.count}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', color: '#64748b' }}>{item.percentage}%</td>
+                          <td style={{ padding: '6px 10px' }}>
+                            <div style={{
+                              height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden',
+                            }}>
+                              <div style={{
+                                height: '100%',
+                                width: `${item.percentage}%`,
+                                background: 'linear-gradient(90deg, #3b82f6, #60a5fa)',
+                                borderRadius: 4,
+                              }}></div>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         </Modal>
       )}

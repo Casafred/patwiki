@@ -5,13 +5,14 @@ import PatentDetailPage from './components/patent/PatentDetailPage'
 import StatsPage from './components/patent/StatsPage'
 import SettingsPage from './components/settings/SettingsPage'
 import FieldSettingsPage from './components/settings/FieldSettingsPage'
+import AgentAnalysisPage from './components/analytics/AgentAnalysisPage'
 import ImportModal from './components/import/ImportModal'
 import AITaskMonitor from './components/ai/AITaskMonitor'
 import { productApi, customFieldApi, tagApi, projectApi, databaseApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
 
-type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks'
+type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis'
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('patents')
@@ -113,6 +114,8 @@ function App() {
             <FieldSettingsPage />
           ) : currentPage === 'ai-tasks' ? (
             <AITaskMonitor />
+          ) : currentPage === 'agent-analysis' ? (
+            <AgentAnalysisPage />
           ) : null}
         </div>
       </div>

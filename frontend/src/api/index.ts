@@ -127,6 +127,76 @@ export const statsApi = {
   get: (): Promise<Stats> => api.get('/stats'),
 }
 
+// ============================================================
+// 统计分析 API（列统计 / AGENTAI看板 / 转标签）
+// ============================================================
+export const analyticsApi = {
+  columnStats: (data: {
+    field_key: string
+    database_id?: number | null
+    product_id?: number | null
+    project_id?: number | null
+    tag_id?: number | null
+    filters?: Record<string, any>
+    top_n?: number
+  }): Promise<{
+    field_key: string
+    total_distinct: number
+    total_rows: number
+    items: { value: string; raw_value: any; count: number; percentage: number }[]
+  }> => api.post('/analytics/column-stats', data),
+
+  statsToTags: (data: {
+    field_key: string
+    group_name?: string
+    group_color?: string
+    tag_color?: string
+    only_non_empty?: boolean
+    auto_apply_to_patents?: boolean
+    database_id?: number | null
+    product_id?: number | null
+    project_id?: number | null
+  }): Promise<{
+    group: { id: number; name: string }
+    tags: { id: number; name: string; count: number }[]
+    total_tags: number
+    applied_count: number
+  }> => api.post('/analytics/stats-to-tags', data),
+
+  agentAnalysis: (data: {
+    requirement: string
+    database_id?: number | null
+    product_id?: number | null
+    project_id?: number | null
+    tag_id?: number | null
+    filters?: Record<string, any>
+    dimensions?: string[]
+    top_n?: number
+  }): Promise<{
+    requirement: string
+    base_stats: any
+    ai_analysis: {
+      overview: string
+      key_findings: string[]
+      dimension_analysis: Record<string, string>
+      anomalies: string[]
+      recommendations: string[]
+      risk_warnings: string[]
+    }
+    created_at: string
+  }> => api.post('/analytics/agent-analysis', data, { timeout: 180000 }),
+
+  crossTab: (data: {
+    row_field: string
+    col_field: string
+    database_id?: number | null
+    product_id?: number | null
+    project_id?: number | null
+    filters?: Record<string, any>
+    top_n?: number
+  }): Promise<any> => api.post('/analytics/crosstab', data),
+}
+
 export const personApi = {
   list: (): Promise<Person[]> => api.get('/people'),
   create: (data: Partial<Person>): Promise<Person> => api.post('/people', data),
