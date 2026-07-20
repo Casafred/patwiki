@@ -395,8 +395,12 @@ def _process_relations(db: Session, patent: Patent, virtual: dict, database_id: 
 
 
 @router.get("/stats", response_model=StatsResponse)
-def get_stats(db: Session = Depends(get_db)):
-    return PatentService.get_stats(db)
+def get_stats(
+    database_id: Optional[int] = None,
+    product_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    return PatentService.get_stats(db, database_id=database_id, product_id=product_id)
 
 
 @router.get("/export")

@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.models import PatentDatabase, Patent
+from app.models import PatentDatabase, Patent, User, DatabaseMembership
 
 
 class DatabaseService:
@@ -41,6 +41,7 @@ class DatabaseService:
         description: Optional[str] = None,
         color: Optional[str] = None,
         icon: Optional[str] = None,
+        owner_id: Optional[int] = None,
     ) -> PatentDatabase:
         # 自动生成 code（如未提供）
         if not code:
@@ -62,8 +63,42 @@ class DatabaseService:
             color=color or "#1890ff",
             icon=icon,
             sort_order=db.query(PatentDatabase).count(),
+            owner_id=owner_id,
         )
         db.add(database)
+        db.commit()
+        db.refresh(database)
+
+        # 自动建立 owner 成员关系（role=owner）
+        if owner_id is not None:
+            existing = db.query(DatabaseMembership).filter(
+                DatabaseMembership.user_id == owner_id,
+                DatabaseMembership.database_id == database.id,
+            ).first()
+            if not existing:
+                membership = DatabaseMembership(
+                    user_id=owner_id,
+                    database_id=database.id,
+                    role="owner",
+                )
+                db.add(membership)
+                db.commit()
+        return database
+
+    @staticmethod
+    def set_owner(db: Session, database: PatentDatabase, user_id: int) -> PatentDatabase:
+        """设置库的所有者（同时建立 owner 成员关系）"""
+        database.owner_id = user_id
+        db.add(database)
+        # 建立/更新成员关系
+        existing = db.query(DatabaseMembership).filter(
+            DatabaseMembership.user_id == user_id,
+            DatabaseMembership.database_id == database.id,
+        ).first()
+        if existing:
+            existing.role = "owner"
+        else:
+            db.add(DatabaseMembership(user_id=user_id, database_id=database.id, role="owner"))
         db.commit()
         db.refresh(database)
         return database
@@ -137,6 +172,7 @@ class DatabaseService:
             "is_archived": database.is_archived,
             "patent_count": database.patent_count,
             "sort_order": database.sort_order,
+            "owner_id": database.owner_id,
             "created_at": database.created_at.isoformat() if database.created_at else None,
             "updated_at": database.updated_at.isoformat() if database.updated_at else None,
         }

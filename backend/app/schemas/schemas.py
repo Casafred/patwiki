@@ -384,6 +384,8 @@ class StatsResponse(BaseSchema):
     top_inventors: list[dict[str, Any]]
     top_applicants: list[dict[str, Any]]
     filing_trend: list[dict[str, Any]]
+    top_ipcs: list[dict[str, Any]] = []
+    by_country: dict[str, int] = {}
 
 
 Patent.model_rebuild()

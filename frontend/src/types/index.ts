@@ -187,6 +187,8 @@ export interface Stats {
   top_inventors: { name: string; count: number }[]
   top_applicants: { name: string; count: number }[]
   filing_trend: { year: string; count: number }[]
+  top_ipcs?: { code: string; count: number }[]
+  by_country?: Record<string, number>
 }
 
 export interface Person {
@@ -240,6 +242,33 @@ export interface FieldMeta {
 
 export interface CellUpdateRequest {
   value: any
+}
+
+// ============================================================
+// 权限管理与协作
+// ============================================================
+export interface User {
+  id: number
+  username: string
+  display_name?: string
+  email?: string
+  role: string  // admin / member
+  is_active: boolean
+  created_at?: string
+}
+
+export interface DatabaseMember {
+  id: number
+  user_id: number
+  username: string
+  display_name?: string
+  role: string  // owner / editor / viewer
+  created_at?: string
+}
+
+export interface SharedDatabase extends PatentDatabase {
+  my_role?: string
+  owner_id?: number
 }
 
 export type FilterCondition = {

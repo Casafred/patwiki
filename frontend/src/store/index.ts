@@ -1,5 +1,7 @@
 import { create } from 'zustand'
-import type { Patent, Product, CustomField, Tag, Project, PatentDatabase } from '../types'
+import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, User } from '../types'
+
+const CURRENT_USER_STORAGE_KEY = 'patwiki_current_user'
 
 interface AppState {
   patents: Patent[]
@@ -17,6 +19,9 @@ interface AppState {
   loading: boolean
   selectedIds: number[]
   filters: Record<string, any>
+  // 权限管理 MVP：当前用户（localStorage 持久化）
+  currentUser: User | null
+  setCurrentUser: (user: User | null) => void
   setPatents: (patents: Patent[], total: number) => void
   setProducts: (products: Product[]) => void
   setCustomFields: (fields: CustomField[]) => void
@@ -28,6 +33,16 @@ interface AppState {
   setFilters: (filters: Record<string, any>) => void
   toggleSelect: (id: number) => void
   clearSelection: () => void
+}
+
+function loadCurrentUserFromStorage(): User | null {
+  try {
+    const raw = localStorage.getItem(CURRENT_USER_STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as User
+  } catch {
+    return null
+  }
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -45,6 +60,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: false,
   selectedIds: [],
   filters: {},
+  currentUser: loadCurrentUserFromStorage(),
+  setCurrentUser: (user) => {
+    if (user) {
+      try { localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user)) } catch {}
+    } else {
+      try { localStorage.removeItem(CURRENT_USER_STORAGE_KEY) } catch {}
+    }
+    set({ currentUser: user })
+  },
 
   setPatents: (patents, total) => set({ patents, totalPatents: total }),
   setProducts: (products) => set({ products }),

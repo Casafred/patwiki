@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { Patent, FieldMeta, CustomField } from '../../types'
+import type { Patent, FieldMeta, CustomField, AITask } from '../../types'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -30,6 +30,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
+  const [columnSearch, setColumnSearch] = useState('')
   const [showBulkEdit, setShowBulkEdit] = useState(false)
   const [showBulkTag, setShowBulkTag] = useState(false)
   const [showAIBatch, setShowAIBatch] = useState(false)
@@ -60,10 +61,34 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [newFieldOptions, setNewFieldOptions] = useState('')
   const [pageInputValue, setPageInputValue] = useState('')
   const [aiProcessingRow, setAiProcessingRow] = useState<number | null>(null)
+  // AI 任务透明化：跟踪所有运行中的任务
+  const [activeAITasks, setActiveAITasks] = useState<AITask[]>([])
+  const [aiPanelOpen, setAiPanelOpen] = useState(true)
+  // 任务 → 触发时记录的元信息（field name、prompt、引用列、输出位置）
+  const [taskMeta, setTaskMeta] = useState<Record<number, {
+    fieldName: string
+    fieldKey: string
+    prompt: string
+    referencedColumns: string[]
+    outputLocation: string
+    targetCount: number
+  }>>({})
+  // 最近完成的任务（保留几秒用于显示成功提示）
+  const [recentCompleted, setRecentCompleted] = useState<{ taskId: number; meta: typeof taskMeta[number] | undefined; task: AITask | undefined } | null>(null)
 
   const loadFields = useCallback(async () => {
     try {
       const fieldsData = await fieldApi.list()
+      // 应用 localStorage 持久化的可见性设置
+      try {
+        const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
+        if (hiddenRaw) {
+          const hiddenKeys: string[] = JSON.parse(hiddenRaw)
+          fieldsData.forEach(f => {
+            if (hiddenKeys.includes(f.key)) f.visible = false
+          })
+        }
+      } catch {}
       setFields(fieldsData)
       const widths: Record<string, number> = {}
       fieldsData.forEach(f => {
@@ -242,10 +267,44 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   }
 
   const handleToggleFieldVisible = (fieldKey: string) => {
-    setFields(prev => prev.map(f =>
-      f.key === fieldKey ? { ...f, visible: !f.visible } : f
-    ))
+    setFields(prev => {
+      const next = prev.map(f =>
+        f.key === fieldKey ? { ...f, visible: f.visible === false } : f
+      )
+      // localStorage 持久化
+      try {
+        const hidden = next.filter(f => f.visible === false).map(f => f.key)
+        localStorage.setItem('patwiki_hidden_fields', JSON.stringify(hidden))
+      } catch {}
+      return next
+    })
     setActiveHeaderMenu(null)
+  }
+
+  // 批量设置可见性
+  const handleSetAllVisible = (visible: boolean) => {
+    setFields(prev => {
+      const next = prev.map(f => ({ ...f, visible }))
+      try {
+        if (visible) {
+          localStorage.removeItem('patwiki_hidden_fields')
+        } else {
+          localStorage.setItem('patwiki_hidden_fields', JSON.stringify(prev.map(f => f.key)))
+        }
+      } catch {}
+      return next
+    })
+  }
+
+  // 重置为默认（系统字段可见，自定义字段可见）
+  const handleResetVisibility = () => {
+    setFields(prev => {
+      const next = prev.map(f => ({ ...f, visible: true }))
+      try {
+        localStorage.removeItem('patwiki_hidden_fields')
+      } catch {}
+      return next
+    })
   }
 
   const handleHeaderFilterApply = (fieldKey: string) => {
@@ -272,6 +331,84 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     setPage(1)
   }
 
+  // 从 prompt 模板解析引用的列名（{xxx} 占位符）
+  const parseReferencedColumns = (prompt: string): string[] => {
+    if (!prompt) return []
+    const matches = prompt.match(/\{([a-zA-Z_][a-zA-Z0-9_.]*)\}/g) || []
+    const keys = matches.map(m => m.replace(/[{}]/g, ''))
+    // 把 key 映射为可读的字段名
+    return keys.map(k => {
+      const f = fields.find(x => x.key === k)
+      if (f) return f.name
+      if (k.startsWith('custom_fields.')) {
+        const sub = k.slice('custom_fields.'.length)
+        const cf = customFields.find(c => c.key === sub)
+        return cf?.name || sub
+      }
+      if (k.startsWith('ai_fields.')) {
+        const sub = k.slice('ai_fields.'.length)
+        const af = aiFields.find(a => a.key === sub)
+        return af?.name || sub
+      }
+      return k
+    })
+  }
+
+  // 启动 AI 任务并加入监控面板
+  const startAITask = async (patentIds: number[], fieldKey: string) => {
+    const aiField = aiFields.find(a => a.key === fieldKey)
+    const customField = customFields.find(c => c.key === fieldKey)
+    const fieldName = aiField?.name || customField?.name || fieldKey
+    const prompt = aiField?.ai_config?.prompt_template || customField?.ai_config?.prompt_template || ''
+    const referencedColumns = parseReferencedColumns(prompt)
+    const outputLocation = `ai_fields['${fieldKey}'] → 表格的"${fieldName}"列`
+
+    const task = await aiApi.process(patentIds, fieldKey)
+    setActiveAITasks(prev => [...prev, task])
+    setTaskMeta(prev => ({
+      ...prev,
+      [task.id]: {
+        fieldName, fieldKey, prompt,
+        referencedColumns,
+        outputLocation,
+        targetCount: patentIds.length,
+      },
+    }))
+    setAiPanelOpen(true)
+    return task
+  }
+
+  // 轮询所有运行中的 AI 任务
+  useEffect(() => {
+    if (activeAITasks.length === 0) return
+    const interval = setInterval(async () => {
+      const stillRunning: AITask[] = []
+      const justCompleted: AITask[] = []
+      for (const t of activeAITasks) {
+        try {
+          const latest = await aiApi.getTask(t.id)
+          if (latest.status === 'running' || latest.status === 'pending' || latest.status === 'processing') {
+            stillRunning.push(latest)
+          } else {
+            justCompleted.push(latest)
+          }
+        } catch {
+          // 查询失败，保留任务（下次再试）
+          stillRunning.push(t)
+        }
+      }
+      setActiveAITasks(stillRunning)
+      if (justCompleted.length > 0) {
+        // 保留最近完成的任务几秒用于显示
+        const lastDone = justCompleted[justCompleted.length - 1]
+        setRecentCompleted({ taskId: lastDone.id, meta: taskMeta[lastDone.id], task: lastDone })
+        setTimeout(() => setRecentCompleted(null), 5000)
+        loadPatents()  // AI 任务完成后立即回填刷新
+      }
+    }, 1500)
+    return () => clearInterval(interval)
+  }, [activeAITasks.length, taskMeta])  // 依赖 taskMeta 以便完成时能拿到 meta
+
   const handleQuickAI = async (patentId: number) => {
     if (aiFields.length === 0) {
       alert('未找到AI字段，请先在设置页配置LLM API')
@@ -280,26 +417,21 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     const firstAiField = aiFields[0]
     setAiProcessingRow(patentId)
     try {
-      const task = await aiApi.process([patentId], firstAiField.key)
-      const poll = async () => {
-        try {
-          const t = await aiApi.getTask(task.id)
-          if (t.status === 'running' || t.status === 'pending') {
-            setTimeout(poll, 1500)
-          } else {
-            setAiProcessingRow(null)
-            loadPatents()
-          }
-        } catch {
-          setAiProcessingRow(null)
-        }
-      }
-      setTimeout(poll, 1500)
+      await startAITask([patentId], firstAiField.key)
+      // 轮询由统一的 useEffect 接管；当任务完成时 loadPatents() 会刷新数据，
+      // 同时清除 aiProcessingRow（通过下方 useEffect 监听）
     } catch (e: any) {
       alert('AI处理失败: ' + (e?.response?.data?.detail || e?.message || ''))
       setAiProcessingRow(null)
     }
   }
+
+  // 当没有运行中的任务时，清除行 loading
+  useEffect(() => {
+    if (activeAITasks.length === 0 && aiProcessingRow !== null) {
+      setAiProcessingRow(null)
+    }
+  }, [activeAITasks.length, aiProcessingRow])
 
   const handleInsertAIColumn = async (processAll: boolean) => {
     if (!newAIColumnName.trim()) {
@@ -341,15 +473,19 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       }
       await loadFields()
       await loadCustomFields()
-      // AI列立即触发处理
+      // 刷新 aiFields 列表（让 startAITask 能找到新字段）
+      try {
+        const refreshedAiFields = await aiApi.listAIFields()
+        setAiFields(refreshedAiFields)
+      } catch {}
+      // AI列立即触发处理（用统一的 startAITask，自动加入监控面板）
       if (isAI) {
         const targetIds = processAll ? patents.map(p => p.id) : selectedIds
         if (targetIds.length === 0) {
           alert('AI列已创建。选中专利后可点击行内 ✨ 按钮或使用"AI批量处理"运行该列')
         } else {
           try {
-            const task = await aiApi.process(targetIds, key)
-            alert(`AI列已创建，任务已启动（ID: ${task.id}），可在"AI 任务"页面查看进度`)
+            await startAITask(targetIds, key)
           } catch (e: any) {
             alert('AI列已创建，但启动AI任务失败: ' + (e?.response?.data?.detail || e?.message || '请先在设置页配置 LLM API'))
           }
@@ -508,8 +644,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       return
     }
     try {
-      const task = await aiApi.process(selectedIds, aiFieldKey)
-      alert(`AI 任务已启动（任务ID: ${task.id}），可在"AI 任务"页面查看进度`)
+      await startAITask(selectedIds, aiFieldKey)
       setShowAIBatch(false)
       setAiFieldKey('')
       clearSelection()
@@ -776,8 +911,8 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           >
             清除筛选
           </button>
-          <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)}>
-            字段
+          <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
+            列管理
           </button>
           <button
             className="btn btn-sm btn-primary"
@@ -1014,6 +1149,22 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                           >
                             <span style={{ color: '#0891b2' }}>📊 统计此列</span>
                           </div>
+                          {field.field_type === 'ai_field' && (
+                            <div
+                              className="menu-item"
+                              onClick={() => {
+                                setActiveHeaderMenu(null)
+                                if (patents.length === 0) {
+                                  alert('当前列表为空')
+                                  return
+                                }
+                                if (!confirm(`将用此 AI 配置处理当前列表的 ${patents.length} 行，是否继续？`)) return
+                                startAITask(patents.map(p => p.id), field.key)
+                              }}
+                            >
+                              <span style={{ color: '#7c3aed' }}>⚡ 批量处理此列（所有可见行）</span>
+                            </div>
+                          )}
                           <div
                             className="menu-item"
                             onClick={() => handleToggleFieldVisible(field.key)}
@@ -1102,6 +1253,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                         wordBreak: 'break-word',
                         overflowWrap: 'anywhere',
                         verticalAlign: 'top',
+                        position: 'relative',
                         ...(isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 5, background: '#fff' } : {}),
                       }}
                       onClick={(e) => {
@@ -1112,6 +1264,42 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                       }}
                     >
                       {renderCellContent(p, field)}
+                      {/* AI 列的拖动复用按钮（Excel 式填充柄） */}
+                      {field.field_type === 'ai_field' && (
+                        <button
+                          className="ai-fill-handle"
+                          title="拖动复用：用此 AI 配置处理下方所有行"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const currentIndex = patents.findIndex(pp => pp.id === p.id)
+                            const belowPatents = patents.slice(currentIndex + 1)
+                            if (belowPatents.length === 0) {
+                              alert('下方没有更多行')
+                              return
+                            }
+                            if (!confirm(`将用此 AI 配置处理下方 ${belowPatents.length} 行，是否继续？`)) return
+                            startAITask(belowPatents.map(pp => pp.id), field.key)
+                          }}
+                          style={{
+                            position: 'absolute',
+                            right: 0,
+                            bottom: 0,
+                            width: 16,
+                            height: 16,
+                            background: '#3b82f6',
+                            color: '#fff',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontSize: 11,
+                            lineHeight: '16px',
+                            padding: 0,
+                            opacity: 0.35,
+                            borderRadius: '3px 0 0 0',
+                          }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.35' }}
+                        >⬇</button>
+                      )}
                     </td>
                     )
                   })}
@@ -1189,64 +1377,106 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       </div>
 
       {showFieldConfig && (
-      <Modal title="字段配置" onClose={() => setShowFieldConfig(false)} width={600}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
-            <h4 style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600, color: '#374151' }}>显示的字段</h4>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {fields.map(field => (
-                <label
-                  key={field.key}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '4px 8px',
-                    background: field.visible !== false ? '#eff6ff' : '#f3f4f6',
-                    border: `1px solid ${field.visible !== false ? '#bfdbfe' : '#e5e7eb'}`,
-                    borderRadius: 4,
-                    fontSize: 12,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={field.visible !== false}
-                    onChange={() => handleToggleFieldVisible(field.key)}
-                    style={{ margin: 0 }}
-                  />
-                  <span style={{ color: field.visible !== false ? '#1e40af' : '#6b7280' }}>
-                    {field.name}
-                    {field.is_system && <span style={{ color: '#9ca3af', marginLeft: 4 }}>(系统)</span>}
-                  </span>
-                  {!field.is_system && (
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault()
-                        const cf = customFields.find(c => c.key === field.key)
-                        if (cf) handleDeleteCustomField(cf.id)
-                      }}
-                      style={{
-                        border: 'none',
-                        background: 'transparent',
-                        color: '#ef4444',
-                        cursor: 'pointer',
-                        fontSize: 14,
-                        padding: '0 2px',
-                        lineHeight: 1,
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
-                </label>
-              ))}
-            </div>
+      <Modal title="列管理" onClose={() => setShowFieldConfig(false)} width={680}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* 搜索 + 批量操作 */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="🔍 搜索列名..."
+              value={columnSearch}
+              onChange={(e) => setColumnSearch(e.target.value)}
+              style={{ flex: 1, height: 32, fontSize: 13 }}
+            />
+            <button className="btn btn-sm btn-secondary" onClick={() => handleSetAllVisible(true)}>全部显示</button>
+            <button className="btn btn-sm btn-secondary" onClick={() => handleSetAllVisible(false)}>全部隐藏</button>
+            <button className="btn btn-sm btn-secondary" onClick={handleResetVisibility}>重置</button>
           </div>
 
-          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16 }}>
-            <h4 style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600, color: '#374151' }}>新建自定义字段</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          {/* 统计 */}
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            共 {fields.length} 列 · 可见 {fields.filter(f => f.visible !== false).length} · 隐藏 {fields.filter(f => f.visible === false).length}
+          </div>
+
+          {/* 列表（按 group 分组） */}
+          <div style={{ maxHeight: 380, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 4 }}>
+            {Object.entries(
+              fields
+                .filter(f => !columnSearch || f.name.toLowerCase().includes(columnSearch.toLowerCase()) || f.key.toLowerCase().includes(columnSearch.toLowerCase()))
+                .reduce((acc, f) => {
+                  const g = f.group_name || '其他'
+                  if (!acc[g]) acc[g] = []
+                  acc[g].push(f)
+                  return acc
+                }, {} as Record<string, typeof fields>)
+            ).map(([group, flds]) => (
+              <div key={group}>
+                <div style={{ padding: '6px 12px', background: '#f9fafb', fontSize: 11, fontWeight: 600, color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
+                  {group} ({flds.length})
+                </div>
+                {flds.map(field => {
+                  const visible = field.visible !== false
+                  const isFrozen = field.frozen || frozenFields.has(field.key)
+                  return (
+                    <div
+                      key={field.key}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '6px 12px',
+                        borderBottom: '1px solid #f3f4f6',
+                        background: visible ? '#fff' : '#f9fafb',
+                        opacity: visible ? 1 : 0.6,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        onChange={() => handleToggleFieldVisible(field.key)}
+                        style={{ margin: 0 }}
+                      />
+                      <span style={{ flex: 1, fontSize: 13, color: visible ? '#1f2937' : '#9ca3af' }}>
+                        {field.name}
+                        {field.is_system && <span style={{ color: '#9ca3af', marginLeft: 6, fontSize: 11 }}>(系统)</span>}
+                      </span>
+                      <span style={{ fontSize: 10, padding: '2px 6px', background: '#eff6ff', color: '#1e40af', borderRadius: 3 }}>
+                        {field.field_type}
+                      </span>
+                      <button
+                        onClick={() => handleToggleFreeze(field.key)}
+                        title="切换冻结"
+                        style={{
+                          border: `1px solid ${isFrozen ? '#f59e0b' : '#e5e7eb'}`,
+                          background: isFrozen ? '#fef3c7' : '#fff',
+                          color: isFrozen ? '#92400e' : '#6b7280',
+                          fontSize: 11, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
+                        }}
+                      >
+                        {isFrozen ? '🔒 冻结' : '🔓'}
+                      </button>
+                      {!field.is_system && (
+                        <button
+                          onClick={() => {
+                            const cf = customFields.find(c => c.key === field.key)
+                            if (cf) handleDeleteCustomField(cf.id)
+                          }}
+                          title="删除字段"
+                          style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 14, padding: '0 4px' }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+
+          {/* 新建自定义字段（折叠） */}
+          <details style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
+            <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#374151' }}>新建自定义字段</summary>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8, marginTop: 8 }}>
               <input
                 type="text"
                 className="form-input"
@@ -1281,7 +1511,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
             <button className="btn btn-sm btn-primary" onClick={handleCreateCustomField}>
               添加字段
             </button>
-          </div>
+          </details>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid #e5e7eb' }}>
             <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(false)}>
@@ -1616,6 +1846,141 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
             )}
           </div>
         </Modal>
+      )}
+
+      {/* AI 任务透明化浮动面板 */}
+      {(activeAITasks.length > 0 || recentCompleted) && (
+        <div style={{
+          position: 'fixed', right: 20, bottom: 20, zIndex: 1000,
+          width: aiPanelOpen ? 480 : 'auto',
+          maxWidth: 'calc(100vw - 40px)',
+          background: '#fff',
+          border: '1px solid #e5e7eb',
+          borderRadius: 8,
+          boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+          fontSize: 12,
+          overflow: 'hidden',
+        }}>
+          {/* 头部 */}
+          <div
+            style={{
+              padding: '8px 12px',
+              background: activeAITasks.length > 0 ? '#1e40af' : '#10b981',
+              color: '#fff',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+            onClick={() => setAiPanelOpen(!aiPanelOpen)}
+          >
+            <span style={{ fontWeight: 600 }}>
+              {activeAITasks.length > 0
+                ? `🤖 AI 任务运行中 (${activeAITasks.length})`
+                : '✅ AI 任务已完成'}
+            </span>
+            <span>{aiPanelOpen ? '▼' : '▲'}</span>
+          </div>
+          {aiPanelOpen && (
+            <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+              {/* 运行中任务 */}
+              {activeAITasks.map(task => {
+                const meta = taskMeta[task.id]
+                const progress = task.total_items > 0 ? (task.processed_items / task.total_items) * 100 : 0
+                return (
+                  <div key={task.id} style={{ padding: 12, borderBottom: '1px solid #f3f4f6' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <strong style={{ color: '#1f2937', fontSize: 13 }}>
+                        {meta?.fieldName || task.field_key}
+                      </strong>
+                      <span style={{ color: '#6b7280', fontSize: 11 }}>
+                        #{task.id} · <span style={{ color: '#3b82f6', fontWeight: 500 }}>{task.status}</span>
+                      </span>
+                    </div>
+                    {/* 进度条 */}
+                    <div style={{ background: '#f3f4f6', borderRadius: 3, height: 6, marginBottom: 6, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${progress}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #3b82f6, #60a5fa)',
+                        borderRadius: 3,
+                        transition: 'width 0.3s',
+                      }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
+                      进度：{task.processed_items} / {task.total_items}
+                      （成功 {task.success_count}，失败 {task.failed_count}）
+                    </div>
+                    {meta && (
+                      <>
+                        <div style={{ marginBottom: 4, lineHeight: 1.5 }}>
+                          <span style={{ color: '#374151', fontWeight: 500 }}>纳入的列：</span>
+                          {meta.referencedColumns.length > 0 ? (
+                            <span style={{ color: '#1e40af' }}>
+                              {meta.referencedColumns.join('、')}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>
+                              默认（标题、摘要、申请人、发明人）
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ marginBottom: 4, lineHeight: 1.5 }}>
+                          <span style={{ color: '#374151', fontWeight: 500 }}>输出位置：</span>
+                          <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: 2, fontSize: 11, color: '#7c3aed' }}>
+                            {meta.outputLocation}
+                          </code>
+                        </div>
+                        {meta.prompt && (
+                          <details style={{ marginTop: 4 }}>
+                            <summary style={{ cursor: 'pointer', color: '#6b7280', fontSize: 11 }}>查看 Prompt</summary>
+                            <pre style={{
+                              background: '#f9fafb',
+                              padding: 8,
+                              borderRadius: 3,
+                              fontSize: 11,
+                              maxHeight: 100,
+                              overflow: 'auto',
+                              whiteSpace: 'pre-wrap',
+                              margin: '4px 0 0',
+                              border: '1px solid #e5e7eb',
+                            }}>
+                              {meta.prompt}
+                            </pre>
+                          </details>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+              {/* 最近完成的任务 */}
+              {recentCompleted && (
+                <div style={{
+                  padding: 12,
+                  background: '#ecfdf5',
+                  borderBottom: '1px solid #d1fae5',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <strong style={{ color: '#065f46', fontSize: 13 }}>
+                      ✅ {recentCompleted.meta?.fieldName || 'AI 字段'}
+                    </strong>
+                    <span style={{ color: '#047857', fontSize: 11 }}>
+                      #{recentCompleted.taskId} · 完成
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#047857', marginBottom: 4 }}>
+                    {recentCompleted.task?.success_count || 0} 件成功 · {recentCompleted.task?.failed_count || 0} 件失败
+                  </div>
+                  <div style={{ fontSize: 11, color: '#065f46' }}>
+                    结果已回填到表格，下方列表已自动刷新。
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

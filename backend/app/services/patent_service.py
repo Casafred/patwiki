@@ -266,72 +266,96 @@ class PatentService:
         return True
 
     @staticmethod
-    def get_stats(db: Session) -> dict:
-        total = db.query(func.count(Patent.id)).scalar()
+    def get_stats(db: Session, database_id: Optional[int] = None, product_id: Optional[int] = None) -> dict:
+        # 基础过滤条件：按库 / 产品过滤
+        def _apply_filter(q):
+            if database_id is not None:
+                q = q.filter(Patent.database_id == database_id)
+            if product_id is not None:
+                q = q.filter(Patent.product_id == product_id)
+            return q
+
+        total = _apply_filter(db.query(func.count(Patent.id))).scalar()
 
         status_counts = dict(
-            db.query(Patent.legal_status, func.count(Patent.id))
-            .group_by(Patent.legal_status)
-            .all()
+            _apply_filter(
+                db.query(Patent.legal_status, func.count(Patent.id))
+            ).group_by(Patent.legal_status).all()
         )
 
         type_counts = dict(
-            db.query(Patent.patent_type, func.count(Patent.id))
-            .group_by(Patent.patent_type)
-            .all()
+            _apply_filter(
+                db.query(Patent.patent_type, func.count(Patent.id))
+            ).group_by(Patent.patent_type).all()
         )
 
-        products = db.query(
-            Product.id,
-            Product.name,
-            func.count(Patent.id).label("count"),
-        ).outerjoin(Patent, Patent.product_id == Product.id) \
-            .group_by(Product.id, Product.name) \
-            .order_by(desc("count")) \
-            .limit(20) \
-            .all()
-        product_counts = [{"id": p.id, "name": p.name, "count": p.count} for p in products]
+        # 按产品分布：需要 join Product，但产品过滤时不需要重复
+        if product_id is None:
+            products_q = db.query(
+                Product.id,
+                Product.name,
+                func.count(Patent.id).label("count"),
+            ).outerjoin(Patent, Patent.product_id == Product.id)
+            if database_id is not None:
+                products_q = products_q.filter((Patent.database_id == database_id) | (Patent.id.is_(None)))
+            products = products_q.group_by(Product.id, Product.name).order_by(desc("count")).limit(20).all()
+            product_counts = [{"id": p.id, "name": p.name, "count": p.count} for p in products]
+        else:
+            # 单产品时无需分组
+            product_counts = [{"id": product_id, "name": "", "count": total}]
 
         category_counts = dict(
-            db.query(Patent.category, func.count(Patent.id))
-            .filter(Patent.category.isnot(None))
-            .group_by(Patent.category)
-            .all()
+            _apply_filter(
+                db.query(Patent.category, func.count(Patent.id))
+            ).filter(Patent.category.isnot(None)).group_by(Patent.category).all()
         )
 
         risk_counts = dict(
-            db.query(Patent.risk_level, func.count(Patent.id))
-            .group_by(Patent.risk_level)
-            .all()
+            _apply_filter(
+                db.query(Patent.risk_level, func.count(Patent.id))
+            ).group_by(Patent.risk_level).all()
         )
 
-        inventors = db.query(
+        inventors_q = db.query(
             Patent.inventor,
             func.count(Patent.id).label("count"),
-        ).filter(Patent.inventor.isnot(None)) \
-            .group_by(Patent.inventor) \
-            .order_by(desc("count")) \
-            .limit(20) \
-            .all()
+        ).filter(Patent.inventor.isnot(None))
+        inventors_q = _apply_filter(inventors_q)
+        inventors = inventors_q.group_by(Patent.inventor).order_by(desc("count")).limit(20).all()
         top_inventors = [{"name": i.inventor, "count": i.count} for i in inventors]
 
-        applicants = db.query(
+        applicants_q = db.query(
             Patent.applicant,
             func.count(Patent.id).label("count"),
-        ).filter(Patent.applicant.isnot(None)) \
-            .group_by(Patent.applicant) \
-            .order_by(desc("count")) \
-            .limit(20) \
-            .all()
+        ).filter(Patent.applicant.isnot(None))
+        applicants_q = _apply_filter(applicants_q)
+        applicants = applicants_q.group_by(Patent.applicant).order_by(desc("count")).limit(20).all()
         top_applicants = [{"name": a.applicant, "count": a.count} for a in applicants]
+
+        # 按 IPC 主分类分布（新增）
+        ipc_q = db.query(
+            Patent.ipc_main,
+            func.count(Patent.id).label("count"),
+        ).filter(Patent.ipc_main.isnot(None))
+        ipc_q = _apply_filter(ipc_q)
+        ipcs = ipc_q.group_by(Patent.ipc_main).order_by(desc("count")).limit(15).all()
+        top_ipcs = [{"code": r.ipc_main, "count": r.count} for r in ipcs]
+
+        # 按国别分布（新增）
+        country_q = db.query(
+            Patent.country,
+            func.count(Patent.id).label("count"),
+        )
+        country_q = _apply_filter(country_q)
+        countries = country_q.group_by(Patent.country).order_by(desc("count")).all()
+        by_country = {str(c.country or '未知'): c.count for c in countries}
 
         filing_trend_raw = db.query(
             func.strftime("%Y", Patent.filing_date).label("year"),
             func.count(Patent.id).label("count"),
-        ).filter(Patent.filing_date.isnot(None)) \
-            .group_by("year") \
-            .order_by("year") \
-            .all()
+        ).filter(Patent.filing_date.isnot(None))
+        filing_trend_raw = _apply_filter(filing_trend_raw)
+        filing_trend_raw = filing_trend_raw.group_by("year").order_by("year").all()
         filing_trend = [{"year": r.year, "count": r.count} for r in filing_trend_raw]
 
         return {
@@ -343,6 +367,8 @@ class PatentService:
             "by_risk_level": {str(k): v for k, v in risk_counts.items()},
             "top_inventors": top_inventors,
             "top_applicants": top_applicants,
+            "top_ipcs": top_ipcs,
+            "by_country": by_country,
             "filing_trend": filing_trend,
         }
 

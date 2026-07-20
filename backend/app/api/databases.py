@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.database_service import DatabaseService
+from app.models import User
 
 router = APIRouter(prefix="/databases", tags=["database"])
 
@@ -19,6 +20,7 @@ class DatabaseCreateRequest(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
     icon: Optional[str] = None
+    owner_id: Optional[int] = None
 
 
 class DatabaseUpdateRequest(BaseModel):
@@ -27,6 +29,10 @@ class DatabaseUpdateRequest(BaseModel):
     color: Optional[str] = None
     icon: Optional[str] = None
     sort_order: Optional[int] = None
+
+
+class SetOwnerRequest(BaseModel):
+    user_id: int
 
 
 @router.get("")
@@ -51,6 +57,11 @@ def create_database(
     req: DatabaseCreateRequest,
     db: Session = Depends(get_db),
 ):
+    # 校验 owner_id
+    owner_id = req.owner_id
+    if owner_id is not None:
+        if not db.query(User).filter(User.id == owner_id).first():
+            raise HTTPException(status_code=400, detail=f"用户不存在：{owner_id}")
     database = DatabaseService.create_database(
         db,
         name=req.name,
@@ -58,8 +69,25 @@ def create_database(
         description=req.description,
         color=req.color,
         icon=req.icon,
+        owner_id=owner_id,
     )
     return DatabaseService.to_dict(database)
+
+
+@router.post("/{database_id}/set-owner")
+def set_owner(
+    database_id: int,
+    req: SetOwnerRequest,
+    db: Session = Depends(get_db),
+):
+    """设置/转移库的所有者"""
+    database = DatabaseService.get_database(db, database_id)
+    if not database:
+        raise HTTPException(status_code=404, detail="数据库不存在")
+    if not db.query(User).filter(User.id == req.user_id).first():
+        raise HTTPException(status_code=400, detail=f"用户不存在：{req.user_id}")
+    updated = DatabaseService.set_owner(db, database, req.user_id)
+    return DatabaseService.to_dict(updated)
 
 
 @router.get("/{database_id}")

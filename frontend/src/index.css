@@ -343,6 +343,10 @@ input, select, textarea {
   text-align: left;
   white-space: nowrap;
   user-select: none;
+}
+
+/* 表头内部相对定位（用于列菜单/排序图标），不能覆盖外层 sticky */
+.data-grid th > * {
   position: relative;
 }
 

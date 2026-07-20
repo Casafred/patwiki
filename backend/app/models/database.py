@@ -3,7 +3,7 @@
 库是专利数据的顶层品类归属，例如"电钻专利数据库"、"传感器专利数据库"。
 导入时强制选择库，去重范围限定在库内。
 """
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -23,7 +23,11 @@ class PatentDatabase(Base):
     is_archived = Column(Boolean, default=False)
     patent_count = Column(Integer, default=0)
     sort_order = Column(Integer, default=0)
+    # 权限管理：所有者（创建库时记录）
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     patents = relationship("Patent", back_populates="database")
+    memberships = relationship("DatabaseMembership", back_populates="database", cascade="all, delete-orphan")
+    owner = relationship("User", foreign_keys=[owner_id])

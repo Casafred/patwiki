@@ -59,6 +59,9 @@ def _ensure_column_migration():
         ("patent_projects", "linked_at", "ALTER TABLE patent_projects ADD COLUMN linked_at DATETIME"),
         ("patent_projects", "created_at_p9", "ALTER TABLE patent_projects ADD COLUMN created_at_p9 DATETIME"),
         ("patent_projects", "updated_at_p9", "ALTER TABLE patent_projects ADD COLUMN updated_at_p9 DATETIME"),
+        # 权限管理 MVP：库的所有者
+        ("patent_databases", "owner_id",
+         "ALTER TABLE patent_databases ADD COLUMN owner_id INTEGER REFERENCES users(id)"),
     ]
 
     with engine.begin() as conn:
@@ -75,6 +78,13 @@ def _ensure_column_migration():
         if not has_index("patents", "ix_patents_database_id"):
             try:
                 conn.execute(text("CREATE INDEX ix_patents_database_id ON patents (database_id)"))
+            except Exception:
+                pass
+
+        # patent_databases.owner_id 索引
+        if not has_index("patent_databases", "ix_patent_databases_owner_id"):
+            try:
+                conn.execute(text("CREATE INDEX ix_patent_databases_owner_id ON patent_databases (owner_id)"))
             except Exception:
                 pass
 

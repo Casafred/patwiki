@@ -3,6 +3,7 @@ import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
   AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
+  User, DatabaseMember, SharedDatabase,
 } from '../types'
 
 export const fieldApi = {
@@ -18,7 +19,7 @@ export const databaseApi = {
 
   get: (id: number): Promise<PatentDatabase> => api.get(`/databases/${id}`),
 
-  create: (data: { name: string; code?: string; description?: string; color?: string; icon?: string }): Promise<PatentDatabase> =>
+  create: (data: { name: string; code?: string; description?: string; color?: string; icon?: string; owner_id?: number | null }): Promise<PatentDatabase> =>
     api.post('/databases', data),
 
   update: (id: number, data: Partial<PatentDatabase>): Promise<PatentDatabase> =>
@@ -32,6 +33,10 @@ export const databaseApi = {
 
   refreshCount: (id: number): Promise<{ success: boolean; patent_count: number }> =>
     api.post(`/databases/${id}/refresh-count`),
+
+  // 设置/转移所有者
+  setOwner: (id: number, userId: number): Promise<PatentDatabase> =>
+    api.post(`/databases/${id}/set-owner`, { user_id: userId }),
 }
 
 export const patentApi = {
@@ -124,7 +129,8 @@ export const importApi = {
 }
 
 export const statsApi = {
-  get: (): Promise<Stats> => api.get('/stats'),
+  get: (params?: { database_id?: number | null; product_id?: number | null }): Promise<Stats> =>
+    api.get('/stats', { params }),
 }
 
 // ============================================================
@@ -235,4 +241,42 @@ export const settingsApi = {
 
   testLLM: (payload: { api_key?: string; base_url?: string; model?: string }): Promise<{ success: boolean; message: string }> =>
     api.post('/settings/test-llm', payload),
+}
+
+// ============================================================
+// 用户与协作 API（权限管理 MVP）
+// ============================================================
+export const sharingApi = {
+  // 用户管理
+  listUsers: (): Promise<User[]> => api.get('/users'),
+
+  createUser: (data: {
+    username: string
+    display_name?: string
+    email?: string
+    role?: string
+  }): Promise<User> => api.post('/users', data),
+
+  getUser: (userId: number): Promise<User> => api.get(`/users/${userId}`),
+
+  // 库的成员管理
+  listMembers: (databaseId: number): Promise<DatabaseMember[]> =>
+    api.get(`/databases/${databaseId}/members`),
+
+  addMember: (databaseId: number, data: {
+    username?: string
+    user_id?: number
+    role: 'editor' | 'viewer'
+  }): Promise<DatabaseMember> =>
+    api.post(`/databases/${databaseId}/members`, data),
+
+  updateMember: (databaseId: number, userId: number, role: 'editor' | 'viewer'): Promise<DatabaseMember> =>
+    api.put(`/databases/${databaseId}/members/${userId}`, { role }),
+
+  removeMember: (databaseId: number, userId: number): Promise<{ success: boolean }> =>
+    api.delete(`/databases/${databaseId}/members/${userId}`),
+
+  // 当前用户视角：与我共享的库
+  listUserDatabases: (userId: number): Promise<SharedDatabase[]> =>
+    api.get(`/users/${userId}/databases`),
 }

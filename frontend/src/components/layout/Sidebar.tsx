@@ -4,13 +4,14 @@ import { useAppStore } from '../../store'
 
 interface SidebarProps {
   currentPage: string
-  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis') => void
+  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing') => void
 }
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const {
     products, currentProductId, setCurrentProductId, setProducts,
     databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
+    currentUser,
   } = useAppStore()
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [newProductName, setNewProductName] = useState('')
@@ -67,7 +68,11 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const handleAddDatabase = async () => {
     if (!newDbName.trim()) return
     try {
-      const db = await databaseApi.create({ name: newDbName.trim(), description: newDbDesc.trim() || undefined })
+      const db = await databaseApi.create({
+        name: newDbName.trim(),
+        description: newDbDesc.trim() || undefined,
+        owner_id: currentUser?.id ?? null,
+      })
       const refreshed = await databaseApi.list()
       setDatabases(refreshed)
       setCurrentDatabaseId(db.id)
@@ -175,6 +180,12 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           字段管理
         </div>
         <div
+          className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`}
+          onClick={() => onNavigate('sharing')}
+        >
+          协作与权限
+        </div>
+        <div
           className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
           onClick={() => onNavigate('settings')}
         >
@@ -233,6 +244,43 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           </div>
         )}
       </nav>
+
+      {/* 当前用户身份（底部） */}
+      <div
+        style={{
+          padding: '10px 16px', borderTop: '1px solid #1e293b', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}
+        onClick={() => onNavigate('sharing')}
+        title="点击管理协作与权限"
+      >
+        {currentUser ? (
+          <>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%', background: '#3b82f6',
+              color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 600, flexShrink: 0,
+            }}>
+              {(currentUser.display_name || currentUser.username).charAt(0).toUpperCase()}
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {currentUser.display_name || currentUser.username}
+              </div>
+              <div style={{ fontSize: 10, color: '#64748b' }}>@{currentUser.username}</div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%', background: '#475569',
+              color: '#cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 600, flexShrink: 0,
+            }}>?</div>
+            <div style={{ fontSize: 12, color: '#94a3b8' }}>未选择身份</div>
+          </>
+        )}
+      </div>
     </aside>
   )
 }
