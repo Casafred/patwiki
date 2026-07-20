@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi } from '../../api'
+import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { Patent, FieldMeta, CustomField, AITask } from '../../types'
+import type { Patent, FieldMeta, CustomField, AITask, ViewPatent } from '../../types'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -15,7 +15,13 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
+    // P0-16：视图绑定
+    currentViewId, views,
   } = useAppStore()
+
+  // P0-16：当前视图对象（来自 store.views 缓存）
+  const currentView = currentViewId != null ? views.find(v => v.id === currentViewId) : undefined
+  const isViewBound = !!currentView
 
   const [page, setPage] = useState(1)
   const [pageSize] = useState(50)
@@ -86,18 +92,44 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
 
   const loadFields = useCallback(async () => {
     try {
-      const fieldsData = await fieldApi.list()
-      // 应用 localStorage 持久化的可见性设置
-      try {
-        const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
-        if (hiddenRaw) {
-          const hiddenKeys: string[] = JSON.parse(hiddenRaw)
-          fieldsData.forEach(f => {
-            if (hiddenKeys.includes(f.key)) f.visible = false
-          })
-        }
-      } catch {}
-      setFields(fieldsData)
+      // P0-16：视图模式下传 view_id，后端会附加 vlf_ 本地字段
+      const fieldsData = await fieldApi.list(currentViewId ?? undefined)
+
+      // P0-16：若处于视图模式且视图配置了 column_config（非空 = 白名单+顺序+宽度），
+      // 则按 column_config 重排/隐藏/设置宽度；column_config=[] 时显示全部字段。
+      if (isViewBound && currentView && currentView.column_config && currentView.column_config.length > 0) {
+        const ccMap = new Map(currentView.column_config.map(c => [c.key, c]))
+        // 标记可见性与宽度
+        fieldsData.forEach(f => {
+          const cc = ccMap.get(f.key)
+          if (cc) {
+            f.visible = cc.visible !== false
+            if (cc.width) f.width = cc.width
+            f.frozen = cc.frozen || false
+          } else {
+            // 不在 column_config 中的字段默认隐藏
+            f.visible = false
+          }
+        })
+        // 重排：column_config 中的字段按其 order 顺序排在前面
+        fieldsData.sort((a, b) => {
+          const oa = ccMap.get(a.key)?.order ?? 9999
+          const ob = ccMap.get(b.key)?.order ?? 9999
+          return oa - ob
+        })
+      } else {
+        // 大表直查 / column_config=[] 视图：应用 localStorage 持久化的可见性设置
+        try {
+          const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
+          if (hiddenRaw) {
+            const hiddenKeys: string[] = JSON.parse(hiddenRaw)
+            fieldsData.forEach(f => {
+              if (hiddenKeys.includes(f.key)) f.visible = false
+            })
+          }
+        } catch {}
+      }
+      setFields(fieldsData as FieldMeta[])
       const widths: Record<string, number> = {}
       fieldsData.forEach(f => {
         widths[f.key] = f.width || DEFAULT_COLUMN_WIDTH
@@ -106,7 +138,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     } catch (e) {
       console.error('Failed to load fields:', e)
     }
-  }, [])
+  }, [currentViewId, isViewBound, currentView])
 
   const loadCustomFields = useCallback(async () => {
     try {
@@ -120,36 +152,54 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const loadPatents = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, any> = {
-        page,
-        page_size: pageSize,
-        sort_by: sortField,
-        sort_order: sortOrder,
-      }
-      if (searchText) params.search = searchText
-      if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
-        params.database_id = currentDatabaseId
-      }
-      if (currentProductId) params.product_id = currentProductId
-
-      const allFilters: Record<string, any> = {}
-      Object.entries(filterValues).forEach(([key, value]) => {
-        if (value) {
-          allFilters[key] = { contains: value }
+      // P0-16：分支——视图模式 vs 大表直查
+      if (isViewBound && currentViewId != null) {
+        // 视图模式：合并视图自带 filter_config + 用户临时 extra_filters
+        const extraFilters: Record<string, any> = {}
+        Object.entries(filterValues).forEach(([key, value]) => {
+          if (value) extraFilters[key] = { contains: value }
+        })
+        const result = await viewApi.listPatents(currentViewId, {
+          page,
+          page_size: pageSize,
+          extra_filters: Object.keys(extraFilters).length > 0 ? extraFilters : undefined,
+        })
+        // 视图模式不应用 product_id 过滤（视图自身已定义 filter）
+        // 但保留 search 关键词（后端 list_view_patents 暂未支持 search，作为后续优化点）
+        setPatents(result.items as Patent[], result.total)
+      } else {
+        // 大表直查
+        const params: Record<string, any> = {
+          page,
+          page_size: pageSize,
+          sort_by: sortField,
+          sort_order: sortOrder,
         }
-      })
-      if (Object.keys(allFilters).length > 0) {
-        params.filters = JSON.stringify(allFilters)
-      }
+        if (searchText) params.search = searchText
+        if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
+          params.database_id = currentDatabaseId
+        }
+        if (currentProductId) params.product_id = currentProductId
 
-      const result = await patentApi.list(params)
-      setPatents(result.items, result.total)
+        const allFilters: Record<string, any> = {}
+        Object.entries(filterValues).forEach(([key, value]) => {
+          if (value) {
+            allFilters[key] = { contains: value }
+          }
+        })
+        if (Object.keys(allFilters).length > 0) {
+          params.filters = JSON.stringify(allFilters)
+        }
+
+        const result = await patentApi.list(params)
+        setPatents(result.items, result.total)
+      }
     } catch (e) {
       console.error('Failed to load patents:', e)
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, setPatents, setLoading, isViewBound, currentViewId])
 
   useEffect(() => {
     loadFields()
@@ -291,7 +341,14 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
 
   const handleCellSave = async (patentId: number, fieldKey: string, value: any) => {
     try {
-      await patentApi.updateCell(patentId, fieldKey, value)
+      // P0-16：vlf_ 视图本地字段走视图专用端点；共享字段编辑时带 source_view_id
+      if (fieldKey.startsWith('vlf_') && currentViewId != null) {
+        await viewApi.setLocalFieldValue(currentViewId, fieldKey, patentId, value)
+      } else {
+        await patentApi.updateCell(patentId, fieldKey, value, {
+          source_view_id: currentViewId ?? undefined,
+        })
+      }
       setEditingCell(null)
       loadPatents()
     } catch (e: any) {
@@ -776,6 +833,10 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   }
 
   const getFieldValue = (patent: Patent, fieldKey: string): any => {
+    // P0-16：vlf_ 视图本地字段从 view_local_fields 读取
+    if (fieldKey.startsWith('vlf_')) {
+      return (patent as ViewPatent).view_local_fields?.[fieldKey] ?? null
+    }
     const field = fields.find(f => f.key === fieldKey)
     if (!field) return null
     if (field.is_system) {
@@ -1002,6 +1063,44 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       <div className="datagrid-toolbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#111827' }}>专利列表</h2>
+          {/* P0-16：视图绑定提示 */}
+          {isViewBound && currentView ? (
+            <span
+              style={{
+                fontSize: 12,
+                padding: '2px 8px',
+                borderRadius: 4,
+                background: currentView.is_department_master ? '#fef3c7' : '#dbeafe',
+                color: currentView.is_department_master ? '#92400e' : '#1e40af',
+                border: `1px solid ${currentView.is_department_master ? '#fbbf24' : '#3b82f6'}`,
+                fontWeight: 500,
+              }}
+              title={
+                currentView.is_department_master
+                  ? '部门总表视图：显示全部字段、全部专利'
+                  : currentView.view_type === 'shared'
+                  ? '共享视图：库内成员可见'
+                  : '个人小表：仅自己可见'
+              }
+            >
+              {currentView.is_department_master ? '★ 部门总表' : `📋 ${currentView.name}`}
+              {currentView.view_type === 'shared' && !currentView.is_department_master ? '（共享）' : ''}
+            </span>
+          ) : (
+            <span
+              style={{
+                fontSize: 12,
+                padding: '2px 8px',
+                borderRadius: 4,
+                background: '#f1f5f9',
+                color: '#475569',
+                border: '1px solid #cbd5e1',
+              }}
+              title="直接查询大表全部专利，不应用任何视图"
+            >
+              🗂 大表直查
+            </span>
+          )}
           <span style={{ fontSize: 13, color: '#6b7280' }}>
             共 {totalPatents} 件{currentProductId ? ' · 当前产品筛选中' : ''}
           </span>

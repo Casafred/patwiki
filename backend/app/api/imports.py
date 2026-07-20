@@ -75,16 +75,18 @@ class ConfirmImportRequest(BaseModel):
     product_id: Optional[int] = None
     project_id: Optional[int] = None
     database_id: Optional[int] = None
+    view_id: Optional[int] = None  # P1-15：导入到指定视图时未知列建为 vlf_ 本地字段
 
 
 @router.post("/import/preview")
 async def preview_import(
     file: UploadFile = File(...),
+    view_id: Optional[int] = Form(None),  # P1-15：可选，传入则未知列建为视图本地字段
     db: Session = Depends(get_db),
 ):
     content = await file.read()
     df, columns = ImportService.parse_excel(content, file.filename or "upload.xlsx")
-    suggested_mapping = ImportService.suggest_mapping(columns, db)
+    suggested_mapping = ImportService.suggest_mapping(columns, db, view_id=view_id)
 
     preview_rows_list = []
     for _, row in df.head(3).iterrows():
@@ -99,11 +101,20 @@ async def preview_import(
         "path": str(temp_path),
         "filename": file.filename or "upload.xlsx",
         "created_at": time.time(),
+        "view_id": view_id,  # P1-15：缓存 view_id 供 confirm 使用
     }
 
     from app.services.database_service import DatabaseService
     databases = DatabaseService.list_databases(db)
     default_db = DatabaseService.get_default_database(db)
+
+    # P1-15：若指定 view_id，附带视图信息供前端展示
+    view_info = None
+    if view_id is not None:
+        from app.services.view_service import ViewService
+        v = ViewService.get_view(db, view_id)
+        if v:
+            view_info = ViewService.to_dict(v, include_fields=False)
 
     return {
         "import_id": import_id,
@@ -113,6 +124,7 @@ async def preview_import(
         "suggested_mapping": suggested_mapping,
         "databases": [DatabaseService.to_dict(d) for d in databases],
         "default_database_id": default_db.id if default_db else None,
+        "view": view_info,  # P1-15
     }
 
 
@@ -176,12 +188,30 @@ def confirm_import(
 
     mapping = {m.source_column: m.target_field for m in req.field_mappings if m.target_field}
 
+    # P1-15：解析 view_id（优先 req.view_id，回退到会话缓存）
+    view_id = req.view_id
+    if view_id is None:
+        view_id = info.get("view_id")
+    view_obj = None
+    if view_id is not None:
+        from app.services.view_service import ViewService
+        view_obj = ViewService.get_view(db, view_id)
+        if not view_obj:
+            raise HTTPException(status_code=400, detail=f"视图不存在：{view_id}")
+        # 视图必须属于当前 database_id
+        if view_obj.database_id != database_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"视图 {view_id} 不属于库 {database_id}",
+            )
+
     errors = []
     inserted = 0
     updated = 0
     duplicates_count = 0
     skipped = 0
     error_count = 0
+    view_local_written = 0  # P1-15：视图本地字段值写入计数
     BATCH_SIZE = 500
 
     try:
@@ -326,6 +356,22 @@ def confirm_import(
                             has_rel = virtual["family_numbers"] or virtual["cited_numbers"] or virtual["citing_numbers"]
                             if has_rel:
                                 pending_relations.append((current_patent, virtual))
+                            # P1-15：写入视图本地字段值（不污染大表）
+                            view_local_data = patent_data.get("view_local_fields")
+                            if view_local_data and view_obj is not None:
+                                from app.services.view_service import ViewService
+                                for vlf_key, vlf_value in view_local_data.items():
+                                    try:
+                                        ViewService.set_local_field_value(
+                                            db, view_obj, current_patent.id, vlf_key, vlf_value,
+                                            changed_by="import",
+                                        )
+                                        view_local_written += 1
+                                    except ValueError:
+                                        # 字段 key 不属于该视图，跳过
+                                        pass
+                                    except Exception as vlf_err:
+                                        print(f"[PatWiki] 视图本地字段写入警告: {vlf_err}", flush=True)
 
                 if (i + 1) % BATCH_SIZE == 0:
                     db.commit()

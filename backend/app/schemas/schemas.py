@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Optional, Any
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class BaseSchema(BaseModel):
@@ -105,6 +105,32 @@ class PatentListResponse(BaseSchema):
     page_size: int
 
 
+class BulkUpdateRequest(BaseModel):
+    """P1-8：批量更新专利的请求体。
+
+    主要路径：显式传 `updates` 字段。
+    向后兼容：旧客户端若未用 `updates` 包装（直接把字段平铺到顶层），
+    会通过 model_validator 把多余字段合并进 `updates`。
+    """
+    patent_ids: list[int]
+    updates: Optional[dict[str, Any]] = None
+    changed_by: Optional[str] = None
+    source: Optional[str] = None  # HistorySource 字符串：manual/bulk/import/ai/...
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def _merge_extra_into_updates(self) -> "BulkUpdateRequest":
+        """旧客户端可能直接把待更新字段平铺到 body（无 updates 包装），
+        此处将额外字段合并到 updates，保持向后兼容。"""
+        if self.updates is None:
+            extras = self.__pydantic_extra__ or {}
+            if extras:
+                self.updates = dict(extras)
+                self.__pydantic_extra__ = {}
+        return self
+
+
 class ProductBase(BaseSchema):
     name: str
     code: Optional[str] = None
@@ -202,6 +228,12 @@ class TagGroupCreate(TagGroupBase):
     pass
 
 
+class TagGroupUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
 class TagGroup(TagGroupBase):
     id: int
     tags: list[Tag] = []
@@ -288,6 +320,15 @@ class PersonCreate(PersonBase):
     pass
 
 
+class PersonUpdate(BaseSchema):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    department_id: Optional[int] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+
+
 class Person(PersonBase):
     id: int
     created_at: datetime
@@ -300,6 +341,11 @@ class DepartmentBase(BaseSchema):
 
 class DepartmentCreate(DepartmentBase):
     pass
+
+
+class DepartmentUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
 
 
 class Department(DepartmentBase):
@@ -392,12 +438,60 @@ class StatsResponse(BaseSchema):
 
 # ===== P0-13：部门级总表与小表（视图）相关 schema =====
 
+# ----- P1-11：标准化 filter_config / column_config / sort_config 结构 -----
+#
+# filter_config 结构（dict[field_key, ViewFilterRule]）：
+#   {
+#     "title": {"contains": "电池"},
+#     "legal_status": {"eq": "granted"},
+#     "custom_fields.cf_xxx": {"contains": "锂"}
+#   }
+#
+# column_config 结构（list[ViewColumnConfig]）：
+#   - []  = 显示全部字段（白名单为空等价全选，部门总表强制为此值）
+#   - 非空 = 白名单 + 排序 + 列宽（仅列出的字段会展示，order 升序）
+#
+# sort_config 结构（ViewSortConfig）：
+#   {"sort_by": "filing_date", "sort_order": "desc"}
+
+
+class ViewFilterRule(BaseSchema):
+    """单字段筛选规则（P1-11 标准化）。
+
+    - contains: 模糊匹配（字符串包含）
+    - eq: 精确匹配
+    - in_: 多值匹配（任一命中）
+    - gte / lte: 范围匹配（用于日期/数字）
+    """
+    contains: Optional[Any] = None
+    eq: Optional[Any] = None
+    in_: Optional[list[Any]] = Field(default=None, alias="in")
+    gte: Optional[Any] = None
+    lte: Optional[Any] = None
+
+    model_config = {"populate_by_name": True}
+
+
 class ViewColumnConfig(BaseSchema):
-    """视图列配置项。"""
+    """视图列配置项（P1-11 标准化）。
+
+    - key: 字段 key（系统字段名 / custom_fields.cf_xxx / view_local.vlf_xxx）
+    - visible: 是否显示（False 时该列被隐藏，仅在"全部字段"模式下生效）
+    - width: 列宽（像素）
+    - order: 排序序号（升序，从 0 开始）
+    - frozen: 是否冻结在左侧
+    """
     key: str
     visible: Optional[bool] = True
     width: Optional[int] = None
     order: Optional[int] = 0
+    frozen: Optional[bool] = False
+
+
+class ViewSortConfig(BaseSchema):
+    """视图排序配置（P1-11 标准化）。"""
+    sort_by: Optional[str] = None
+    sort_order: Optional[str] = "asc"  # asc / desc
 
 
 class PatentViewBase(BaseSchema):
@@ -405,6 +499,8 @@ class PatentViewBase(BaseSchema):
     description: Optional[str] = None
     database_id: int
     view_type: Optional[str] = "personal"  # personal / shared / department_master
+    # 标准化结构：filter_config={field_key: ViewFilterRule}, column_config=list[ViewColumnConfig]
+    # 注：column_config=[] 表示"显示全部字段"（白名单为空 = 全选）
     filter_config: Optional[dict[str, Any]] = {}
     column_config: Optional[list[dict[str, Any]]] = []
     sort_config: Optional[dict[str, Any]] = {}

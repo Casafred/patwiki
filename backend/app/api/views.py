@@ -159,7 +159,12 @@ def update_patent_field_in_view(
     body: ViewPatentCellUpdate = Body(...),
     db: Session = Depends(get_db),
 ):
-    """在视图中编辑共享字段——写入大表并记录来源视图。"""
+    """在视图中编辑共享字段——写入大表并记录来源视图。
+
+    P1-10：此端点保留为视图语义入口，但实际逻辑已合并到
+    PATCH /patents/{pid}/field/{key}（接受 source_view_id）。
+    内部直接复用 ViewService.update_shared_field_in_view 调用统一的 PatentService.update_patent。
+    """
     view = ViewService.get_view(db, view_id)
     if not view:
         raise HTTPException(status_code=404, detail="View not found")

@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
-import type { Patent, Product, Project, Tag, CustomField, AITask, PatentHistory } from '../../types'
+import type { Patent, Product, Project, Tag, CustomField, AITask, PatentHistory, FieldSource } from '../../types'
 
 interface PatentDetailPageProps {
   patentId: number
   onBack: () => void
 }
 
-type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'history'
+type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'history' | 'sources'
 
 export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageProps) {
   const [patent, setPatent] = useState<Patent | null>(null)
@@ -24,12 +24,23 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   const [aiTaskInfo, setAiTaskInfo] = useState<AITask | null>(null)
   const [history, setHistory] = useState<PatentHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  // P0-17：字段来源标注
+  const [fieldSources, setFieldSources] = useState<FieldSource[]>([])
+  const [viewLocalSources, setViewLocalSources] = useState<FieldSource[]>([])
+  const [sourcesLoading, setSourcesLoading] = useState(false)
 
   useEffect(() => {
     loadPatent()
     loadMeta()
     loadHistory()
   }, [patentId])
+
+  // P0-17：首次切入"字段来源" Tab 时加载来源数据
+  useEffect(() => {
+    if (activeTab === 'sources' && fieldSources.length === 0 && viewLocalSources.length === 0 && !sourcesLoading) {
+      loadFieldSources()
+    }
+  }, [activeTab])
 
   const loadPatent = async () => {
     setLoading(true)
@@ -54,6 +65,20 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       console.error('Failed to load history:', e)
     } finally {
       setHistoryLoading(false)
+    }
+  }
+
+  // P0-17：加载字段来源追溯
+  const loadFieldSources = async () => {
+    setSourcesLoading(true)
+    try {
+      const resp = await patentApi.getFieldSources(patentId)
+      setFieldSources(resp.sources || [])
+      setViewLocalSources(resp.view_local_sources || [])
+    } catch (e) {
+      console.error('Failed to load field sources:', e)
+    } finally {
+      setSourcesLoading(false)
     }
   }
 
@@ -185,6 +210,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     { key: 'ai', label: 'AI 分析' },
     { key: 'custom', label: '自定义字段' },
     { key: 'relations', label: '关联关系' },
+    { key: 'sources', label: '字段来源' },
     { key: 'history', label: `修改历史${history.length > 0 ? ` (${history.length})` : ''}` },
   ]
 
@@ -275,6 +301,14 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         )}
         {activeTab === 'relations' && (
           <RelationsTab patent={patent} tags={tags} projects={projects} editing={editing} updateField={updateField} />
+        )}
+        {activeTab === 'sources' && (
+          <FieldSourcesTab
+            sources={fieldSources}
+            viewLocalSources={viewLocalSources}
+            loading={sourcesLoading}
+            onReload={loadFieldSources}
+          />
         )}
         {activeTab === 'history' && (
           <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
@@ -772,13 +806,188 @@ function RelationsTab({ patent, tags, projects, editing, updateField }: {
   )
 }
 
+// ============ 字段来源追溯 Tab (P0-17) ============
+function FieldSourcesTab({ sources, viewLocalSources, loading, onReload }: {
+  sources: FieldSource[]
+  viewLocalSources: FieldSource[]
+  loading: boolean
+  onReload: () => void
+}) {
+  const SOURCE_BADGE: Record<string, { label: string; color: string; bg: string }> = {
+    manual:    { label: '手动', color: '#1e40af', bg: '#dbeafe' },
+    view_edit: { label: '视图编辑', color: '#155e75', bg: '#cffafe' },
+    bulk:      { label: '批量', color: '#6b21a8', bg: '#f3e8ff' },
+    ai:        { label: 'AI', color: '#065f46', bg: '#d1fae5' },
+    import:    { label: '导入', color: '#92400e', bg: '#fef3c7' },
+    promote:   { label: '字段提升', color: '#9d174d', bg: '#fce7f3' },
+    api:       { label: 'API', color: '#475569', bg: '#e2e8f0' },
+  }
+
+  const renderSourceBadge = (source?: string) => {
+    if (!source) return <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>
+    const badge = SOURCE_BADGE[source] || { label: source, color: '#475569', bg: '#e2e8f0' }
+    return (
+      <span style={{
+        padding: '1px 8px', borderRadius: 10, fontSize: 11,
+        background: badge.bg, color: badge.color, fontWeight: 500,
+      }}>
+        {badge.label}
+      </span>
+    )
+  }
+
+  const renderRow = (s: FieldSource, isViewLocal = false) => {
+    const time = s.last_changed_at ? new Date(s.last_changed_at).toLocaleString('zh-CN') : null
+    return (
+      <tr key={`${isViewLocal ? 'vl_' : ''}${s.field_key}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+        <td style={{ padding: '8px 10px', fontSize: 12 }}>
+          <div style={{ fontWeight: 600, color: '#0f172a' }}>
+            {s.field_display_name || s.field_key}
+            {isViewLocal && (
+              <span style={{
+                marginLeft: 6, padding: '0 6px', fontSize: 10, borderRadius: 8,
+                background: '#ede9fe', color: '#5b21b6', fontWeight: 500,
+              }} title="视图本地字段（仅存在于该视图，未提升为全局字段）">
+                vlf
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>{s.field_key}</div>
+        </td>
+        <td style={{ padding: '8px 10px', fontSize: 12, color: '#475569', maxWidth: 280, wordBreak: 'break-word' }}>
+          {s.current_value === null || s.current_value === undefined || s.current_value === ''
+            ? <span style={{ color: '#cbd5e1' }}>（空）</span>
+            : String(s.current_value).slice(0, 200)}
+        </td>
+        <td style={{ padding: '8px 10px' }}>{renderSourceBadge(s.last_source)}</td>
+        <td style={{ padding: '8px 10px', fontSize: 11, color: '#64748b' }}>
+          {s.source_view_name ? (
+            <span
+              style={{
+                padding: '1px 6px', borderRadius: 10, fontSize: 10,
+                background: '#f0f9ff', color: '#0369a1', border: '1px solid #bae6fd',
+              }}
+              title={`字段值由视图 "${s.source_view_name}" 写入${s.source_view_id ? ` (ID: ${s.source_view_id})` : ''}`}
+            >
+              📋 {s.source_view_name}
+            </span>
+          ) : (
+            <span style={{ color: '#cbd5e1' }}>—</span>
+          )}
+        </td>
+        <td style={{ padding: '8px 10px', fontSize: 11, color: '#64748b' }}>
+          {s.last_changed_by || <span style={{ color: '#cbd5e1' }}>—</span>}
+        </td>
+        <td style={{ padding: '8px 10px', fontSize: 11, color: '#64748b' }}>
+          {time || <span style={{ color: '#cbd5e1' }}>—</span>}
+        </td>
+      </tr>
+    )
+  }
+
+  return (
+    <div>
+      {/* 工具条 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ fontSize: 13, color: '#64748b' }}>
+          字段来源追溯：展示该专利每个字段当前值的最近一次修改来源，包括来自视图编辑的标注。
+          共 {sources.length + viewLocalSources.length} 个字段
+          {viewLocalSources.length > 0 && `（其中 ${viewLocalSources.length} 个视图本地字段）`}
+        </div>
+        <button className="btn btn-secondary" onClick={onReload} disabled={loading} style={{ fontSize: 13, padding: '4px 12px' }}>
+          {loading ? '刷新中...' : '刷新'}
+        </button>
+      </div>
+
+      {loading && sources.length === 0 && viewLocalSources.length === 0 ? (
+        <div className="loading-spinner">
+          <div className="spinner"></div>
+          加载中...
+        </div>
+      ) : sources.length === 0 && viewLocalSources.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-title">暂无字段来源数据</div>
+          <div className="empty-state-desc">
+            当字段被修改时（手动编辑、批量更新、AI 处理、导入、视图内编辑），最后一次修改来源会记录在此处。
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* 全局字段来源 */}
+          {sources.length > 0 && (
+            <div>
+              <div style={{
+                fontSize: 12, color: '#475569', marginBottom: 8, fontWeight: 600,
+                paddingBottom: 4, borderBottom: '1px solid #e2e8f0',
+              }}>
+                全局字段（系统字段 + 自定义字段 + AI 字段） · {sources.length} 个
+              </div>
+              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#64748b', fontWeight: 600 }}>字段</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#64748b', fontWeight: 600 }}>当前值</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#64748b', fontWeight: 600 }}>来源</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#64748b', fontWeight: 600 }}>来自视图</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#64748b', fontWeight: 600 }}>修改人</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#64748b', fontWeight: 600 }}>修改时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sources.map(s => renderRow(s, false))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 视图本地字段来源 */}
+          {viewLocalSources.length > 0 && (
+            <div>
+              <div style={{
+                fontSize: 12, color: '#5b21b6', marginBottom: 8, fontWeight: 600,
+                paddingBottom: 4, borderBottom: '1px solid #e2e8f0',
+              }}>
+                视图本地字段（vlf_） · {viewLocalSources.length} 个
+                <span style={{ marginLeft: 8, color: '#94a3b8', fontWeight: 400 }}>
+                  这些字段值仅在对应视图中可见；可通过"字段提升"升级为全局自定义字段
+                </span>
+              </div>
+              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#faf5ff', borderBottom: '1px solid #e2e8f0' }}>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#6b21a8', fontWeight: 600 }}>字段</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#6b21a8', fontWeight: 600 }}>当前值</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#6b21a8', fontWeight: 600 }}>来源</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#6b21a8', fontWeight: 600 }}>来自视图</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#6b21a8', fontWeight: 600 }}>修改人</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, color: '#6b21a8', fontWeight: 600 }}>修改时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewLocalSources.map(s => renderRow(s, true))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ============ 修改历史 Tab ============
 const SOURCE_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  manual:  { label: '手动', color: '#1e40af', bg: '#dbeafe' },
-  bulk:    { label: '批量', color: '#6b21a8', bg: '#f3e8ff' },
-  ai:      { label: 'AI', color: '#065f46', bg: '#d1fae5' },
-  import:  { label: '导入', color: '#92400e', bg: '#fef3c7' },
-  api:     { label: 'API', color: '#475569', bg: '#e2e8f0' },
+  manual:    { label: '手动', color: '#1e40af', bg: '#dbeafe' },
+  view_edit: { label: '视图编辑', color: '#155e75', bg: '#cffafe' },
+  bulk:      { label: '批量', color: '#6b21a8', bg: '#f3e8ff' },
+  ai:        { label: 'AI', color: '#065f46', bg: '#d1fae5' },
+  import:    { label: '导入', color: '#92400e', bg: '#fef3c7' },
+  promote:   { label: '字段提升', color: '#9d174d', bg: '#fce7f3' },
+  api:       { label: 'API', color: '#475569', bg: '#e2e8f0' },
 }
 
 function formatValue(v: string | null | undefined): string {
@@ -813,7 +1022,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
     groups[day].push(h)
   })
 
-  const sourceOptions = ['all', 'manual', 'bulk', 'ai', 'import', 'api']
+  const sourceOptions = ['all', 'manual', 'view_edit', 'bulk', 'ai', 'import', 'promote', 'api']
 
   return (
     <div>
@@ -894,6 +1103,19 @@ function HistoryTab({ patent, history, loading, onReload }: {
                           }}>
                             {src.label}
                           </span>
+                          {/* P0-17：视图来源标注 */}
+                          {h.source_view_name && (
+                            <span
+                              style={{
+                                padding: '1px 6px', borderRadius: 10, fontSize: 10,
+                                background: '#f0f9ff', color: '#0369a1',
+                                border: '1px solid #bae6fd',
+                              }}
+                              title={`此修改在视图内进行：${h.source_view_name}${h.source_view_id ? ` (ID: ${h.source_view_id})` : ''}`}
+                            >
+                              📋 {h.source_view_name}
+                            </span>
+                          )}
                           {h.changed_by && (
                             <span style={{ fontSize: 11, color: '#94a3b8' }}>· {h.changed_by}</span>
                           )}

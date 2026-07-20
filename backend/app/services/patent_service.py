@@ -344,11 +344,19 @@ class PatentService:
         return patent
 
     @staticmethod
-    def bulk_update(db: Session, patent_ids: list[int], updates: dict) -> int:
+    def bulk_update(
+        db: Session,
+        patent_ids: list[int],
+        updates: dict,
+        changed_by: Optional[str] = None,
+        source: str = "bulk",
+    ) -> int:
         count = 0
         patents = db.query(Patent).filter(Patent.id.in_(patent_ids)).all()
         for patent in patents:
-            PatentService.update_patent(db, patent, updates, source="bulk")
+            PatentService.update_patent(
+                db, patent, updates, source=source, changed_by=changed_by
+            )
             count += 1
         return count
 

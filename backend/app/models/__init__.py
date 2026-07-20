@@ -23,6 +23,7 @@ from app.models.enums import (
     LegalStatus, PatentType, ProjectRole, RiskLevel,
     ImportBatchStatus, CustomFieldType,
     RelationType, DocumentRole,
+    HistorySource,
 )
 
 # 关联表
@@ -71,6 +72,7 @@ __all__ = [
     "LegalStatus", "PatentType", "ProjectRole", "RiskLevel",
     "ImportBatchStatus", "CustomFieldType",
     "RelationType", "DocumentRole",
+    "HistorySource",
     # association
     "patent_tag", "patent_project", "PatentProjectLink",
     # organization

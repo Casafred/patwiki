@@ -346,11 +346,25 @@ def get_system_field_meta(key: str) -> dict | None:
     return None
 
 
-def get_all_fields_meta(db) -> list[dict]:
+def get_all_fields_meta(db, view_id: int | None = None) -> list[dict]:
+    """获取所有字段元数据（系统字段 + 自定义字段）。
+
+    P1-12 扩展：若传入 view_id，则额外返回该视图的 view_local_fields，
+    并为每个字段标注 source（system / custom / view_local）和视图相关属性。
+
+    返回结构（每项额外字段）：
+    - is_system: bool
+    - is_ai: bool (仅 custom)
+    - source: "system" | "custom" | "view_local"
+    - view_id: int (仅 view_local)
+    - view_local_field_id: int (仅 view_local)
+    - is_promoted: bool (仅 view_local)
+    - promoted_field_key: str | None (仅 view_local)
+    """
     from app.models import CustomField
     fields = []
     for sf in SYSTEM_FIELDS_REGISTRY:
-        fields.append({**sf, "is_system": True})
+        fields.append({**sf, "is_system": True, "source": "system"})
     custom_fields = db.query(CustomField).filter(CustomField.is_active == True).order_by(CustomField.sort_order, CustomField.name).all()
     for cf in custom_fields:
         fields.append({
@@ -367,10 +381,60 @@ def get_all_fields_meta(db) -> list[dict]:
             "frozen": False,
             "visible": True,
             "is_system": False,
+            "source": "custom",
             "is_ai": (cf.ai_config is not None),
             "ai_config": cf.ai_config,
             "description": cf.description,
             "id": cf.id,
             "sort_order": cf.sort_order,
         })
+
+    # P1-12：附加视图本地字段
+    if view_id is not None:
+        from app.models import PatentView, ViewLocalField
+        view = db.query(PatentView).filter(PatentView.id == view_id).first()
+        if view is not None:
+            local_fields = (
+                db.query(ViewLocalField)
+                .filter(ViewLocalField.view_id == view_id)
+                .order_by(ViewLocalField.sort_order, ViewLocalField.id)
+                .all()
+            )
+            for lf in local_fields:
+                # 已提升的本地字段在 custom 字段中已存在，跳过避免重复
+                if lf.is_promoted and lf.promoted_field_key:
+                    # 在对应的 custom 字段上标注"来自视图 X 提升"
+                    for f in fields:
+                        if f.get("key") == lf.promoted_field_key:
+                            f["promoted_from_view_id"] = view.id
+                            f["promoted_from_view_name"] = view.name
+                            f["promoted_from_local_field_id"] = lf.id
+                            break
+                    continue
+                fields.append({
+                    "key": lf.key,
+                    "name": lf.name,
+                    "field_type": lf.field_type,
+                    "group_name": f"小表·{view.name}",
+                    "options": lf.options,
+                    "option_labels": None,
+                    "width": 140,
+                    "sortable": lf.field_type in ("text", "number", "date", "select", "boolean"),
+                    "filterable": True,
+                    "editable": True,
+                    "frozen": False,
+                    "visible": True,
+                    "is_system": False,
+                    "source": "view_local",
+                    "is_ai": False,
+                    "description": lf.description,
+                    "id": lf.id,
+                    "sort_order": lf.sort_order,
+                    "view_id": view.id,
+                    "view_name": view.name,
+                    "view_local_field_id": lf.id,
+                    "is_promoted": lf.is_promoted,
+                    "promoted_field_key": lf.promoted_field_key,
+                })
+
     return fields

@@ -9,11 +9,13 @@ import SharingPage from './components/settings/SharingPage'
 import AgentAnalysisPage from './components/analytics/AgentAnalysisPage'
 import ImportModal from './components/import/ImportModal'
 import AITaskMonitor from './components/ai/AITaskMonitor'
+import ViewManagementPage from './components/views/ViewManagementPage'
+import MetadataManagementPage from './components/settings/MetadataManagementPage'
 import { productApi, customFieldApi, tagApi, projectApi, databaseApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
 
-type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing'
+type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'views' | 'metadata'
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('patents')
@@ -119,6 +121,10 @@ function App() {
             <AITaskMonitor />
           ) : currentPage === 'agent-analysis' ? (
             <AgentAnalysisPage />
+          ) : currentPage === 'views' ? (
+            <ViewManagementPage />
+          ) : currentPage === 'metadata' ? (
+            <MetadataManagementPage />
           ) : null}
         </div>
       </div>

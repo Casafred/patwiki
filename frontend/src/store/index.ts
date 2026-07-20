@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, User } from '../types'
+import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, User, PatentView } from '../types'
 
 const CURRENT_USER_STORAGE_KEY = 'patwiki_current_user'
+const CURRENT_VIEW_STORAGE_KEY_PREFIX = 'patwiki_current_view_'
 
 interface AppState {
   patents: Patent[]
@@ -15,6 +16,11 @@ interface AppState {
   currentDatabaseId: number | null
   setDatabases: (databases: PatentDatabase[]) => void
   setCurrentDatabaseId: (id: number | null) => void
+  // P0-14：视图相关
+  views: PatentView[]
+  currentViewId: number | null  // null = 显示大表（无视图筛选）
+  setViews: (views: PatentView[]) => void
+  setCurrentViewId: (id: number | null) => void
   currentProductId: number | null
   loading: boolean
   selectedIds: number[]
@@ -45,6 +51,31 @@ function loadCurrentUserFromStorage(): User | null {
   }
 }
 
+// P0-14：当前视图 ID 按库 ID 持久化（每个库记住上次切到的视图）
+function loadCurrentViewIdFromStorage(databaseId: number | null): number | null {
+  if (databaseId == null) return null
+  try {
+    const raw = localStorage.getItem(CURRENT_VIEW_STORAGE_KEY_PREFIX + String(databaseId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return typeof parsed === 'number' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function saveCurrentViewIdToStorage(databaseId: number | null, viewId: number | null) {
+  if (databaseId == null) return
+  const key = CURRENT_VIEW_STORAGE_KEY_PREFIX + String(databaseId)
+  try {
+    if (viewId == null) {
+      localStorage.removeItem(key)
+    } else {
+      localStorage.setItem(key, JSON.stringify(viewId))
+    }
+  } catch {}
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   patents: [],
   totalPatents: 0,
@@ -55,7 +86,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   databases: [],
   currentDatabaseId: null,
   setDatabases: (databases) => set({ databases }),
-  setCurrentDatabaseId: (currentDatabaseId) => set({ currentDatabaseId }),
+  setCurrentDatabaseId: (currentDatabaseId) => set({
+    currentDatabaseId,
+    // 切换库时重置当前视图：先恢复该库上次记住的视图 ID，由调用方后续 setViews 后再决定是否有效
+    currentViewId: loadCurrentViewIdFromStorage(currentDatabaseId),
+    views: [],
+  }),
+  // P0-14：视图状态
+  views: [],
+  currentViewId: null,
+  setViews: (views) => set({ views }),
+  setCurrentViewId: (viewId) => {
+    const { currentDatabaseId } = get()
+    saveCurrentViewIdToStorage(currentDatabaseId, viewId)
+    set({ currentViewId: viewId })
+  },
   currentProductId: null,
   loading: false,
   selectedIds: [],

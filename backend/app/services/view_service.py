@@ -91,6 +91,14 @@ class ViewService:
                 raise ValueError(f"库 {database_id} 已存在部门总表视图（id={existing.id}）")
             view_type = "department_master"
 
+        # P1-11/P1-14：标准化 + 部门总表列策略
+        filter_config = ViewService._normalize_filter_config(filter_config)
+        column_config = ViewService._normalize_column_config(column_config)
+        sort_config = ViewService._normalize_sort_config(sort_config)
+        # 部门总表强制全字段：column_config 必须为 []
+        if is_department_master:
+            column_config = []
+
         view = PatentView(
             name=name,
             description=description,
@@ -98,9 +106,9 @@ class ViewService:
             owner_id=owner_id,
             view_type=view_type,
             is_department_master=is_department_master,
-            filter_config=filter_config or {},
-            column_config=column_config or [],
-            sort_config=sort_config or {},
+            filter_config=filter_config,
+            column_config=column_config,
+            sort_config=sort_config,
         )
         db.add(view)
         db.commit()
@@ -109,6 +117,18 @@ class ViewService:
 
     @staticmethod
     def update_view(db: Session, view: PatentView, updates: dict) -> PatentView:
+        # P1-11/P1-14：标准化更新值；部门总表禁止改 column_config
+        if "filter_config" in updates and updates["filter_config"] is not None:
+            updates["filter_config"] = ViewService._normalize_filter_config(updates["filter_config"])
+        if "column_config" in updates and updates["column_config"] is not None:
+            normalized = ViewService._normalize_column_config(updates["column_config"])
+            # 部门总表强制 column_config=[]，忽略任何非空更新
+            if view.is_department_master and normalized:
+                raise ValueError("部门总表视图必须显示全部字段，不允许列裁剪")
+            updates["column_config"] = normalized
+        if "sort_config" in updates and updates["sort_config"] is not None:
+            updates["sort_config"] = ViewService._normalize_sort_config(updates["sort_config"])
+
         for k, v in updates.items():
             if v is not None and hasattr(view, k):
                 setattr(view, k, v)
@@ -116,6 +136,155 @@ class ViewService:
         db.commit()
         db.refresh(view)
         return view
+
+    # ========== P1-16：视图编辑权限继承库成员角色 ==========
+
+    @staticmethod
+    def get_user_role(db: Session, database_id: int, user_id: Optional[int]) -> Optional[str]:
+        """获取用户在某库的角色。返回 owner / editor / viewer / None。
+
+        - user_id 为 None：未登录用户，返回 None（公共访问）
+        - 用户不在 members 表中但库无 owner：返回 None
+        - 用户不在 members 表中但库 owner_id 匹配：返回 owner
+        - 数据库 owner_id 为空且无任何成员：视为公共库，返回 editor（开发模式默认可写）
+        """
+        from app.models import PatentDatabase, DatabaseMembership, User
+        if user_id is None:
+            return None
+        # 1. 显式成员关系
+        m = db.query(DatabaseMembership).filter(
+            DatabaseMembership.user_id == user_id,
+            DatabaseMembership.database_id == database_id,
+        ).first()
+        if m:
+            return m.role
+        # 2. 库的 owner_id
+        d = db.query(PatentDatabase).filter(PatentDatabase.id == database_id).first()
+        if d and d.owner_id == user_id:
+            return "owner"
+        # 3. 库无 owner 且无任何成员：视为公共库
+        if d and d.owner_id is None:
+            cnt = db.query(DatabaseMembership).filter(DatabaseMembership.database_id == database_id).count()
+            if cnt == 0:
+                return "editor"
+        return None
+
+    @staticmethod
+    def check_view_write_permission(db: Session, view: PatentView, user_id: Optional[int]) -> bool:
+        """校验用户是否可编辑视图（P1-16）。
+
+        - owner: 可编辑任何视图（含部门总表）
+        - editor: 可编辑自己的个人视图、共享视图；不可编辑部门总表
+        - viewer: 不可编辑任何视图
+        - 无角色（None）：开发模式下默认允许（便于本地调试），生产环境应拒绝
+        """
+        role = ViewService.get_user_role(db, view.database_id, user_id)
+        if role == "owner":
+            return True
+        if role == "editor":
+            # 部门总表仅 owner 可改
+            if view.is_department_master:
+                return False
+            # editor 可改自己拥有的视图、shared 视图
+            if view.owner_id is None or view.owner_id == user_id:
+                return True
+            if view.view_type == "shared":
+                return True
+            return False
+        if role == "viewer":
+            return False
+        # role 为 None：开发模式默认允许（保持向后兼容）
+        # 生产环境应改为 return False
+        return True
+
+    @staticmethod
+    def require_view_write_permission(db: Session, view: PatentView, user_id: Optional[int]) -> None:
+        """校验权限，不通过则抛 ValueError。"""
+        if not ViewService.check_view_write_permission(db, view, user_id):
+            raise ValueError(f"用户 {user_id} 无编辑视图「{view.name}」的权限")
+
+    # ========== P1-11：filter/column/sort 标准化 ==========
+
+    @staticmethod
+    def _normalize_filter_config(config: Optional[dict]) -> dict:
+        """标准化 filter_config：dict[field_key, {contains/eq/in/gte/lte}]。
+
+        非法值会被忽略，返回空 dict 表示无筛选。
+        """
+        if not config or not isinstance(config, dict):
+            return {}
+        result: dict[str, Any] = {}
+        for k, v in config.items():
+            if not isinstance(k, str) or not k:
+                continue
+            if v is None:
+                continue
+            # 简单字符串值 → 自动包装为 contains
+            if isinstance(v, str) or isinstance(v, (int, float, bool)):
+                result[k] = {"contains": v}
+                continue
+            if isinstance(v, dict):
+                # 过滤掉 None 值
+                clean = {kk: vv for kk, vv in v.items() if vv is not None and vv != ""}
+                if clean:
+                    # "in" → "in_" 兼容（存储时仍用 "in" 字符串）
+                    result[k] = clean
+                continue
+        return result
+
+    @staticmethod
+    def _normalize_column_config(config: Optional[list]) -> list:
+        """标准化 column_config：list[{key, visible, width, order, frozen}]。
+
+        - [] 或 None = 显示全部字段
+        - 非空 = 白名单 + 排序 + 列宽
+        """
+        if not config or not isinstance(config, list):
+            return []
+        result: list[dict] = []
+        seen_keys: set[str] = set()
+        for item in config:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if not key or not isinstance(key, str) or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            result.append({
+                "key": key,
+                "visible": bool(item.get("visible", True)),
+                "width": item.get("width") if isinstance(item.get("width"), int) else None,
+                "order": item.get("order", 0) if isinstance(item.get("order", 0), int) else 0,
+                "frozen": bool(item.get("frozen", False)),
+            })
+        # 按 order 升序
+        result.sort(key=lambda x: x["order"])
+        return result
+
+    @staticmethod
+    def _normalize_sort_config(config: Optional[dict]) -> dict:
+        """标准化 sort_config：{sort_by, sort_order}。"""
+        if not config or not isinstance(config, dict):
+            return {}
+        sort_by = config.get("sort_by")
+        sort_order = config.get("sort_order", "asc")
+        if not sort_by or not isinstance(sort_by, str):
+            return {}
+        if sort_order not in ("asc", "desc"):
+            sort_order = "asc"
+        return {"sort_by": sort_by, "sort_order": sort_order}
+
+    @staticmethod
+    def is_show_all_columns(view: PatentView) -> bool:
+        """判断视图是否显示全部字段（column_config=[] 语义）。
+
+        P1-11：column_config=[] 明确表示"显示全部字段"（白名单为空 = 全选）。
+        部门总表视图始终为 True。
+        """
+        if view.is_department_master:
+            return True
+        cc = view.column_config or []
+        return len(cc) == 0
 
     @staticmethod
     def archive_view(db: Session, view: PatentView) -> PatentView:
@@ -370,6 +539,7 @@ class ViewService:
         - 系统字段：直接 setattr
         - custom_fields.{key}：更新 Patent.custom_fields
         - 历史记录 source_view_id / source_view_name 自动填充
+        - P1-13：source 标记为 view_edit（区别于大表直接编辑的 manual）
         """
         patent = db.query(Patent).filter(Patent.id == patent_id).first()
         if not patent:
@@ -383,9 +553,10 @@ class ViewService:
             update_data = {field_key: value}
 
         # 通过 PatentService.update_patent 写入（自动产生历史并注入来源视图信息）
+        # P1-13：source 使用 view_edit 而非 manual，便于区分大表直接编辑 vs 小表编辑
         updated_patent = PatentService.update_patent(
             db, patent, update_data,
-            source="manual",
+            source="view_edit",
             changed_by=changed_by,
             source_view_id=view.id,
             source_view_name=view.name,

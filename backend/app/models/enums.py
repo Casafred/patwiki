@@ -76,3 +76,24 @@ class DocumentRole(str, enum.Enum):
     FILE_WRAPPER = "file_wrapper"    # 案卷
     CITED = "cited"                  # 被引用文献
     OTHER = "other"
+
+
+class HistorySource(str, enum.Enum):
+    """专利字段修改来源类型（P1-13）。
+
+    用于 PatentHistory.source 字段，实现完整溯源：
+    - manual: 大表上手动编辑
+    - view_edit: 在小表视图中编辑共享字段（同时记录 source_view_id）
+    - import: Excel 导入合并
+    - ai: AI 字段计算
+    - promote: 视图本地字段提升为全局字段
+    - bulk: 批量编辑
+    - api: 其他 API 调用
+    """
+    MANUAL = "manual"
+    VIEW_EDIT = "view_edit"
+    IMPORT = "import"
+    AI = "ai"
+    PROMOTE = "promote"
+    BULK = "bulk"
+    API = "api"

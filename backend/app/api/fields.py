@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Any
+from typing import Any, Optional
 from datetime import date
 
 from app.database import get_db
@@ -13,12 +13,29 @@ router = APIRouter(tags=["fields"])
 
 
 @router.get("/fields")
-def list_fields(db: Session = Depends(get_db)):
-    return get_all_fields_meta(db)
+def list_fields(
+    view_id: Optional[int] = Query(None, description="视图 ID：传入则附加该视图的本地字段元数据"),
+    db: Session = Depends(get_db),
+):
+    """列出所有字段元数据（系统字段 + 自定义字段）。
+
+    P1-12 扩展：传入 view_id 时附加该视图的 view_local_fields，
+    每项标注 source（system / custom / view_local）。
+    """
+    return get_all_fields_meta(db, view_id=view_id)
 
 
 class CellUpdateRequest(BaseModel):
+    """单元格更新请求（P1-10 扩展：支持 source_view_id）。
+
+    - value: 新值
+    - changed_by: 修改人用户名（可选）
+    - source_view_id: 来源视图 ID（可选）。传入时表示在小表中编辑共享字段，
+      会自动写入 PatentHistory.source_view_id/source_view_name，并将 source 标记为 view_edit。
+    """
     value: Any
+    changed_by: Optional[str] = None
+    source_view_id: Optional[int] = None
 
 
 def _resolve_field_display_name(db: Session, field_key: str) -> str:
@@ -34,6 +51,22 @@ def _resolve_field_display_name(db: Session, field_key: str) -> str:
     return field_key
 
 
+def _resolve_view_info(db: Session, view_id: Optional[int]) -> tuple[Optional[int], Optional[str], str]:
+    """P1-10：解析 source_view_id 为 (view_id, view_name, source)。
+
+    - view_id 为空 → (None, None, "manual")  大表直接编辑
+    - view_id 有效 → (id, name, "view_edit")  小表编辑共享字段
+    - view_id 无效 → 抛 400
+    """
+    if view_id is None:
+        return None, None, "manual"
+    from app.models import PatentView
+    view = db.query(PatentView).filter(PatentView.id == view_id).first()
+    if not view:
+        raise HTTPException(status_code=400, detail=f"视图不存在：{view_id}")
+    return view.id, view.name, "view_edit"
+
+
 @router.patch("/patents/{patent_id}/field/{field_key}")
 def update_cell(
     patent_id: int,
@@ -41,9 +74,17 @@ def update_cell(
     req: CellUpdateRequest,
     db: Session = Depends(get_db),
 ):
+    """更新单个字段值（P1-10：合并了 views.py 中的重复端点）。
+
+    - 系统字段直接 setattr；custom_fields.{key} 更新 Patent.custom_fields
+    - 自动写入 PatentHistory；source 由 source_view_id 决定（manual / view_edit）
+    - 若传入 source_view_id，会同时记录 source_view_name，便于追溯"从哪个小表改的"
+    """
     patent = db.query(Patent).filter(Patent.id == patent_id).first()
     if not patent:
         raise HTTPException(status_code=404, detail="Patent not found")
+
+    source_view_id, source_view_name, source = _resolve_view_info(db, req.source_view_id)
 
     history_entry = None
     if field_key in SYSTEM_FIELD_KEYS:
@@ -65,7 +106,10 @@ def update_cell(
                 field_display_name=_resolve_field_display_name(db, field_key),
                 old_value=_stringify_value(old_value),
                 new_value=_stringify_value(value),
-                source="manual",
+                source=source,
+                changed_by=req.changed_by,
+                source_view_id=source_view_id,
+                source_view_name=source_view_name,
             )
         setattr(patent, field_key, value)
     else:
@@ -78,7 +122,10 @@ def update_cell(
                 field_display_name=_resolve_field_display_name(db, field_key),
                 old_value=_stringify_value(old_v),
                 new_value=_stringify_value(req.value),
-                source="manual",
+                source=source,
+                changed_by=req.changed_by,
+                source_view_id=source_view_id,
+                source_view_name=source_view_name,
             )
         current[field_key] = req.value
         patent.custom_fields = current
@@ -88,7 +135,13 @@ def update_cell(
         db.add(history_entry)
     db.commit()
     db.refresh(patent)
-    return {"success": True}
+    return {
+        "success": True,
+        "patent_id": patent.id,
+        "field_key": field_key,
+        "source_view_id": source_view_id,
+        "source_view_name": source_view_name,
+    }
 
 
 @router.post("/patents/{patent_id}/fields")

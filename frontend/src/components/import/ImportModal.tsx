@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
-import { importApi, databaseApi } from '../../api'
+import { importApi, databaseApi, productApi, projectApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { ImportPreview, FieldMapping } from '../../types'
+import type { ImportPreview, FieldMapping, Product, Project } from '../../types'
 
 interface ImportModalProps {
   onClose: () => void
@@ -78,6 +78,26 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [showCreateDb, setShowCreateDb] = useState(false)
   const [newDbName, setNewDbName] = useState('')
   const [newDbDesc, setNewDbDesc] = useState('')
+
+  // P1-7：产品/项目下拉填充
+  const [products, setProducts] = useState<Product[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+
+  // P1-7：根据当前库加载产品 / 项目列表
+  useEffect(() => {
+    const dbId = selectedDatabaseId || currentDatabaseId
+    if (dbId == null) {
+      setProducts([])
+      setProjects([])
+      return
+    }
+    const params: Record<string, any> = { database_id: dbId }
+    productApi.list(params).then(setProducts).catch(e => console.error('Failed to load products:', e))
+    projectApi.list(params).then(setProjects).catch(e => console.error('Failed to load projects:', e))
+    // 切库时清空已选产品/项目
+    setSelectedProductId('')
+    setSelectedProjectId('')
+  }, [selectedDatabaseId, currentDatabaseId])
 
   // P0-12：库列表为空时自动跳到 chooseDatabase；有库时默认 upload
   useEffect(() => {
@@ -426,13 +446,29 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>关联产品（可选）</label>
                   <select className="form-input" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value ? Number(e.target.value) : '')}>
                     <option value="">不关联产品</option>
+                    {products.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ''}</option>
+                    ))}
                   </select>
+                  {products.length === 0 && (
+                    <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                      当前库暂无产品。可到"元数据管理 → 产品"创建。
+                    </div>
+                  )}
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>关联项目（可选）</label>
                   <select className="form-input" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value ? Number(e.target.value) : '')}>
                     <option value="">不关联项目</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ''}</option>
+                    ))}
                   </select>
+                  {projects.length === 0 && (
+                    <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                      当前库暂无项目。可到"元数据管理 → 项目"创建。
+                    </div>
+                  )}
                 </div>
               </div>
 
