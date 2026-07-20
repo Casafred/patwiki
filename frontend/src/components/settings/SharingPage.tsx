@@ -58,7 +58,15 @@ export default function SharingPage() {
       setNewDisplayName('')
       setShowCreateUser(false)
     } catch (e: any) {
-      alert(e?.response?.data?.detail || '创建用户失败')
+      const detail = e?.response?.data?.detail || '创建用户失败'
+      // 若是用户名已存在，自动刷新用户列表（用户可能不知道之前已创建过），
+      // 并在文案中提示"可在上方点击切换为该身份"
+      if (typeof detail === 'string' && detail.includes('已存在')) {
+        await loadUsers()
+        alert(`${detail}\n\n可在上方"已有用户"列表中点击该用户名直接切换为该身份，无需重复创建。`)
+      } else {
+        alert(detail)
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   productApi, projectApi, tagApi, tagGroupApi,
   departmentApi, personApi,
@@ -69,20 +69,24 @@ function useCrud<T extends { id: number }>(loadFn: () => Promise<T[]>) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 用 ref 持有最新的 loadFn，避免 loadFn 每次渲染都是新引用触发 useEffect 死循环
+  const loadFnRef = useRef(loadFn)
+  loadFnRef.current = loadFn
+
   const reload = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const data = await loadFn()
+      const data = await loadFnRef.current()
       setItems(data)
     } catch (e: any) {
       setError(e?.message || '加载失败')
     } finally {
       setLoading(false)
     }
-  }, [loadFn])
+  }, [])  // 空依赖 → reload 引用稳定
 
-  useEffect(() => { reload() }, [reload])
+  useEffect(() => { reload() }, [reload])  // 只在 mount 时执行一次
 
   return { items, setItems, loading, error, reload }
 }
