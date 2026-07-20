@@ -5,7 +5,7 @@ import type { PatentView } from '../../types'
 
 interface SidebarProps {
   currentPage: string
-  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'views' | 'metadata') => void
+  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'views' | 'metadata' | 'import-history') => void
 }
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
@@ -379,6 +379,12 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           onClick={() => onNavigate('metadata')}
         >
           元数据管理
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`}
+          onClick={() => onNavigate('import-history')}
+        >
+          导入历史
         </div>
         <div
           className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`}

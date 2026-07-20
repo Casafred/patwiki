@@ -143,9 +143,14 @@ export interface ImportBatch {
   duplicate_count: number
   skipped_count: number
   error_count: number
+  view_local_written?: number
+  dedupe_by?: string
+  database_id?: number | null
+  view_id?: number | null
   started_at?: string
   completed_at?: string
   created_at: string
+  errors?: any[]
 }
 
 export interface ImportPreview {
@@ -276,6 +281,21 @@ export interface FieldSource {
   view_id?: number | null
   is_promoted?: boolean
   promoted_field_key?: string | null
+}
+
+// P2-3：AI 字段值（含人工覆盖状态）
+export interface AIFieldValueInfo {
+  id: number
+  field_key: string
+  field_name: string
+  ai_value: string | null
+  model_name?: string | null
+  is_overridden: boolean
+  display_value: string | null
+  overridden_value: string | null
+  overridden_at: string | null
+  created_at?: string
+  updated_at?: string
 }
 
 // ============================================================

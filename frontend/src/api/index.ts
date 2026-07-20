@@ -5,7 +5,7 @@ import type {
   AITask, FieldMetaWithView, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory,
   PatentView, ViewLocalField, ViewPatentListResponse, ViewFilterRule,
-  ViewColumnConfig, ViewSortConfig, FieldSource,
+  ViewColumnConfig, ViewSortConfig, FieldSource, AIFieldValueInfo,
 } from '../types'
 
 export const fieldApi = {
@@ -86,6 +86,24 @@ export const patentApi = {
     sources: FieldSource[]
     view_local_sources: FieldSource[]
   }> => api.get(`/patents/${patentId}/field-sources`),
+
+  // P2-3：AI 字段值人工覆盖
+  getAIValues: (patentId: number): Promise<AIFieldValueInfo[]> =>
+    api.get(`/patents/${patentId}/ai-values`),
+
+  overrideAIValue: (
+    patentId: number,
+    fieldKey: string,
+    value: string | null,
+    changedBy?: string,
+  ): Promise<AIFieldValueInfo> =>
+    api.put(`/patents/${patentId}/ai-values/${fieldKey}`, {
+      value,
+      changed_by: changedBy,
+    }),
+
+  clearAIOverride: (patentId: number, fieldKey: string): Promise<AIFieldValueInfo> =>
+    api.delete(`/patents/${patentId}/ai-values/${fieldKey}/override`),
 }
 
 export const productApi = {
@@ -161,10 +179,11 @@ export const importApi = {
     })
   },
 
-  listBatches: (params: Record<string, any> = {}): Promise<ImportBatch[]> =>
+  // P2-2：返回 {total, items}
+  listBatches: (params: Record<string, any> = {}): Promise<{ total: number; items: ImportBatch[] }> =>
     api.get('/import/batches', { params }),
 
-  getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
+  getBatch: (id: number): Promise<ImportBatch & { errors?: any[] }> => api.get(`/import/batches/${id}`),
 }
 
 export const statsApi = {

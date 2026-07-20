@@ -11,11 +11,12 @@ import ImportModal from './components/import/ImportModal'
 import AITaskMonitor from './components/ai/AITaskMonitor'
 import ViewManagementPage from './components/views/ViewManagementPage'
 import MetadataManagementPage from './components/settings/MetadataManagementPage'
+import ImportHistoryPage from './components/import/ImportHistoryPage'
 import { productApi, customFieldApi, tagApi, projectApi, databaseApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
 
-type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'views' | 'metadata'
+type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'views' | 'metadata' | 'import-history'
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('patents')
@@ -125,6 +126,8 @@ function App() {
             <ViewManagementPage />
           ) : currentPage === 'metadata' ? (
             <MetadataManagementPage />
+          ) : currentPage === 'import-history' ? (
+            <ImportHistoryPage />
           ) : null}
         </div>
       </div>

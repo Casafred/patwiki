@@ -21,6 +21,9 @@ from app.services.patent_service import PatentService
 from app.services.merge_service import merge_patent_data, _is_empty
 from app.config import settings
 from app.models import Patent, CustomField
+from app.models.importing import ImportBatch
+from app.models.enums import ImportBatchStatus
+from datetime import datetime
 
 router = APIRouter(tags=["import"])
 
@@ -182,6 +185,20 @@ def confirm_import(
         if not DatabaseService.get_database(db, database_id):
             raise HTTPException(status_code=400, detail=f"库不存在：{database_id}")
 
+    # P2-2：创建 ImportBatch 记录，便于在导入历史页追溯
+    batch = ImportBatch(
+        filename=info["filename"],
+        status=ImportBatchStatus.PROCESSING,
+        started_at=datetime.utcnow(),
+        mapping_config={m.source_column: m.target_field for m in req.field_mappings},
+        database_id=database_id,
+        view_id=req.view_id,
+        dedupe_by=req.dedupe_by,
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+
     with open(info["path"], "rb") as f:
         content = f.read()
     filename = info["filename"]
@@ -213,6 +230,9 @@ def confirm_import(
     error_count = 0
     view_local_written = 0  # P1-15：视图本地字段值写入计数
     BATCH_SIZE = 500
+    total_rows = 0
+    batch_failed = False
+    failure_msg = None
 
     try:
         _optimize_sqlite_connection(db)
@@ -405,7 +425,34 @@ def confirm_import(
         if database_id is not None:
             from app.services.database_service import DatabaseService
             DatabaseService.refresh_patent_count(db, database_id)
+    except Exception as e:
+        batch_failed = True
+        failure_msg = str(e)
+        print(f"[PatWiki] 导入异常: {e}", flush=True)
+        # 重新抛出，让 FastAPI 返回 500
+        raise
     finally:
+        # P2-2：无论成功或失败，更新 ImportBatch 状态
+        try:
+            batch.status = ImportBatchStatus.FAILED if batch_failed else ImportBatchStatus.COMPLETED
+            batch.total_rows = total_rows
+            batch.processed_rows = inserted + updated + skipped
+            batch.inserted_count = inserted
+            batch.updated_count = updated
+            batch.skipped_count = skipped
+            batch.duplicate_count = duplicates_count
+            batch.error_count = error_count
+            batch.view_local_written = view_local_written
+            batch.completed_at = datetime.utcnow()
+            if errors:
+                batch.errors = errors[:50]
+            if batch_failed and failure_msg:
+                batch.errors = [{"error": failure_msg}]
+            db.add(batch)
+            db.commit()
+        except Exception as batch_err:
+            print(f"[PatWiki] ImportBatch 更新失败: {batch_err}", flush=True)
+
         info = TEMP_FILES.pop(req.import_id, None)
         if info and os.path.exists(info["path"]):
             try:
@@ -423,6 +470,8 @@ def confirm_import(
         "database_id": database_id,
         "family_links": 0,
         "citation_links": 0,
+        "batch_id": batch.id,  # P2-2：返回批次 ID
+        "view_local_written": view_local_written,
     }
 
 
@@ -438,6 +487,72 @@ def _process_relations(db: Session, patent: Patent, virtual: dict, database_id: 
         process_citations(db, patent, virtual["cited_numbers"], database_id=database_id)
     if virtual["citing_numbers"]:
         process_citing_patents(db, patent, virtual["citing_numbers"], database_id=database_id)
+
+
+@router.get("/import/batches")
+def list_import_batches(
+    database_id: Optional[int] = None,
+    view_id: Optional[int] = None,
+    status: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """P2-2：导入历史列表，按库/视图/状态过滤。"""
+    q = db.query(ImportBatch)
+    if database_id is not None:
+        q = q.filter(ImportBatch.database_id == database_id)
+    if view_id is not None:
+        q = q.filter(ImportBatch.view_id == view_id)
+    if status:
+        try:
+            status_enum = ImportBatchStatus(status)
+            q = q.filter(ImportBatch.status == status_enum)
+        except ValueError:
+            pass
+    total = q.count()
+    items = (
+        q.order_by(ImportBatch.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return {
+        "total": total,
+        "items": [_batch_to_dict(b) for b in items],
+    }
+
+
+@router.get("/import/batches/{batch_id}")
+def get_import_batch(batch_id: int, db: Session = Depends(get_db)):
+    """P2-2：导入批次详情（含错误明细）。"""
+    b = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail=f"批次不存在：{batch_id}")
+    return _batch_to_dict(b, include_errors=True)
+
+
+def _batch_to_dict(b: ImportBatch, include_errors: bool = False) -> dict:
+    return {
+        "id": b.id,
+        "filename": b.filename,
+        "status": b.status.value if b.status else None,
+        "total_rows": b.total_rows or 0,
+        "processed_rows": b.processed_rows or 0,
+        "inserted_count": b.inserted_count or 0,
+        "updated_count": b.updated_count or 0,
+        "skipped_count": b.skipped_count or 0,
+        "duplicate_count": b.duplicate_count or 0,
+        "error_count": b.error_count or 0,
+        "view_local_written": b.view_local_written or 0,
+        "dedupe_by": b.dedupe_by,
+        "database_id": b.database_id,
+        "view_id": b.view_id,
+        "started_at": b.started_at.isoformat() if b.started_at else None,
+        "completed_at": b.completed_at.isoformat() if b.completed_at else None,
+        "created_at": b.created_at.isoformat() if b.created_at else None,
+        "errors": b.errors if include_errors else None,
+    }
 
 
 @router.get("/stats", response_model=StatsResponse)

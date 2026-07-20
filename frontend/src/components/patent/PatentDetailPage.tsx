@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
-import type { Patent, Product, Project, Tag, CustomField, AITask, PatentHistory, FieldSource } from '../../types'
+import type { Patent, Product, Project, Tag, CustomField, AITask, PatentHistory, FieldSource, AIFieldValueInfo } from '../../types'
 
 interface PatentDetailPageProps {
   patentId: number
@@ -248,6 +248,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         ) : (
           <>
             <button className="btn btn-primary" onClick={() => setEditing(true)}>编辑</button>
+            <button className="btn btn-secondary" onClick={() => setShowShareModal(true)} title="以 Wiki 形式预览/打印当前专利">分享</button>
             <button className="btn btn-secondary" onClick={handleDelete} style={{ color: '#dc2626' }}>删除</button>
           </>
         )}
@@ -294,6 +295,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
             onProcess={handleAIProcess}
             processing={aiProcessing}
             taskInfo={aiTaskInfo}
+            onPatentUpdated={loadPatent}
           />
         )}
         {activeTab === 'custom' && (
@@ -588,14 +590,74 @@ function RiskTab({ patent, formData, editing, updateField }: {
 }
 
 // ============ AI 分析 Tab ============
-function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
+function AITab({ patent, aiFields, onProcess, processing, taskInfo, onPatentUpdated }: {
   patent: Patent
   aiFields: CustomField[]
   onProcess: (fieldKey: string) => void
   processing: string | null
   taskInfo: AITask | null
+  onPatentUpdated: () => void
 }) {
   const aiData = patent.ai_fields || {}
+  // P2-3：AI 值人工覆盖
+  const [aiValues, setAIValues] = useState<AIFieldValueInfo[]>([])
+  const [aiValuesLoading, setAIValuesLoading] = useState(false)
+  const [editingField, setEditingField] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const loadAIValues = useCallback(async () => {
+    setAIValuesLoading(true)
+    try {
+      const data = await patentApi.getAIValues(patent.id)
+      setAIValues(data)
+    } catch (e) {
+      console.error('Failed to load AI values:', e)
+    } finally {
+      setAIValuesLoading(false)
+    }
+  }, [patent.id])
+
+  useEffect(() => {
+    loadAIValues()
+  }, [loadAIValues])
+
+  const aiValueMap: Record<string, AIFieldValueInfo> = {}
+  aiValues.forEach(v => { aiValueMap[v.field_key] = v })
+
+  const handleSave = async (fieldKey: string) => {
+    setSaving(true)
+    try {
+      await patentApi.overrideAIValue(patent.id, fieldKey, editValue)
+      await loadAIValues()
+      onPatentUpdated()
+      setEditingField(null)
+      setEditValue('')
+    } catch (e: any) {
+      alert('保存失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleClear = async (fieldKey: string) => {
+    if (!confirm('确定要取消人工覆盖，恢复 AI 原值吗？')) return
+    setSaving(true)
+    try {
+      await patentApi.clearAIOverride(patent.id, fieldKey)
+      await loadAIValues()
+      onPatentUpdated()
+    } catch (e: any) {
+      alert('取消覆盖失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const startEdit = (fieldKey: string, currentValue: string) => {
+    setEditingField(fieldKey)
+    setEditValue(currentValue || '')
+  }
 
   return (
     <div>
@@ -628,29 +690,100 @@ function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
           {aiFields.map(field => {
             const value = aiData[field.key]
             const isProcessing = processing === field.key
+            const aiValueInfo = aiValueMap[field.key]
+            const isOverridden = aiValueInfo?.is_overridden
+            const displayValue = aiValueInfo?.display_value ?? value
+            const aiOriginalValue = aiValueInfo?.ai_value
+            const overriddenAt = aiValueInfo?.overridden_at
+            const isEditing = editingField === field.key
+
             return (
               <Field key={field.id} label={field.name} full>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                  <div className="field-value" style={{
-                    flex: 1,
-                    padding: 12,
-                    background: value ? '#f8fafc' : '#fffbeb',
-                    border: `1px solid ${value ? '#e2e8f0' : '#fde68a'}`,
-                    borderRadius: 6,
-                    minHeight: 60,
-                    whiteSpace: 'pre-wrap',
-                    fontSize: 13,
-                  }}>
-                    {value || '尚未生成，点击右侧按钮运行 AI 抽取'}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {isEditing ? (
+                      <textarea
+                        className="form-input"
+                        style={{ minHeight: 80, fontSize: 13 }}
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        autoFocus
+                        placeholder="输入人工覆盖值（保存后将覆盖 AI 提取的值）"
+                      />
+                    ) : (
+                      <div className="field-value" style={{
+                        padding: 12,
+                        background: displayValue ? (isOverridden ? '#fef3c7' : '#f8fafc') : '#fffbeb',
+                        border: `1px solid ${displayValue ? (isOverridden ? '#fbbf24' : '#e2e8f0') : '#fde68a'}`,
+                        borderRadius: 6,
+                        minHeight: 60,
+                        whiteSpace: 'pre-wrap',
+                        fontSize: 13,
+                      }}>
+                        {displayValue || '尚未生成，点击右侧按钮运行 AI 抽取'}
+                      </div>
+                    )}
+                    {/* P2-3：覆盖状态徽标 */}
+                    {isOverridden && !isEditing && (
+                      <div style={{ fontSize: 11, color: '#92400e', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                        <span style={{
+                          padding: '1px 6px', background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 4,
+                        }}>✎ 已人工覆盖</span>
+                        {overriddenAt && <span>覆盖时间：{new Date(overriddenAt).toLocaleString('zh-CN', { hour12: false })}</span>}
+                        {aiOriginalValue && (
+                          <span style={{ color: '#64748b' }} title="AI 原值">
+                            AI 原值：{aiOriginalValue.length > 50 ? aiOriginalValue.slice(0, 50) + '...' : aiOriginalValue}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => onProcess(field.key)}
-                    disabled={isProcessing || !!processing}
-                    style={{ flexShrink: 0 }}
-                  >
-                    {isProcessing ? '处理中' : '生成'}
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => onProcess(field.key)}
+                      disabled={isProcessing || !!processing || isEditing || saving}
+                    >
+                      {isProcessing ? '处理中' : '生成'}
+                    </button>
+                    {/* P2-3：人工覆盖/编辑按钮 */}
+                    {aiValueInfo && !isEditing && (
+                      <>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: 12, padding: '4px 8px' }}
+                          onClick={() => startEdit(field.key, displayValue || '')}
+                          disabled={saving}
+                          title="人工编辑此 AI 字段值"
+                        >✎ 编辑</button>
+                        {isOverridden && (
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: 12, padding: '4px 8px' }}
+                            onClick={() => handleClear(field.key)}
+                            disabled={saving}
+                            title="取消人工覆盖，恢复 AI 原值"
+                          >↺ 恢复</button>
+                        )}
+                      </>
+                    )}
+                    {isEditing && (
+                      <>
+                        <button
+                          className="btn btn-primary"
+                          style={{ fontSize: 12, padding: '4px 8px' }}
+                          onClick={() => handleSave(field.key)}
+                          disabled={saving}
+                        >{saving ? '保存中' : '保存'}</button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: 12, padding: '4px 8px' }}
+                          onClick={() => { setEditingField(null); setEditValue('') }}
+                          disabled={saving}
+                        >取消</button>
+                      </>
+                    )}
+                  </div>
                 </div>
                 {field.description && (
                   <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{field.description}</div>
@@ -659,6 +792,9 @@ function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
             )
           })}
         </div>
+      )}
+      {aiValuesLoading && (
+        <div style={{ textAlign: 'center', padding: 8, fontSize: 11, color: '#94a3b8' }}>加载 AI 值覆盖状态...</div>
       )}
     </div>
   )

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 import json
 
 from app.database import get_db
@@ -11,7 +11,8 @@ from app.schemas.schemas import (
 )
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
-from app.models import PatentHistory
+from app.models import PatentHistory, AIFieldValue, CustomField
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -172,3 +173,193 @@ def get_field_sources(patent_id: int, db: Session = Depends(get_db)):
     if not patent:
         raise HTTPException(status_code=404, detail="Patent not found")
     return ViewService.get_field_sources(db, patent_id)
+
+
+# ============================================================
+# P2-3：AI 字段值人工覆盖
+# ============================================================
+
+class AIValueOverrideRequest(BaseModel):
+    """人工覆盖 AI 字段值。"""
+    value: Optional[str] = None  # None 表示取消覆盖
+    changed_by: Optional[str] = None
+
+
+@router.get("/{patent_id}/ai-values")
+def get_ai_values(patent_id: int, db: Session = Depends(get_db)):
+    """P2-3：列出该专利所有 AI 字段的当前值与覆盖状态。"""
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+
+    rows = (
+        db.query(AIFieldValue)
+        .filter(AIFieldValue.patent_id == patent_id)
+        .all()
+    )
+    # 字段名映射
+    field_name_map: dict[str, str] = {}
+    for cf in db.query(CustomField).all():
+        field_name_map[cf.key] = cf.name
+
+    return [
+        {
+            "id": r.id,
+            "field_key": r.field_key,
+            "field_name": field_name_map.get(r.field_key, r.field_key),
+            "ai_value": r.value,
+            "model_name": r.model_name,
+            "is_overridden": bool(r.is_overridden),
+            "display_value": r.overridden_value if r.is_overridden else r.value,
+            "overridden_value": r.overridden_value if r.is_overridden else None,
+            "overridden_at": r.overridden_at.isoformat() if r.overridden_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.put("/{patent_id}/ai-values/{field_key}")
+def override_ai_value(
+    patent_id: int,
+    field_key: str,
+    req: AIValueOverrideRequest,
+    db: Session = Depends(get_db),
+):
+    """P2-3：人工覆盖某个 AI 字段值（写入 overridden_value，is_overridden=True）。
+
+    若 req.value 为 None，则取消覆盖，恢复显示 AI 原值。
+    同时把覆盖写回 Patent.ai_fields（与显示保持一致）并记一条历史。
+    """
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+
+    row = (
+        db.query(AIFieldValue)
+        .filter(
+            AIFieldValue.patent_id == patent_id,
+            AIFieldValue.field_key == field_key,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"AI 字段值不存在：patent_id={patent_id}, field_key={field_key}（请先运行 AI 提取）",
+        )
+
+    ai_value = row.value
+    old_display = row.overridden_value if row.is_overridden else row.value
+
+    if req.value is None:
+        # 取消覆盖
+        row.is_overridden = False
+        row.overridden_value = None
+        row.overridden_at = None
+        new_display = ai_value
+    else:
+        row.is_overridden = True
+        row.overridden_value = req.value
+        row.overridden_at = datetime.utcnow()
+        new_display = req.value
+
+    # 同步写回 patent.ai_fields（便于在列表/筛选中看到覆盖后的值）
+    current_ai = dict(patent.ai_fields or {})
+    current_ai[field_key] = new_display
+    patent.ai_fields = current_ai
+
+    # 记录历史
+    field_display_name = field_key
+    cf = db.query(CustomField).filter(CustomField.key == field_key).first()
+    if cf:
+        field_display_name = cf.name
+
+    hist = PatentHistory(
+        patent_id=patent_id,
+        field_key=f"ai_fields.{field_key}",
+        field_display_name=field_display_name,
+        old_value=old_display or "",
+        new_value=new_display or "",
+        source="manual",
+        changed_by=req.changed_by or "manual",
+    )
+    db.add(hist)
+    db.add(row)
+    db.add(patent)
+    db.commit()
+    db.refresh(row)
+
+    return {
+        "id": row.id,
+        "field_key": row.field_key,
+        "ai_value": row.value,
+        "is_overridden": bool(row.is_overridden),
+        "display_value": row.overridden_value if row.is_overridden else row.value,
+        "overridden_value": row.overridden_value if row.is_overridden else None,
+        "overridden_at": row.overridden_at.isoformat() if row.overridden_at else None,
+    }
+
+
+@router.delete("/{patent_id}/ai-values/{field_key}/override")
+def clear_ai_override(
+    patent_id: int,
+    field_key: str,
+    db: Session = Depends(get_db),
+):
+    """P2-3：取消 AI 字段的人工覆盖，恢复显示 AI 原值。"""
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+
+    row = (
+        db.query(AIFieldValue)
+        .filter(
+            AIFieldValue.patent_id == patent_id,
+            AIFieldValue.field_key == field_key,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"AI 字段值不存在：patent_id={patent_id}, field_key={field_key}",
+        )
+
+    old_display = row.overridden_value if row.is_overridden else row.value
+    row.is_overridden = False
+    row.overridden_value = None
+    row.overridden_at = None
+
+    # 同步回 patent.ai_fields
+    current_ai = dict(patent.ai_fields or {})
+    current_ai[field_key] = row.value
+    patent.ai_fields = current_ai
+
+    field_display_name = field_key
+    cf = db.query(CustomField).filter(CustomField.key == field_key).first()
+    if cf:
+        field_display_name = cf.name
+
+    hist = PatentHistory(
+        patent_id=patent_id,
+        field_key=f"ai_fields.{field_key}",
+        field_display_name=field_display_name,
+        old_value=old_display or "",
+        new_value=row.value or "",
+        source="manual",
+        changed_by="manual",
+    )
+    db.add(hist)
+    db.add(row)
+    db.add(patent)
+    db.commit()
+
+    return {
+        "id": row.id,
+        "field_key": row.field_key,
+        "ai_value": row.value,
+        "is_overridden": False,
+        "display_value": row.value,
+    }
