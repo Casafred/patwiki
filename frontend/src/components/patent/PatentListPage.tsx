@@ -15,6 +15,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
+    groupByFamily, setGroupByFamily,
   } = useAppStore()
 
   const [page, setPage] = useState(1)
@@ -131,6 +132,10 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
         params.database_id = currentDatabaseId
       }
       if (currentProductId) params.product_id = currentProductId
+      // P2-8：大表直查（无产品筛选）时透传同族聚拢开关
+      if (groupByFamily && !currentProductId) {
+        params.group_by_family = true
+      }
 
       const allFilters: Record<string, any> = {}
       Object.entries(filterValues).forEach(([key, value]) => {
@@ -149,7 +154,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, groupByFamily, setPatents, setLoading])
 
   useEffect(() => {
     loadFields()
@@ -1067,6 +1072,14 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           >
             清除筛选
           </button>
+          <button
+            className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => { setGroupByFamily(!groupByFamily); setPage(1) }}
+            title="开启后，同族专利会排在一起显示，并在行左侧标注同族编号和成员数"
+            style={groupByFamily ? { background: '#7c3aed', borderColor: '#7c3aed' } : {}}
+          >
+            🧲 同族聚拢 {groupByFamily ? 'ON' : 'OFF'}
+          </button>
           <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
             列管理
           </button>
@@ -1351,7 +1364,40 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
               </tr>
             </thead>
             <tbody>
-              {patents.map((p) => (
+              {patents.map((p, rowIdx) => {
+                // P2-8：同族聚拢模式下，为同族组交替背景色 + 行首徽章
+                const familyBgColors = ['#faf5ff', '#eff6ff', '#f0fdf4', '#fefce8', '#fff7ed', '#fdf2f8']
+                let rowBg: string | undefined
+                let familyBadge: React.ReactNode = null
+                if (groupByFamily && p.family_id) {
+                  // 同族组用 family_id 哈希到颜色槽，保证同族同色
+                  const colorSlot = p.family_id % familyBgColors.length
+                  rowBg = familyBgColors[colorSlot]
+                  // 检测同族组首行（前一行 family_id 不同）
+                  const prevFamilyId = rowIdx > 0 ? patents[rowIdx - 1].family_id : undefined
+                  const isGroupStart = prevFamilyId !== p.family_id
+                  if (isGroupStart) {
+                    familyBadge = (
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          background: '#7c3aed',
+                          color: '#fff',
+                          fontSize: 10,
+                          fontWeight: 600,
+                          padding: '1px 5px',
+                          borderRadius: 8,
+                          marginRight: 4,
+                          verticalAlign: 'middle',
+                        }}
+                        title={`同族 ${p.family_id}，共 ${p.family_size ?? 1} 件`}
+                      >
+                        族{p.family_id}{p.family_size ? `·${p.family_size}` : ''}
+                      </span>
+                    )
+                  }
+                }
+                return (
                 <tr
                   key={p.id}
                   className={selectedIds.includes(p.id) ? 'row-selected' : ''}
@@ -1364,7 +1410,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     onPatentClick(p.id)
                   }}
                   onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id })}
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', background: rowBg }}
                 >
                   <td className="col-checkbox">
                     <input
@@ -1373,6 +1419,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                       onChange={() => toggleSelect(p.id)}
                       onClick={(e) => e.stopPropagation()}
                     />
+                    {familyBadge}
                   </td>
                   <td className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
@@ -1478,7 +1525,8 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     )
                   })}
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         )}

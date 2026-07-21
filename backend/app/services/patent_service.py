@@ -108,6 +108,7 @@ class PatentService:
         sort_order: Optional[str] = "asc",
         custom_filters: Optional[dict[str, Any]] = None,
         filters: Optional[dict[str, Any]] = None,
+        group_by_family: bool = False,
     ) -> tuple[list[Patent], int]:
         query = db.query(Patent).options(
             joinedload(Patent.tags),
@@ -216,7 +217,15 @@ class PatentService:
 
         total = query.count()
 
-        if sort_by:
+        # P2-8：同族聚拢模式 —— 把同族专利排在一起（family_id 非空的在前，按 family_id 分组，组内按申请日倒序）
+        if group_by_family:
+            query = query.order_by(
+                Patent.family_id.is_(None),
+                Patent.family_id.asc(),
+                desc(Patent.filing_date),
+                Patent.id.asc(),
+            )
+        elif sort_by:
             if sort_by in SYSTEM_FIELDS:
                 column = getattr(Patent, sort_by, None)
                 if column is not None:
@@ -235,6 +244,21 @@ class PatentService:
 
         query = query.offset((page - 1) * page_size).limit(page_size)
         patents = query.all()
+
+        # P2-8：同族聚拢模式下，附加 family_size（该族成员数，含自身）
+        # 用单次 GROUP BY 查询避免 N+1
+        if group_by_family and patents:
+            family_ids = list({p.family_id for p in patents if p.family_id is not None})
+            if family_ids:
+                size_rows = db.query(
+                    Patent.family_id.label("fid"),
+                    func.count(Patent.id).label("cnt"),
+                ).filter(Patent.family_id.in_(family_ids)).group_by(Patent.family_id).all()
+                size_map = {row.fid: row.cnt for row in size_rows}
+            else:
+                size_map = {}
+            for p in patents:
+                p.family_size = size_map.get(p.family_id) if p.family_id is not None else None
 
         return patents, total
 

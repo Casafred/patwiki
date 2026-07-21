@@ -40,6 +40,9 @@ export interface Patent {
   notes?: string
   custom_fields?: Record<string, any>
   ai_fields?: Record<string, any>
+  // P2-8：同族聚拢相关
+  family_id?: number | null
+  family_size?: number | null
   tags?: Tag[]
   projects?: Project[]
   created_at: string

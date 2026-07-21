@@ -94,6 +94,10 @@ class Patent(PatentBase):
     created_at: datetime
     updated_at: datetime
     ai_fields: Optional[dict[str, Any]] = {}
+    # P2-8：同族聚拢相关（family_id 来自 Patent.family_id 外键；
+    # family_size 由 list_patents 在 group_by_family=True 时聚合附加，None 表示未计算）
+    family_id: Optional[int] = None
+    family_size: Optional[int] = None
     tags: list["Tag"] = []
     projects: list["Project"] = []
 

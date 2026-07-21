@@ -37,6 +37,7 @@ def list_patents(
     sort_order: Optional[str] = "asc",
     custom_filters: Optional[str] = Query(None, description="JSON string of custom field filters"),
     filters: Optional[str] = Query(None, description="JSON string of unified field filters, supports {field: {contains: 'xxx'}, field2: {eq: 'yyy'}}"),
+    group_by_family: bool = Query(False, description="同族聚拢模式：同族专利排在一起，附加 family_size"),
     db: Session = Depends(get_db),
 ):
     tag_ids = [tag_id] if tag_id else None
@@ -73,6 +74,7 @@ def list_patents(
         sort_order=sort_order,
         custom_filters=cf,
         filters=uf,
+        group_by_family=group_by_family,
     )
     return {
         "total": total,

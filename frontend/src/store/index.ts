@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, User } from '../types'
 
 const CURRENT_USER_STORAGE_KEY = 'patwiki_current_user'
+const GROUP_BY_FAMILY_STORAGE_KEY = 'patwiki_group_by_family'
 
 interface AppState {
   patents: Patent[]
@@ -19,6 +20,9 @@ interface AppState {
   loading: boolean
   selectedIds: number[]
   filters: Record<string, any>
+  // P2-8：同族聚拢开关（localStorage 持久化）
+  groupByFamily: boolean
+  setGroupByFamily: (v: boolean) => void
   // 权限管理 MVP：当前用户（localStorage 持久化）
   currentUser: User | null
   setCurrentUser: (user: User | null) => void
@@ -60,6 +64,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: false,
   selectedIds: [],
   filters: {},
+  // P2-8：同族聚拢开关，初始值从 localStorage 读取
+  groupByFamily: (() => {
+    try { return localStorage.getItem(GROUP_BY_FAMILY_STORAGE_KEY) === 'true' } catch { return false }
+  })(),
+  setGroupByFamily: (v) => {
+    try { localStorage.setItem(GROUP_BY_FAMILY_STORAGE_KEY, String(v)) } catch {}
+    set({ groupByFamily: v })
+  },
   currentUser: loadCurrentUserFromStorage(),
   setCurrentUser: (user) => {
     if (user) {
