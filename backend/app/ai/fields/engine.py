@@ -162,18 +162,6 @@ class AIFieldEngine:
             current[field_def.key] = result
             patent.ai_fields = current
 
-            # P1-13：写入历史记录，标记 source=ai，便于追溯"该值由 AI 生成"
-            from app.models import PatentHistory
-            self.db.add(PatentHistory(
-                patent_id=patent.id,
-                field_key=f"ai_fields.{field_def.key}",
-                field_display_name=field_def.name,
-                old_value=None,  # AI 字段旧值不强制记录
-                new_value=str(result) if result is not None else None,
-                source="ai",
-                changed_by=f"AI:{self.model_name}" if hasattr(self, "model_name") else "AI",
-            ))
-
             self.db.commit()
             return result
 

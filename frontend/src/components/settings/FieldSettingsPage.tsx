@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react'
-import { customFieldApi, fieldApi } from '../../api'
-import type { CustomField, FieldMetaWithView } from '../../types'
+import { customFieldApi } from '../../api'
+import type { CustomField } from '../../types'
 import { useAppStore } from '../../store'
 
 export default function FieldSettingsPage() {
   const [fields, setFields] = useState<CustomField[]>([])
   const [loading, setLoading] = useState(true)
-  // P1-4：通过 fieldApi.list 获取每个字段是否由视图本地字段提升而来
-  const [promotedMap, setPromotedMap] = useState<Record<string, { viewId: number; viewName: string }>>({})
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<Partial<CustomField>>({})
   const [saving, setSaving] = useState(false)
@@ -29,19 +27,6 @@ export default function FieldSettingsPage() {
     try {
       const data = await customFieldApi.list()
       setFields(data)
-      // P1-4：并行拉取 fieldApi.list() 以获取提升来源信息
-      try {
-        const metas = await fieldApi.list()
-        const map: Record<string, { viewId: number; viewName: string }> = {}
-        metas.forEach((m: FieldMetaWithView) => {
-          if (m.promoted_from_view_id && m.promoted_from_view_name) {
-            map[m.key] = { viewId: m.promoted_from_view_id, viewName: m.promoted_from_view_name }
-          }
-        })
-        setPromotedMap(map)
-      } catch (e) {
-        console.error('Failed to load field metas for promoted info:', e)
-      }
     } catch (e) {
       console.error('Failed to load fields:', e)
     } finally {
@@ -383,21 +368,6 @@ export default function FieldSettingsPage() {
                           color: '#2563eb',
                         }}>
                           AI
-                        </span>
-                      )}
-                      {/* P1-4：提升字段标注 */}
-                      {promotedMap[field.key] && (
-                        <span
-                          style={{
-                            padding: '1px 6px',
-                            borderRadius: 4,
-                            fontSize: 10,
-                            background: '#fce7f3',
-                            color: '#9d174d',
-                          }}
-                          title={`此字段由视图本地字段提升而来（源视图：${promotedMap[field.key].viewName}，ID: ${promotedMap[field.key].viewId}）`}
-                        >
-                          ↑ 提升自视图：{promotedMap[field.key].viewName}
                         </span>
                       )}
                       {!field.is_active && (

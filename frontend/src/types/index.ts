@@ -42,9 +42,6 @@ export interface Patent {
   ai_fields?: Record<string, any>
   tags?: Tag[]
   projects?: Project[]
-  // P2-8：同族信息（list_patents 在 group_by_family=True 时由后端填充）
-  family_id?: number | null
-  family_size?: number | null  // 同族成员数（含自身）；undefined/null 表示未计算或无同族
   created_at: string
   updated_at: string
 }
@@ -146,14 +143,9 @@ export interface ImportBatch {
   duplicate_count: number
   skipped_count: number
   error_count: number
-  view_local_written?: number
-  dedupe_by?: string
-  database_id?: number | null
-  view_id?: number | null
   started_at?: string
   completed_at?: string
   created_at: string
-  errors?: any[]
 }
 
 export interface ImportPreview {
@@ -250,8 +242,6 @@ export interface FieldMeta {
 
 export interface CellUpdateRequest {
   value: any
-  changed_by?: string
-  source_view_id?: number
 }
 
 // 专利修改历史
@@ -262,200 +252,9 @@ export interface PatentHistory {
   field_display_name?: string
   old_value?: string | null
   new_value?: string | null
-  source: string  // manual / view_edit / import / ai / promote / bulk / api
+  source: string  // manual / bulk / ai / import / api
   changed_by?: string | null
-  source_view_id?: number | null
-  source_view_name?: string | null
   created_at?: string
-}
-
-// 字段来源追溯（P0-13）
-export interface FieldSource {
-  field_key: string
-  field_display_name?: string
-  current_value?: any
-  last_source?: string  // manual / view_edit / import / ai / promote / bulk / api
-  last_changed_by?: string | null
-  last_changed_at?: string | null
-  source_view_id?: number | null
-  source_view_name?: string | null
-  // 该字段是否为视图本地字段（仅 view_local_sources 中存在）
-  view_local?: boolean
-  view_id?: number | null
-  is_promoted?: boolean
-  promoted_field_key?: string | null
-}
-
-// P2-3：AI 字段值（含人工覆盖状态）
-export interface AIFieldValueInfo {
-  id: number
-  field_key: string
-  field_name: string
-  ai_value: string | null
-  model_name?: string | null
-  is_overridden: boolean
-  display_value: string | null
-  overridden_value: string | null
-  overridden_at: string | null
-  created_at?: string
-  updated_at?: string
-}
-
-// P2-6：搜索自动补全建议项
-export interface SearchSuggestion {
-  type: 'application_number' | 'publication_number' | 'title' | 'applicant' | 'inventor'
-  value: string
-  label: string
-  patent_id?: number
-}
-
-// ============================================================
-// P2-7：专利引用 / 同族关系图谱
-// ============================================================
-export interface GraphNode {
-  id: number
-  title: string
-  application_number?: string | null
-  publication_number?: string | null
-  applicant?: string | null
-  filing_date?: string | null
-  country?: string | null
-  patent_type?: string | null
-  legal_status?: string | null
-  family_id?: number | null
-  module?: string | null
-  risk_level?: string | null
-  distance: number       // 0=中心, 1=直接相邻, 2=二度
-  relation: 'center' | 'family' | 'cited' | 'citing'
-  is_center: boolean
-}
-
-export interface GraphEdge {
-  source: number
-  target: number
-  type: 'family' | 'citation'
-  citation_type?: string
-}
-
-export interface PatentGraph {
-  center_id: number
-  depth: number
-  nodes: GraphNode[]
-  edges: GraphEdge[]
-  stats: {
-    total_nodes: number
-    total_edges: number
-    family_count: number
-    cited_count: number
-    citing_count: number
-  }
-}
-
-// ============================================================
-// P0-13/P0-14：视图（小表 / 部门总表）
-// ============================================================
-
-export type ViewType = 'personal' | 'shared' | 'department_master'
-
-// 视图筛选规则（P1-11 标准化）
-export interface ViewFilterRule {
-  contains?: any
-  eq?: any
-  in?: any[]
-  gte?: any
-  lte?: any
-}
-
-// 视图列配置（P1-11 标准化）
-// column_config=[] 表示"显示全部字段"（白名单空 = 全选）
-// 非空数组 = 白名单 + 顺序 + 列宽
-export interface ViewColumnConfig {
-  key: string
-  visible?: boolean
-  width?: number
-  order?: number
-  frozen?: boolean
-}
-
-// 视图排序配置（P1-11 标准化）
-export interface ViewSortConfig {
-  sort_by?: string
-  sort_order?: 'asc' | 'desc'
-}
-
-// 视图本地字段（vlf_ 前缀）
-export interface ViewLocalField {
-  id: number
-  view_id: number
-  key: string  // vlf_xxx
-  name: string
-  field_type: string
-  options?: string[] | null
-  description?: string | null
-  default_value?: string | null
-  is_required?: boolean
-  sort_order?: number
-  is_promoted?: boolean
-  promoted_field_key?: string | null
-  created_at?: string
-  updated_at?: string
-}
-
-// 视图本体
-export interface PatentView {
-  id: number
-  name: string
-  description?: string | null
-  database_id: number
-  owner_id?: number | null
-  view_type: ViewType
-  is_department_master?: boolean
-  filter_config?: Record<string, ViewFilterRule>
-  column_config?: ViewColumnConfig[]
-  sort_config?: ViewSortConfig
-  is_archived?: boolean
-  local_fields?: ViewLocalField[]
-  created_at?: string
-  updated_at?: string
-}
-
-// 视图内单条专利 = 大表专利 + 本地字段值
-export interface ViewPatent extends Patent {
-  view_local_fields?: Record<string, any>  // vlf_key -> value
-}
-
-export interface ViewPatentListResponse {
-  total: number
-  items: ViewPatent[]
-  page: number
-  page_size: number
-  view_id: number
-  view_filter_config?: Record<string, ViewFilterRule>
-  view_column_config?: ViewColumnConfig[]
-}
-
-// 字段来源类型常量（与后端 HistorySource 枚举一致）
-export const HISTORY_SOURCES = {
-  MANUAL: 'manual',
-  VIEW_EDIT: 'view_edit',
-  IMPORT: 'import',
-  AI: 'ai',
-  PROMOTE: 'promote',
-  BULK: 'bulk',
-  API: 'api',
-} as const
-
-export type HistorySource = typeof HISTORY_SOURCES[keyof typeof HISTORY_SOURCES]
-
-// 字段来源元数据（P1-12：get_all_fields_meta 支持 view_id 后的扩展字段）
-export interface FieldMetaWithView extends FieldMeta {
-  source?: 'system' | 'custom' | 'view_local' | 'ai'
-  view_id?: number | null
-  view_name?: string | null
-  is_promoted?: boolean
-  promoted_from_view_id?: number | null
-  promoted_from_view_name?: string | null
-  promoted_field_key?: string | null
 }
 
 // ============================================================

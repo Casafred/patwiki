@@ -141,18 +141,36 @@ def archive_database(
 @router.delete("/{database_id}")
 def delete_database(
     database_id: int,
+    force: bool = False,
     db: Session = Depends(get_db),
 ):
+    """删除库。
+
+    - force=False（默认）：库中有专利时返回 400，需先迁移或清空。
+    - force=True：级联删除库内所有专利后删库（用于"整库删除"场景）。
+    默认库不可删。
+    """
     database = DatabaseService.get_database(db, database_id)
     if not database:
         raise HTTPException(status_code=404, detail="数据库不存在")
-    ok = DatabaseService.delete_database(db, database)
+    if database.is_default:
+        raise HTTPException(status_code=400, detail="默认数据库不可删除")
+    # 先查专利数，给前端更友好的提示
+    from app.models import Patent as PatentModel
+    from sqlalchemy import func as _func
+    patent_count = db.query(_func.count(PatentModel.id)).filter(PatentModel.database_id == database_id).scalar()
+    if patent_count and patent_count > 0 and not force:
+        raise HTTPException(
+            status_code=400,
+            detail=f"库中仍有 {patent_count} 条专利，无法直接删除。请先清空专利，或使用 force=true 级联删除（将一并删除所有专利）。",
+        )
+    ok = DatabaseService.delete_database(db, database, force=force)
     if not ok:
         raise HTTPException(
             status_code=400,
-            detail="删除失败：库中仍有专利或为默认库（请先迁移专利或归档）",
+            detail="删除失败（可能为默认库或发生异常）",
         )
-    return {"success": True}
+    return {"success": True, "force": force, "deleted_patent_count": patent_count or 0}
 
 
 @router.post("/{database_id}/refresh-count")

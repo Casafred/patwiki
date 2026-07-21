@@ -9,8 +9,6 @@ export default function StatsPage() {
   const [loading, setLoading] = useState(true)
   const [filterDbId, setFilterDbId] = useState<number | ''>('')
   const [filterProdId, setFilterProdId] = useState<number | ''>('')
-  // P2-1：申请趋势年份范围切换
-  const [trendRange, setTrendRange] = useState<'recent10' | 'all'>('recent10')
 
   useEffect(() => {
     // 初始化筛选条件为当前库/产品
@@ -81,11 +79,6 @@ export default function StatsPage() {
   // 近 3 年申请趋势合计
   const recent3Years = stats.filing_trend.slice(-3).reduce((s, f) => s + f.count, 0)
 
-  // P2-1：申请趋势按年份范围过滤
-  const trendData = trendRange === 'recent10'
-    ? stats.filing_trend.slice(-10)
-    : stats.filing_trend
-
   return (
     <div>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
@@ -127,34 +120,9 @@ export default function StatsPage() {
       </div>
 
       {/* 申请趋势柱状图 */}
-      <Card
-        title="📅 申请趋势（按年份）"
-        subtitle={`共 ${stats.filing_trend.length} 年数据 · 当前显示 ${trendData.length} 年`}
-        action={
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button
-              onClick={() => setTrendRange('recent10')}
-              style={{
-                fontSize: 11, padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
-                border: `1px solid ${trendRange === 'recent10' ? '#2563eb' : '#cbd5e1'}`,
-                background: trendRange === 'recent10' ? '#2563eb' : 'transparent',
-                color: trendRange === 'recent10' ? '#fff' : '#64748b',
-              }}
-            >近10年</button>
-            <button
-              onClick={() => setTrendRange('all')}
-              style={{
-                fontSize: 11, padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
-                border: `1px solid ${trendRange === 'all' ? '#2563eb' : '#cbd5e1'}`,
-                background: trendRange === 'all' ? '#2563eb' : 'transparent',
-                color: trendRange === 'all' ? '#fff' : '#64748b',
-              }}
-            >全部</button>
-          </div>
-        }
-      >
-        {trendData.length > 0 ? (
-          <BarChartTrend data={trendData} />
+      <Card title="📅 申请趋势（按年份）" subtitle={`共 ${stats.filing_trend.length} 年数据`}>
+        {stats.filing_trend.length > 0 ? (
+          <BarChartTrend data={stats.filing_trend} />
         ) : (
           <Empty text="无申请日期数据" />
         )}
@@ -171,10 +139,9 @@ export default function StatsPage() {
           />
         </Card>
         <Card title="📋 专利类型分布">
-          <DonutChart
+          <BarList
             data={Object.entries(stats.by_patent_type).map(([k, v]) => ({
-              label: typeMap[k] || k, value: v,
-              color: ['#3b82f6', '#0ea5e9', '#10b981', '#94a3b8'][['invention', 'utility_model', 'design', 'unknown'].indexOf(k)] || '#94a3b8',
+              label: typeMap[k] || k, value: v, color: '#0ea5e9',
             }))}
             total={stats.total_patents}
           />
@@ -268,15 +235,12 @@ function KpiCard({ label, value, color }: { label: string; value: number; color:
   )
 }
 
-function Card({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode }) {
+function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <div className="table-container" style={{ marginBottom: 16 }}>
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
-          <span style={{ fontWeight: 600, fontSize: 14, color: '#1f2937' }}>{title}</span>
-          {subtitle && <span style={{ fontSize: 11, color: '#9ca3af' }}>{subtitle}</span>}
-        </div>
-        {action}
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontWeight: 600, fontSize: 14, color: '#1f2937' }}>{title}</span>
+        {subtitle && <span style={{ fontSize: 11, color: '#9ca3af' }}>{subtitle}</span>}
       </div>
       <div style={{ padding: 16 }}>{children}</div>
     </div>

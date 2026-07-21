@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi } from '../../api'
+import { useState, useEffect, useCallback } from 'react'
+import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { Patent, FieldMeta, CustomField, AITask, ViewPatent, SearchSuggestion } from '../../types'
+import type { Patent, FieldMeta, CustomField, AITask } from '../../types'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -15,15 +15,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
-    // P0-16：视图绑定
-    currentViewId, views,
-    // P2-8：同族聚拢
-    groupByFamily, setGroupByFamily,
   } = useAppStore()
-
-  // P0-16：当前视图对象（来自 store.views 缓存）
-  const currentView = currentViewId != null ? views.find(v => v.id === currentViewId) : undefined
-  const isViewBound = !!currentView
 
   const [page, setPage] = useState(1)
   const [pageSize] = useState(50)
@@ -35,14 +27,6 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
   const [headerFilterText, setHeaderFilterText] = useState<string>('')
-
-  // P2-6：搜索自动补全
-  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([])
-  const [showSuggestions, setShowSuggestions] = useState(false)
-  const [suggestionLoading, setSuggestionLoading] = useState(false)
-  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState(-1)
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const suggestAbortRef = useRef<AbortController | null>(null)
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
@@ -102,44 +86,18 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
 
   const loadFields = useCallback(async () => {
     try {
-      // P0-16：视图模式下传 view_id，后端会附加 vlf_ 本地字段
-      const fieldsData = await fieldApi.list(currentViewId ?? undefined)
-
-      // P0-16：若处于视图模式且视图配置了 column_config（非空 = 白名单+顺序+宽度），
-      // 则按 column_config 重排/隐藏/设置宽度；column_config=[] 时显示全部字段。
-      if (isViewBound && currentView && currentView.column_config && currentView.column_config.length > 0) {
-        const ccMap = new Map(currentView.column_config.map(c => [c.key, c]))
-        // 标记可见性与宽度
-        fieldsData.forEach(f => {
-          const cc = ccMap.get(f.key)
-          if (cc) {
-            f.visible = cc.visible !== false
-            if (cc.width) f.width = cc.width
-            f.frozen = cc.frozen || false
-          } else {
-            // 不在 column_config 中的字段默认隐藏
-            f.visible = false
-          }
-        })
-        // 重排：column_config 中的字段按其 order 顺序排在前面
-        fieldsData.sort((a, b) => {
-          const oa = ccMap.get(a.key)?.order ?? 9999
-          const ob = ccMap.get(b.key)?.order ?? 9999
-          return oa - ob
-        })
-      } else {
-        // 大表直查 / column_config=[] 视图：应用 localStorage 持久化的可见性设置
-        try {
-          const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
-          if (hiddenRaw) {
-            const hiddenKeys: string[] = JSON.parse(hiddenRaw)
-            fieldsData.forEach(f => {
-              if (hiddenKeys.includes(f.key)) f.visible = false
-            })
-          }
-        } catch {}
-      }
-      setFields(fieldsData as FieldMeta[])
+      const fieldsData = await fieldApi.list()
+      // 应用 localStorage 持久化的可见性设置
+      try {
+        const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
+        if (hiddenRaw) {
+          const hiddenKeys: string[] = JSON.parse(hiddenRaw)
+          fieldsData.forEach(f => {
+            if (hiddenKeys.includes(f.key)) f.visible = false
+          })
+        }
+      } catch {}
+      setFields(fieldsData)
       const widths: Record<string, number> = {}
       fieldsData.forEach(f => {
         widths[f.key] = f.width || DEFAULT_COLUMN_WIDTH
@@ -148,7 +106,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     } catch (e) {
       console.error('Failed to load fields:', e)
     }
-  }, [currentViewId, isViewBound, currentView])
+  }, [])
 
   const loadCustomFields = useCallback(async () => {
     try {
@@ -162,56 +120,36 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const loadPatents = useCallback(async () => {
     setLoading(true)
     try {
-      // P0-16：分支——视图模式 vs 大表直查
-      if (isViewBound && currentViewId != null) {
-        // 视图模式：合并视图自带 filter_config + 用户临时 extra_filters
-        const extraFilters: Record<string, any> = {}
-        Object.entries(filterValues).forEach(([key, value]) => {
-          if (value) extraFilters[key] = { contains: value }
-        })
-        const result = await viewApi.listPatents(currentViewId, {
-          page,
-          page_size: pageSize,
-          extra_filters: Object.keys(extraFilters).length > 0 ? extraFilters : undefined,
-        })
-        // 视图模式不应用 product_id 过滤（视图自身已定义 filter）
-        // 但保留 search 关键词（后端 list_view_patents 暂未支持 search，作为后续优化点）
-        setPatents(result.items as Patent[], result.total)
-      } else {
-        // 大表直查
-        const params: Record<string, any> = {
-          page,
-          page_size: pageSize,
-          sort_by: sortField,
-          sort_order: sortOrder,
-        }
-        if (searchText) params.search = searchText
-        if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
-          params.database_id = currentDatabaseId
-        }
-        if (currentProductId) params.product_id = currentProductId
-        // P2-8：同族聚拢模式（后端会忽略 sort_by/sort_order，按 family_id 分组排序）
-        if (groupByFamily) params.group_by_family = true
-
-        const allFilters: Record<string, any> = {}
-        Object.entries(filterValues).forEach(([key, value]) => {
-          if (value) {
-            allFilters[key] = { contains: value }
-          }
-        })
-        if (Object.keys(allFilters).length > 0) {
-          params.filters = JSON.stringify(allFilters)
-        }
-
-        const result = await patentApi.list(params)
-        setPatents(result.items, result.total)
+      const params: Record<string, any> = {
+        page,
+        page_size: pageSize,
+        sort_by: sortField,
+        sort_order: sortOrder,
       }
+      if (searchText) params.search = searchText
+      if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
+        params.database_id = currentDatabaseId
+      }
+      if (currentProductId) params.product_id = currentProductId
+
+      const allFilters: Record<string, any> = {}
+      Object.entries(filterValues).forEach(([key, value]) => {
+        if (value) {
+          allFilters[key] = { contains: value }
+        }
+      })
+      if (Object.keys(allFilters).length > 0) {
+        params.filters = JSON.stringify(allFilters)
+      }
+
+      const result = await patentApi.list(params)
+      setPatents(result.items, result.total)
     } catch (e) {
       console.error('Failed to load patents:', e)
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, setPatents, setLoading, isViewBound, currentViewId, groupByFamily])
+  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, setPatents, setLoading])
 
   useEffect(() => {
     loadFields()
@@ -296,90 +234,6 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     }
   }, [contextMenu])
 
-  // P2-6：搜索自动补全 —— 防抖拉取建议
-  useEffect(() => {
-    const q = searchInputText.trim()
-    if (!q) {
-      setSuggestions([])
-      setShowSuggestions(false)
-      setActiveSuggestionIdx(-1)
-      return
-    }
-    const timer = setTimeout(async () => {
-      // 取消上一个请求
-      if (suggestAbortRef.current) {
-        suggestAbortRef.current.abort()
-      }
-      const ctrl = new AbortController()
-      suggestAbortRef.current = ctrl
-      setSuggestionLoading(true)
-      try {
-        const resp = await patentApi.searchSuggest(q, 10, currentDatabaseId ?? undefined)
-        if (ctrl.signal.aborted) return
-        const items = (resp?.suggestions ?? []) as SearchSuggestion[]
-        setSuggestions(items)
-        setShowSuggestions(items.length > 0)
-        setActiveSuggestionIdx(-1)
-      } catch (e: any) {
-        if (e?.name !== 'AbortError') {
-          // 静默失败，不打扰用户
-          setSuggestions([])
-          setShowSuggestions(false)
-        }
-      } finally {
-        if (!ctrl.signal.aborted) setSuggestionLoading(false)
-      }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [searchInputText, currentDatabaseId])
-
-  // P2-6：点击搜索框外部时关闭下拉
-  useEffect(() => {
-    if (!showSuggestions) return
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('.patent-search-suggest')) {
-        setShowSuggestions(false)
-      }
-    }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [showSuggestions])
-
-  // P2-6：选择建议项
-  const applySuggestion = (s: SearchSuggestion) => {
-    setSearchInputText(s.value)
-    setSearchText(s.value)
-    setShowSuggestions(false)
-    setActiveSuggestionIdx(-1)
-    setPage(1)
-  }
-
-  // P2-6：搜索框键盘导航
-  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'ArrowDown') {
-      if (!showSuggestions || suggestions.length === 0) return
-      e.preventDefault()
-      setActiveSuggestionIdx(prev => (prev + 1) % suggestions.length)
-    } else if (e.key === 'ArrowUp') {
-      if (!showSuggestions || suggestions.length === 0) return
-      e.preventDefault()
-      setActiveSuggestionIdx(prev => (prev - 1 + suggestions.length) % suggestions.length)
-    } else if (e.key === 'Enter') {
-      if (showSuggestions && activeSuggestionIdx >= 0 && suggestions[activeSuggestionIdx]) {
-        e.preventDefault()
-        applySuggestion(suggestions[activeSuggestionIdx])
-      }
-      // 否则交给 form onSubmit (handleSearch)
-    } else if (e.key === 'Escape') {
-      if (showSuggestions) {
-        e.preventDefault()
-        setShowSuggestions(false)
-        setActiveSuggestionIdx(-1)
-      }
-    }
-  }
-
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     setSearchText(searchInputText)
@@ -399,6 +253,49 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       window.URL.revokeObjectURL(url)
     } catch (e) {
       alert('导出失败')
+    }
+  }
+
+  // 批量删除选中的专利
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return
+    if (!confirm(`确定要删除选中的 ${selectedIds.length} 条专利吗？此操作不可恢复！`)) return
+    try {
+      const result = await patentApi.bulkDelete(selectedIds)
+      alert(`已删除 ${result.deleted_count} 条专利`)
+      clearSelection()
+      setPage(1)
+      loadPatents()
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail
+      alert(detail || e?.message || '删除失败')
+    }
+  }
+
+  // 清理无效占位专利（title="待补全" 且号格式不合法的历史残留，如 20061102AU2005201606A1）
+  const handleCleanupPlaceholders = async () => {
+    try {
+      const dry = await patentApi.cleanupInvalidPlaceholders(true)
+      if (dry.deleted_count === 0) {
+        alert('扫描完成：未发现无效占位专利。')
+        return
+      }
+      const preview = dry.deleted_items
+        .slice(0, 10)
+        .map((it, i) => `${i + 1}. id=${it.id} | 申请号: ${it.application_number ?? '-'} | 公开号: ${it.publication_number ?? '-'}`)
+        .join('\n')
+      const more = dry.deleted_count > 10 ? `\n...（共 ${dry.deleted_count} 条，仅显示前 10 条）` : ''
+      const ok = confirm(
+        `扫描到 ${dry.deleted_count} 条无效占位专利（title="待补全" 且专利号格式不合法的历史残留）。\n\n预览：\n${preview}${more}\n\n点击"确定"立即删除这些无效记录。`
+      )
+      if (!ok) return
+      const real = await patentApi.cleanupInvalidPlaceholders(false)
+      alert(`已删除 ${real.deleted_count} 条无效占位专利。`)
+      setPage(1)
+      loadPatents()
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail
+      alert(detail || e?.message || '清理失败')
     }
   }
 
@@ -437,14 +334,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
 
   const handleCellSave = async (patentId: number, fieldKey: string, value: any) => {
     try {
-      // P0-16：vlf_ 视图本地字段走视图专用端点；共享字段编辑时带 source_view_id
-      if (fieldKey.startsWith('vlf_') && currentViewId != null) {
-        await viewApi.setLocalFieldValue(currentViewId, fieldKey, patentId, value)
-      } else {
-        await patentApi.updateCell(patentId, fieldKey, value, {
-          source_view_id: currentViewId ?? undefined,
-        })
-      }
+      await patentApi.updateCell(patentId, fieldKey, value)
       setEditingCell(null)
       loadPatents()
     } catch (e: any) {
@@ -515,37 +405,6 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     setSearchText('')
     setSearchInputText('')
     setPage(1)
-  }
-
-  // P2-9：清理无效占位专利（早期同族号解析 BUG 产生的垃圾数据）
-  const handleCleanupPlaceholders = async () => {
-    try {
-      // 第一步：dry_run 看有多少
-      const dry = await patentApi.cleanupInvalidPlaceholders(true)
-      if (dry.deleted_count === 0) {
-        alert('扫描完成：未发现无效占位专利。')
-        return
-      }
-      const preview = dry.deleted_items
-        .slice(0, 10)
-        .map((it, i) => `${i + 1}. id=${it.id} | 申请号: ${it.application_number ?? '-'} | 公开号: ${it.publication_number ?? '-'}`)
-        .join('\n')
-      const more = dry.deleted_count > 10 ? `\n...（共 ${dry.deleted_count} 条，仅显示前 10 条）` : ''
-      const ok = confirm(
-        `扫描到 ${dry.deleted_count} 条无效占位专利（因早期同族号解析 BUG 把多个号合并为一个乱码字符串而建）。\n\n` +
-        `预览：\n${preview}${more}\n\n` +
-        `点击"确定"立即删除，点击"取消"放弃。删除后不可恢复。`
-      )
-      if (!ok) return
-      const real = await patentApi.cleanupInvalidPlaceholders(false)
-      alert(`已删除 ${real.deleted_count} 条无效占位专利。`)
-      // 刷新列表
-      setPage(1)
-      loadPatents()
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail
-      alert(detail || e?.message || '清理失败')
-    }
   }
 
   // 从 prompt 模板解析引用的列名（{xxx} 占位符）
@@ -960,10 +819,6 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   }
 
   const getFieldValue = (patent: Patent, fieldKey: string): any => {
-    // P0-16：vlf_ 视图本地字段从 view_local_fields 读取
-    if (fieldKey.startsWith('vlf_')) {
-      return (patent as ViewPatent).view_local_fields?.[fieldKey] ?? null
-    }
     const field = fields.find(f => f.key === fieldKey)
     if (!field) return null
     if (field.is_system) {
@@ -1190,136 +1045,20 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       <div className="datagrid-toolbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#111827' }}>专利列表</h2>
-          {/* P0-16：视图绑定提示 */}
-          {isViewBound && currentView ? (
-            <span
-              style={{
-                fontSize: 12,
-                padding: '2px 8px',
-                borderRadius: 4,
-                background: currentView.is_department_master ? '#fef3c7' : '#dbeafe',
-                color: currentView.is_department_master ? '#92400e' : '#1e40af',
-                border: `1px solid ${currentView.is_department_master ? '#fbbf24' : '#3b82f6'}`,
-                fontWeight: 500,
-              }}
-              title={
-                currentView.is_department_master
-                  ? '部门总表视图：显示全部字段、全部专利'
-                  : currentView.view_type === 'shared'
-                  ? '共享视图：库内成员可见'
-                  : '个人小表：仅自己可见'
-              }
-            >
-              {currentView.is_department_master ? '★ 部门总表' : `📋 ${currentView.name}`}
-              {currentView.view_type === 'shared' && !currentView.is_department_master ? '（共享）' : ''}
-            </span>
-          ) : (
-            <span
-              style={{
-                fontSize: 12,
-                padding: '2px 8px',
-                borderRadius: 4,
-                background: '#f1f5f9',
-                color: '#475569',
-                border: '1px solid #cbd5e1',
-              }}
-              title="直接查询大表全部专利，不应用任何视图"
-            >
-              🗂 大表直查
-            </span>
-          )}
           <span style={{ fontSize: 13, color: '#6b7280' }}>
             共 {totalPatents} 件{currentProductId ? ' · 当前产品筛选中' : ''}
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <form onSubmit={handleSearch} style={{ display: 'flex', gap: 4, position: 'relative' }} className="patent-search-suggest">
+          <form onSubmit={handleSearch} style={{ display: 'flex', gap: 4 }}>
             <input
-              ref={searchInputRef}
               type="text"
               className="form-input"
               style={{ width: 260, height: 32, fontSize: 13 }}
               placeholder="搜索专利号、标题、申请人..."
               value={searchInputText}
               onChange={(e) => setSearchInputText(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true) }}
-              autoComplete="off"
             />
-            {suggestionLoading && (
-              <span style={{ position: 'absolute', right: 8, top: 9, fontSize: 11, color: '#9ca3af' }}>…</span>
-            )}
-            {showSuggestions && suggestions.length > 0 && (
-              <ul style={{
-                position: 'absolute',
-                top: 34,
-                left: 0,
-                width: 320,
-                margin: 0,
-                padding: 0,
-                listStyle: 'none',
-                background: '#fff',
-                border: '1px solid #e5e7eb',
-                borderRadius: 6,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                zIndex: 1000,
-                maxHeight: 360,
-                overflowY: 'auto',
-              }}>
-                {suggestions.map((s, idx) => {
-                  const iconMap: Record<string, string> = {
-                    application_number: '申',
-                    publication_number: '公',
-                    title: '题',
-                    applicant: '请',
-                    inventor: '发',
-                  }
-                  const colorMap: Record<string, string> = {
-                    application_number: '#3b82f6',
-                    publication_number: '#3b82f6',
-                    title: '#8b5cf6',
-                    applicant: '#f59e0b',
-                    inventor: '#10b981',
-                  }
-                  const icon = iconMap[s.type] || '·'
-                  const color = colorMap[s.type] || '#6b7280'
-                  return (
-                    <li
-                      key={`${s.type}-${idx}`}
-                      onMouseDown={(e) => { e.preventDefault(); applySuggestion(s) }}
-                      onMouseEnter={() => setActiveSuggestionIdx(idx)}
-                      style={{
-                        padding: '7px 10px',
-                        fontSize: 13,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        background: idx === activeSuggestionIdx ? '#f3f4f6' : '#fff',
-                        borderBottom: idx < suggestions.length - 1 ? '1px solid #f3f4f6' : 'none',
-                      }}
-                    >
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 22,
-                        height: 22,
-                        borderRadius: 4,
-                        background: color,
-                        color: '#fff',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        flexShrink: 0,
-                      }}>{icon}</span>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#374151' }}>
-                        {s.label}
-                      </span>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
           </form>
           <button
             className={`btn btn-sm ${hasActiveFilters ? 'btn-primary' : 'btn-secondary'}`}
@@ -1327,27 +1066,6 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
             style={{ display: hasActiveFilters ? 'inline-flex' : 'none' }}
           >
             清除筛选
-          </button>
-          {/* P2-8：同族聚拢切换 —— 仅大表直查模式下显示，视图模式不适用 */}
-          {!isViewBound && (
-            <button
-              className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setGroupByFamily(!groupByFamily)}
-              title={groupByFamily ? '已开启：同族专利聚拢在一起，行首显示同族徽章。点击关闭' : '开启后同族专利会聚拢在一起，便于对比同族成员'}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-            >
-              <span style={{ fontSize: 13 }}>🧲</span>
-              同族聚拢
-              {groupByFamily && <span style={{ fontSize: 10, opacity: 0.85 }}>ON</span>}
-            </button>
-          )}
-          {/* P2-9：清理无效占位专利（早期同族号解析 BUG 产生的垃圾数据） */}
-          <button
-            className="btn btn-sm btn-secondary"
-            onClick={handleCleanupPlaceholders}
-            title="扫描并清理因早期同族号解析 BUG（不识别 | 竖线、连续空格）而产生的非法占位专利"
-          >
-            🧹 清理无效占位
           </button>
           <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
             列管理
@@ -1361,6 +1079,14 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           </button>
           <button className="btn btn-sm btn-secondary" onClick={handleExport}>
             导出
+          </button>
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={handleCleanupPlaceholders}
+            title="扫描并清理 title=待补全 且专利号格式不合法的历史残留记录（如日期+专利号合并的乱码）"
+            style={{ color: '#dc2626' }}
+          >
+            清理无效占位
           </button>
         </div>
       </div>
@@ -1389,6 +1115,13 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)}>批量编辑</button>
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)}>批量打标签</button>
             <button className="btn btn-xs btn-primary" onClick={() => setShowAIBatch(true)}>AI批量处理</button>
+            <button
+              className="btn btn-xs btn-secondary"
+              onClick={handleBulkDelete}
+              style={{ color: '#dc2626', borderColor: '#fecaca' }}
+            >
+              批量删除
+            </button>
           </div>
           <button className="btn btn-xs btn-ghost" onClick={clearSelection} style={{ marginLeft: 'auto' }}>
             取消选择
@@ -1618,31 +1351,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
               </tr>
             </thead>
             <tbody>
-              {patents.map((p, rowIdx) => {
-                // P2-8：同族聚拢模式下计算同族组背景色
-                // 相邻同 family_id 的行归为同一组（组号 +1 在 family_id 首次出现时），
-                // 组号 % 2 决定浅色背景，便于视觉区分不同的族。
-                let familyBg: string | undefined
-                let familyGroupIdx = -1
-                if (groupByFamily && p.family_id != null) {
-                  // 找当前行所属组的起始位置：往前找直到 family_id 不同
-                  let startIdx = rowIdx
-                  while (startIdx > 0 && patents[startIdx - 1].family_id === p.family_id) {
-                    startIdx--
-                  }
-                  // 组号 = 在 startIdx 之前有多少个不同的非 null family_id 组
-                  familyGroupIdx = 0
-                  let prevFid: number | null | undefined = null
-                  for (let i = 0; i < startIdx; i++) {
-                    const fid = patents[i].family_id
-                    if (fid != null && fid !== prevFid) {
-                      familyGroupIdx++
-                    }
-                    prevFid = fid
-                  }
-                  familyBg = familyGroupIdx % 2 === 0 ? '#f0f9ff' : '#fef3f2'
-                }
-                return (
+              {patents.map((p) => (
                 <tr
                   key={p.id}
                   className={selectedIds.includes(p.id) ? 'row-selected' : ''}
@@ -1655,7 +1364,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     onPatentClick(p.id)
                   }}
                   onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id })}
-                  style={{ cursor: 'pointer', background: familyBg }}
+                  style={{ cursor: 'pointer' }}
                 >
                   <td className="col-checkbox">
                     <input
@@ -1664,26 +1373,6 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                       onChange={() => toggleSelect(p.id)}
                       onClick={(e) => e.stopPropagation()}
                     />
-                    {/* P2-8：同族聚拢模式下，checkbox 下方显示同族徽章 */}
-                    {groupByFamily && p.family_id != null && p.family_size != null && p.family_size > 1 && (
-                      <div
-                        title={`同族 ${p.family_size} 件专利已聚拢在一起`}
-                        style={{
-                          marginTop: 2,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          minWidth: 22,
-                          height: 16,
-                          padding: '0 5px',
-                          fontSize: 10,
-                          fontWeight: 600,
-                          color: '#fff',
-                          background: familyGroupIdx % 2 === 0 ? '#0284c7' : '#dc2626',
-                          borderRadius: 8,
-                        }}
-                      >族 {p.family_size}</div>
-                    )}
                   </td>
                   <td className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
@@ -1789,8 +1478,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     )
                   })}
                 </tr>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         )}

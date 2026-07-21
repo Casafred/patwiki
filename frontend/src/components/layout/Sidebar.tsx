@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { productApi, databaseApi, viewApi } from '../../api'
+import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { PatentView } from '../../types'
 
 interface SidebarProps {
   currentPage: string
-  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'views' | 'metadata' | 'import-history') => void
+  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing') => void
 }
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
@@ -13,18 +12,12 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     products, currentProductId, setCurrentProductId, setProducts,
     databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
     currentUser,
-    views, setViews, currentViewId, setCurrentViewId,
   } = useAppStore()
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [newProductName, setNewProductName] = useState('')
   const [showAddDatabase, setShowAddDatabase] = useState(false)
   const [newDbName, setNewDbName] = useState('')
   const [newDbDesc, setNewDbDesc] = useState('')
-  // P0-15：新建视图（内联简易表单）
-  const [showAddView, setShowAddView] = useState(false)
-  const [newViewName, setNewViewName] = useState('')
-  const [newViewType, setNewViewType] = useState<'personal' | 'shared'>('personal')
-  const [viewLoading, setViewLoading] = useState(false)
 
   // 打通关联：监听当前库切换，重新加载产品列表，patent_count 按当前库过滤
   const reloadProducts = useCallback(async () => {
@@ -43,29 +36,6 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   useEffect(() => {
     reloadProducts()
   }, [reloadProducts])
-
-  // P0-15：当前库切换时重新加载视图列表
-  const reloadViews = useCallback(async () => {
-    if (currentDatabaseId == null) {
-      setViews([])
-      return
-    }
-    try {
-      const list = await viewApi.list({ database_id: currentDatabaseId })
-      setViews(list)
-      // 校验 currentViewId 仍属于该库；否则置空
-      if (currentViewId != null && !list.some(v => v.id === currentViewId)) {
-        setCurrentViewId(null)
-      }
-    } catch (e) {
-      console.error('Failed to load views:', e)
-      setViews([])
-    }
-  }, [currentDatabaseId, setViews, currentViewId, setCurrentViewId])
-
-  useEffect(() => {
-    reloadViews()
-  }, [reloadViews])
 
   const handleProductClick = (productId: number | null) => {
     setCurrentProductId(productId)
@@ -114,61 +84,42 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     }
   }
 
-  // P0-15：切换视图
-  const handleViewClick = (viewId: number | null) => {
-    setCurrentViewId(viewId)
-    setCurrentProductId(null)
-    onNavigate('patents')
-  }
-
-  // P0-15：点击"部门总表"——若不存在则后端自动创建
-  const handleMasterViewClick = async () => {
-    if (currentDatabaseId == null) return
-    setViewLoading(true)
+  // 整库删除：级联删除库内所有专利后删库（默认库不可删）
+  const handleDeleteDatabase = async () => {
+    if (currentDatabaseId === null || currentDatabaseId === undefined) {
+      alert('请先选择要删除的库')
+      return
+    }
+    const db = databases.find(d => d.id === currentDatabaseId)
+    if (!db) {
+      alert('未找到当前库')
+      return
+    }
+    if (db.is_default) {
+      alert('默认数据库不可删除')
+      return
+    }
+    const count = db.patent_count ?? 0
+    const msg = count > 0
+      ? `确定要删除库「${db.name}」吗？\n\n该库包含 ${count} 条专利，将一并删除，此操作不可恢复！`
+      : `确定要删除空库「${db.name}」吗？此操作不可恢复。`
+    if (!confirm(msg)) return
     try {
-      const master = await databaseApi.getOrCreateMasterView(currentDatabaseId)
-      // 把 master 合入 views 缓存（若尚未存在）
-      if (!views.some(v => v.id === master.id)) {
-        setViews([...views, master])
+      await databaseApi.delete(db.id, true)
+      const refreshed = await databaseApi.list()
+      setDatabases(refreshed)
+      // 切到第一个可用库
+      if (refreshed.length > 0) {
+        setCurrentDatabaseId(refreshed[0].id)
+      } else {
+        setCurrentDatabaseId(null)
       }
-      setCurrentViewId(master.id)
-      setCurrentProductId(null)
       onNavigate('patents')
-    } catch (e) {
-      console.error('Failed to get/create master view:', e)
-      alert('获取部门总表失败')
-    } finally {
-      setViewLoading(false)
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail
+      alert(detail || '删除库失败')
     }
   }
-
-  // P0-15：新建视图（简易内联表单，完整管理在 P0-18）
-  const handleAddView = async () => {
-    if (!newViewName.trim() || currentDatabaseId == null) return
-    try {
-      const created = await viewApi.create({
-        name: newViewName.trim(),
-        database_id: currentDatabaseId,
-        view_type: newViewType,
-        filter_config: {},
-        column_config: [],
-        sort_config: {},
-      })
-      setViews([...views, created])
-      setCurrentViewId(created.id)
-      setCurrentProductId(null)
-      setNewViewName('')
-      setShowAddView(false)
-      onNavigate('patents')
-    } catch (e) {
-      alert('创建视图失败')
-    }
-  }
-
-  // 视图分组：部门总表 / 个人 / 共享
-  const masterView = views.find(v => v.is_department_master)
-  const personalViews = views.filter(v => !v.is_department_master && v.view_type === 'personal')
-  const sharedViews = views.filter(v => !v.is_department_master && v.view_type === 'shared')
 
   return (
     <aside className="sidebar">
@@ -225,122 +176,31 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
               </div>
             </div>
           ) : (
-            <div
-              className="product-item"
-              style={{ color: '#64748b', fontStyle: 'italic', marginTop: 4 }}
-              onClick={() => setShowAddDatabase(true)}
-            >
-              + 新建库
-            </div>
-          )}
-        </div>
-
-        {/* P0-15：视图切换器 */}
-        <div className="nav-section">视图（小表 / 部门总表）</div>
-        <div style={{ borderBottom: '1px solid #1e293b', marginBottom: 8 }}>
-          {/* 大表直查（不应用任何视图） */}
-          <div
-            className={`nav-item ${currentPage === 'patents' && currentViewId === null && currentProductId === null ? 'active' : ''}`}
-            onClick={() => handleViewClick(null)}
-            title="直接查询大表全部专利，不应用任何视图"
-          >
-            大表直查
-          </div>
-
-          {/* 部门总表入口（自动获取/创建） */}
-          <div
-            className={`nav-item ${currentPage === 'patents' && currentViewId !== null && masterView && currentViewId === masterView.id ? 'active' : ''}`}
-            onClick={handleMasterViewClick}
-            title="部门级综合全属性总表（显示全部字段、全部专利）"
-            style={viewLoading ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
-          >
-            <span style={{ color: '#fbbf24' }}>★</span> 部门总表
-          </div>
-
-          {/* 个人小表 */}
-          {personalViews.length > 0 && (
-            <div style={{ padding: '4px 12px 2px', fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>
-              我的小表
-            </div>
-          )}
-          {personalViews.map((v: PatentView) => (
-            <div
-              key={v.id}
-              className={`nav-item ${currentPage === 'patents' && currentViewId === v.id ? 'active' : ''}`}
-              onClick={() => handleViewClick(v.id)}
-              title={v.description || v.name}
-            >
-              <span style={{ marginRight: 6, color: '#3b82f6' }}>●</span>
-              {v.name}
-            </div>
-          ))}
-
-          {/* 共享视图 */}
-          {sharedViews.length > 0 && (
-            <div style={{ padding: '4px 12px 2px', fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>
-              共享视图
-            </div>
-          )}
-          {sharedViews.map((v: PatentView) => (
-            <div
-              key={v.id}
-              className={`nav-item ${currentPage === 'patents' && currentViewId === v.id ? 'active' : ''}`}
-              onClick={() => handleViewClick(v.id)}
-              title={v.description || v.name}
-            >
-              <span style={{ marginRight: 6, color: '#10b981' }}>◐</span>
-              {v.name}
-            </div>
-          ))}
-
-          {/* 新建视图 */}
-          {showAddView ? (
-            <div style={{ padding: '8px 12px' }}>
-              <input
-                className="form-input"
-                style={{ fontSize: 12, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', marginBottom: 4, width: '100%' }}
-                placeholder="视图名称（如：电钻风险排查）"
-                value={newViewName}
-                onChange={(e) => setNewViewName(e.target.value)}
-                autoFocus
-              />
-              <select
-                className="form-input"
-                style={{ fontSize: 12, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', marginBottom: 4, width: '100%' }}
-                value={newViewType}
-                onChange={(e) => setNewViewType(e.target.value as 'personal' | 'shared')}
+            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+              <div
+                className="product-item"
+                style={{ color: '#64748b', fontStyle: 'italic', flex: 1 }}
+                onClick={() => setShowAddDatabase(true)}
               >
-                <option value="personal">个人小表（仅自己）</option>
-                <option value="shared">共享视图（库内成员可见）</option>
-              </select>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-primary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={handleAddView}>
-                  创建
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  style={{ fontSize: 11, padding: '3px 8px', background: 'transparent', border: '1px solid #475569', color: '#cbd5e1' }}
-                  onClick={() => { setShowAddView(false); setNewViewName(''); setNewViewType('personal') }}
-                >
-                  取消
-                </button>
+                + 新建库
               </div>
-            </div>
-          ) : (
-            <div
-              className="product-item"
-              style={{ color: '#64748b', fontStyle: 'italic' }}
-              onClick={() => setShowAddView(true)}
-            >
-              + 新建视图
+              {currentDatabaseId !== null && databases.find(d => d.id === currentDatabaseId && !d.is_default) && (
+                <div
+                  className="product-item"
+                  style={{ color: '#ef4444', fontStyle: 'italic', flexShrink: 0, padding: '4px 8px' }}
+                  onClick={handleDeleteDatabase}
+                  title="删除当前库（连同库内所有专利一并删除，不可恢复）"
+                >
+                  🗑 删除库
+                </div>
+              )}
             </div>
           )}
         </div>
 
         <div
-          className={`nav-item ${currentPage === 'patents' && !currentProductId && currentViewId === null ? 'active' : ''}`}
+          className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`}
           onClick={() => handleProductClick(null)}
-          style={{ display: 'none' }}
         >
           全部专利
         </div>
@@ -367,24 +227,6 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           onClick={() => onNavigate('fields')}
         >
           字段管理
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'views' ? 'active' : ''}`}
-          onClick={() => onNavigate('views')}
-        >
-          视图管理
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'metadata' ? 'active' : ''}`}
-          onClick={() => onNavigate('metadata')}
-        >
-          元数据管理
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`}
-          onClick={() => onNavigate('import-history')}
-        >
-          导入历史
         </div>
         <div
           className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`}

@@ -13,10 +13,10 @@ from app.schemas.schemas import (
     Product as ProductSchema, ProductCreate, ProductUpdate,
     Project as ProjectSchema, ProjectCreate, ProjectUpdate,
     Tag as TagSchema, TagCreate, TagUpdate,
-    TagGroup as TagGroupSchema, TagGroupCreate, TagGroupUpdate,
+    TagGroup as TagGroupSchema, TagGroupCreate,
     CustomField as CustomFieldSchema, CustomFieldCreate, CustomFieldUpdate,
-    Department as DepartmentSchema, DepartmentCreate, DepartmentUpdate,
-    Person as PersonSchema, PersonCreate, PersonUpdate,
+    Department as DepartmentSchema, DepartmentCreate,
+    Person as PersonSchema, PersonCreate,
     ProductLine as ProductLineSchema, ProductLineCreate,
 )
 
@@ -90,35 +90,14 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
 @router.get("/projects", response_model=list[ProjectSchema])
 def list_projects(
     product_id: Optional[int] = None,
-    database_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
-    """
-    列出项目。
-
-    P2-5：修复 N+1 — 用一条聚合 SQL 一次性拿到所有项目的专利计数，
-    避免每个项目都触发 `len(p.patents)` 的 lazy-load。
-    可选 database_id：按库过滤 patent_count（与 /products 行为一致）。
-    """
     query = db.query(Project)
     if product_id:
         query = query.filter(Project.product_id == product_id)
     projects = query.order_by(Project.name).all()
-
-    # P2-5：单条聚合查询，避免 N+1
-    from app.models.association import patent_project
-    count_query = db.query(
-        patent_project.c.project_id,
-        func.count(patent_project.c.patent_id).label("cnt"),
-    )
-    if database_id is not None:
-        count_query = count_query.join(
-            Patent, Patent.id == patent_project.c.patent_id
-        ).filter(Patent.database_id == database_id)
-    count_map = {pid: cnt for pid, cnt in count_query.group_by(patent_project.c.project_id).all()}
-
     for p in projects:
-        p.patent_count = count_map.get(p.id, 0)
+        p.patent_count = len(p.patents)
     return projects
 
 
@@ -203,30 +182,6 @@ def create_tag_group(group_in: TagGroupCreate, db: Session = Depends(get_db)):
     return group
 
 
-@router.put("/tag-groups/{group_id}", response_model=TagGroupSchema)
-def update_tag_group(group_id: int, group_in: TagGroupUpdate, db: Session = Depends(get_db)):
-    group = db.query(TagGroup).filter(TagGroup.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="TagGroup not found")
-    for field, value in group_in.model_dump(exclude_unset=True).items():
-        setattr(group, field, value)
-    db.commit()
-    db.refresh(group)
-    return group
-
-
-@router.delete("/tag-groups/{group_id}")
-def delete_tag_group(group_id: int, db: Session = Depends(get_db)):
-    group = db.query(TagGroup).filter(TagGroup.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="TagGroup not found")
-    # 级联：成员 Tag 的 group_id 置空（避免悬空外键）
-    db.query(Tag).filter(Tag.group_id == group_id).update({"group_id": None})
-    db.delete(group)
-    db.commit()
-    return {"success": True}
-
-
 @router.get("/custom-fields", response_model=list[CustomFieldSchema])
 def list_custom_fields(
     active_only: bool = False,
@@ -283,30 +238,6 @@ def create_department(dept_in: DepartmentCreate, db: Session = Depends(get_db)):
     return dept
 
 
-@router.put("/departments/{department_id}", response_model=DepartmentSchema)
-def update_department(department_id: int, dept_in: DepartmentUpdate, db: Session = Depends(get_db)):
-    dept = db.query(Department).filter(Department.id == department_id).first()
-    if not dept:
-        raise HTTPException(status_code=404, detail="Department not found")
-    for field, value in dept_in.model_dump(exclude_unset=True).items():
-        setattr(dept, field, value)
-    db.commit()
-    db.refresh(dept)
-    return dept
-
-
-@router.delete("/departments/{department_id}")
-def delete_department(department_id: int, db: Session = Depends(get_db)):
-    dept = db.query(Department).filter(Department.id == department_id).first()
-    if not dept:
-        raise HTTPException(status_code=404, detail="Department not found")
-    # 级联：成员 Person 的 department_id 置空（避免悬空外键）
-    db.query(Person).filter(Person.department_id == department_id).update({"department_id": None})
-    db.delete(dept)
-    db.commit()
-    return {"success": True}
-
-
 @router.get("/people", response_model=list[PersonSchema])
 def list_people(db: Session = Depends(get_db)):
     return db.query(Person).order_by(Person.name).all()
@@ -321,28 +252,6 @@ def create_person(person_in: PersonCreate, db: Session = Depends(get_db)):
     return person
 
 
-@router.put("/people/{person_id}", response_model=PersonSchema)
-def update_person(person_id: int, person_in: PersonUpdate, db: Session = Depends(get_db)):
-    person = db.query(Person).filter(Person.id == person_id).first()
-    if not person:
-        raise HTTPException(status_code=404, detail="Person not found")
-    for field, value in person_in.model_dump(exclude_unset=True).items():
-        setattr(person, field, value)
-    db.commit()
-    db.refresh(person)
-    return person
-
-
-@router.delete("/people/{person_id}")
-def delete_person(person_id: int, db: Session = Depends(get_db)):
-    person = db.query(Person).filter(Person.id == person_id).first()
-    if not person:
-        raise HTTPException(status_code=404, detail="Person not found")
-    db.delete(person)
-    db.commit()
-    return {"success": True}
-
-
 @router.get("/product-lines", response_model=list[ProductLineSchema])
 def list_product_lines(db: Session = Depends(get_db)):
     return db.query(ProductLine).order_by(ProductLine.name).all()
@@ -355,15 +264,3 @@ def create_product_line(pl_in: ProductLineCreate, db: Session = Depends(get_db))
     db.commit()
     db.refresh(pl)
     return pl
-
-
-@router.delete("/product-lines/{product_line_id}")
-def delete_product_line(product_line_id: int, db: Session = Depends(get_db)):
-    pl = db.query(ProductLine).filter(ProductLine.id == product_line_id).first()
-    if not pl:
-        raise HTTPException(status_code=404, detail="ProductLine not found")
-    # 级联：成员 Product 的 product_line_id 置空（避免悬空外键）
-    db.query(Product).filter(Product.product_line_id == product_line_id).update({"product_line_id": None})
-    db.delete(pl)
-    db.commit()
-    return {"success": True}

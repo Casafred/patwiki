@@ -108,7 +108,6 @@ class PatentService:
         sort_order: Optional[str] = "asc",
         custom_filters: Optional[dict[str, Any]] = None,
         filters: Optional[dict[str, Any]] = None,
-        group_by_family: bool = False,
     ) -> tuple[list[Patent], int]:
         query = db.query(Patent).options(
             joinedload(Patent.tags),
@@ -217,17 +216,7 @@ class PatentService:
 
         total = query.count()
 
-        if group_by_family:
-            # 同族聚拢排序：family_id IS NULL 的排最后，相同 family_id 的聚在一起，
-            # 同族内按 filing_date 倒序（最新的在前），最后用 id 兜底稳定排序。
-            # 忽略用户传的 sort_by/sort_order。
-            query = query.order_by(
-                Patent.family_id.is_(None),         # False(=0) 在前，True(=1) 在后
-                Patent.family_id.asc(),             # 同 family_id 聚拢
-                desc(Patent.filing_date),           # 族内按申请日倒序
-                Patent.id.asc(),                    # 兜底稳定
-            )
-        elif sort_by:
+        if sort_by:
             if sort_by in SYSTEM_FIELDS:
                 column = getattr(Patent, sort_by, None)
                 if column is not None:
@@ -246,27 +235,6 @@ class PatentService:
 
         query = query.offset((page - 1) * page_size).limit(page_size)
         patents = query.all()
-
-        # 同族聚拢模式下，附加 family_size（同族成员数，含自身）
-        # 用一条 GROUP BY 聚合查询，避免每行 N+1
-        if group_by_family and patents:
-            family_ids = list({p.family_id for p in patents if p.family_id is not None})
-            if family_ids:
-                size_rows = (
-                    db.query(
-                        Patent.family_id.label("fid"),
-                        func.count(Patent.id).label("cnt"),
-                    )
-                    .filter(Patent.family_id.in_(family_ids))
-                    .group_by(Patent.family_id)
-                    .all()
-                )
-                size_map = {row.fid: row.cnt for row in size_rows}
-            else:
-                size_map = {}
-            for p in patents:
-                # 直接挂到 ORM 对象上，schema 序列化时会读出
-                p.family_size = size_map.get(p.family_id) if p.family_id is not None else None
 
         return patents, total
 
@@ -376,19 +344,11 @@ class PatentService:
         return patent
 
     @staticmethod
-    def bulk_update(
-        db: Session,
-        patent_ids: list[int],
-        updates: dict,
-        changed_by: Optional[str] = None,
-        source: str = "bulk",
-    ) -> int:
+    def bulk_update(db: Session, patent_ids: list[int], updates: dict) -> int:
         count = 0
         patents = db.query(Patent).filter(Patent.id.in_(patent_ids)).all()
         for patent in patents:
-            PatentService.update_patent(
-                db, patent, updates, source=source, changed_by=changed_by
-            )
+            PatentService.update_patent(db, patent, updates, source="bulk")
             count += 1
         return count
 

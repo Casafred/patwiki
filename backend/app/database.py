@@ -67,17 +67,6 @@ def _ensure_column_migration():
          "ALTER TABLE patent_histories ADD COLUMN source_view_id INTEGER REFERENCES patent_views(id)"),
         ("patent_histories", "source_view_name",
          "ALTER TABLE patent_histories ADD COLUMN source_view_name VARCHAR(200)"),
-        # P2-2：ImportBatch 增加库/视图/视图本地字段计数/触发者字段
-        ("import_batches", "database_id",
-         "ALTER TABLE import_batches ADD COLUMN database_id INTEGER REFERENCES patent_databases(id)"),
-        ("import_batches", "view_id",
-         "ALTER TABLE import_batches ADD COLUMN view_id INTEGER REFERENCES patent_views(id)"),
-        ("import_batches", "view_local_written",
-         "ALTER TABLE import_batches ADD COLUMN view_local_written INTEGER DEFAULT 0"),
-        ("import_batches", "dedupe_by",
-         "ALTER TABLE import_batches ADD COLUMN dedupe_by VARCHAR(20) DEFAULT 'both'"),
-        ("import_batches", "triggered_by",
-         "ALTER TABLE import_batches ADD COLUMN triggered_by VARCHAR(100)"),
     ]
 
     with engine.begin() as conn:
@@ -108,18 +97,6 @@ def _ensure_column_migration():
         if not has_index("patent_histories", "ix_patent_histories_source_view_id"):
             try:
                 conn.execute(text("CREATE INDEX ix_patent_histories_source_view_id ON patent_histories (source_view_id)"))
-            except Exception:
-                pass
-
-        # P2-2：import_batches.database_id / view_id 索引
-        if not has_index("import_batches", "ix_import_batches_database_id"):
-            try:
-                conn.execute(text("CREATE INDEX ix_import_batches_database_id ON import_batches (database_id)"))
-            except Exception:
-                pass
-        if not has_index("import_batches", "ix_import_batches_view_id"):
-            try:
-                conn.execute(text("CREATE INDEX ix_import_batches_view_id ON import_batches (view_id)"))
             except Exception:
                 pass
 

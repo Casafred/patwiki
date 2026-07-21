@@ -21,9 +21,6 @@ from app.services.patent_service import PatentService
 from app.services.merge_service import merge_patent_data, _is_empty
 from app.config import settings
 from app.models import Patent, CustomField
-from app.models.importing import ImportBatch
-from app.models.enums import ImportBatchStatus
-from datetime import datetime
 
 router = APIRouter(tags=["import"])
 
@@ -78,18 +75,16 @@ class ConfirmImportRequest(BaseModel):
     product_id: Optional[int] = None
     project_id: Optional[int] = None
     database_id: Optional[int] = None
-    view_id: Optional[int] = None  # P1-15：导入到指定视图时未知列建为 vlf_ 本地字段
 
 
 @router.post("/import/preview")
 async def preview_import(
     file: UploadFile = File(...),
-    view_id: Optional[int] = Form(None),  # P1-15：可选，传入则未知列建为视图本地字段
     db: Session = Depends(get_db),
 ):
     content = await file.read()
     df, columns = ImportService.parse_excel(content, file.filename or "upload.xlsx")
-    suggested_mapping = ImportService.suggest_mapping(columns, db, view_id=view_id)
+    suggested_mapping = ImportService.suggest_mapping(columns, db)
 
     preview_rows_list = []
     for _, row in df.head(3).iterrows():
@@ -104,20 +99,11 @@ async def preview_import(
         "path": str(temp_path),
         "filename": file.filename or "upload.xlsx",
         "created_at": time.time(),
-        "view_id": view_id,  # P1-15：缓存 view_id 供 confirm 使用
     }
 
     from app.services.database_service import DatabaseService
     databases = DatabaseService.list_databases(db)
     default_db = DatabaseService.get_default_database(db)
-
-    # P1-15：若指定 view_id，附带视图信息供前端展示
-    view_info = None
-    if view_id is not None:
-        from app.services.view_service import ViewService
-        v = ViewService.get_view(db, view_id)
-        if v:
-            view_info = ViewService.to_dict(v, include_fields=False)
 
     return {
         "import_id": import_id,
@@ -127,7 +113,6 @@ async def preview_import(
         "suggested_mapping": suggested_mapping,
         "databases": [DatabaseService.to_dict(d) for d in databases],
         "default_database_id": default_db.id if default_db else None,
-        "view": view_info,  # P1-15
     }
 
 
@@ -149,29 +134,33 @@ def confirm_import(
     req: ConfirmImportRequest,
     db: Session = Depends(get_db),
 ):
-    # 从内存索引或磁盘恢复会话
-    info = TEMP_FILES.get(req.import_id)
-    if not info:
-        # 尝试从磁盘恢复（后端可能重启过）
-        temp_path = TEMP_DIR / f"{req.import_id}.bin"
-        if temp_path.exists():
-            info = {
-                "path": str(temp_path),
-                "filename": "upload.xlsx",
-                "created_at": time.time(),
-            }
-            TEMP_FILES[req.import_id] = info
-        else:
-            raise HTTPException(status_code=400, detail="导入会话已过期，请重新上传文件")
-
-    # 过期检查
-    if time.time() - info["created_at"] > TEMP_TTL:
+    # 从磁盘读取会话文件（不再依赖内存索引，避免后端重启导致会话丢失）
+    temp_path = TEMP_DIR / f"{req.import_id}.bin"
+    if not temp_path.exists():
+        raise HTTPException(
+            status_code=400,
+            detail="导入会话已过期或文件不存在，请重新上传文件"
+        )
+    # 基于文件 mtime 检查 TTL，避免后端重启后 created_at 被重置
+    file_mtime = temp_path.stat().st_mtime
+    if time.time() - file_mtime > TEMP_TTL:
         try:
-            os.remove(info["path"])
+            os.remove(temp_path)
         except OSError:
             pass
-        TEMP_FILES.pop(req.import_id, None)
-        raise HTTPException(status_code=400, detail="导入会话已过期（超过6小时），请重新上传文件")
+        raise HTTPException(
+            status_code=400,
+            detail=f"导入会话已过期（超过{TEMP_TTL // 3600}小时），请重新上传文件"
+        )
+    # 同步内存索引（便于 /import/batches 等查询）
+    info = TEMP_FILES.get(req.import_id)
+    if not info:
+        info = {
+            "path": str(temp_path),
+            "filename": "upload.xlsx",
+            "created_at": file_mtime,
+        }
+        TEMP_FILES[req.import_id] = info
 
     database_id = req.database_id
     if database_id is None:
@@ -185,42 +174,11 @@ def confirm_import(
         if not DatabaseService.get_database(db, database_id):
             raise HTTPException(status_code=400, detail=f"库不存在：{database_id}")
 
-    # P2-2：创建 ImportBatch 记录，便于在导入历史页追溯
-    batch = ImportBatch(
-        filename=info["filename"],
-        status=ImportBatchStatus.PROCESSING,
-        started_at=datetime.utcnow(),
-        mapping_config={m.source_column: m.target_field for m in req.field_mappings},
-        database_id=database_id,
-        view_id=req.view_id,
-        dedupe_by=req.dedupe_by,
-    )
-    db.add(batch)
-    db.commit()
-    db.refresh(batch)
-
     with open(info["path"], "rb") as f:
         content = f.read()
     filename = info["filename"]
 
     mapping = {m.source_column: m.target_field for m in req.field_mappings if m.target_field}
-
-    # P1-15：解析 view_id（优先 req.view_id，回退到会话缓存）
-    view_id = req.view_id
-    if view_id is None:
-        view_id = info.get("view_id")
-    view_obj = None
-    if view_id is not None:
-        from app.services.view_service import ViewService
-        view_obj = ViewService.get_view(db, view_id)
-        if not view_obj:
-            raise HTTPException(status_code=400, detail=f"视图不存在：{view_id}")
-        # 视图必须属于当前 database_id
-        if view_obj.database_id != database_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"视图 {view_id} 不属于库 {database_id}",
-            )
 
     errors = []
     inserted = 0
@@ -228,11 +186,7 @@ def confirm_import(
     duplicates_count = 0
     skipped = 0
     error_count = 0
-    view_local_written = 0  # P1-15：视图本地字段值写入计数
     BATCH_SIZE = 500
-    total_rows = 0
-    batch_failed = False
-    failure_msg = None
 
     try:
         _optimize_sqlite_connection(db)
@@ -376,22 +330,6 @@ def confirm_import(
                             has_rel = virtual["family_numbers"] or virtual["cited_numbers"] or virtual["citing_numbers"]
                             if has_rel:
                                 pending_relations.append((current_patent, virtual))
-                            # P1-15：写入视图本地字段值（不污染大表）
-                            view_local_data = patent_data.get("view_local_fields")
-                            if view_local_data and view_obj is not None:
-                                from app.services.view_service import ViewService
-                                for vlf_key, vlf_value in view_local_data.items():
-                                    try:
-                                        ViewService.set_local_field_value(
-                                            db, view_obj, current_patent.id, vlf_key, vlf_value,
-                                            changed_by="import",
-                                        )
-                                        view_local_written += 1
-                                    except ValueError:
-                                        # 字段 key 不属于该视图，跳过
-                                        pass
-                                    except Exception as vlf_err:
-                                        print(f"[PatWiki] 视图本地字段写入警告: {vlf_err}", flush=True)
 
                 if (i + 1) % BATCH_SIZE == 0:
                     db.commit()
@@ -425,34 +363,7 @@ def confirm_import(
         if database_id is not None:
             from app.services.database_service import DatabaseService
             DatabaseService.refresh_patent_count(db, database_id)
-    except Exception as e:
-        batch_failed = True
-        failure_msg = str(e)
-        print(f"[PatWiki] 导入异常: {e}", flush=True)
-        # 重新抛出，让 FastAPI 返回 500
-        raise
     finally:
-        # P2-2：无论成功或失败，更新 ImportBatch 状态
-        try:
-            batch.status = ImportBatchStatus.FAILED if batch_failed else ImportBatchStatus.COMPLETED
-            batch.total_rows = total_rows
-            batch.processed_rows = inserted + updated + skipped
-            batch.inserted_count = inserted
-            batch.updated_count = updated
-            batch.skipped_count = skipped
-            batch.duplicate_count = duplicates_count
-            batch.error_count = error_count
-            batch.view_local_written = view_local_written
-            batch.completed_at = datetime.utcnow()
-            if errors:
-                batch.errors = errors[:50]
-            if batch_failed and failure_msg:
-                batch.errors = [{"error": failure_msg}]
-            db.add(batch)
-            db.commit()
-        except Exception as batch_err:
-            print(f"[PatWiki] ImportBatch 更新失败: {batch_err}", flush=True)
-
         info = TEMP_FILES.pop(req.import_id, None)
         if info and os.path.exists(info["path"]):
             try:
@@ -470,8 +381,6 @@ def confirm_import(
         "database_id": database_id,
         "family_links": 0,
         "citation_links": 0,
-        "batch_id": batch.id,  # P2-2：返回批次 ID
-        "view_local_written": view_local_written,
     }
 
 
@@ -487,72 +396,6 @@ def _process_relations(db: Session, patent: Patent, virtual: dict, database_id: 
         process_citations(db, patent, virtual["cited_numbers"], database_id=database_id)
     if virtual["citing_numbers"]:
         process_citing_patents(db, patent, virtual["citing_numbers"], database_id=database_id)
-
-
-@router.get("/import/batches")
-def list_import_batches(
-    database_id: Optional[int] = None,
-    view_id: Optional[int] = None,
-    status: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
-):
-    """P2-2：导入历史列表，按库/视图/状态过滤。"""
-    q = db.query(ImportBatch)
-    if database_id is not None:
-        q = q.filter(ImportBatch.database_id == database_id)
-    if view_id is not None:
-        q = q.filter(ImportBatch.view_id == view_id)
-    if status:
-        try:
-            status_enum = ImportBatchStatus(status)
-            q = q.filter(ImportBatch.status == status_enum)
-        except ValueError:
-            pass
-    total = q.count()
-    items = (
-        q.order_by(ImportBatch.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    return {
-        "total": total,
-        "items": [_batch_to_dict(b) for b in items],
-    }
-
-
-@router.get("/import/batches/{batch_id}")
-def get_import_batch(batch_id: int, db: Session = Depends(get_db)):
-    """P2-2：导入批次详情（含错误明细）。"""
-    b = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
-    if not b:
-        raise HTTPException(status_code=404, detail=f"批次不存在：{batch_id}")
-    return _batch_to_dict(b, include_errors=True)
-
-
-def _batch_to_dict(b: ImportBatch, include_errors: bool = False) -> dict:
-    return {
-        "id": b.id,
-        "filename": b.filename,
-        "status": b.status.value if b.status else None,
-        "total_rows": b.total_rows or 0,
-        "processed_rows": b.processed_rows or 0,
-        "inserted_count": b.inserted_count or 0,
-        "updated_count": b.updated_count or 0,
-        "skipped_count": b.skipped_count or 0,
-        "duplicate_count": b.duplicate_count or 0,
-        "error_count": b.error_count or 0,
-        "view_local_written": b.view_local_written or 0,
-        "dedupe_by": b.dedupe_by,
-        "database_id": b.database_id,
-        "view_id": b.view_id,
-        "started_at": b.started_at.isoformat() if b.started_at else None,
-        "completed_at": b.completed_at.isoformat() if b.completed_at else None,
-        "created_at": b.created_at.isoformat() if b.created_at else None,
-        "errors": b.errors if include_errors else None,
-    }
 
 
 @router.get("/stats", response_model=StatsResponse)

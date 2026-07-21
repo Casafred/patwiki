@@ -137,14 +137,23 @@ class DatabaseService:
         return database
 
     @staticmethod
-    def delete_database(db: Session, database: PatentDatabase) -> bool:
-        """删除库前需先迁移或清空其中的专利。"""
-        patent_count = db.query(func.count(Patent.id)).filter(Patent.database_id == database.id).scalar()
-        if patent_count and patent_count > 0:
-            return False
+    def delete_database(db: Session, database: PatentDatabase, force: bool = False) -> bool:
+        """删除库。
+
+        - force=False（默认）：库中有专利时拒绝删除，需先迁移或清空。
+        - force=True：级联删除库内所有专利，然后删库。默认库仍不可删。
+        """
         # 不允许删除默认库
         if database.is_default:
             return False
+        patent_count = db.query(func.count(Patent.id)).filter(Patent.database_id == database.id).scalar()
+        if patent_count and patent_count > 0:
+            if not force:
+                return False
+            # force=True：级联删除库内所有专利
+            db.query(Patent).filter(Patent.database_id == database.id).delete(
+                synchronize_session=False
+            )
         db.delete(database)
         db.commit()
         return True

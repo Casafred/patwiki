@@ -42,12 +42,6 @@ class ImportBatch(Base):
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
-    # P2-2：导入历史按库/视图过滤
-    database_id = Column(Integer, ForeignKey("patent_databases.id"), nullable=True, index=True)
-    view_id = Column(Integer, ForeignKey("patent_views.id"), nullable=True, index=True)
-    view_local_written = Column(Integer, default=0)  # P1-15：写入视图本地字段值条数
-    dedupe_by = Column(String(20), default="both")
-    triggered_by = Column(String(100), nullable=True)  # 触发者用户名/邮箱
 
     mapping = relationship("FieldMapping")
     patents = relationship("Patent", back_populates="source_batch")

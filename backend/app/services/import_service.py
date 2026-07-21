@@ -1,17 +1,29 @@
 import hashlib
+import json
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Any
 from io import BytesIO
 
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
+from app.config import settings
 from app.models import (
-    Patent,
-    CustomField, CustomFieldType, LegalStatus, PatentType, RiskLevel
+    Patent, ImportBatch, FieldMapping, ImportBatchStatus,
+    CustomField, CustomFieldType, Product, LegalStatus, PatentType, RiskLevel
 )
-from app.services.relation_service import parse_patent_numbers
+from app.schemas.schemas import FieldMappingConfig, ImportRequest
+from app.services.patent_service import PatentService
+from app.services.merge_service import merge_patent_data
+from app.services.relation_service import (
+    parse_patent_numbers,
+    process_family_members,
+    process_citations,
+    process_citing_patents,
+)
 
 
 # 虚拟字段：不直接写入 Patent 主表，由 relation_service 处理
@@ -177,44 +189,6 @@ def auto_create_custom_field(db: Session, column_name: str) -> str:
     return key
 
 
-def auto_create_view_local_field(db: Session, view, column_name: str) -> str:
-    """P1-15：未知列在指定视图下创建为本地字段（vlf_ 前缀），返回 key。
-
-    与 auto_create_custom_field 不同：vlf_ 字段不污染大表 custom_fields，
-    仅在该视图内可见。适用于"导入到小表"的场景。
-
-    规则：
-    - key = "vlf_" + slug(列名)[:20] + "_" + 短哈希
-    - 字段类型默认 text
-    - 已存在同名 vlf_ 字段时直接返回其 key
-    """
-    from app.services.view_service import ViewService
-    column_name = column_name.strip()
-
-    # 查现有同名 vlf_ 字段
-    for lf in view.local_fields:
-        if lf.name == column_name:
-            return lf.key
-
-    slug = _slugify(column_name)[:20]
-    raw_key = f"vlf_{slug}_{_short_hash(column_name)}"
-    # ViewService.create_local_field 会自动加 vlf_ 前缀（如果没加的话）
-    # 此处我们直接传完整 key（以 vlf_ 开头时不会再加前缀）
-    try:
-        field = ViewService.create_local_field(
-            db, view,
-            key=raw_key,
-            name=column_name,
-            field_type="text",
-            description=f"导入时自动创建，源列名：{column_name}",
-            is_required=False,
-        )
-        return field.key
-    except ValueError:
-        # 极小概率冲突：直接返回原 key（后续值会写入失败，但不影响主流程）
-        return raw_key
-
-
 class ImportService:
     @staticmethod
     def parse_excel(file_content: bytes, filename: str) -> tuple[pd.DataFrame, list[str]]:
@@ -230,33 +204,19 @@ class ImportService:
         return df, columns
 
     @staticmethod
-    def suggest_mapping(
-        columns: list[str],
-        db: Session,
-        view_id: Optional[int] = None,
-    ) -> dict[str, str]:
+    def suggest_mapping(columns: list[str], db: Session) -> dict[str, str]:
         """对每列生成映射目标。
 
         返回结构：
             {
-                "列名": "field_key"  # 系统字段 / cf_xxx / vlf_xxx
+                "列名": "field_key"  # 系统字段或 cf_xxx 自定义字段
             }
-        - 未传入 view_id：未知列自动创建 CustomField（cf_ 前缀，污染大表）
-        - 传入 view_id（P1-15）：未知列自动创建视图本地字段（vlf_ 前缀，不污染大表）
+        未匹配列自动创建 CustomField，按设计文档 3.3。
         """
         mapping: dict[str, str] = {}
 
         custom_fields = db.query(CustomField).all()
         custom_field_by_name = {cf.name: cf.key for cf in custom_fields}
-
-        # P1-15：若指定 view_id，预加载视图与现有本地字段
-        view = None
-        existing_local_field_names: set[str] = set()
-        if view_id is not None:
-            from app.models import PatentView
-            view = db.query(PatentView).filter(PatentView.id == view_id).first()
-            if view:
-                existing_local_field_names = {lf.name for lf in view.local_fields}
 
         for col in columns:
             col_clean = col.strip()
@@ -283,32 +243,32 @@ class ImportService:
             if matched:
                 continue
 
-            # 4. 未知列处理
-            if view is not None:
-                # P1-15：导入到视图 → 建为 vlf_ 本地字段
-                if col_clean in existing_local_field_names:
-                    # 已有同名本地字段，复用
-                    for lf in view.local_fields:
-                        if lf.name == col_clean:
-                            mapping[col_clean] = lf.key
-                            break
-                else:
-                    try:
-                        new_key = auto_create_view_local_field(db, view, col_clean)
-                        mapping[col_clean] = new_key
-                        existing_local_field_names.add(col_clean)
-                    except Exception:
-                        pass
-            else:
-                # 未指定视图：维持原有行为，建为 CustomField
-                try:
-                    new_key = auto_create_custom_field(db, col_clean)
-                    mapping[col_clean] = new_key
-                    custom_field_by_name[col_clean] = new_key
-                except Exception:
-                    pass
+            # 4. 未知列：自动创建 CustomField
+            try:
+                new_key = auto_create_custom_field(db, col_clean)
+                mapping[col_clean] = new_key
+                # 刷新缓存，避免同一次导入重复创建
+                custom_field_by_name[col_clean] = new_key
+            except Exception:
+                # 创建失败则忽略该列
+                pass
 
         return mapping
+
+    @staticmethod
+    def preview_import(file_content: bytes, filename: str, db: Session) -> dict:
+        df, columns = ImportService.parse_excel(file_content, filename)
+        suggested_mapping = ImportService.suggest_mapping(columns, db)
+
+        sample_rows = df.head(10).to_dict("records")
+        sample_rows = [{str(k): str(v) for k, v in row.items()} for row in sample_rows]
+
+        return {
+            "columns": columns,
+            "sample_rows": sample_rows,
+            "total_rows": len(df),
+            "suggested_mapping": suggested_mapping,
+        }
 
     @staticmethod
     def _parse_date(value: Any) -> Optional[datetime.date]:
@@ -374,13 +334,10 @@ class ImportService:
         返回:
             (patent_data, virtual_data)
             - patent_data: 可直接用于创建/更新 Patent
-              * 含 custom_fields 子 dict（cf_xxx 字段）
-              * 含 view_local_fields 子 dict（vlf_xxx 字段，P1-15 新增）
             - virtual_data: {"family_numbers": [...], "cited_numbers": [...], "citing_numbers": [...]}
         """
         data: dict[str, Any] = {}
         custom: dict[str, Any] = {}
-        view_local: dict[str, Any] = {}  # P1-15：视图本地字段值
         virtual: dict[str, list[str]] = {
             "family_numbers": [],
             "cited_numbers": [],
@@ -409,11 +366,6 @@ class ImportService:
                 continue
             if field_key == "citing_patents":
                 virtual["citing_numbers"] = parse_patent_numbers(value)
-                continue
-
-            # P1-15：视图本地字段（vlf_ 前缀）单独收集
-            if field_key.startswith("vlf_"):
-                view_local[field_key] = value
                 continue
 
             # 自定义字段
@@ -447,6 +399,152 @@ class ImportService:
                 data[field_key] = value
 
         data["custom_fields"] = custom
-        if view_local:
-            data["view_local_fields"] = view_local
         return data, virtual
+
+    @staticmethod
+    def process_import(
+        batch_id: int,
+        file_content: bytes,
+        filename: str,
+        mapping: dict,
+        options: dict,
+        db: Session,
+        product_id: Optional[int] = None,
+    ):
+        batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
+        if not batch:
+            return
+
+        batch.status = ImportBatchStatus.PROCESSING
+        batch.started_at = datetime.now()
+        db.commit()
+
+        errors = []
+        inserted = 0
+        updated = 0
+        duplicates = 0
+        skipped = 0
+
+        try:
+            df, _ = ImportService.parse_excel(file_content, filename)
+            batch.total_rows = len(df)
+            db.commit()
+
+            update_on_duplicate = options.get("update_on_duplicate", True)
+            skip_duplicate = options.get("skip_duplicate", False)
+
+            for idx, (_, row) in enumerate(df.iterrows()):
+                try:
+                    row_dict = row.to_dict()
+                    patent_data, virtual = ImportService._row_to_patent_data(row_dict, mapping, db)
+
+                    if not patent_data.get("title"):
+                        skipped += 1
+                        continue
+
+                    if product_id:
+                        patent_data["product_id"] = product_id
+
+                    country = patent_data.get("country", "CN")
+                    app_num = patent_data.get("application_number", "")
+                    pub_num = patent_data.get("publication_number", "")
+
+                    existing = PatentService.find_duplicate(
+                        db,
+                        application_number=app_num,
+                        publication_number=pub_num,
+                        country=country,
+                        title=patent_data.get("title"),
+                    )
+
+                    if existing:
+                        duplicates += 1
+                        if skip_duplicate:
+                            skipped += 1
+                        elif update_on_duplicate:
+                            # Wiki 式增量合并：仅更新非空新值，标注类字段保留
+                            merged = merge_patent_data(existing, patent_data)
+                            PatentService.update_patent(db, existing, merged)
+                            updated += 1
+                            current_patent = existing
+                        else:
+                            skipped += 1
+                            current_patent = None
+                    else:
+                        patent = Patent(**patent_data)
+                        patent.source_batch_id = batch_id
+                        patent.source_row = idx + 1
+                        db.add(patent)
+                        db.flush()
+                        inserted += 1
+                        current_patent = patent
+
+                    # P0-10：同族/引用关系入库
+                    if current_patent is not None:
+                        try:
+                            if virtual["family_numbers"]:
+                                process_family_members(db, current_patent, virtual["family_numbers"])
+                            if virtual["cited_numbers"]:
+                                process_citations(db, current_patent, virtual["cited_numbers"])
+                            if virtual["citing_numbers"]:
+                                process_citing_patents(db, current_patent, virtual["citing_numbers"])
+                        except Exception:
+                            # 关系入库失败不影响主表导入
+                            pass
+
+                    batch.processed_rows = idx + 1
+                    batch.inserted_count = inserted
+                    batch.updated_count = updated
+                    batch.duplicate_count = duplicates
+                    batch.skipped_count = skipped
+
+                    if (idx + 1) % 100 == 0:
+                        db.commit()
+
+                except Exception as e:
+                    errors.append({
+                        "row": idx + 1,
+                        "error": str(e),
+                        "data": {k: str(v) for k, v in row_dict.items()},
+                    })
+                    batch.error_count += 1
+
+            db.commit()
+
+            batch.status = ImportBatchStatus.COMPLETED
+            batch.completed_at = datetime.now()
+            batch.errors = errors if errors else None
+
+        except Exception as e:
+            batch.status = ImportBatchStatus.FAILED
+            batch.completed_at = datetime.now()
+            errors.append({"error": str(e)})
+            batch.errors = errors
+
+        db.commit()
+
+    @staticmethod
+    def create_import_batch(db: Session, filename: str, mapping: dict, options: dict,
+                            total_rows: int) -> ImportBatch:
+        batch = ImportBatch(
+            filename=filename,
+            status=ImportBatchStatus.PENDING,
+            total_rows=total_rows,
+            mapping_config=mapping,
+            errors=[],
+        )
+        db.add(batch)
+        db.commit()
+        db.refresh(batch)
+        return batch
+
+    @staticmethod
+    def list_import_batches(db: Session, page: int = 1, page_size: int = 20) -> tuple[list[ImportBatch], int]:
+        query = db.query(ImportBatch).order_by(ImportBatch.created_at.desc())
+        total = query.count()
+        batches = query.offset((page - 1) * page_size).limit(page_size).all()
+        return batches, total
+
+    @staticmethod
+    def get_import_batch(db: Session, batch_id: int) -> Optional[ImportBatch]:
+        return db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()

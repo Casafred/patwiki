@@ -2,19 +2,12 @@ import api from '../lib/api'
 import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
-  AITask, FieldMetaWithView, CellUpdateRequest, PatentDatabase,
+  AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory,
-  PatentView, ViewLocalField, ViewPatentListResponse, ViewFilterRule,
-  ViewColumnConfig, ViewSortConfig, FieldSource, AIFieldValueInfo, SearchSuggestion,
-  PatentGraph,
 } from '../types'
 
 export const fieldApi = {
-  // P1-12：可选 view_id，传入时返回值会附加 vlf_ 本地字段
-  list: (viewId?: number): Promise<FieldMetaWithView[]> => {
-    const params = viewId != null ? { view_id: viewId } : {}
-    return api.get('/fields', { params })
-  },
+  list: (): Promise<FieldMeta[]> => api.get('/fields'),
 }
 
 // P0-11：库（Database）API
@@ -35,8 +28,12 @@ export const databaseApi = {
   archive: (id: number): Promise<PatentDatabase> =>
     api.post(`/databases/${id}/archive`),
 
-  delete: (id: number): Promise<{ success: boolean }> =>
-    api.delete(`/databases/${id}`),
+  delete: (id: number, force: boolean = false): Promise<{ success: boolean; force?: boolean; deleted_patent_count?: number }> =>
+    api.delete(`/databases/${id}`, { params: { force } }),
+
+  // 清空库内所有专利（不删库本身）
+  clearPatents: (id: number): Promise<{ success: boolean; deleted_count: number }> =>
+    api.delete(`/patents/by-database/${id}`),
 
   refreshCount: (id: number): Promise<{ success: boolean; patent_count: number }> =>
     api.post(`/databases/${id}/refresh-count`),
@@ -44,10 +41,6 @@ export const databaseApi = {
   // 设置/转移所有者
   setOwner: (id: number, userId: number): Promise<PatentDatabase> =>
     api.post(`/databases/${id}/set-owner`, { user_id: userId }),
-
-  // P0-13：获取或创建某库的部门总表视图
-  getOrCreateMasterView: (id: number): Promise<PatentView> =>
-    api.get(`/databases/${id}/master-view`),
 }
 
 export const patentApi = {
@@ -65,77 +58,23 @@ export const patentApi = {
   bulkUpdate: (ids: number[], updates: Partial<Patent>): Promise<{ success: boolean; updated_count: number }> =>
     api.post('/patents/bulk-update', { patent_ids: ids, updates }),
 
-  // P2-9：清理因同族/引用号解析 BUG 而产生的非法占位专利
+  // 批量删除专利（请求体为 [id1, id2, ...] 数组）
+  bulkDelete: (ids: number[]): Promise<{ success: boolean; deleted_count: number }> =>
+    api.post('/patents/bulk-delete', ids),
+
+  // 清理无效占位专利（title="待补全" 且号格式不合法的历史残留）
   cleanupInvalidPlaceholders: (dryRun: boolean = true): Promise<{
     deleted_count: number
     deleted_items: Array<{ id: number; application_number: string | null; publication_number: string | null; notes: string | null; created_at: string | null }>
     dry_run: boolean
   }> => api.post('/patents/cleanup/invalid-placeholders', null, { params: { dry_run: dryRun } }),
 
-  // P2-6：搜索自动补全
-  searchSuggest: (q: string, limit: number = 10, databaseId?: number): Promise<{ suggestions: SearchSuggestion[] }> => {
-    const params: Record<string, any> = { q, limit }
-    if (databaseId != null) params.database_id = databaseId
-    return api.get('/patents/search/suggest', { params })
-  },
-
-  // P1-10：合并后的单字段更新端点，支持 source_view_id（在视图内编辑时传入）
-  updateCell: (
-    patentId: number,
-    fieldKey: string,
-    value: any,
-    options: { changed_by?: string; source_view_id?: number } = {},
-  ): Promise<Patent & { source_view_id?: number; source_view_name?: string }> =>
-    api.patch(`/patents/${patentId}/field/${fieldKey}`, {
-      value,
-      changed_by: options.changed_by,
-      source_view_id: options.source_view_id,
-    } as CellUpdateRequest),
+  updateCell: (patentId: number, fieldKey: string, value: any): Promise<Patent> =>
+    api.patch(`/patents/${patentId}/field/${fieldKey}`, { value } as CellUpdateRequest),
 
   // 修改历史
   getHistory: (patentId: number, limit: number = 100): Promise<PatentHistory[]> =>
     api.get(`/patents/${patentId}/history`, { params: { limit } }),
-
-  // P0-13：字段来源追溯
-  getFieldSources: (patentId: number): Promise<{
-    sources: FieldSource[]
-    view_local_sources: FieldSource[]
-  }> => api.get(`/patents/${patentId}/field-sources`),
-
-  // P2-3：AI 字段值人工覆盖
-  getAIValues: (patentId: number): Promise<AIFieldValueInfo[]> =>
-    api.get(`/patents/${patentId}/ai-values`),
-
-  overrideAIValue: (
-    patentId: number,
-    fieldKey: string,
-    value: string | null,
-    changedBy?: string,
-  ): Promise<AIFieldValueInfo> =>
-    api.put(`/patents/${patentId}/ai-values/${fieldKey}`, {
-      value,
-      changed_by: changedBy,
-    }),
-
-  clearAIOverride: (patentId: number, fieldKey: string): Promise<AIFieldValueInfo> =>
-    api.delete(`/patents/${patentId}/ai-values/${fieldKey}/override`),
-
-  // P2-7：专利关系图谱
-  getGraph: (patentId: number, depth: number = 1): Promise<PatentGraph> =>
-    api.get(`/patents/${patentId}/graph`, { params: { depth } }),
-
-  addCitation: (
-    patentId: number,
-    citedPatentId: number,
-    citationType: string = 'citation',
-  ): Promise<{ success: boolean; id: number; already_exists: boolean }> =>
-    api.post(`/patents/${patentId}/citations`, {
-      cited_patent_id: citedPatentId,
-      citation_type: citationType,
-    }),
-
-  removeCitation: (patentId: number, citedPatentId: number): Promise<{ success: boolean }> =>
-    api.delete(`/patents/${patentId}/citations/${citedPatentId}`),
 }
 
 export const productApi = {
@@ -162,8 +101,6 @@ export const tagApi = {
 export const tagGroupApi = {
   list: (): Promise<TagGroup[]> => api.get('/tag-groups'),
   create: (data: Partial<TagGroup>): Promise<TagGroup> => api.post('/tag-groups', data),
-  update: (id: number, data: Partial<TagGroup>): Promise<TagGroup> => api.put(`/tag-groups/${id}`, data),
-  delete: (id: number): Promise<{ success: boolean }> => api.delete(`/tag-groups/${id}`),
 }
 
 export const customFieldApi = {
@@ -174,13 +111,9 @@ export const customFieldApi = {
 }
 
 export const importApi = {
-  // P1-15：可选 view_id，传入时未知列自动建为视图本地字段（vlf_）
-  upload: (file: File, viewId?: number): Promise<ImportPreview & { view?: PatentView }> => {
+  upload: (file: File): Promise<ImportPreview> => {
     const formData = new FormData()
     formData.append('file', file)
-    if (viewId != null) {
-      formData.append('view_id', String(viewId))
-    }
     return api.post('/import/preview', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
@@ -194,8 +127,6 @@ export const importApi = {
     productId?: number,
     projectId?: number,
     databaseId?: number,
-    // P1-15：导入到视图
-    viewId?: number,
   ): Promise<ImportResult> => {
     return api.post('/import/confirm', {
       import_id: importId,
@@ -205,17 +136,15 @@ export const importApi = {
       product_id: productId,
       project_id: projectId,
       database_id: databaseId,
-      view_id: viewId,
     }, {
       timeout: 600000,
     })
   },
 
-  // P2-2：返回 {total, items}
-  listBatches: (params: Record<string, any> = {}): Promise<{ total: number; items: ImportBatch[] }> =>
+  listBatches: (params: Record<string, any> = {}): Promise<ImportBatch[]> =>
     api.get('/import/batches', { params }),
 
-  getBatch: (id: number): Promise<ImportBatch & { errors?: any[] }> => api.get(`/import/batches/${id}`),
+  getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
 }
 
 export const statsApi = {
@@ -296,15 +225,11 @@ export const analyticsApi = {
 export const personApi = {
   list: (): Promise<Person[]> => api.get('/people'),
   create: (data: Partial<Person>): Promise<Person> => api.post('/people', data),
-  update: (id: number, data: Partial<Person>): Promise<Person> => api.put(`/people/${id}`, data),
-  delete: (id: number): Promise<{ success: boolean }> => api.delete(`/people/${id}`),
 }
 
 export const departmentApi = {
   list: (): Promise<Department[]> => api.get('/departments'),
   create: (data: Partial<Department>): Promise<Department> => api.post('/departments', data),
-  update: (id: number, data: Partial<Department>): Promise<Department> => api.put(`/departments/${id}`, data),
-  delete: (id: number): Promise<{ success: boolean }> => api.delete(`/departments/${id}`),
 }
 
 export const aiApi = {
@@ -373,117 +298,4 @@ export const sharingApi = {
   // 当前用户视角：与我共享的库
   listUserDatabases: (userId: number): Promise<SharedDatabase[]> =>
     api.get(`/users/${userId}/databases`),
-}
-
-// ============================================================
-// P0-13/P0-14：视图（小表 / 部门总表）API
-// ============================================================
-export const viewApi = {
-  // ===== 视图 CRUD =====
-  list: (params: {
-    database_id?: number
-    owner_id?: number
-    view_type?: string
-    include_archived?: boolean
-  } = {}): Promise<PatentView[]> => api.get('/views', { params }),
-
-  get: (viewId: number): Promise<PatentView> => api.get(`/views/${viewId}`),
-
-  create: (data: {
-    name: string
-    database_id: number
-    description?: string
-    view_type?: 'personal' | 'shared'
-    is_department_master?: boolean
-    filter_config?: Record<string, ViewFilterRule>
-    column_config?: ViewColumnConfig[]
-    sort_config?: ViewSortConfig
-  }): Promise<PatentView> => api.post('/views', data),
-
-  update: (viewId: number, data: {
-    name?: string
-    description?: string
-    filter_config?: Record<string, ViewFilterRule>
-    column_config?: ViewColumnConfig[]
-    sort_config?: ViewSortConfig
-  }): Promise<PatentView> => api.put(`/views/${viewId}`, data),
-
-  delete: (viewId: number): Promise<{ success: boolean }> =>
-    api.delete(`/views/${viewId}`),
-
-  archive: (viewId: number): Promise<PatentView> =>
-    api.post(`/views/${viewId}/archive`),
-
-  // ===== 视图数据查询 =====
-  listPatents: (
-    viewId: number,
-    params: { page?: number; page_size?: number; extra_filters?: Record<string, any> } = {},
-  ): Promise<ViewPatentListResponse> => {
-    const query: Record<string, any> = {
-      page: params.page ?? 1,
-      page_size: params.page_size ?? 50,
-    }
-    if (params.extra_filters) {
-      query.extra_filters = JSON.stringify(params.extra_filters)
-    }
-    return api.get(`/views/${viewId}/patents`, { params: query })
-  },
-
-  // ===== 视图本地字段（vlf_）CRUD =====
-  listLocalFields: (viewId: number): Promise<ViewLocalField[]> =>
-    api.get(`/views/${viewId}/local-fields`),
-
-  createLocalField: (viewId: number, data: {
-    key: string
-    name: string
-    field_type?: string
-    options?: string[]
-    description?: string
-    default_value?: string
-    is_required?: boolean
-    sort_order?: number
-  }): Promise<ViewLocalField> => api.post(`/views/${viewId}/local-fields`, data),
-
-  updateLocalField: (
-    viewId: number,
-    fieldId: number,
-    data: Partial<ViewLocalField>,
-  ): Promise<ViewLocalField> => api.put(`/views/${viewId}/local-fields/${fieldId}`, data),
-
-  deleteLocalField: (viewId: number, fieldId: number): Promise<{ success: boolean }> =>
-    api.delete(`/views/${viewId}/local-fields/${fieldId}`),
-
-  // ===== 视图本地字段值 =====
-  setLocalFieldValue: (
-    viewId: number,
-    fieldKey: string,
-    patentId: number,
-    value: any,
-    changedBy?: string,
-  ): Promise<{ success: boolean; patent_id: number; view_id: number; field_key: string; value: any }> =>
-    api.put(`/views/${viewId}/local-fields/${fieldKey}/values/${patentId}`, {
-      value,
-      changed_by: changedBy,
-    }),
-
-  getLocalFieldValue: (
-    viewId: number,
-    fieldKey: string,
-    patentId: number,
-  ): Promise<{ patent_id: number; view_id: number; field_key: string; value: any }> =>
-    api.get(`/views/${viewId}/local-fields/${fieldKey}/values/${patentId}`),
-
-  // ===== 字段提升（vlf_ -> cf_） =====
-  promoteLocalField: (
-    viewId: number,
-    fieldId: number,
-    options: { global_name?: string; global_group?: string } = {},
-  ): Promise<{
-    success: boolean
-    global_field_key: string
-    global_field_name: string
-    global_field_id: number
-    source_view_id: number
-    source_view_name: string
-  }> => api.post(`/views/${viewId}/local-fields/${fieldId}/promote`, options),
 }

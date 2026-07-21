@@ -1,6 +1,6 @@
 """同族/引用关系解析与入库服务——P0-10 新增。
 
-Excel 列 "同族专利号" / "引用专利" / "被引用专利" 中可能包含多种分隔符，
+Excel 列 "同族专利号" / "引用专利" / "被引用专利" / "同族公开号" 中可能包含多种分隔符，
 本服务负责解析这些列、创建/复用关系记录、为占位专利建立条目。
 """
 import hashlib
@@ -14,25 +14,22 @@ from app.models import (
 )
 
 
-# 同族/引用列的常见分隔符：
-# - 分号 ; ；（中英）
-# - 逗号 , ，（中英）
-# - 顿号 、（中文）
-# - 竖线 | （从某处粘贴常带）
-# - 换行 \n \r
-# - 制表符 \t
-# - 连续空格（≥2 个空格才当作分隔符，避免误伤内部单空格）
+# 同族/引用列的常见分隔符：分号、逗号、顿号、竖线、换行、Tab、连续空格（≥2）
+# 竖线 | 是 incopat 等导出工具常见分隔符；连续空格用于应对无显式分隔符但用空格对齐的情况
 SPLIT_PATTERN = re.compile(r"[;；,，、|\n\r\t]+|\s{2,}")
 
-# 专利号格式校验：必须同时含字母和数字，长度 5-30。
-# 用于过滤被错误拼接的乱码字符串（如 "20210413CN112643595A_" 拼接、纯日期、纯文本等）。
+# 专利号格式校验：必须同时含字母和数字，长度 5-30，仅允许字母数字和连字符
 _PATENT_NUM_RE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9\-]+$")
+
+# 日期前缀乱码检测：8 位纯数字开头（如 20061102AU2005201606A1 = 日期+专利号合并）
+# 正常专利号都以国家码开头（CN/US/EP/JP/KR/WO 等），不会以 8 位纯数字开头
+_DATE_PREFIX_RE = re.compile(r"^\d{8}")
 
 
 def _normalize_patent_number(num: str) -> Optional[str]:
     """清洗单个专利号：去括号、修剪首尾非字母数字字符、校验格式。
 
-    返回 None 表示该 token 不是合法专利号，应跳过。
+    返回 None 表示该字符串不是合法专利号，调用方应跳过。
     """
     if not num:
         return None
@@ -43,15 +40,19 @@ def _normalize_patent_number(num: str) -> Optional[str]:
     num = re.sub(r"[（(][^)）]*[)）]", "", num).strip()
     if not num:
         return None
-    # 修剪首尾非字母数字字符（_ - : . 空格 等）
+    # 修剪首尾非字母数字字符（如 " CN115000123A " 或 "|CN115000123A|"）
     num = re.sub(r"^[^A-Za-z0-9]+", "", num)
     num = re.sub(r"[^A-Za-z0-9]+$", "", num)
     if not num:
         return None
-    # 格式校验：必须含字母+数字，只允许字母数字和连字符，长度 5-30
+    # 长度校验：专利号通常 5-30 字符
     if len(num) < 5 or len(num) > 30:
         return None
+    # 格式校验：必须同时含字母和数字
     if not _PATENT_NUM_RE.match(num):
+        return None
+    # 日期前缀乱码过滤：排除 20061102AU2005201606A1 这种日期+专利号合并的字符串
+    if _DATE_PREFIX_RE.match(num):
         return None
     return num
 
@@ -59,7 +60,8 @@ def _normalize_patent_number(num: str) -> Optional[str]:
 def parse_patent_numbers(raw: str) -> list[str]:
     """把单元格里的多个专利号解析为列表。
 
-    支持多种分隔符；去除空白和括号内容（如公开日期）；过滤明显非专利号的 token。
+    支持分号、逗号、顿号、竖线、换行、Tab、连续空格等分隔符；
+    去除空白和括号内容（如公开日期）；过滤不合法的乱码字符串。
     """
     if not raw:
         return []
@@ -83,13 +85,14 @@ def _find_or_create_patent_by_number(
 
     占位专利只有 application_number/publication_number + title="待补全"，
     后续导入或外部 API 补全时通过 merge_service 字段级合并。
-
-    返回 None 表示该号未通过格式校验（不应建占位专利）。
+    返回 None 表示号格式不合法，调用方应跳过。
     """
-    number = number.strip()
-    # 二次校验：即使 parse_patent_numbers 已过滤，此处再防一手
-    if not _PATENT_NUM_RE.match(number) or len(number) < 5 or len(number) > 30:
+    # 二次校验号格式，防止外部直接调用传入乱码
+    normalized = _normalize_patent_number(number)
+    if not normalized:
         return None
+    number = normalized
+
     # 优先按申请号找
     existing = db.query(Patent).filter(Patent.application_number == number).first()
     if existing:
@@ -161,7 +164,7 @@ def process_family_members(
         num = num.strip()
         if not num:
             continue
-        # 找/建成员专利；返回 None 表示该号未通过格式校验，跳过
+        # 找/建成员专利（号格式不合法时返回 None，跳过）
         member = _find_or_create_patent_by_number(db, num, database_id)
         if member is None:
             continue
@@ -231,8 +234,8 @@ def _process_citation_direction(
         if not num:
             continue
         other = _find_or_create_patent_by_number(db, num, database_id)
+        # 号格式不合法时跳过，不创建占位专利也不建关系
         if other is None:
-            # 号未通过格式校验，跳过（不建占位、不建关系）
             continue
         if other.id is None:
             created += 1
