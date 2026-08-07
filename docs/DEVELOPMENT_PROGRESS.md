@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-07（启动飞书基础架构改造，完成视图工作区基础闭环，详见 docs/14-改造启动方案.md）
+最近更新：2026-08-08（完成看板视图基础闭环，详见 docs/14-改造启动方案.md）
 
 ---
 
@@ -39,6 +39,7 @@
 |----|------|-------|------|---------|---------|------|
 | P0-13 | 部门总表 + 小表视图后端基础 | 高 | 已完成 | 2026-07-20 | 后端 | 主表/视图模型、视图本地字段、字段来源追溯 |
 | P0-14 | 视图工作区基础闭环 | 高 | 已完成 | 2026-08-07 | 全栈 | 视图 API/状态/切换器；layout_type 与多维视图配置契约；列表按视图加载 |
+| P0-15 | 看板视图基础闭环 | 高 | 已完成 | 2026-08-08 | 全栈 | 看板分组数据 API、卡片投影、跨列拖拽更新共享/自定义字段、视图内卡片字段配置 |
 
 ## 二、下一迭代（P1 - 管理功能）
 
@@ -83,4 +84,5 @@
 | 2026-07-20 | P0-7 | 修复打包后端启动失败：patwiki_backend.spec 的 hiddenimports 漏掉 P0-6 新增的 app.api.fields 和 app.services.field_registry，导致打包后 uvicorn 字符串导入 app.main 时静默失败（只报 "Could not import module"）。同时 run.py 改为直接 from app.main import app 并传入 uvicorn.run(app, ...)，遇导入错误打印真实 traceback。诊断中还发现 8765 端口被 7/19 19:04 启动的旧 python 进程（PID 32704）占用，导致新后端被迫使用 1108，而前端 Vite proxy 硬编码 8765，造成前后端错位 |
 | 2026-07-19 | P0-8/9/10/11/12 | 启动 P0 第二阶段规划：新增 docs/07-P0阶段-库模型与Wiki式导入设计.md，定义 PatentDatabase 库模型、Wiki 式字段级增量合并、未知列自动创建 CustomField、同族/引用关系解析、patent_project 多维属性扩展、models 目录按 03-项目结构与代码规范.md 拆分为 11 个子模块、前端导入首步 chooseDatabase + Sidebar 库切换器 |
 | 2026-07-19 | P0-8/9/10/11/12 | 完成 P0 第二阶段全部任务：1) 后端 models 拆分为 11 子模块，PatentDatabase 库模型 + Patent.database_id 外键，PatentProjectLink 替代简单 patent_project Table 新增多维属性；2) merge_service.Wiki 字段级合并 + ANNOTATION_FIELDS 标注类保护；relation_service 解析同族/引用号、MD5 哈希 family_id、占位 Patent 创建；import_service.suggest_mapping 自动为未知列建 CustomField（cf_ 前缀+短哈希），_row_to_patent_data 拆出虚拟字段（family_members/cited_patents/citing_patents），process_import/confirm_import 接入 merge+relation+database_id；3) DatabaseService 库 CRUD+归档+refresh-count，api/databases 路由，init_data 创建"默认数据库"，schemas 补 PatentDatabase schema；4) 前端 types 新增 PatentDatabase 类型与 ImportPreview/ImportResult 字段扩展，api 新增 databaseApi，store 新增 databases/currentDatabaseId，App.tsx 初始化加载库列表，Sidebar 顶部库切换器+新建库表单，PatentListPage 查询参数带 database_id，ImportModal 新增 chooseDatabase 步骤、显示"将自动创建 N 个新字段"提示、对 cf_ 字段标"新建字段"徽章、对虚拟字段标"关系入库"徽章、完成页显示同族/引用关联统计；5) patwiki_backend.spec 补全 12 个新模块 hiddenimports；6) 前端 npm run build 通过 0 错误，后端 init_db 验证 OK（1 默认库+6 AI字段） |
-| 2026-08-07 | P0-15 | 完成视图工作区第二批能力：新增分组查询接口、最多三级嵌套分组、默认折叠、条件格式运算符校验与配置接口；前端新增分组/条件格式配置面板、分组表头折叠和单元格条件着色。通过后端编译、接口回归与前端 npm run build。 |
+| 2026-08-07 | P0-14 | 完成视图工作区第二批能力：新增分组查询接口、最多三级嵌套分组、默认折叠、条件格式运算符校验与配置接口；前端新增分组/条件格式配置面板、分组表头折叠和单元格条件着色。通过后端编译、接口回归与前端 npm run build。 |
+| 2026-08-08 | P0-15 | 完成看板视图基础闭环：新增看板分组/卡片查询与拖拽换列 API；前端新增 KanbanView，支持分组字段选择、卡片字段配置、详情跳转和跨列更新；自定义字段读取与视图写回链路同步修正。 |
