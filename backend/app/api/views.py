@@ -21,7 +21,7 @@ from app.schemas.schemas import (
     PatentView, PatentViewCreate, PatentViewUpdate,
     ViewLocalField, ViewLocalFieldCreate, ViewLocalFieldUpdate,
     ViewFieldValueUpdate, ViewPatentCellUpdate,
-    PromoteFieldRequest, FieldSourceInfo,
+    PromoteFieldRequest, FieldSourceInfo, KanbanMoveRequest,
 )
 from app.services.view_service import ViewService
 from app.models import PatentView, ViewLocalField
@@ -190,6 +190,59 @@ def get_grouped_view_patents(
         db, view, page=page, page_size=page_size, extra_filters=ef,
         search=search, sort_by=sort_by, sort_order=sort_order,
     )
+
+
+@router.get("/{view_id}/kanban")
+def get_kanban_view_data(
+    view_id: int,
+    page_size: int = Query(200, ge=1, le=1000),
+    search: Optional[str] = Query(None),
+    extra_filters: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """获取看板列和卡片数据。"""
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+
+    ef = None
+    if extra_filters:
+        try:
+            ef = json.loads(extra_filters)
+        except (json.JSONDecodeError, TypeError):
+            raise HTTPException(status_code=400, detail="extra_filters must be valid JSON")
+
+    return ViewService.get_kanban_data(
+        db, view, page_size=page_size, extra_filters=ef, search=search,
+    )
+
+
+@router.post("/{view_id}/kanban/move")
+def move_kanban_card(
+    view_id: int,
+    body: KanbanMoveRequest,
+    db: Session = Depends(get_db),
+):
+    """拖拽卡片到另一列，并将分组字段写回主表。"""
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+    try:
+        patent = ViewService.move_kanban_card(
+            db, view, body.patent_id, body.to_value, changed_by=body.changed_by,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    config = ViewService.validate_kanban_config(view.kanban_config)
+    return {
+        "success": True,
+        "patent_id": patent.id,
+        "field_key": config["group_by_field"],
+        "value": body.to_value,
+        "source_view_id": view.id,
+        "source_view_name": view.name,
+    }
 
 
 @router.put("/{view_id}/group-config")

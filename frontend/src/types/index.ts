@@ -136,6 +136,37 @@ export interface PatentView {
   updated_at?: string
 }
 
+export interface KanbanConfig {
+  group_by_field: string
+  group_values?: any[]
+  card_fields: string[]
+  card_title_field: string
+}
+
+export interface KanbanCard {
+  id: number
+  title: string
+  group_value: any
+  fields: Record<string, any>
+}
+
+export interface KanbanGroup {
+  key: any
+  label: string
+  count: number
+  cards: KanbanCard[]
+}
+
+export interface KanbanResponse {
+  view_id: number
+  total: number
+  returned: number
+  truncated: boolean
+  group_by_field: string
+  config: KanbanConfig
+  groups: KanbanGroup[]
+}
+
 export interface ViewLocalField {
   id: number
   view_id: number

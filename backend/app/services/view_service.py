@@ -19,7 +19,7 @@ from app.models import (
     Patent, CustomField, PatentHistory, PatentDatabase,
     DatabaseMembership,
 )
-from app.services.patent_service import PatentService
+from app.services.patent_service import PatentService, SYSTEM_FIELDS
 from app.services.field_registry import get_all_fields_meta
 
 
@@ -33,6 +33,12 @@ class ViewService:
     CONDITION_STYLE_KEYS = {
         "bgColor", "color", "fontWeight", "fontStyle", "textDecoration",
         "opacity",
+    }
+    DEFAULT_KANBAN_CONFIG = {
+        "group_by_field": "legal_status",
+        "group_values": [],
+        "card_fields": ["application_number", "title", "legal_status"],
+        "card_title_field": "title",
     }
 
     # ========== 视图 CRUD ==========
@@ -110,6 +116,7 @@ class ViewService:
         conditional_formatting = ViewService.validate_conditional_formatting(
             conditional_formatting or []
         )
+        kanban_config = ViewService.validate_kanban_config(kanban_config or {})
 
         if is_department_master:
             existing = ViewService.get_department_master_view(db, database_id)
@@ -151,6 +158,10 @@ class ViewService:
         if "conditional_formatting" in updates:
             updates["conditional_formatting"] = ViewService.validate_conditional_formatting(
                 updates["conditional_formatting"]
+            )
+        if "kanban_config" in updates:
+            updates["kanban_config"] = ViewService.validate_kanban_config(
+                updates["kanban_config"]
             )
         for k, v in updates.items():
             if v is not None and hasattr(view, k):
@@ -243,6 +254,149 @@ class ViewService:
             sort_order=sort_order,
         )
         return patents, total
+
+    @staticmethod
+    def validate_kanban_config(config: Any) -> dict:
+        """Normalize the persisted configuration for a kanban view."""
+        if config in (None, {}):
+            return dict(ViewService.DEFAULT_KANBAN_CONFIG)
+        if not isinstance(config, dict):
+            raise ValueError("kanban_config must be an object")
+
+        group_by_field = str(config.get("group_by_field", "legal_status")).strip()
+        if not group_by_field:
+            raise ValueError("kanban_config.group_by_field is required")
+        if group_by_field.startswith("view_local."):
+            raise ValueError("看板分组字段暂不支持视图本地字段")
+
+        group_values = config.get("group_values") or []
+        if not isinstance(group_values, list) or len(group_values) > 100:
+            raise ValueError("kanban_config.group_values must be an array with at most 100 values")
+        if any(isinstance(value, (dict, list)) for value in group_values):
+            raise ValueError("kanban group values must be scalar values")
+
+        card_fields = config.get("card_fields") or [group_by_field]
+        if not isinstance(card_fields, list) or not card_fields or len(card_fields) > 12:
+            raise ValueError("kanban_config.card_fields must contain 1 to 12 fields")
+        normalized_card_fields = []
+        for field in card_fields:
+            key = str(field).strip()
+            if key and key not in normalized_card_fields:
+                normalized_card_fields.append(key)
+        if not normalized_card_fields:
+            raise ValueError("kanban_config.card_fields must contain field keys")
+
+        card_title_field = str(
+            config.get("card_title_field") or normalized_card_fields[0]
+        ).strip()
+        if card_title_field not in normalized_card_fields:
+            normalized_card_fields.insert(0, card_title_field)
+
+        return {
+            "group_by_field": group_by_field,
+            "group_values": group_values,
+            "card_fields": normalized_card_fields[:12],
+            "card_title_field": card_title_field,
+        }
+
+    @staticmethod
+    def get_kanban_data(
+        db: Session,
+        view: PatentView,
+        page_size: int = 200,
+        extra_filters: Optional[dict] = None,
+        search: Optional[str] = None,
+    ) -> dict:
+        """Return configured kanban groups with projected patent cards."""
+        config = ViewService.validate_kanban_config(view.kanban_config)
+        patents, total = ViewService.list_view_patents(
+            db, view, page=1, page_size=min(max(page_size, 1), 1000),
+            extra_filters=extra_filters, search=search,
+        )
+        group_field = config["group_by_field"]
+        card_fields = config["card_fields"]
+        cards = []
+        for patent in patents:
+            item = ViewService.get_view_patent_with_local_fields(db, view, patent)
+            group_value = _get_item_field_value(item, group_field)
+            card_values = {
+                field: _get_item_field_value(item, field) for field in card_fields
+            }
+            title_value = card_values.get(config["card_title_field"])
+            cards.append({
+                "id": patent.id,
+                "title": str(title_value or patent.title or "未命名专利"),
+                "group_value": group_value,
+                "fields": card_values,
+            })
+
+        groups_by_key: dict[str, dict] = {}
+        ordered_keys: list[str] = []
+
+        def add_group(value: Any) -> None:
+            key = _group_key(value)
+            if key in groups_by_key:
+                return
+            groups_by_key[key] = {
+                "key": None if value in (None, "") else value,
+                "label": "未设置" if value in (None, "") else str(value),
+                "count": 0,
+                "cards": [],
+            }
+            ordered_keys.append(key)
+
+        for value in config["group_values"]:
+            add_group(value)
+        for card in cards:
+            add_group(card["group_value"])
+        add_group(None)
+
+        for card in cards:
+            group = groups_by_key[_group_key(card["group_value"])]
+            group["cards"].append(card)
+            group["count"] += 1
+
+        return {
+            "view_id": view.id,
+            "total": total,
+            "returned": len(cards),
+            "truncated": total > len(cards),
+            "group_by_field": group_field,
+            "config": config,
+            "groups": [groups_by_key[key] for key in ordered_keys],
+        }
+
+    @staticmethod
+    def move_kanban_card(
+        db: Session,
+        view: PatentView,
+        patent_id: int,
+        to_value: Any,
+        changed_by: Optional[str] = None,
+    ) -> Patent:
+        """Move a card by updating its configured shared/custom field."""
+        config = ViewService.validate_kanban_config(view.kanban_config)
+        if config["group_values"] and to_value is not None:
+            allowed = {_group_key(value) for value in config["group_values"]}
+            if _group_key(to_value) not in allowed:
+                raise ValueError("目标看板列不在当前视图配置中")
+        patent = db.query(Patent).filter(
+            Patent.id == patent_id,
+            Patent.database_id == view.database_id,
+        ).first()
+        if not patent:
+            raise ValueError(f"专利 {patent_id} 不属于当前视图所在的库")
+
+        field_key = config["group_by_field"]
+        if field_key.startswith("custom_fields."):
+            update_key = field_key
+        elif field_key in SYSTEM_FIELDS:
+            update_key = field_key
+        else:
+            update_key = f"custom_fields.{field_key}"
+        return ViewService.update_shared_field_in_view(
+            db, view, patent_id, update_key, to_value, changed_by=changed_by,
+        )
 
     # ========== Grouping and conditional formatting ==========
 
@@ -778,7 +932,9 @@ def _get_item_field_value(item: dict, field_key: str) -> Any:
         return (item.get("ai_fields") or {}).get(field_key[len("ai_fields."):])
     if field_key.startswith("view_local."):
         return (item.get("view_local_fields") or {}).get(field_key[len("view_local."):])
-    return item.get(field_key)
+    if field_key in item:
+        return item.get(field_key)
+    return (item.get("custom_fields") or {}).get(field_key)
 
 
 def _group_key(value: Any) -> str:

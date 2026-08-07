@@ -7,6 +7,7 @@ import type {
 } from '../../types'
 import GroupConfigPanel from '../views/GroupConfigPanel'
 import ConditionalFormatPanel from '../views/ConditionalFormatPanel'
+import KanbanView from '../views/KanbanView'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -197,6 +198,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
       if (viewId !== null) {
         const activeViewForLoad = views.find(view => view.id === viewId)
+        if (activeViewForLoad?.layout_type === 'kanban') {
+          setGroupedGroups([])
+          setPatents([], 0)
+          return
+        }
         const groupFields = getViewGroupFields(activeViewForLoad)
         if (groupFields.length > 0) {
           const result = await viewApi.grouped(viewId, {
@@ -1006,6 +1012,14 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       : view))
   }
 
+  const handleViewChange = (updatedView: PatentView) => {
+    setViews(views.map(view => view.id === updatedView.id ? updatedView : view))
+  }
+
+  const handleKanbanTotalChange = useCallback((total: number) => {
+    setPatents([], total)
+  }, [setPatents])
+
   const getConditionalCellStyle = (fieldKey: string, value: any): React.CSSProperties => {
     const rule = activeView?.conditional_formatting?.find(item => item.field === fieldKey)
     const condition = rule?.conditions?.find(item => {
@@ -1299,7 +1313,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         </div>
       </div>
 
-      {activeView && (
+      {activeView && activeView.layout_type === 'table' && (
         <div style={{ display: 'flex', gap: 6, padding: '6px 20px', background: '#fff', borderBottom: '1px solid #e5e7eb' }}>
           <button
             className={`btn btn-sm ${getViewGroupFields(activeView).length > 0 ? 'btn-primary' : 'btn-secondary'}`}
@@ -1362,7 +1376,15 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       )}
 
       <div className="data-grid-wrapper" onScroll={() => setActiveHeaderMenu(null)}>
-        {loading ? (
+        {activeView?.layout_type === 'kanban' ? (
+          <KanbanView
+            view={activeView}
+            fields={fields}
+            onPatentClick={onPatentClick}
+            onViewChange={handleViewChange}
+            onTotalChange={handleKanbanTotalChange}
+          />
+        ) : loading ? (
           <div className="loading-state">
             <div className="spinner" style={{ width: 24, height: 24, borderWidth: 2, marginBottom: 12 }}></div>
             <span style={{ fontSize: 13, color: '#6b7280' }}>加载中...</span>
@@ -1776,7 +1798,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         )}
       </div>
 
-      <div className="datagrid-footer">
+      {activeView?.layout_type !== 'kanban' && <div className="datagrid-footer">
         <span style={{ fontSize: 12, color: '#6b7280' }}>
           第 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, totalPatents)} 条，共 {totalPatents} 条
         </span>
@@ -1840,7 +1862,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             <span style={{ fontSize: 12, color: '#6b7280' }}>页</span>
           </div>
         </div>
-      </div>
+      </div>}
 
       {showFieldConfig && (
       <Modal title="列管理" onClose={() => setShowFieldConfig(false)} width={680}>

@@ -496,6 +496,14 @@ class ViewPatentCellUpdate(BaseSchema):
     changed_by: Optional[str] = None
 
 
+class KanbanMoveRequest(BaseSchema):
+    """看板卡片跨列移动请求。"""
+    patent_id: int
+    to_value: Optional[Any] = None
+    from_value: Optional[Any] = None
+    changed_by: Optional[str] = None
+
+
 class PromoteFieldRequest(BaseSchema):
     """将视图本地字段提升为全局 CustomField。"""
     global_name: Optional[str] = None  # 提升后的全局字段名（默认用原名）

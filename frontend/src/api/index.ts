@@ -4,7 +4,7 @@ import type {
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
   AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
-  GroupedViewResponse, ViewGroupField, ConditionalFormatRule,
+  GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse,
 } from '../types'
 
 export const fieldApi = {
@@ -61,6 +61,9 @@ export const viewApi = {
     sort_config?: PatentView['sort_config']
     group_by_config?: PatentView['group_by_config']
     conditional_formatting?: ConditionalFormatRule[]
+    kanban_config?: PatentView['kanban_config']
+    form_config?: PatentView['form_config']
+    gantt_config?: PatentView['gantt_config']
   }): Promise<PatentView> => api.post('/views', data),
 
   update: (id: number, data: Partial<PatentView>): Promise<PatentView> =>
@@ -116,6 +119,17 @@ export const viewApi = {
     success: boolean
     conditional_formatting: ConditionalFormatRule[]
   }> => api.put(`/views/${viewId}/conditional-formatting`, config),
+
+  kanban: (viewId: number, params: { page_size?: number; search?: string } = {}): Promise<KanbanResponse> =>
+    api.get(`/views/${viewId}/kanban`, { params }),
+
+  moveKanbanCard: (viewId: number, data: {
+    patent_id: number
+    to_value: any
+    from_value?: any
+    changed_by?: string
+  }): Promise<{ success: boolean; patent_id: number; field_key: string; value: any }> =>
+    api.post(`/views/${viewId}/kanban/move`, data),
 
   updateSharedField: (viewId: number, patentId: number, fieldKey: string, value: any): Promise<{
     success: boolean
