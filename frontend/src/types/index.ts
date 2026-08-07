@@ -65,6 +65,98 @@ export interface PatentDatabase {
   updated_at?: string
 }
 
+export type ViewLayoutType = 'table' | 'kanban' | 'form' | 'gantt' | 'calendar'
+
+export interface ViewGroupField {
+  field: string
+  direction?: 'asc' | 'desc'
+  collapsed?: boolean
+}
+
+export interface ConditionalFormatCondition {
+  op: string
+  value?: any
+  unit?: 'day' | 'week' | 'month'
+  style?: {
+    bgColor?: string
+    color?: string
+    fontWeight?: string | number
+    fontStyle?: string
+    textDecoration?: string
+    opacity?: number
+  }
+}
+
+export interface ConditionalFormatRule {
+  id: string
+  field: string
+  conditions: ConditionalFormatCondition[]
+}
+
+export interface ViewGroup {
+  key: any
+  label: string
+  field: string
+  count: number
+  collapsed: boolean
+  subgroups?: ViewGroup[]
+  patents?: Patent[]
+}
+
+export interface GroupedViewResponse {
+  view_id: number
+  total: number
+  page: number
+  page_size: number
+  groups: ViewGroup[]
+  group_by_config: { fields: ViewGroupField[] }
+  conditional_formatting: ConditionalFormatRule[]
+}
+
+export interface PatentView {
+  id: number
+  name: string
+  description?: string
+  database_id: number
+  // view_type 表示可见范围；layout_type 表示展示形态。
+  view_type: 'personal' | 'shared' | 'department_master' | string
+  layout_type: ViewLayoutType
+  is_department_master?: boolean
+  is_archived?: boolean
+  filter_config?: Record<string, any>
+  column_config?: { key: string; visible?: boolean; width?: number; order?: number }[]
+  sort_config?: { sort_by?: string; sort_order?: 'asc' | 'desc' }
+  group_by_config?: { fields?: ViewGroupField[] } | Record<string, any>
+  conditional_formatting?: ConditionalFormatRule[]
+  kanban_config?: Record<string, any>
+  form_config?: Record<string, any>
+  gantt_config?: Record<string, any>
+  local_fields?: ViewLocalField[]
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ViewLocalField {
+  id: number
+  view_id: number
+  key: string
+  name: string
+  field_type: string
+  options?: string[]
+  is_promoted?: boolean
+  promoted_field_key?: string
+}
+
+export interface ViewPatentListResponse {
+  total: number
+  items: (Patent & { view_local_fields?: Record<string, string | null> })[]
+  page: number
+  page_size: number
+  view_id: number
+  view_filter_config?: Record<string, any>
+  view_column_config?: PatentView['column_config']
+}
+
 export interface PatentListResponse {
   total: number
   items: Patent[]

@@ -3,7 +3,8 @@ import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
   AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
-  User, DatabaseMember, SharedDatabase, PatentHistory,
+  User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
+  GroupedViewResponse, ViewGroupField, ConditionalFormatRule,
 } from '../types'
 
 export const fieldApi = {
@@ -41,6 +42,86 @@ export const databaseApi = {
   // 设置/转移所有者
   setOwner: (id: number, userId: number): Promise<PatentDatabase> =>
     api.post(`/databases/${id}/set-owner`, { user_id: userId }),
+}
+
+export const viewApi = {
+  list: (databaseId: number, includeArchived = false): Promise<PatentView[]> =>
+    api.get('/views', { params: { database_id: databaseId, include_archived: includeArchived } }),
+
+  get: (id: number): Promise<PatentView> => api.get(`/views/${id}`),
+
+  create: (data: {
+    name: string
+    database_id: number
+    description?: string
+    view_type?: PatentView['view_type']
+    layout_type?: PatentView['layout_type']
+    filter_config?: Record<string, any>
+    column_config?: PatentView['column_config']
+    sort_config?: PatentView['sort_config']
+    group_by_config?: PatentView['group_by_config']
+    conditional_formatting?: ConditionalFormatRule[]
+  }): Promise<PatentView> => api.post('/views', data),
+
+  update: (id: number, data: Partial<PatentView>): Promise<PatentView> =>
+    api.put(`/views/${id}`, data),
+
+  master: (databaseId: number): Promise<PatentView> =>
+    api.get(`/databases/${databaseId}/master-view`),
+
+  listPatents: (viewId: number, params: {
+    page?: number
+    page_size?: number
+    search?: string
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
+    extra_filters?: Record<string, any>
+  } = {}): Promise<ViewPatentListResponse> => {
+    const { extra_filters, ...query } = params
+    return api.get(`/views/${viewId}/patents`, {
+      params: {
+        ...query,
+        extra_filters: extra_filters && Object.keys(extra_filters).length > 0
+          ? JSON.stringify(extra_filters)
+          : undefined,
+      },
+    })
+  },
+
+  grouped: (viewId: number, params: {
+    page?: number
+    page_size?: number
+    search?: string
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
+    extra_filters?: Record<string, any>
+  } = {}): Promise<GroupedViewResponse> => {
+    const { extra_filters, ...query } = params
+    return api.get(`/views/${viewId}/grouped`, {
+      params: {
+        ...query,
+        extra_filters: extra_filters && Object.keys(extra_filters).length > 0
+          ? JSON.stringify(extra_filters)
+          : undefined,
+      },
+    })
+  },
+
+  updateGroupConfig: (viewId: number, config: { fields: ViewGroupField[] }): Promise<{
+    success: boolean
+    group_by_config: { fields: ViewGroupField[] }
+  }> => api.put(`/views/${viewId}/group-config`, config),
+
+  updateConditionalFormatting: (viewId: number, config: ConditionalFormatRule[]): Promise<{
+    success: boolean
+    conditional_formatting: ConditionalFormatRule[]
+  }> => api.put(`/views/${viewId}/conditional-formatting`, config),
+
+  updateSharedField: (viewId: number, patentId: number, fieldKey: string, value: any): Promise<{
+    success: boolean
+    patent_id: number
+    field_key: string
+  }> => api.patch(`/views/${viewId}/patents/${patentId}/field/${fieldKey}`, { value }),
 }
 
 export const patentApi = {

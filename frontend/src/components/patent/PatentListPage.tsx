@@ -1,21 +1,86 @@
-import { useState, useEffect, useCallback } from 'react'
-import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi } from '../../api'
+import { Fragment, useState, useEffect, useCallback } from 'react'
+import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { Patent, FieldMeta, CustomField, AITask } from '../../types'
+import type {
+  Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
+  ViewGroupField, ConditionalFormatRule,
+} from '../../types'
+import GroupConfigPanel from '../views/GroupConfigPanel'
+import ConditionalFormatPanel from '../views/ConditionalFormatPanel'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
+  viewId?: number | null
 }
 
 type SortOrder = 'asc' | 'desc'
 
 const DEFAULT_COLUMN_WIDTH = 150
 
-export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
+function getViewGroupFields(view?: PatentView): ViewGroupField[] {
+  const config = view?.group_by_config
+  if (Array.isArray(config)) return config as ViewGroupField[]
+  return (config as { fields?: ViewGroupField[] } | undefined)?.fields || []
+}
+
+function flattenGroups(groups: ViewGroup[]): Patent[] {
+  return groups.flatMap(group => group.subgroups
+    ? flattenGroups(group.subgroups)
+    : (group.patents || []))
+}
+
+interface GroupPresentation {
+  visibleIds: Set<number>
+  headerIds: Set<number>
+  headers: Map<number, { id: string; label: string; field: string; count: number; depth: number }[]>
+}
+
+function getGroupPresentation(groups: ViewGroup[], collapsedKeys: Set<string>): GroupPresentation {
+  const visibleIds = new Set<number>()
+  const headerIds = new Set<number>()
+  const headers = new Map<number, { id: string; label: string; field: string; count: number; depth: number }[]>()
+  const firstLeafPatent = (items: ViewGroup[]): Patent | undefined => {
+    for (const item of items) {
+      if (item.patents?.[0]) return item.patents[0]
+      const nested = firstLeafPatent(item.subgroups || [])
+      if (nested) return nested
+    }
+    return undefined
+  }
+  const walk = (items: ViewGroup[], path: string[], parentCollapsed: boolean) => {
+    items.forEach(group => {
+      const id = [...path, `${group.field}:${group.key ?? '__empty__'}`].join('|')
+      const isCollapsed = parentCollapsed || collapsedKeys.has(id)
+      const children = group.subgroups || []
+      const leafPatents = group.patents || []
+      const firstPatent = leafPatents[0] || firstLeafPatent(children)
+      if (firstPatent) {
+        headerIds.add(firstPatent.id)
+        const currentHeaders = headers.get(firstPatent.id) || []
+        headers.set(firstPatent.id, [...currentHeaders, { id, label: group.label, field: group.field, count: group.count, depth: path.length }])
+      }
+      if (isCollapsed) return
+      if (children.length > 0) walk(children, [...path, id], false)
+      leafPatents.forEach(patent => visibleIds.add(patent.id))
+    })
+  }
+  walk(groups, [], false)
+  return { visibleIds, headerIds, headers }
+}
+
+function getDefaultCollapsedKeys(groups: ViewGroup[], path: string[] = []): string[] {
+  return groups.flatMap(group => {
+    const id = [...path, `${group.field}:${group.key ?? '__empty__'}`].join('|')
+    const nested = getDefaultCollapsedKeys(group.subgroups || [], [...path, id])
+    return [ ...(group.collapsed ? [id] : []), ...nested ]
+  })
+}
+
+export default function PatentListPage({ onPatentClick, viewId = null }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
-    groupByFamily, setGroupByFamily,
+    groupByFamily, setGroupByFamily, views, setViews,
   } = useAppStore()
 
   const [page, setPage] = useState(1)
@@ -84,6 +149,10 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     patentId?: number
     fieldKey?: string
   } | null>(null)
+  const [groupedGroups, setGroupedGroups] = useState<ViewGroup[]>([])
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set())
+  const [showGroupConfig, setShowGroupConfig] = useState(false)
+  const [showConditionalConfig, setShowConditionalConfig] = useState(false)
 
   const loadFields = useCallback(async () => {
     try {
@@ -121,6 +190,42 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
   const loadPatents = useCallback(async () => {
     setLoading(true)
     try {
+      const viewFilters: Record<string, any> = {}
+      Object.entries(filterValues).forEach(([key, value]) => {
+        if (value) viewFilters[key] = { contains: value }
+      })
+
+      if (viewId !== null) {
+        const activeViewForLoad = views.find(view => view.id === viewId)
+        const groupFields = getViewGroupFields(activeViewForLoad)
+        if (groupFields.length > 0) {
+          const result = await viewApi.grouped(viewId, {
+            page,
+            page_size: pageSize,
+            search: searchText || undefined,
+            sort_by: sortField,
+            sort_order: sortOrder,
+            extra_filters: viewFilters,
+          })
+          setGroupedGroups(result.groups)
+          setCollapsedGroupKeys(new Set(getDefaultCollapsedKeys(result.groups)))
+          setPatents(flattenGroups(result.groups), result.total)
+          return
+        }
+        setGroupedGroups([])
+        setCollapsedGroupKeys(new Set())
+        const result = await viewApi.listPatents(viewId, {
+          page,
+          page_size: pageSize,
+          search: searchText || undefined,
+          sort_by: sortField,
+          sort_order: sortOrder,
+          extra_filters: viewFilters,
+        })
+        setPatents(result.items as Patent[], result.total)
+        return
+      }
+
       const params: Record<string, any> = {
         page,
         page_size: pageSize,
@@ -154,7 +259,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, groupByFamily, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, views, setPatents, setLoading])
 
   useEffect(() => {
     loadFields()
@@ -166,6 +271,11 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
       loadPatents()
     }
   }, [loadPatents, fields.length])
+
+  useEffect(() => {
+    clearSelection()
+    setPage(1)
+  }, [viewId, currentDatabaseId, clearSelection])
 
   useEffect(() => {
     aiApi.listAIFields().then(setAiFields).catch(() => {})
@@ -249,6 +359,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     try {
       const blob = await exportApi.exportPatents({
         product_id: currentProductId || undefined,
+        database_id: currentDatabaseId || undefined,
       })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -339,7 +450,11 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
 
   const handleCellSave = async (patentId: number, fieldKey: string, value: any) => {
     try {
-      await patentApi.updateCell(patentId, fieldKey, value)
+      if (viewId !== null) {
+        await viewApi.updateSharedField(viewId, patentId, fieldKey, value)
+      } else {
+        await patentApi.updateCell(patentId, fieldKey, value)
+      }
       setEditingCell(null)
       loadPatents()
     } catch (e: any) {
@@ -867,7 +982,85 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     return map[level || 'none'] || '-'
   }
 
-  const visibleFields = fields.filter(f => f.visible !== false)
+  const activeView = views.find(view => view.id === viewId)
+  const groupPresentation = groupedGroups.length > 0
+    ? getGroupPresentation(groupedGroups, collapsedGroupKeys)
+    : null
+  const displayPatents = groupPresentation
+    ? patents.filter(patent => groupPresentation.visibleIds.has(patent.id) || groupPresentation.headerIds.has(patent.id))
+    : patents
+  const saveGroupConfig = async (fields: ViewGroupField[]) => {
+    if (!activeView) return
+    const result = await viewApi.updateGroupConfig(activeView.id, { fields })
+    setViews(views.map(view => view.id === activeView.id
+      ? { ...view, group_by_config: result.group_by_config }
+      : view))
+    setPage(1)
+  }
+
+  const saveConditionalFormatting = async (rules: ConditionalFormatRule[]) => {
+    if (!activeView) return
+    const result = await viewApi.updateConditionalFormatting(activeView.id, rules)
+    setViews(views.map(view => view.id === activeView.id
+      ? { ...view, conditional_formatting: result.conditional_formatting }
+      : view))
+  }
+
+  const getConditionalCellStyle = (fieldKey: string, value: any): React.CSSProperties => {
+    const rule = activeView?.conditional_formatting?.find(item => item.field === fieldKey)
+    const condition = rule?.conditions?.find(item => {
+      const empty = value === null || value === undefined || value === ''
+      if (item.op === 'is_empty') return empty
+      if (item.op === 'is_not_empty') return !empty
+      if (empty) return false
+      const expected = item.value
+      if (item.op === 'contains') return String(value).toLowerCase().includes(String(expected).toLowerCase())
+      if (item.op === 'starts_with') return String(value).toLowerCase().startsWith(String(expected).toLowerCase())
+      if (item.op === 'ends_with') return String(value).toLowerCase().endsWith(String(expected).toLowerCase())
+      if (['>', '<', '>=', '<='].includes(item.op)) {
+        const left = Number(value)
+        const right = Number(expected)
+        if (Number.isNaN(left) || Number.isNaN(right)) return false
+        return item.op === '>' ? left > right : item.op === '<' ? left < right : item.op === '>=' ? left >= right : left <= right
+      }
+      if (item.op === 'date_within') {
+        const actual = new Date(String(value)).getTime()
+        const days = Number(expected)
+        const multiplier = item.unit === 'week' ? 7 : item.unit === 'month' ? 30 : 1
+        return !Number.isNaN(actual) && !Number.isNaN(days) && actual >= Date.now() && actual <= Date.now() + days * multiplier * 86400000
+      }
+      if (item.op === 'date_before' || item.op === 'date_after') {
+        const actual = new Date(String(value)).getTime()
+        const target = new Date(String(expected)).getTime()
+        return item.op === 'date_before' ? actual < target : actual > target
+      }
+      return item.op === '!=' ? String(value).toLowerCase() !== String(expected).toLowerCase() : String(value).toLowerCase() === String(expected).toLowerCase()
+    })
+    const style = condition?.style
+    if (!style) return {}
+    return {
+      backgroundColor: style.bgColor,
+      color: style.color,
+      fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle,
+      textDecoration: style.textDecoration,
+      opacity: style.opacity,
+    }
+  }
+  const visibleFields = (() => {
+    const baseFields = fields.filter(f => f.visible !== false)
+    const columnConfig = activeView?.column_config || []
+    if (columnConfig.length === 0) return baseFields
+
+    const configByKey = new Map(columnConfig.map(column => [column.key, column]))
+    return baseFields
+      .filter(field => configByKey.get(field.key)?.visible !== false)
+      .sort((a, b) => {
+        const aOrder = configByKey.get(a.key)?.order ?? Number.MAX_SAFE_INTEGER
+        const bOrder = configByKey.get(b.key)?.order ?? Number.MAX_SAFE_INTEGER
+        return aOrder - bOrder
+      })
+  })()
   const totalPages = Math.ceil(totalPatents / pageSize)
   const allSelected = patents.length > 0 && selectedIds.length === patents.length
   const hasActiveFilters = Object.values(filterValues).some(v => v) || !!searchText
@@ -1049,7 +1242,9 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f3f4f6' }}>
       <div className="datagrid-toolbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#111827' }}>专利列表</h2>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#111827' }}>
+            {activeView?.name || '专利列表'}
+          </h2>
           <span style={{ fontSize: 13, color: '#6b7280' }}>
             共 {totalPatents} 件{currentProductId ? ' · 当前产品筛选中' : ''}
           </span>
@@ -1103,6 +1298,30 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
           </button>
         </div>
       </div>
+
+      {activeView && (
+        <div style={{ display: 'flex', gap: 6, padding: '6px 20px', background: '#fff', borderBottom: '1px solid #e5e7eb' }}>
+          <button
+            className={`btn btn-sm ${getViewGroupFields(activeView).length > 0 ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setShowGroupConfig(true)}
+            title="按字段分组并折叠展示"
+          >
+            分组设置
+          </button>
+          <button
+            className={`btn btn-sm ${activeView.conditional_formatting?.length ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setShowConditionalConfig(true)}
+            title="按条件突出显示单元格"
+          >
+            条件格式
+          </button>
+          {getViewGroupFields(activeView).length > 0 && (
+            <span style={{ alignSelf: 'center', fontSize: 11, color: '#6b7280' }}>
+              已按 {getViewGroupFields(activeView).map(item => fields.find(field => field.key === item.field)?.name || item.field).join(' / ')} 分组
+            </span>
+          )}
+        </div>
+      )}
 
       {Object.keys(filterValues).length > 0 && (
         <div style={{ display: 'flex', gap: 6, padding: '6px 20px', background: '#fff', borderBottom: '1px solid #e5e7eb', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1364,7 +1583,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
               </tr>
             </thead>
             <tbody>
-              {patents.map((p, rowIdx) => {
+              {displayPatents.map((p, rowIdx) => {
                 // P2-8：同族聚拢模式下，为同族组交替背景色 + 行首徽章
                 const familyBgColors = ['#faf5ff', '#eff6ff', '#f0fdf4', '#fefce8', '#fff7ed', '#fdf2f8']
                 let rowBg: string | undefined
@@ -1397,7 +1616,29 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     )
                   }
                 }
+                const groupHeaders = groupPresentation?.headers.get(p.id) || []
+                const isGroupRowCollapsed = groupHeaders.some(header => collapsedGroupKeys.has(header.id))
                 return (
+                <Fragment key={p.id}>
+                {groupHeaders.map(groupHeader => (
+                  <tr
+                    key={groupHeader.id}
+                    className="view-group-header"
+                    onClick={() => setCollapsedGroupKeys(previous => {
+                      const next = new Set(previous)
+                      if (next.has(groupHeader.id)) next.delete(groupHeader.id)
+                      else next.add(groupHeader.id)
+                      return next
+                    })}
+                  >
+                    <td colSpan={visibleFields.length + 2} style={{ padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                      <span style={{ display: 'inline-block', width: 18, color: '#64748b' }}>{collapsedGroupKeys.has(groupHeader.id) ? '›' : '⌄'}</span>
+                      {groupHeader.label}
+                      <span style={{ marginLeft: 8, color: '#94a3b8', fontWeight: 400 }}>{groupHeader.count} 条</span>
+                    </td>
+                  </tr>
+                ))}
+                {!isGroupRowCollapsed && (
                 <tr
                   key={p.id}
                   className={selectedIds.includes(p.id) ? 'row-selected' : ''}
@@ -1475,6 +1716,7 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                         verticalAlign: 'top',
                         position: 'relative',
                         ...(isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 5, background: '#fff' } : {}),
+                        ...getConditionalCellStyle(field.key, getFieldValue(p, field.key)),
                       }}
                       onClick={(e) => {
                         if (field.editable) {
@@ -1525,6 +1767,8 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
                     )
                   })}
                 </tr>
+                )}
+                </Fragment>
                 )
               })}
             </tbody>
@@ -2392,6 +2636,25 @@ export default function PatentListPage({ onPatentClick }: PatentListPageProps) {
             </div>
           )}
         </div>
+      )}
+
+      {activeView && showGroupConfig && (
+        <GroupConfigPanel
+          open
+          view={activeView}
+          fields={fields}
+          onClose={() => setShowGroupConfig(false)}
+          onSave={saveGroupConfig}
+        />
+      )}
+      {activeView && showConditionalConfig && (
+        <ConditionalFormatPanel
+          open
+          view={activeView}
+          fields={fields}
+          onClose={() => setShowConditionalConfig(false)}
+          onSave={saveConditionalFormatting}
+        />
       )}
     </div>
   )

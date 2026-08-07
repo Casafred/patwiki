@@ -99,6 +99,58 @@ input, select, textarea {
   letter-spacing: 0.8px;
 }
 
+.view-switcher {
+  padding-bottom: 8px;
+}
+
+.view-switcher-control {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px;
+}
+
+.view-switcher-select {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 8px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+}
+
+.view-add-button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.view-add-button:hover {
+  background: #334155;
+  color: #fff;
+}
+
+.view-create-form {
+  padding: 8px 12px 4px;
+}
+
+.view-create-form .form-input {
+  background: #1e293b;
+  border-color: #475569;
+  color: #e2e8f0;
+}
+
+.view-create-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
 .product-list {
   padding: 2px 0;
 }

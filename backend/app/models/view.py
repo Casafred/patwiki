@@ -43,12 +43,19 @@ class PatentView(Base):
     database_id = Column(Integer, ForeignKey("patent_databases.id", ondelete="CASCADE"), nullable=False, index=True)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
+    # view_type 表示可见范围；layout_type 表示展示形态，二者不能混用。
     view_type = Column(String(30), default="personal")  # personal / shared / department_master
+    layout_type = Column(String(30), default="table")  # table / kanban / form / gantt / calendar
     is_department_master = Column(Boolean, default=False, index=True)
 
     filter_config = Column(JSON, default=dict)
     column_config = Column(JSON, default=list)
     sort_config = Column(JSON, default=dict)
+    group_by_config = Column(JSON, default=dict)
+    conditional_formatting = Column(JSON, default=list)
+    kanban_config = Column(JSON, default=dict)
+    form_config = Column(JSON, default=dict)
+    gantt_config = Column(JSON, default=dict)
 
     is_archived = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())

@@ -409,9 +409,15 @@ class PatentViewBase(BaseSchema):
     description: Optional[str] = None
     database_id: int
     view_type: Optional[str] = "personal"  # personal / shared / department_master
+    layout_type: Optional[str] = "table"  # table / kanban / form / gantt / calendar
     filter_config: Optional[dict[str, Any]] = {}
     column_config: Optional[list[dict[str, Any]]] = []
     sort_config: Optional[dict[str, Any]] = {}
+    group_by_config: Optional[dict[str, Any]] = {}
+    conditional_formatting: Optional[list[dict[str, Any]]] = []
+    kanban_config: Optional[dict[str, Any]] = {}
+    form_config: Optional[dict[str, Any]] = {}
+    gantt_config: Optional[dict[str, Any]] = {}
 
 
 class PatentViewCreate(PatentViewBase):
@@ -422,9 +428,15 @@ class PatentViewUpdate(BaseSchema):
     name: Optional[str] = None
     description: Optional[str] = None
     view_type: Optional[str] = None
+    layout_type: Optional[str] = None
     filter_config: Optional[dict[str, Any]] = None
     column_config: Optional[list[dict[str, Any]]] = None
     sort_config: Optional[dict[str, Any]] = None
+    group_by_config: Optional[dict[str, Any]] = None
+    conditional_formatting: Optional[list[dict[str, Any]]] = None
+    kanban_config: Optional[dict[str, Any]] = None
+    form_config: Optional[dict[str, Any]] = None
+    gantt_config: Optional[dict[str, Any]] = None
     is_archived: Optional[bool] = None
 
 

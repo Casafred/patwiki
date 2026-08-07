@@ -67,6 +67,19 @@ def _ensure_column_migration():
          "ALTER TABLE patent_histories ADD COLUMN source_view_id INTEGER REFERENCES patent_views(id)"),
         ("patent_histories", "source_view_name",
          "ALTER TABLE patent_histories ADD COLUMN source_view_name VARCHAR(200)"),
+        # 视图展示类型与多维视图配置。view_type 继续保留为可见范围。
+        ("patent_views", "layout_type",
+         "ALTER TABLE patent_views ADD COLUMN layout_type VARCHAR(30) DEFAULT 'table'"),
+        ("patent_views", "group_by_config",
+         "ALTER TABLE patent_views ADD COLUMN group_by_config JSON"),
+        ("patent_views", "conditional_formatting",
+         "ALTER TABLE patent_views ADD COLUMN conditional_formatting JSON"),
+        ("patent_views", "kanban_config",
+         "ALTER TABLE patent_views ADD COLUMN kanban_config JSON"),
+        ("patent_views", "form_config",
+         "ALTER TABLE patent_views ADD COLUMN form_config JSON"),
+        ("patent_views", "gantt_config",
+         "ALTER TABLE patent_views ADD COLUMN gantt_config JSON"),
     ]
 
     with engine.begin() as conn:

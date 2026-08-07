@@ -12,7 +12,7 @@
 """
 from fastapi import APIRouter, Depends, Query, HTTPException, Body
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Any
 import json
 
 from app.database import get_db
@@ -60,9 +60,15 @@ def create_view(view_in: PatentViewCreate, db: Session = Depends(get_db)):
             description=view_in.description,
             owner_id=None,
             view_type=view_in.view_type or "personal",
+            layout_type=view_in.layout_type or "table",
             filter_config=view_in.filter_config,
             column_config=view_in.column_config,
             sort_config=view_in.sort_config,
+            group_by_config=view_in.group_by_config,
+            conditional_formatting=view_in.conditional_formatting,
+            kanban_config=view_in.kanban_config,
+            form_config=view_in.form_config,
+            gantt_config=view_in.gantt_config,
             is_department_master=view_in.is_department_master or False,
         )
     except ValueError as e:
@@ -84,7 +90,10 @@ def update_view(view_id: int, view_in: PatentViewUpdate, db: Session = Depends(g
     if not view:
         raise HTTPException(status_code=404, detail="View not found")
     updates = view_in.model_dump(exclude_unset=True)
-    view = ViewService.update_view(db, view, updates)
+    try:
+        view = ViewService.update_view(db, view, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return ViewService.to_dict(view)
 
 
@@ -116,6 +125,9 @@ def list_view_patents(
     view_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=1000),
+    search: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
     extra_filters: Optional[str] = Query(None, description="JSON 字符串：临时筛选，与视图自身 filter 合并"),
     db: Session = Depends(get_db),
 ):
@@ -132,6 +144,7 @@ def list_view_patents(
 
     patents, total = ViewService.list_view_patents(
         db, view, page=page, page_size=page_size, extra_filters=ef,
+        search=search, sort_by=sort_by, sort_order=sort_order,
     )
 
     # 返回时附带视图本地字段值
@@ -149,6 +162,68 @@ def list_view_patents(
         "view_filter_config": view.filter_config or {},
         "view_column_config": view.column_config or [],
     }
+
+
+@router.get("/{view_id}/grouped")
+def get_grouped_view_patents(
+    view_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(500, ge=1, le=500),
+    search: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
+    extra_filters: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+
+    ef = None
+    if extra_filters:
+        try:
+            ef = json.loads(extra_filters)
+        except (json.JSONDecodeError, TypeError):
+            raise HTTPException(status_code=400, detail="extra_filters must be valid JSON")
+
+    return ViewService.get_grouped_data(
+        db, view, page=page, page_size=page_size, extra_filters=ef,
+        search=search, sort_by=sort_by, sort_order=sort_order,
+    )
+
+
+@router.put("/{view_id}/group-config")
+def update_group_config(
+    view_id: int,
+    body: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+):
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+    config = body.get("group_by_config", body)
+    try:
+        view = ViewService.update_view(db, view, {"group_by_config": config})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, "group_by_config": view.group_by_config or {"fields": []}}
+
+
+@router.put("/{view_id}/conditional-formatting")
+def update_conditional_formatting(
+    view_id: int,
+    body: Any = Body(...),
+    db: Session = Depends(get_db),
+):
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+    config = body.get("conditional_formatting", []) if isinstance(body, dict) else body
+    try:
+        view = ViewService.update_view(db, view, {"conditional_formatting": config})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, "conditional_formatting": view.conditional_formatting or []}
 
 
 @router.patch("/{view_id}/patents/{patent_id}/field/{field_key}")

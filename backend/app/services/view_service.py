@@ -7,8 +7,9 @@
 - 视图本地字段可一键 promote 为全局 CustomField（同时在历史中注明来源视图）
 """
 import hashlib
+import json
 from typing import Optional, Any
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
@@ -23,6 +24,17 @@ from app.services.field_registry import get_all_fields_meta
 
 
 class ViewService:
+    SUPPORTED_LAYOUT_TYPES = {"table", "kanban", "form", "gantt", "calendar"}
+    CONDITION_OPERATORS = {
+        "==", "!=", ">", "<", ">=", "<=", "contains", "starts_with",
+        "ends_with", "is_empty", "is_not_empty", "date_within",
+        "date_before", "date_after",
+    }
+    CONDITION_STYLE_KEYS = {
+        "bgColor", "color", "fontWeight", "fontStyle", "textDecoration",
+        "opacity",
+    }
+
     # ========== 视图 CRUD ==========
 
     @staticmethod
@@ -82,9 +94,23 @@ class ViewService:
         filter_config: Optional[dict] = None,
         column_config: Optional[list] = None,
         sort_config: Optional[dict] = None,
+        layout_type: str = "table",
+        group_by_config: Optional[dict] = None,
+        conditional_formatting: Optional[list] = None,
+        kanban_config: Optional[dict] = None,
+        form_config: Optional[dict] = None,
+        gantt_config: Optional[dict] = None,
         is_department_master: bool = False,
     ) -> PatentView:
+        if layout_type not in ViewService.SUPPORTED_LAYOUT_TYPES:
+            raise ValueError(f"不支持的视图展示类型：{layout_type}")
+
         # 部门总表视图每库唯一
+        group_by_config = ViewService.validate_group_by_config(group_by_config or {})
+        conditional_formatting = ViewService.validate_conditional_formatting(
+            conditional_formatting or []
+        )
+
         if is_department_master:
             existing = ViewService.get_department_master_view(db, database_id)
             if existing:
@@ -97,10 +123,16 @@ class ViewService:
             database_id=database_id,
             owner_id=owner_id,
             view_type=view_type,
+            layout_type=layout_type,
             is_department_master=is_department_master,
             filter_config=filter_config or {},
             column_config=column_config or [],
             sort_config=sort_config or {},
+            group_by_config=group_by_config or {},
+            conditional_formatting=conditional_formatting or [],
+            kanban_config=kanban_config or {},
+            form_config=form_config or {},
+            gantt_config=gantt_config or {},
         )
         db.add(view)
         db.commit()
@@ -109,6 +141,17 @@ class ViewService:
 
     @staticmethod
     def update_view(db: Session, view: PatentView, updates: dict) -> PatentView:
+        layout_type = updates.get("layout_type")
+        if layout_type is not None and layout_type not in ViewService.SUPPORTED_LAYOUT_TYPES:
+            raise ValueError(f"不支持的视图展示类型：{layout_type}")
+        if "group_by_config" in updates:
+            updates["group_by_config"] = ViewService.validate_group_by_config(
+                updates["group_by_config"]
+            )
+        if "conditional_formatting" in updates:
+            updates["conditional_formatting"] = ViewService.validate_conditional_formatting(
+                updates["conditional_formatting"]
+            )
         for k, v in updates.items():
             if v is not None and hasattr(view, k):
                 setattr(view, k, v)
@@ -143,11 +186,17 @@ class ViewService:
             "database_id": view.database_id,
             "owner_id": view.owner_id,
             "view_type": view.view_type,
+            "layout_type": view.layout_type or "table",
             "is_department_master": view.is_department_master,
             "is_archived": view.is_archived,
             "filter_config": view.filter_config or {},
             "column_config": view.column_config or [],
             "sort_config": view.sort_config or {},
+            "group_by_config": view.group_by_config or {},
+            "conditional_formatting": view.conditional_formatting or [],
+            "kanban_config": view.kanban_config or {},
+            "form_config": view.form_config or {},
+            "gantt_config": view.gantt_config or {},
             "created_at": view.created_at.isoformat() if view.created_at else None,
             "updated_at": view.updated_at.isoformat() if view.updated_at else None,
         }
@@ -166,6 +215,9 @@ class ViewService:
         page: int = 1,
         page_size: int = 50,
         extra_filters: Optional[dict] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> tuple[list[Patent], int]:
         """获取视图中的专利列表。
 
@@ -177,19 +229,193 @@ class ViewService:
         if extra_filters:
             merged_filters.update(extra_filters)
 
-        sort_by = (view.sort_config or {}).get("sort_by")
-        sort_order = (view.sort_config or {}).get("sort_order", "asc")
+        sort_by = sort_by or (view.sort_config or {}).get("sort_by")
+        sort_order = sort_order or (view.sort_config or {}).get("sort_order", "asc")
 
         patents, total = PatentService.list_patents(
             db,
             page=page,
             page_size=page_size,
             database_id=view.database_id,
+            search=search,
             filters=merged_filters if merged_filters else None,
             sort_by=sort_by,
             sort_order=sort_order,
         )
         return patents, total
+
+    # ========== Grouping and conditional formatting ==========
+
+    @staticmethod
+    def validate_group_by_config(config: Any) -> dict:
+        """Normalize and validate the persisted grouping configuration."""
+        if config in (None, {}, []):
+            return {"fields": []}
+        if isinstance(config, dict):
+            raw_fields = config.get("fields", [])
+            if not raw_fields and config.get("field"):
+                raw_fields = [config]
+        elif isinstance(config, list):
+            raw_fields = config
+        else:
+            raise ValueError("group_by_config must be an object or array")
+
+        if not isinstance(raw_fields, list) or len(raw_fields) > 3:
+            raise ValueError("group_by_config supports at most 3 fields")
+
+        normalized = []
+        seen = set()
+        for item in raw_fields:
+            if not isinstance(item, dict) or not str(item.get("field", "")).strip():
+                raise ValueError("Every group field must include a field key")
+            field = str(item["field"]).strip()
+            if field in seen:
+                raise ValueError(f"Duplicate group field: {field}")
+            direction = item.get("direction", "asc")
+            if direction not in {"asc", "desc"}:
+                raise ValueError("Group direction must be asc or desc")
+            seen.add(field)
+            normalized.append({
+                "field": field,
+                "direction": direction,
+                "collapsed": bool(item.get("collapsed", False)),
+            })
+        return {"fields": normalized}
+
+    @staticmethod
+    def validate_conditional_formatting(config: Any) -> list[dict]:
+        """Validate conditional formatting without executing arbitrary expressions."""
+        if config in (None, []):
+            return []
+        if not isinstance(config, list):
+            raise ValueError("conditional_formatting must be an array")
+
+        normalized = []
+        for index, rule in enumerate(config):
+            if not isinstance(rule, dict) or not str(rule.get("field", "")).strip():
+                raise ValueError("Every conditional format rule must include a field key")
+            conditions = rule.get("conditions", [])
+            if not isinstance(conditions, list) or not conditions:
+                raise ValueError("Every conditional format rule needs at least one condition")
+            normalized_conditions = []
+            for condition in conditions:
+                if not isinstance(condition, dict):
+                    raise ValueError("Conditional format conditions must be objects")
+                operator = condition.get("op")
+                if operator not in ViewService.CONDITION_OPERATORS:
+                    raise ValueError(f"Unsupported conditional format operator: {operator}")
+                style = condition.get("style") or {}
+                if not isinstance(style, dict):
+                    raise ValueError("Conditional format style must be an object")
+                normalized_conditions.append({
+                    "op": operator,
+                    "value": condition.get("value"),
+                    **({"unit": condition.get("unit")} if condition.get("unit") else {}),
+                    "style": {
+                        key: value
+                        for key, value in style.items()
+                        if key in ViewService.CONDITION_STYLE_KEYS and value is not None
+                    },
+                })
+            normalized.append({
+                "id": str(rule.get("id") or f"cf_{index + 1}"),
+                "field": str(rule["field"]).strip(),
+                "conditions": normalized_conditions,
+            })
+        return normalized
+
+    @staticmethod
+    def get_grouped_data(
+        db: Session,
+        view: PatentView,
+        page: int = 1,
+        page_size: int = 500,
+        extra_filters: Optional[dict] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
+    ) -> dict:
+        """Return the current view page as nested groups."""
+        group_fields = ViewService.validate_group_by_config(view.group_by_config).get("fields", [])
+        normalized_page_size = min(max(page_size, 1), 500)
+        patents, total = ViewService.list_view_patents(
+            db, view, page=page, page_size=normalized_page_size,
+            extra_filters=extra_filters, search=search,
+            sort_by=sort_by, sort_order=sort_order,
+        )
+        local_values = {}
+        if patents:
+            rows = db.query(PatentViewFieldValue).filter(
+                PatentViewFieldValue.view_id == view.id,
+                PatentViewFieldValue.patent_id.in_([patent.id for patent in patents]),
+            ).all()
+            for row in rows:
+                local_values.setdefault(row.patent_id, {})[row.field_key] = row.value
+
+        items = []
+        for patent in patents:
+            item = _patent_to_dict(patent)
+            item["view_local_fields"] = {
+                field.key: local_values.get(patent.id, {}).get(field.key)
+                for field in view.local_fields
+            }
+            items.append(item)
+
+        def build_groups(current_items: list[dict], depth: int) -> list[dict]:
+            config = group_fields[depth]
+            buckets: dict[str, dict] = {}
+            for item in current_items:
+                value = _get_item_field_value(item, config["field"])
+                bucket_key = _group_key(value)
+                bucket = buckets.setdefault(bucket_key, {
+                    "key": None if value in (None, "") else value,
+                    "label": "未设置" if value in (None, "") else str(value),
+                    "items": [],
+                })
+                bucket["items"].append(item)
+
+            groups = list(buckets.values())
+            groups.sort(
+                key=lambda group: (group["key"] is None, str(group["key"]).casefold()),
+                reverse=config["direction"] == "desc",
+            )
+            result = []
+            for group in groups:
+                children = group.pop("items")
+                entry = {
+                    "key": group["key"],
+                    "label": group["label"],
+                    "field": config["field"],
+                    "count": len(children),
+                    "collapsed": config["collapsed"],
+                }
+                if depth + 1 < len(group_fields):
+                    entry["subgroups"] = build_groups(children, depth + 1)
+                else:
+                    entry["patents"] = children
+                result.append(entry)
+            return result
+
+        return {
+            "view_id": view.id,
+            "total": total,
+            "page": page,
+            "page_size": normalized_page_size,
+            "groups": build_groups(items, 0) if group_fields else [],
+            "group_by_config": {"fields": group_fields},
+            "conditional_formatting": view.conditional_formatting or [],
+        }
+
+    @staticmethod
+    def get_conditional_styles(view: PatentView, field_key: str, value: Any) -> dict:
+        """Return the first matching style for one cell."""
+        for rule in view.conditional_formatting or []:
+            if rule.get("field") != field_key:
+                continue
+            for condition in rule.get("conditions", []):
+                if _matches_condition(value, condition):
+                    return condition.get("style") or {}
+        return {}
 
     @staticmethod
     def get_view_patent_with_local_fields(
@@ -545,6 +771,88 @@ class ViewService:
 
 # ========== 内部工具 ==========
 
+def _get_item_field_value(item: dict, field_key: str) -> Any:
+    if field_key.startswith("custom_fields."):
+        return (item.get("custom_fields") or {}).get(field_key[len("custom_fields."):])
+    if field_key.startswith("ai_fields."):
+        return (item.get("ai_fields") or {}).get(field_key[len("ai_fields."):])
+    if field_key.startswith("view_local."):
+        return (item.get("view_local_fields") or {}).get(field_key[len("view_local."):])
+    return item.get(field_key)
+
+
+def _group_key(value: Any) -> str:
+    if value is None or value == "":
+        return "__empty__"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _matches_condition(value: Any, condition: dict) -> bool:
+    operator = condition.get("op")
+    expected = condition.get("value")
+    empty = value is None or value == ""
+    if operator == "is_empty":
+        return empty
+    if operator == "is_not_empty":
+        return not empty
+    if empty:
+        return False
+    if operator == "contains":
+        return str(expected).casefold() in str(value).casefold()
+    if operator == "starts_with":
+        return str(value).casefold().startswith(str(expected).casefold())
+    if operator == "ends_with":
+        return str(value).casefold().endswith(str(expected).casefold())
+    if operator in {"date_within", "date_before", "date_after"}:
+        actual_date = _parse_date(value)
+        if not actual_date:
+            return False
+        if operator == "date_within":
+            try:
+                amount = int(expected)
+            except (TypeError, ValueError):
+                return False
+            unit = condition.get("unit", "day")
+            multiplier = {"day": 1, "week": 7, "month": 30}.get(unit, 1)
+            today = date.today()
+            return today <= actual_date <= today + timedelta(days=amount * multiplier)
+        compare_date = _parse_date(expected)
+        if not compare_date:
+            return False
+        return actual_date < compare_date if operator == "date_before" else actual_date > compare_date
+    if operator in {">", "<", ">=", "<="}:
+        try:
+            left, right = float(value), float(expected)
+        except (TypeError, ValueError):
+            left, right = str(value), str(expected)
+        return {
+            ">": left > right,
+            "<": left < right,
+            ">=": left >= right,
+            "<=": left <= right,
+        }[operator]
+    if operator == "==":
+        return str(value).casefold() == str(expected).casefold()
+    if operator == "!=":
+        return str(value).casefold() != str(expected).casefold()
+    return False
+
+
 def _stringify(v: Any) -> Optional[str]:
     if v is None:
         return None
@@ -585,5 +893,6 @@ def _patent_to_dict(patent: Patent) -> dict:
         "risk_level": patent.risk_level.value if patent.risk_level else None,
         "notes": patent.notes,
         "custom_fields": dict(patent.custom_fields or {}),
+        "ai_fields": dict(patent.ai_fields or {}),
         "database_id": patent.database_id,
     }

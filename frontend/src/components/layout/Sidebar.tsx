@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
+import ViewSwitcher from '../views/ViewSwitcher'
+import type { Page } from '../../App'
 
 interface SidebarProps {
-  currentPage: string
-  onNavigate: (page: 'patents' | 'stats' | 'settings' | 'fields' | 'ai-tasks' | 'agent-analysis' | 'sharing') => void
+  currentPage: Page
+  onNavigate: (page: Page) => void
 }
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
@@ -22,10 +24,9 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   // 打通关联：监听当前库切换，重新加载产品列表，patent_count 按当前库过滤
   const reloadProducts = useCallback(async () => {
     try {
-      const params: Record<string, any> = {}
-      if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
-        params.database_id = currentDatabaseId
-      }
+      const params = currentDatabaseId === null || currentDatabaseId === undefined
+        ? {}
+        : { database_id: currentDatabaseId }
       const refreshed = await productApi.list(params)
       setProducts(refreshed)
     } catch (e) {
@@ -52,7 +53,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       setNewProductName('')
       setShowAddProduct(false)
       onNavigate('patents')
-    } catch (e) {
+    } catch {
       alert('创建产品失败')
     }
   }
@@ -79,7 +80,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       setNewDbName('')
       setNewDbDesc('')
       setShowAddDatabase(false)
-    } catch (e) {
+    } catch {
       alert('创建库失败')
     }
   }
@@ -115,8 +116,10 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
         setCurrentDatabaseId(null)
       }
       onNavigate('patents')
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail
+    } catch (e: unknown) {
+      const detail = e && typeof e === 'object' && 'response' in e
+        ? (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail
+        : undefined
       alert(detail || '删除库失败')
     }
   }
@@ -240,6 +243,8 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
         >
           设置
         </div>
+
+        <ViewSwitcher onOpenView={() => onNavigate('patents')} />
 
         <div className="nav-section">产品分类</div>
         <div className="product-list">

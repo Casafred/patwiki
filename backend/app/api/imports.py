@@ -410,6 +410,7 @@ def get_stats(
 @router.get("/export")
 def export_patents(
     search: Optional[str] = None,
+    database_id: Optional[int] = None,
     product_id: Optional[int] = None,
     project_id: Optional[int] = None,
     tag_id: Optional[int] = None,
@@ -421,7 +422,7 @@ def export_patents(
     tag_ids = [tag_id] if tag_id else None
     patents, total = PatentService.list_patents(
         db, page=1, page_size=100000,
-        search=search, product_id=product_id, project_id=project_id,
+        search=search, database_id=database_id, product_id=product_id, project_id=project_id,
         tag_ids=tag_ids, legal_status=legal_status, category=category,
         has_risk=has_risk,
     )

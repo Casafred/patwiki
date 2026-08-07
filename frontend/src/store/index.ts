@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, User } from '../types'
+import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, PatentView, User } from '../types'
 
 const CURRENT_USER_STORAGE_KEY = 'patwiki_current_user'
 const GROUP_BY_FAMILY_STORAGE_KEY = 'patwiki_group_by_family'
@@ -16,6 +16,10 @@ interface AppState {
   currentDatabaseId: number | null
   setDatabases: (databases: PatentDatabase[]) => void
   setCurrentDatabaseId: (id: number | null) => void
+  views: PatentView[]
+  currentViewId: number | null
+  setViews: (views: PatentView[]) => void
+  setCurrentViewId: (id: number | null) => void
   currentProductId: number | null
   loading: boolean
   selectedIds: number[]
@@ -60,6 +64,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentDatabaseId: null,
   setDatabases: (databases) => set({ databases }),
   setCurrentDatabaseId: (currentDatabaseId) => set({ currentDatabaseId }),
+  views: [],
+  currentViewId: null,
+  setViews: (views) => set({ views }),
+  setCurrentViewId: (currentViewId) => set({ currentViewId }),
   currentProductId: null,
   loading: false,
   selectedIds: [],
