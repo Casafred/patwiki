@@ -87,8 +87,14 @@ try {
     Write-Host "[5/5] Verify installer artifacts"
     $msiDir = Join-Path $root "src-tauri\target\release\bundle\msi"
     $nsisDir = Join-Path $root "src-tauri\target\release\bundle\nsis"
-    $msiFiles = if (Test-Path -LiteralPath $msiDir) { @(Get-ChildItem -LiteralPath $msiDir -Filter *.msi -File) } else { @() }
-    $nsisFiles = if (Test-Path -LiteralPath $nsisDir) { @(Get-ChildItem -LiteralPath $nsisDir -Filter *.exe -File) } else { @() }
+    $msiFiles = @()
+    if (Test-Path -LiteralPath $msiDir) {
+        $msiFiles = @(Get-ChildItem -LiteralPath $msiDir -Filter *.msi -File)
+    }
+    $nsisFiles = @()
+    if (Test-Path -LiteralPath $nsisDir) {
+        $nsisFiles = @(Get-ChildItem -LiteralPath $nsisDir -Filter *.exe -File)
+    }
 
     if ($msiFiles.Count -eq 0) {
         throw "MSI installer was not found: $msiDir"
@@ -97,9 +103,9 @@ try {
         throw "NSIS installer was not found: $nsisDir"
     }
 
-    $msiFiles + $nsisFiles | ForEach-Object {
-        $size = [math]::Round($_.Length / 1MB, 1)
-        Write-Host "Installer: $($_.FullName) ($size MB)"
+    foreach ($installer in @($msiFiles) + @($nsisFiles)) {
+        $size = [math]::Round($installer.Length / 1MB, 1)
+        Write-Host "Installer: $($installer.FullName) ($size MB)"
     }
     Write-Host "Windows installer build completed."
 }
