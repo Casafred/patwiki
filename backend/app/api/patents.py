@@ -7,7 +7,7 @@ import json
 from app.database import get_db
 from app.api.deps import get_pagination_params
 from app.schemas.schemas import (
-    Patent, PatentCreate, PatentUpdate, PatentListResponse
+    Patent, PatentCreate, PatentUpdate, PatentListResponse, BulkUpdateRequest
 )
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
@@ -114,11 +114,10 @@ def delete_patent(patent_id: int, db: Session = Depends(get_db)):
 
 @router.post("/bulk-update")
 def bulk_update_patents(
-    patent_ids: list[int],
-    updates: dict,
+    payload: BulkUpdateRequest,
     db: Session = Depends(get_db),
 ):
-    count = PatentService.bulk_update(db, patent_ids, updates)
+    count = PatentService.bulk_update(db, payload.patent_ids, payload.updates)
     return {"success": True, "updated_count": count}
 
 

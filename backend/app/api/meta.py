@@ -13,11 +13,11 @@ from app.schemas.schemas import (
     Product as ProductSchema, ProductCreate, ProductUpdate,
     Project as ProjectSchema, ProjectCreate, ProjectUpdate,
     Tag as TagSchema, TagCreate, TagUpdate,
-    TagGroup as TagGroupSchema, TagGroupCreate,
+    TagGroup as TagGroupSchema, TagGroupCreate, TagGroupUpdate,
     CustomField as CustomFieldSchema, CustomFieldCreate, CustomFieldUpdate,
-    Department as DepartmentSchema, DepartmentCreate,
-    Person as PersonSchema, PersonCreate,
-    ProductLine as ProductLineSchema, ProductLineCreate,
+    Department as DepartmentSchema, DepartmentCreate, DepartmentUpdate,
+    Person as PersonSchema, PersonCreate, PersonUpdate,
+    ProductLine as ProductLineSchema, ProductLineCreate, ProductLineUpdate,
 )
 
 router = APIRouter(tags=["meta"])
@@ -182,6 +182,28 @@ def create_tag_group(group_in: TagGroupCreate, db: Session = Depends(get_db)):
     return group
 
 
+@router.put("/tag-groups/{group_id}", response_model=TagGroupSchema)
+def update_tag_group(group_id: int, group_in: TagGroupUpdate, db: Session = Depends(get_db)):
+    group = db.query(TagGroup).filter(TagGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Tag group not found")
+    for field, value in group_in.model_dump(exclude_unset=True).items():
+        setattr(group, field, value)
+    db.commit()
+    db.refresh(group)
+    return group
+
+
+@router.delete("/tag-groups/{group_id}")
+def delete_tag_group(group_id: int, db: Session = Depends(get_db)):
+    group = db.query(TagGroup).filter(TagGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Tag group not found")
+    db.delete(group)
+    db.commit()
+    return {"success": True}
+
+
 @router.get("/custom-fields", response_model=list[CustomFieldSchema])
 def list_custom_fields(
     active_only: bool = False,
@@ -238,6 +260,28 @@ def create_department(dept_in: DepartmentCreate, db: Session = Depends(get_db)):
     return dept
 
 
+@router.put("/departments/{department_id}", response_model=DepartmentSchema)
+def update_department(department_id: int, dept_in: DepartmentUpdate, db: Session = Depends(get_db)):
+    dept = db.query(Department).filter(Department.id == department_id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    for field, value in dept_in.model_dump(exclude_unset=True).items():
+        setattr(dept, field, value)
+    db.commit()
+    db.refresh(dept)
+    return dept
+
+
+@router.delete("/departments/{department_id}")
+def delete_department(department_id: int, db: Session = Depends(get_db)):
+    dept = db.query(Department).filter(Department.id == department_id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    db.delete(dept)
+    db.commit()
+    return {"success": True}
+
+
 @router.get("/people", response_model=list[PersonSchema])
 def list_people(db: Session = Depends(get_db)):
     return db.query(Person).order_by(Person.name).all()
@@ -252,6 +296,28 @@ def create_person(person_in: PersonCreate, db: Session = Depends(get_db)):
     return person
 
 
+@router.put("/people/{person_id}", response_model=PersonSchema)
+def update_person(person_id: int, person_in: PersonUpdate, db: Session = Depends(get_db)):
+    person = db.query(Person).filter(Person.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    for field, value in person_in.model_dump(exclude_unset=True).items():
+        setattr(person, field, value)
+    db.commit()
+    db.refresh(person)
+    return person
+
+
+@router.delete("/people/{person_id}")
+def delete_person(person_id: int, db: Session = Depends(get_db)):
+    person = db.query(Person).filter(Person.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    db.delete(person)
+    db.commit()
+    return {"success": True}
+
+
 @router.get("/product-lines", response_model=list[ProductLineSchema])
 def list_product_lines(db: Session = Depends(get_db)):
     return db.query(ProductLine).order_by(ProductLine.name).all()
@@ -264,3 +330,25 @@ def create_product_line(pl_in: ProductLineCreate, db: Session = Depends(get_db))
     db.commit()
     db.refresh(pl)
     return pl
+
+
+@router.put("/product-lines/{product_line_id}", response_model=ProductLineSchema)
+def update_product_line(product_line_id: int, pl_in: ProductLineUpdate, db: Session = Depends(get_db)):
+    product_line = db.query(ProductLine).filter(ProductLine.id == product_line_id).first()
+    if not product_line:
+        raise HTTPException(status_code=404, detail="Product line not found")
+    for field, value in pl_in.model_dump(exclude_unset=True).items():
+        setattr(product_line, field, value)
+    db.commit()
+    db.refresh(product_line)
+    return product_line
+
+
+@router.delete("/product-lines/{product_line_id}")
+def delete_product_line(product_line_id: int, db: Session = Depends(get_db)):
+    product_line = db.query(ProductLine).filter(ProductLine.id == product_line_id).first()
+    if not product_line:
+        raise HTTPException(status_code=404, detail="Product line not found")
+    db.delete(product_line)
+    db.commit()
+    return {"success": True}

@@ -1360,6 +1360,118 @@ input, select, textarea {
   gap: 12px;
 }
 
+.management-page {
+  min-height: 100%;
+  padding-bottom: 24px;
+}
+
+.management-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 12px 20px 0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+  overflow-x: auto;
+}
+
+.management-tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 8px 12px 10px;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.management-tab:hover,
+.management-tab.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+.management-form {
+  margin: 0 20px 16px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+}
+
+.management-form.compact {
+  margin: 0 0 12px;
+  padding: 12px;
+}
+
+.management-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.management-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.management-table {
+  margin: 0 20px;
+}
+
+.management-split .management-table {
+  margin: 0;
+}
+
+.management-page > .page-header,
+.management-page > .management-error {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+
+.management-page > .page-header {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.management-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  margin: 0 20px;
+}
+
+.management-split section {
+  min-width: 0;
+}
+
+.management-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.management-error {
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .management-form-grid,
+  .management-split {
+    grid-template-columns: 1fr;
+  }
+}
+
 .spinner {
   width: 24px;
   height: 24px;

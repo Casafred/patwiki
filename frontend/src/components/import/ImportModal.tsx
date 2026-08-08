@@ -52,7 +52,14 @@ const SYSTEM_FIELD_LABELS: Record<string, string> = {
 }
 
 export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
-  const { currentDatabaseId, databases, setDatabases, setCurrentDatabaseId } = useAppStore()
+  const {
+    currentDatabaseId,
+    databases,
+    products,
+    projects,
+    setDatabases,
+    setCurrentDatabaseId,
+  } = useAppStore()
 
   // P0-12：新增 chooseDatabase 步骤
   const [step, setStep] = useState<'chooseDatabase' | 'upload' | 'mapping' | 'processing' | 'complete'>(
@@ -434,14 +441,30 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>关联产品（可选）</label>
-                  <select className="form-input" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value ? Number(e.target.value) : '')}>
+                  <select
+                    className="form-input"
+                    value={selectedProductId}
+                    onChange={(e) => {
+                      const nextProductId = e.target.value ? Number(e.target.value) : ''
+                      setSelectedProductId(nextProductId)
+                      setSelectedProjectId('')
+                    }}
+                  >
                     <option value="">不关联产品</option>
+                    {products.map(product => (
+                      <option key={product.id} value={product.id}>{product.name}</option>
+                    ))}
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>关联项目（可选）</label>
                   <select className="form-input" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value ? Number(e.target.value) : '')}>
                     <option value="">不关联项目</option>
+                    {projects
+                      .filter(project => !selectedProductId || project.product_id === selectedProductId)
+                      .map(project => (
+                        <option key={project.id} value={project.id}>{project.name}</option>
+                      ))}
                   </select>
                 </div>
               </div>

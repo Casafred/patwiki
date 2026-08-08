@@ -1,7 +1,7 @@
 import api from '../lib/api'
 import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
-  CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
+  CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department, ProductLine,
   AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
@@ -197,6 +197,8 @@ export const tagApi = {
 export const tagGroupApi = {
   list: (): Promise<TagGroup[]> => api.get('/tag-groups'),
   create: (data: Partial<TagGroup>): Promise<TagGroup> => api.post('/tag-groups', data),
+  update: (id: number, data: Partial<TagGroup>): Promise<TagGroup> => api.put(`/tag-groups/${id}`, data),
+  delete: (id: number): Promise<{ success: boolean }> => api.delete(`/tag-groups/${id}`),
 }
 
 export const customFieldApi = {
@@ -309,11 +311,22 @@ export const analyticsApi = {
 export const personApi = {
   list: (): Promise<Person[]> => api.get('/people'),
   create: (data: Partial<Person>): Promise<Person> => api.post('/people', data),
+  update: (id: number, data: Partial<Person>): Promise<Person> => api.put(`/people/${id}`, data),
+  delete: (id: number): Promise<{ success: boolean }> => api.delete(`/people/${id}`),
 }
 
 export const departmentApi = {
   list: (): Promise<Department[]> => api.get('/departments'),
   create: (data: Partial<Department>): Promise<Department> => api.post('/departments', data),
+  update: (id: number, data: Partial<Department>): Promise<Department> => api.put(`/departments/${id}`, data),
+  delete: (id: number): Promise<{ success: boolean }> => api.delete(`/departments/${id}`),
+}
+
+export const productLineApi = {
+  list: (): Promise<ProductLine[]> => api.get('/product-lines'),
+  create: (data: Partial<ProductLine>): Promise<ProductLine> => api.post('/product-lines', data),
+  update: (id: number, data: Partial<ProductLine>): Promise<ProductLine> => api.put(`/product-lines/${id}`, data),
+  delete: (id: number): Promise<{ success: boolean }> => api.delete(`/product-lines/${id}`),
 }
 
 export const aiApi = {

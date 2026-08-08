@@ -232,6 +232,12 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           字段管理
         </div>
         <div
+          className={`nav-item ${currentPage === 'management' ? 'active' : ''}`}
+          onClick={() => onNavigate('management')}
+        >
+          管理台
+        </div>
+        <div
           className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`}
           onClick={() => onNavigate('sharing')}
         >

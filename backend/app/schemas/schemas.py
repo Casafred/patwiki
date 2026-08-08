@@ -109,6 +109,11 @@ class PatentListResponse(BaseSchema):
     page_size: int
 
 
+class BulkUpdateRequest(BaseSchema):
+    patent_ids: list[int]
+    updates: dict[str, Any]
+
+
 class ProductBase(BaseSchema):
     name: str
     code: Optional[str] = None
@@ -206,6 +211,12 @@ class TagGroupCreate(TagGroupBase):
     pass
 
 
+class TagGroupUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
 class TagGroup(TagGroupBase):
     id: int
     tags: list[Tag] = []
@@ -292,6 +303,15 @@ class PersonCreate(PersonBase):
     pass
 
 
+class PersonUpdate(BaseSchema):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    department_id: Optional[int] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+
+
 class Person(PersonBase):
     id: int
     created_at: datetime
@@ -304,6 +324,11 @@ class DepartmentBase(BaseSchema):
 
 class DepartmentCreate(DepartmentBase):
     pass
+
+
+class DepartmentUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
 
 
 class Department(DepartmentBase):
@@ -319,6 +344,12 @@ class ProductLineBase(BaseSchema):
 
 class ProductLineCreate(ProductLineBase):
     pass
+
+
+class ProductLineUpdate(BaseSchema):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    description: Optional[str] = None
 
 
 class ProductLine(ProductLineBase):

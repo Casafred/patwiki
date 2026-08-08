@@ -250,6 +250,15 @@ export interface TagGroup {
   tags?: Tag[]
 }
 
+export interface ProductLine {
+  id: number
+  name: string
+  code?: string
+  description?: string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface CustomField {
   id: number
   key: string
@@ -334,6 +343,8 @@ export interface Person {
   role?: string
   is_active?: boolean
   notes?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface Department {
@@ -341,6 +352,7 @@ export interface Department {
   name: string
   description?: string
   members?: Person[]
+  created_at?: string
 }
 
 export interface AITask {
