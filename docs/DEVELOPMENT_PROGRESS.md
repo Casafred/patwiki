@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-08（完成 P1 管理台与元数据 CRUD 闭环）
+最近更新：2026-08-09（完成 P1 管理功能迭代）
 
 ---
 
@@ -53,7 +53,7 @@
 | P1-6 | 后端补齐元数据 CRUD（update/delete） | 中 | 已完成 | 2026-08-08 | 后端 | 部门/人员/标签组/产品线完整 CRUD |
 | P1-7 | 修 ImportModal 产品/项目下拉填充 | 中 | 已完成 | 2026-08-08 | 前端 | 从 store 读取并按产品过滤项目 |
 | P1-8 | 修后端 bulk-update 入参模型 | 中 | 已完成 | 2026-08-08 | 后端 | 封装为 BulkUpdateRequest |
-| P1-9 | 清理 import_service 死代码 | 低 | 未开始 | - | 后端 | process_import 等未被调用 |
+| P1-9 | 清理 import_service 死代码 | 低 | 已完成 | 2026-08-09 | 后端 | 删除未调用的 preview/process/batch 辅助链路，保留现行导入 API 依赖的方法 |
 
 ## 三、增强迭代（P2 - 锦上添花）
 
@@ -88,3 +88,4 @@
 | 2026-08-08 | P0-15 | 完成看板视图基础闭环：新增看板分组/卡片查询与拖拽换列 API；前端新增 KanbanView，支持分组字段选择、卡片字段配置、详情跳转和跨列更新；自定义字段读取与视图写回链路同步修正。 |
 | 2026-08-08 | P0-5 | 新增 scripts/build_windows.ps1 作为本地与 CI 共用的 Windows 打包入口；统一依赖检查、图标生成、PyInstaller 后端构建、前端构建、固定 Tauri CLI 2.11.4 和 MSI/NSIS 产物校验；tauri.conf.json 同步声明 msi 与 nsis 目标，并修正 Tauri 在仓库根目录执行 beforeBuildCommand 的前端路径；本地实际生成 MSI 与 NSIS 安装包；修复 Windows PowerShell 单文件产物在集合相加时的 FileInfo 标量错误。 |
 | 2026-08-08 | P1-1~P1-8 | 新增管理台路由和页面，覆盖产品、项目、标签/标签组、部门/人员、产品线 CRUD；补齐对应后端 update/delete 接口和 Pydantic schema；管理台提供自定义字段入口；ImportModal 产品/项目下拉接入 store 并按产品过滤项目；bulk-update 改用 BulkUpdateRequest 请求体。通过 ESLint、TypeScript、Vite build、后端 compileall 和 diff check。 |
+| 2026-08-09 | P1-9 | 清理 backend/app/services/import_service.py 中无调用方的 preview_import、process_import、create/list/get_import_batch 方法及专属依赖，保留当前 imports API 使用的解析、映射和行转换链路。通过后端 compileall、前端 lint/build 和 diff check。 |

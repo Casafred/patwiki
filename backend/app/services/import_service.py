@@ -1,29 +1,16 @@
 import hashlib
-import json
 import re
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, Any
 from io import BytesIO
 
 import pandas as pd
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
-from app.config import settings
 from app.models import (
-    Patent, ImportBatch, FieldMapping, ImportBatchStatus,
-    CustomField, CustomFieldType, Product, LegalStatus, PatentType, RiskLevel
+    CustomField, CustomFieldType, LegalStatus, PatentType, RiskLevel
 )
-from app.schemas.schemas import FieldMappingConfig, ImportRequest
-from app.services.patent_service import PatentService
-from app.services.merge_service import merge_patent_data
-from app.services.relation_service import (
-    parse_patent_numbers,
-    process_family_members,
-    process_citations,
-    process_citing_patents,
-)
+from app.services.relation_service import parse_patent_numbers
 
 
 # 虚拟字段：不直接写入 Patent 主表，由 relation_service 处理
@@ -256,21 +243,6 @@ class ImportService:
         return mapping
 
     @staticmethod
-    def preview_import(file_content: bytes, filename: str, db: Session) -> dict:
-        df, columns = ImportService.parse_excel(file_content, filename)
-        suggested_mapping = ImportService.suggest_mapping(columns, db)
-
-        sample_rows = df.head(10).to_dict("records")
-        sample_rows = [{str(k): str(v) for k, v in row.items()} for row in sample_rows]
-
-        return {
-            "columns": columns,
-            "sample_rows": sample_rows,
-            "total_rows": len(df),
-            "suggested_mapping": suggested_mapping,
-        }
-
-    @staticmethod
     def _parse_date(value: Any) -> Optional[datetime.date]:
         if not value or str(value).strip() == "":
             return None
@@ -400,151 +372,3 @@ class ImportService:
 
         data["custom_fields"] = custom
         return data, virtual
-
-    @staticmethod
-    def process_import(
-        batch_id: int,
-        file_content: bytes,
-        filename: str,
-        mapping: dict,
-        options: dict,
-        db: Session,
-        product_id: Optional[int] = None,
-    ):
-        batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
-        if not batch:
-            return
-
-        batch.status = ImportBatchStatus.PROCESSING
-        batch.started_at = datetime.now()
-        db.commit()
-
-        errors = []
-        inserted = 0
-        updated = 0
-        duplicates = 0
-        skipped = 0
-
-        try:
-            df, _ = ImportService.parse_excel(file_content, filename)
-            batch.total_rows = len(df)
-            db.commit()
-
-            update_on_duplicate = options.get("update_on_duplicate", True)
-            skip_duplicate = options.get("skip_duplicate", False)
-
-            for idx, (_, row) in enumerate(df.iterrows()):
-                try:
-                    row_dict = row.to_dict()
-                    patent_data, virtual = ImportService._row_to_patent_data(row_dict, mapping, db)
-
-                    if not patent_data.get("title"):
-                        skipped += 1
-                        continue
-
-                    if product_id:
-                        patent_data["product_id"] = product_id
-
-                    country = patent_data.get("country", "CN")
-                    app_num = patent_data.get("application_number", "")
-                    pub_num = patent_data.get("publication_number", "")
-
-                    existing = PatentService.find_duplicate(
-                        db,
-                        application_number=app_num,
-                        publication_number=pub_num,
-                        country=country,
-                        title=patent_data.get("title"),
-                    )
-
-                    if existing:
-                        duplicates += 1
-                        if skip_duplicate:
-                            skipped += 1
-                        elif update_on_duplicate:
-                            # Wiki 式增量合并：仅更新非空新值，标注类字段保留
-                            merged = merge_patent_data(existing, patent_data)
-                            PatentService.update_patent(db, existing, merged)
-                            updated += 1
-                            current_patent = existing
-                        else:
-                            skipped += 1
-                            current_patent = None
-                    else:
-                        patent = Patent(**patent_data)
-                        patent.source_batch_id = batch_id
-                        patent.source_row = idx + 1
-                        db.add(patent)
-                        db.flush()
-                        inserted += 1
-                        current_patent = patent
-
-                    # P0-10：同族/引用关系入库
-                    if current_patent is not None:
-                        try:
-                            if virtual["family_numbers"]:
-                                process_family_members(db, current_patent, virtual["family_numbers"])
-                            if virtual["cited_numbers"]:
-                                process_citations(db, current_patent, virtual["cited_numbers"])
-                            if virtual["citing_numbers"]:
-                                process_citing_patents(db, current_patent, virtual["citing_numbers"])
-                        except Exception:
-                            # 关系入库失败不影响主表导入
-                            pass
-
-                    batch.processed_rows = idx + 1
-                    batch.inserted_count = inserted
-                    batch.updated_count = updated
-                    batch.duplicate_count = duplicates
-                    batch.skipped_count = skipped
-
-                    if (idx + 1) % 100 == 0:
-                        db.commit()
-
-                except Exception as e:
-                    errors.append({
-                        "row": idx + 1,
-                        "error": str(e),
-                        "data": {k: str(v) for k, v in row_dict.items()},
-                    })
-                    batch.error_count += 1
-
-            db.commit()
-
-            batch.status = ImportBatchStatus.COMPLETED
-            batch.completed_at = datetime.now()
-            batch.errors = errors if errors else None
-
-        except Exception as e:
-            batch.status = ImportBatchStatus.FAILED
-            batch.completed_at = datetime.now()
-            errors.append({"error": str(e)})
-            batch.errors = errors
-
-        db.commit()
-
-    @staticmethod
-    def create_import_batch(db: Session, filename: str, mapping: dict, options: dict,
-                            total_rows: int) -> ImportBatch:
-        batch = ImportBatch(
-            filename=filename,
-            status=ImportBatchStatus.PENDING,
-            total_rows=total_rows,
-            mapping_config=mapping,
-            errors=[],
-        )
-        db.add(batch)
-        db.commit()
-        db.refresh(batch)
-        return batch
-
-    @staticmethod
-    def list_import_batches(db: Session, page: int = 1, page_size: int = 20) -> tuple[list[ImportBatch], int]:
-        query = db.query(ImportBatch).order_by(ImportBatch.created_at.desc())
-        total = query.count()
-        batches = query.offset((page - 1) * page_size).limit(page_size).all()
-        return batches, total
-
-    @staticmethod
-    def get_import_batch(db: Session, batch_id: int) -> Optional[ImportBatch]:
-        return db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
