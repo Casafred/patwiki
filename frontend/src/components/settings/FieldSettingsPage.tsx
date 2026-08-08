@@ -1,8 +1,103 @@
 import { useState, useEffect, useCallback } from 'react'
 import { customFieldApi } from '../../api'
-import type { CustomField } from '../../types'
+import type { CustomField, LinkConfig, LookupConfig, RollupConfig } from '../../types'
 import { useAppStore } from '../../store'
 import { getErrorMessage } from '../../lib/errors'
+
+interface RelationConfigFieldsProps {
+  fieldType?: string
+  field: Partial<CustomField>
+  availableFields: CustomField[]
+  onChange: (next: Partial<CustomField>) => void
+}
+
+function RelationConfigFields({ fieldType, field, availableFields, onChange }: RelationConfigFieldsProps) {
+  if (fieldType === 'link') {
+    const config: LinkConfig = field.link_config || {
+      target_table: 'projects',
+      display_field: 'name',
+      allow_multiple: true,
+    }
+    return (
+      <div style={{ gridColumn: '1 / -1', padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+        <div style={{ fontSize: 12, color: '#475569', fontWeight: 600, marginBottom: 10 }}>关联配置</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label style={{ fontSize: 12, color: '#64748b' }}>目标表
+            <select className="form-input" style={{ marginTop: 4 }} value={config.target_table} onChange={e => onChange({ link_config: { ...config, target_table: e.target.value } })}>
+              <option value="projects">项目</option>
+              <option value="products">产品</option>
+              <option value="patents">专利</option>
+              <option value="people">人员</option>
+              <option value="departments">部门</option>
+              <option value="product-lines">产品线</option>
+              <option value="tags">标签</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 12, color: '#64748b' }}>显示字段
+            <input className="form-input" style={{ marginTop: 4 }} value={config.display_field || 'name'} onChange={e => onChange({ link_config: { ...config, display_field: e.target.value } })} placeholder="name 或 title" />
+          </label>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 12, color: '#475569' }}>
+          <input type="checkbox" checked={config.allow_multiple !== false} onChange={e => onChange({ link_config: { ...config, allow_multiple: e.target.checked } })} />
+          允许关联多条记录
+        </label>
+      </div>
+    )
+  }
+
+  if (fieldType === 'lookup') {
+    const config: LookupConfig = field.lookup_config || { link_field_key: '', source_field: 'name', allow_multiple: true }
+    const linkFields = availableFields.filter(item => item.field_type === 'link')
+    return (
+      <div style={{ gridColumn: '1 / -1', padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+        <div style={{ fontSize: 12, color: '#475569', fontWeight: 600, marginBottom: 10 }}>Lookup 配置</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label style={{ fontSize: 12, color: '#64748b' }}>关联字段
+            <select className="form-input" style={{ marginTop: 4 }} value={config.link_field_key} onChange={e => onChange({ lookup_config: { ...config, link_field_key: e.target.value } })}>
+              <option value="">请选择 Link 字段</option>
+              {linkFields.map(item => <option key={item.key} value={item.key}>{item.name} ({item.key})</option>)}
+            </select>
+          </label>
+          <label style={{ fontSize: 12, color: '#64748b' }}>拉取字段
+            <input className="form-input" style={{ marginTop: 4 }} value={config.source_field} onChange={e => onChange({ lookup_config: { ...config, source_field: e.target.value } })} placeholder="例如 name、status" />
+          </label>
+        </div>
+      </div>
+    )
+  }
+
+  if (fieldType === 'rollup') {
+    const config: RollupConfig = field.rollup_config || { link_field_key: '', source_field: '', aggregation: 'COUNT' }
+    const linkFields = availableFields.filter(item => item.field_type === 'link')
+    return (
+      <div style={{ gridColumn: '1 / -1', padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+        <div style={{ fontSize: 12, color: '#475569', fontWeight: 600, marginBottom: 10 }}>Rollup 配置</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <label style={{ fontSize: 12, color: '#64748b' }}>关联字段
+            <select className="form-input" style={{ marginTop: 4 }} value={config.link_field_key} onChange={e => onChange({ rollup_config: { ...config, link_field_key: e.target.value } })}>
+              <option value="">请选择 Link 字段</option>
+              {linkFields.map(item => <option key={item.key} value={item.key}>{item.name} ({item.key})</option>)}
+            </select>
+          </label>
+          <label style={{ fontSize: 12, color: '#64748b' }}>聚合字段
+            <input className="form-input" style={{ marginTop: 4 }} value={config.source_field || ''} onChange={e => onChange({ rollup_config: { ...config, source_field: e.target.value } })} placeholder="COUNT 可留空" />
+          </label>
+          <label style={{ fontSize: 12, color: '#64748b' }}>聚合方式
+            <select className="form-input" style={{ marginTop: 4 }} value={config.aggregation} onChange={e => onChange({ rollup_config: { ...config, aggregation: e.target.value as RollupConfig['aggregation'] } })}>
+              <option value="COUNT">COUNT 计数</option>
+              <option value="SUM">SUM 求和</option>
+              <option value="AVG">AVG 平均</option>
+              <option value="MIN">MIN 最小</option>
+              <option value="MAX">MAX 最大</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    )
+  }
+
+  return null
+}
 
 export default function FieldSettingsPage() {
   const [fields, setFields] = useState<CustomField[]>([])
@@ -47,6 +142,9 @@ export default function FieldSettingsPage() {
       is_active: field.is_active,
       is_required: field.is_required,
       ai_config: field.ai_config ? { ...field.ai_config } : {},
+      link_config: field.link_config ? { ...field.link_config } : undefined,
+      lookup_config: field.lookup_config ? { ...field.lookup_config } : undefined,
+      rollup_config: field.rollup_config ? { ...field.rollup_config } : undefined,
       group_name: field.group_name,
     })
   }
@@ -123,6 +221,9 @@ export default function FieldSettingsPage() {
     number: '数字',
     date: '日期',
     boolean: '是/否',
+    link: '关联',
+    lookup: 'Lookup',
+    rollup: 'Rollup',
   }
 
   if (loading) {
@@ -191,6 +292,9 @@ export default function FieldSettingsPage() {
                 <option value="number">数字</option>
                 <option value="date">日期</option>
                 <option value="boolean">是/否</option>
+                <option value="link">关联记录（Link）</option>
+                <option value="lookup">查找引用（Lookup）</option>
+                <option value="rollup">汇总计算（Rollup）</option>
               </select>
             </div>
             <div>
@@ -202,6 +306,14 @@ export default function FieldSettingsPage() {
                 placeholder="例如: AI分析"
               />
             </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+            <RelationConfigFields
+              fieldType={newField.field_type}
+              field={newField}
+              availableFields={fields}
+              onChange={next => setNewField({ ...newField, ...next })}
+            />
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 4, fontWeight: 500 }}>描述</label>
@@ -262,6 +374,9 @@ export default function FieldSettingsPage() {
                       <option value="number">数字</option>
                       <option value="date">日期</option>
                       <option value="boolean">是/否</option>
+                      <option value="link">关联记录（Link）</option>
+                      <option value="lookup">查找引用（Lookup）</option>
+                      <option value="rollup">汇总计算（Rollup）</option>
                     </select>
                   </div>
                   <div>
@@ -272,6 +387,14 @@ export default function FieldSettingsPage() {
                       onChange={(e) => setEditForm({ ...editForm, group_name: e.target.value })}
                     />
                   </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <RelationConfigFields
+                    fieldType={editForm.field_type}
+                    field={editForm}
+                    availableFields={fields}
+                    onChange={next => setEditForm({ ...editForm, ...next })}
+                  />
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>描述</label>

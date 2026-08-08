@@ -234,6 +234,9 @@ class CustomFieldBase(BaseSchema):
     is_active: Optional[bool] = True
     sort_order: Optional[int] = 0
     ai_config: Optional[dict[str, Any]] = None
+    link_config: Optional[dict[str, Any]] = None
+    lookup_config: Optional[dict[str, Any]] = None
+    rollup_config: Optional[dict[str, Any]] = None
 
 
 class CustomFieldCreate(CustomFieldBase):
@@ -251,12 +254,53 @@ class CustomFieldUpdate(BaseSchema):
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
     ai_config: Optional[dict[str, Any]] = None
+    link_config: Optional[dict[str, Any]] = None
+    lookup_config: Optional[dict[str, Any]] = None
+    rollup_config: Optional[dict[str, Any]] = None
 
 
 class CustomField(CustomFieldBase):
     id: int
     created_at: datetime
     updated_at: datetime
+
+
+class LinkCreateRequest(BaseSchema):
+    field_key: str
+    source_record_id: int
+    target_record_id: int
+    source_table: str = "patents"
+    created_by: Optional[str] = None
+
+
+class LinkDeleteRequest(BaseSchema):
+    field_key: str
+    source_record_id: int
+    target_record_id: int
+    source_table: str = "patents"
+
+
+class LinkRecord(BaseSchema):
+    id: int
+    field_key: str
+    source_table: str
+    source_record_id: int
+    target_table: str
+    target_record_id: int
+    label: str
+    created_at: Optional[datetime] = None
+
+
+class RelationResolveRequest(BaseSchema):
+    record_id: int
+    field_key: str
+    source_table: str = "patents"
+
+
+class RelationBatchRequest(BaseSchema):
+    field_key: str
+    record_ids: list[int]
+    source_table: str = "patents"
 
 
 # P0-8：库（PatentDatabase）相关 schema

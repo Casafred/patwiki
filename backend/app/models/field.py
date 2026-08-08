@@ -24,5 +24,9 @@ class CustomField(Base):
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
     ai_config = Column(JSON)
+    # 通用关联字段配置：Link / Lookup / Rollup
+    link_config = Column(JSON)
+    lookup_config = Column(JSON)
+    rollup_config = Column(JSON)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

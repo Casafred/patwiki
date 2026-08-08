@@ -17,6 +17,7 @@
 - user:           User / DatabaseMembership
 - view:           PatentView / ViewLocalField / PatentViewFieldValue（P0-13 新增）
 - history:        PatentHistory
+- cross_table_link: CrossTableLink（通用 Link 字段关联）
 """
 # 枚举
 from app.models.enums import (
@@ -43,6 +44,9 @@ from app.models.tag import TagGroup, Tag
 
 # 自定义字段
 from app.models.field import CustomField
+
+# 通用跨表关联
+from app.models.cross_table_link import CrossTableLink
 
 # 库（P0-8 新增）
 from app.models.database import PatentDatabase
@@ -80,7 +84,7 @@ __all__ = [
     # tag
     "TagGroup", "Tag",
     # field
-    "CustomField",
+    "CustomField", "CrossTableLink",
     # database
     "PatentDatabase",
     # patent

@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-09（完成 P1 管理功能迭代）
+最近更新：2026-08-09（M3 关联字段进入表格闭环）
 
 ---
 
@@ -40,6 +40,7 @@
 | P0-13 | 部门总表 + 小表视图后端基础 | 高 | 已完成 | 2026-07-20 | 后端 | 主表/视图模型、视图本地字段、字段来源追溯 |
 | P0-14 | 视图工作区基础闭环 | 高 | 已完成 | 2026-08-07 | 全栈 | 视图 API/状态/切换器；layout_type 与多维视图配置契约；列表按视图加载 |
 | P0-15 | 看板视图基础闭环 | 高 | 已完成 | 2026-08-08 | 全栈 | 看板分组数据 API、卡片投影、跨列拖拽更新共享/自定义字段、视图内卡片字段配置 |
+| P0-16 | 前端 ESLint 历史债务清理 | 高 | 已完成 | 2026-08-08 | 前端 | 清理显式 any、Hook 规则、空 catch、旧列表页和 render 副作用；npm run lint 达到 0 errors/0 warnings |
 
 ## 二、下一迭代（P1 - 管理功能）
 
@@ -55,7 +56,13 @@
 | P1-8 | 修后端 bulk-update 入参模型 | 中 | 已完成 | 2026-08-08 | 后端 | 封装为 BulkUpdateRequest |
 | P1-9 | 清理 import_service 死代码 | 低 | 已完成 | 2026-08-09 | 后端 | 删除未调用的 preview/process/batch 辅助链路，保留现行导入 API 依赖的方法 |
 
-## 三、增强迭代（P2 - 锦上添花）
+## 三、第二阶段（M3 - 关联字段体系）
+
+| ID | 任务 | 优先级 | 状态 | 实际完成 | 负责模块 | 备注 |
+|----|------|-------|------|---------|---------|------|
+| M3 | Link / Lookup / Rollup 通用关联字段 | 高 | 进行中 | - | 全栈 | 已完成 CrossTableLink、字段配置、Link CRUD、目标搜索、批量解析 API 及表格展示/编辑；剩余端到端 API 回归、文档验收和 main 推送 |
+
+## 四、增强迭代（P2 - 锦上添花）
 
 | ID | 任务 | 优先级 | 状态 | 备注 |
 |----|------|-------|------|------|
@@ -69,7 +76,7 @@
 
 ---
 
-## 四、变更记录
+## 五、变更记录
 
 | 日期 | 任务ID | 变更内容 |
 |------|--------|---------|
@@ -89,3 +96,4 @@
 | 2026-08-08 | P0-5 | 新增 scripts/build_windows.ps1 作为本地与 CI 共用的 Windows 打包入口；统一依赖检查、图标生成、PyInstaller 后端构建、前端构建、固定 Tauri CLI 2.11.4 和 MSI/NSIS 产物校验；tauri.conf.json 同步声明 msi 与 nsis 目标，并修正 Tauri 在仓库根目录执行 beforeBuildCommand 的前端路径；本地实际生成 MSI 与 NSIS 安装包；修复 Windows PowerShell 单文件产物在集合相加时的 FileInfo 标量错误。 |
 | 2026-08-08 | P1-1~P1-8 | 新增管理台路由和页面，覆盖产品、项目、标签/标签组、部门/人员、产品线 CRUD；补齐对应后端 update/delete 接口和 Pydantic schema；管理台提供自定义字段入口；ImportModal 产品/项目下拉接入 store 并按产品过滤项目；bulk-update 改用 BulkUpdateRequest 请求体。通过 ESLint、TypeScript、Vite build、后端 compileall 和 diff check。 |
 | 2026-08-09 | P1-9 | 清理 backend/app/services/import_service.py 中无调用方的 preview_import、process_import、create/list/get_import_batch 方法及专属依赖，保留当前 imports API 使用的解析、映射和行转换链路。通过后端 compileall、前端 lint/build 和 diff check。 |
+| 2026-08-09 | M3 | 新增 CrossTableLink 与 Link/Lookup/Rollup 字段配置；新增关联字段 CRUD、目标记录搜索、Lookup/Rollup 单条与批量解析 API；专利表格接入 Link 搜索/添加/移除和 Lookup/Rollup 只读展示；新增 3 项服务/API 回归测试。已通过 unittest、compileall、ESLint、TypeScript、Vite build 与 diff check，待提交推送并继续做端到端验收。 |

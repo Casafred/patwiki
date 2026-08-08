@@ -5,7 +5,7 @@ import type {
   AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
-  AgentAnalysisResult,
+  AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem,
 } from '../types'
 
 export const fieldApi = {
@@ -43,6 +43,38 @@ export const databaseApi = {
   // 设置/转移所有者
   setOwner: (id: number, userId: number): Promise<PatentDatabase> =>
     api.post(`/databases/${id}/set-owner`, { user_id: userId }),
+}
+
+export const linkApi = {
+  create: (data: {
+    field_key: string
+    source_record_id: number
+    target_record_id: number
+    source_table?: string
+    created_by?: string
+  }): Promise<LinkRecord> => api.post('/links', data),
+
+  delete: (data: {
+    field_key: string
+    source_record_id: number
+    target_record_id: number
+    source_table?: string
+  }): Promise<{ success: boolean }> => api.delete('/links', { data }),
+
+  list: (fieldKey: string, recordId: number, sourceTable = 'patents'): Promise<LinkRecord[]> =>
+    api.get(`/links/${fieldKey}/${recordId}`, { params: { source_table: sourceTable } }),
+
+  search: (fieldKey: string, search = '', limit = 50): Promise<LinkTarget[]> =>
+    api.get('/links/search', { params: { field_key: fieldKey, search, limit } }),
+
+  lookup: (fieldKey: string, recordId: number, sourceTable = 'patents'): Promise<{ field_key: string; record_id: number; value: JsonValue }> =>
+    api.post('/lookup/resolve', { field_key: fieldKey, record_id: recordId, source_table: sourceTable }),
+
+  rollup: (fieldKey: string, recordId: number, sourceTable = 'patents'): Promise<{ field_key: string; record_id: number; aggregation: string; value: JsonValue }> =>
+    api.post('/rollup/resolve', { field_key: fieldKey, record_id: recordId, source_table: sourceTable }),
+
+  batch: (fieldKey: string, recordIds: number[], sourceTable = 'patents'): Promise<RelationBatchItem[]> =>
+    api.post('/relations/resolve-batch', { field_key: fieldKey, record_ids: recordIds, source_table: sourceTable }),
 }
 
 export const viewApi = {

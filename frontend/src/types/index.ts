@@ -272,8 +272,53 @@ export interface CustomField {
   is_active?: boolean
   sort_order?: number
   ai_config?: AIConfig
+  link_config?: LinkConfig
+  lookup_config?: LookupConfig
+  rollup_config?: RollupConfig
   created_at: string
   updated_at: string
+}
+
+export interface LinkConfig {
+  target_table: 'patents' | 'projects' | 'products' | 'people' | 'departments' | 'product-lines' | 'tags' | string
+  display_field?: string
+  allow_multiple?: boolean
+}
+
+export interface LookupConfig {
+  link_field_key: string
+  source_field: string
+  allow_multiple?: boolean
+}
+
+export interface RollupConfig {
+  link_field_key: string
+  source_field?: string
+  aggregation: 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX'
+}
+
+export interface LinkRecord {
+  id: number
+  field_key: string
+  source_table: string
+  source_record_id: number
+  target_table: string
+  target_record_id: number
+  label: string
+  created_at?: string
+}
+
+export interface LinkTarget {
+  id: number
+  label: string
+  target_table: string
+}
+
+export interface RelationBatchItem {
+  record_id: number
+  links?: LinkRecord[]
+  value?: JsonValue
+  aggregation?: string
 }
 
 export interface ImportBatch {
@@ -374,7 +419,7 @@ export interface AITask {
 export interface FieldMeta {
   key: string
   name: string
-  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating'
+  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'lookup' | 'rollup' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating'
   group_name: string
   options?: string[] | null
   width?: number
@@ -385,6 +430,9 @@ export interface FieldMeta {
   visible?: boolean
   is_system?: boolean
   ai_config?: AIConfig | null
+  link_config?: LinkConfig | null
+  lookup_config?: LookupConfig | null
+  rollup_config?: RollupConfig | null
 }
 
 export interface CellUpdateRequest {

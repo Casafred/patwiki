@@ -80,6 +80,13 @@ def _ensure_column_migration():
          "ALTER TABLE patent_views ADD COLUMN form_config JSON"),
         ("patent_views", "gantt_config",
          "ALTER TABLE patent_views ADD COLUMN gantt_config JSON"),
+        # M3：通用关联字段配置
+        ("custom_fields", "link_config",
+         "ALTER TABLE custom_fields ADD COLUMN link_config JSON"),
+        ("custom_fields", "lookup_config",
+         "ALTER TABLE custom_fields ADD COLUMN lookup_config JSON"),
+        ("custom_fields", "rollup_config",
+         "ALTER TABLE custom_fields ADD COLUMN rollup_config JSON"),
     ]
 
     with engine.begin() as conn:

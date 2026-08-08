@@ -1,9 +1,9 @@
 import { Fragment, useState, useEffect, useCallback } from 'react'
-import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi } from '../../api'
+import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi, linkApi } from '../../api'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
-  ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue,
+  ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import GroupConfigPanel from '../views/GroupConfigPanel'
@@ -16,6 +16,7 @@ interface PatentListPageProps {
 }
 
 type SortOrder = 'asc' | 'desc'
+type RelationCellData = { links?: LinkRecord[]; value?: JsonValue; aggregation?: string }
 
 const DEFAULT_COLUMN_WIDTH = 150
 
@@ -78,6 +79,126 @@ function getDefaultCollapsedKeys(groups: ViewGroup[], path: string[] = []): stri
   })
 }
 
+interface LinkFieldEditorProps {
+  patentId: number
+  field: FieldMeta
+  currentLinks: LinkRecord[]
+  onChanged: (links: LinkRecord[]) => void
+  onCancel: () => void
+}
+
+function LinkFieldEditor({ patentId, field, currentLinks, onChanged, onCancel }: LinkFieldEditorProps) {
+  const [selectedLinks, setSelectedLinks] = useState<LinkRecord[]>(currentLinks)
+  const [targets, setTargets] = useState<LinkTarget[]>([])
+  const [search, setSearch] = useState('')
+  const [savingTargetId, setSavingTargetId] = useState<number | null>(null)
+  const allowMultiple = field.link_config?.allow_multiple !== false
+
+  useEffect(() => {
+    let cancelled = false
+    const loadTargets = async () => {
+      try {
+        const result = await linkApi.search(field.key, search, 20)
+        if (!cancelled) setTargets(result)
+      } catch (error: unknown) {
+        if (!cancelled) console.error('Failed to load link targets:', error)
+      }
+    }
+    void loadTargets()
+    return () => { cancelled = true }
+  }, [field.key, search])
+
+  const addLink = async (target: LinkTarget) => {
+    if (selectedLinks.some(link => link.target_record_id === target.id)) return
+    setSavingTargetId(target.id)
+    try {
+      const created = await linkApi.create({
+        field_key: field.key,
+        source_record_id: patentId,
+        target_record_id: target.id,
+      })
+      const next = allowMultiple ? [...selectedLinks, created] : [created]
+      setSelectedLinks(next)
+      onChanged(next)
+      if (!allowMultiple) setSearch('')
+    } catch (error: unknown) {
+      alert('添加关联失败: ' + getErrorMessage(error))
+    } finally {
+      setSavingTargetId(null)
+    }
+  }
+
+  const removeLink = async (link: LinkRecord) => {
+    try {
+      await linkApi.delete({
+        field_key: field.key,
+        source_record_id: patentId,
+        target_record_id: link.target_record_id,
+      })
+      const next = selectedLinks.filter(item => item.id !== link.id)
+      setSelectedLinks(next)
+      onChanged(next)
+    } catch (error: unknown) {
+      alert('移除关联失败: ' + getErrorMessage(error))
+    }
+  }
+
+  return (
+    <div
+      style={{ minWidth: 250, padding: 4 }}
+      onClick={event => event.stopPropagation()}
+    >
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+        {selectedLinks.map(link => (
+          <span key={link.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 6px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', fontSize: 12 }}>
+            <span>{link.label}</span>
+            <button
+              type="button"
+              className="cell-action-btn"
+              title="移除关联"
+              onClick={() => void removeLink(link)}
+              style={{ border: 'none', background: 'transparent', color: '#1d4ed8', cursor: 'pointer', padding: 0, lineHeight: 1 }}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {selectedLinks.length === 0 && <span style={{ color: '#94a3b8', fontSize: 12 }}>尚未关联记录</span>}
+      </div>
+      {(allowMultiple || selectedLinks.length === 0) && (
+        <>
+          <input
+            className="form-input"
+            autoFocus
+            value={search}
+            placeholder="搜索目标记录..."
+            onChange={event => setSearch(event.target.value)}
+            style={{ width: '100%', fontSize: 12, padding: '4px 6px' }}
+          />
+          <div style={{ maxHeight: 120, overflowY: 'auto', marginTop: 4, border: '1px solid #e5e7eb', borderRadius: 4, background: '#fff' }}>
+            {targets.map(target => (
+              <button
+                type="button"
+                key={target.id}
+                className="cell-action-btn"
+                disabled={savingTargetId === target.id || selectedLinks.some(link => link.target_record_id === target.id)}
+                onClick={() => void addLink(target)}
+                style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', padding: '5px 7px', cursor: selectedLinks.some(link => link.target_record_id === target.id) ? 'default' : 'pointer', color: selectedLinks.some(link => link.target_record_id === target.id) ? '#94a3b8' : '#374151', fontSize: 12 }}
+              >
+                {target.label}
+              </button>
+            ))}
+            {targets.length === 0 && <div style={{ padding: '6px 7px', color: '#94a3b8', fontSize: 12 }}>没有匹配记录</div>}
+          </div>
+        </>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+        <button type="button" className="btn btn-xs btn-secondary cell-action-btn" onClick={onCancel}>完成</button>
+      </div>
+    </div>
+  )
+}
+
 export default function PatentListPage({ onPatentClick, viewId = null }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading,
@@ -124,6 +245,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [aiFields, setAiFields] = useState<CustomField[]>([])
   const [filterValues, setFilterValues] = useState<Record<string, string>>({})
   const [customFields, setCustomFields] = useState<CustomField[]>([])
+  const [relationData, setRelationData] = useState<Record<string, Record<number, RelationCellData>>>({})
   const [newFieldName, setNewFieldName] = useState('')
   const [newFieldType, setNewFieldType] = useState<string>('text')
   const [newFieldOptions, setNewFieldOptions] = useState('')
@@ -155,6 +277,39 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set())
   const [showGroupConfig, setShowGroupConfig] = useState(false)
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
+
+  const loadRelationData = useCallback(async () => {
+    const relationFields = fields.filter(field => ['link', 'lookup', 'rollup'].includes(field.field_type))
+    const recordIds = patents.map(patent => patent.id)
+    if (relationFields.length === 0 || recordIds.length === 0) {
+      setRelationData({})
+      return
+    }
+    const entries = await Promise.all(relationFields.map(async field => {
+      try {
+        const result = await linkApi.batch(field.key, recordIds)
+        const byRecord: Record<number, RelationCellData> = {}
+        result.forEach(item => {
+          byRecord[item.record_id] = {
+            links: item.links,
+            value: item.value,
+            aggregation: item.aggregation,
+          }
+        })
+        return [field.key, byRecord] as const
+      } catch (error: unknown) {
+        console.error(`Failed to load relation field ${field.key}:`, error)
+        return [field.key, {}] as const
+      }
+    }))
+    setRelationData(Object.fromEntries(entries))
+  }, [fields, patents])
+
+  useEffect(() => {
+    // Relation values are loaded from the API when the visible records change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRelationData()
+  }, [loadRelationData])
 
   const loadFields = useCallback(async () => {
     try {
@@ -450,7 +605,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const handleCellClick = (patentId: number, fieldKey: string, e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.cell-action-btn')) return
     const field = fields.find(f => f.key === fieldKey)
-    if (!field?.editable) {
+    if (!field?.editable || field.field_type === 'lookup' || field.field_type === 'rollup') {
       onPatentClick(patentId)
       return
     }
@@ -1108,6 +1263,18 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     const save = (v: JsonValue) => handleCellSave(patent.id, field.key, v)
     const cancel = () => setEditingCell(null)
 
+    if (field.field_type === 'link') {
+      return (
+        <LinkFieldEditor
+          patentId={patent.id}
+          field={field}
+          currentLinks={relationData[field.key]?.[patent.id]?.links || []}
+          onChanged={() => void loadRelationData()}
+          onCancel={cancel}
+        />
+      )
+    }
+
     const commonStyle: React.CSSProperties = {
       width: '100%',
       padding: '4px 8px',
@@ -1188,6 +1355,29 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
     if (isEditing) {
       return renderCellEditor(patent, field, value)
+    }
+
+    if (field.field_type === 'link') {
+      const links = relationData[field.key]?.[patent.id]?.links || []
+      return links.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {links.map(link => (
+            <span key={link.id} style={{ display: 'inline-block', padding: '2px 6px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', fontSize: 12 }}>
+              {link.label}
+            </span>
+          ))}
+        </div>
+      ) : <span style={{ color: '#94a3b8', fontSize: 12 }}>-</span>
+    }
+
+    if (field.field_type === 'lookup' || field.field_type === 'rollup') {
+      const relationValue = relationData[field.key]?.[patent.id]?.value
+      const displayValue = formatValue(relationValue ?? null, field)
+      return (
+        <span style={{ color: displayValue === '-' ? '#94a3b8' : '#374151', display: 'block', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere', lineHeight: 1.5 }}>
+          {displayValue}
+        </span>
+      )
     }
 
     if (field.key === 'legal_status') {
