@@ -9,13 +9,14 @@ import FieldSettingsPage from './components/settings/FieldSettingsPage'
 import SharingPage from './components/settings/SharingPage'
 import AgentAnalysisPage from './components/analytics/AgentAnalysisPage'
 import ImportModal from './components/import/ImportModal'
+import ImportHistoryPage from './components/import/ImportHistoryPage'
 import AITaskMonitor from './components/ai/AITaskMonitor'
 import ManagementPage from './components/management/ManagementPage'
 import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
 
-export type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing'
+export type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history'
 
 const pagePaths: Record<Page, string> = {
   patents: '/patents',
@@ -26,6 +27,7 @@ const pagePaths: Record<Page, string> = {
   'ai-tasks': '/ai-tasks',
   'agent-analysis': '/agent-analysis',
   sharing: '/sharing',
+  'import-history': '/import-history',
 }
 
 function getPageFromPath(pathname: string): Page {
@@ -36,6 +38,7 @@ function getPageFromPath(pathname: string): Page {
   if (pathname.startsWith('/ai-tasks')) return 'ai-tasks'
   if (pathname.startsWith('/agent-analysis')) return 'agent-analysis'
   if (pathname.startsWith('/sharing')) return 'sharing'
+  if (pathname.startsWith('/import-history')) return 'import-history'
   return 'patents'
 }
 
@@ -167,6 +170,7 @@ function App() {
             <Route path="fields" element={<FieldSettingsPage />} />
             <Route path="management" element={<ManagementPage />} />
             <Route path="sharing" element={<SharingPage />} />
+            <Route path="import-history" element={<ImportHistoryPage />} />
             <Route path="ai-tasks" element={<AITaskMonitor />} />
             <Route path="agent-analysis" element={<AgentAnalysisPage />} />
             <Route path="*" element={<Navigate to="/patents" replace />} />

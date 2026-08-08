@@ -244,6 +244,12 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           协作与权限
         </div>
         <div
+          className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`}
+          onClick={() => onNavigate('import-history')}
+        >
+          导入历史
+        </div>
+        <div
           className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
           onClick={() => onNavigate('settings')}
         >

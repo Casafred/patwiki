@@ -3,6 +3,7 @@ import uuid
 import tempfile
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -15,12 +16,12 @@ from io import BytesIO
 from pydantic import BaseModel
 
 from app.database import get_db, SessionLocal, engine
-from app.schemas.schemas import StatsResponse
+from app.schemas.schemas import ImportBatchResponse, StatsResponse
 from app.services.import_service import ImportService
 from app.services.patent_service import PatentService
 from app.services.merge_service import merge_patent_data, _is_empty
 from app.config import settings
-from app.models import Patent, CustomField
+from app.models import CustomField, ImportBatch, ImportBatchStatus, Patent
 
 router = APIRouter(tags=["import"])
 
@@ -187,12 +188,22 @@ def confirm_import(
     skipped = 0
     error_count = 0
     BATCH_SIZE = 500
+    batch: ImportBatch | None = None
 
     try:
         _optimize_sqlite_connection(db)
 
+        batch = ImportBatch(
+            filename=filename,
+            status=ImportBatchStatus.PROCESSING,
+            started_at=datetime.utcnow(),
+        )
+        db.add(batch)
+        db.flush()
+
         df, _ = ImportService.parse_excel(content, filename)
         total_rows = len(df)
+        batch.total_rows = total_rows
         print(f"[PatWiki] 开始导入 {total_rows} 条数据...", flush=True)
 
         custom_fields_cache = {cf.key: cf for cf in db.query(CustomField).all()}
@@ -314,6 +325,8 @@ def confirm_import(
                                     seen_app_nums.add((app_num, country))
                                 if pub_num:
                                     seen_pub_nums.add((pub_num, country))
+                                if batch is not None:
+                                    patent_data["source_batch_id"] = batch.id
                                 custom_fields = patent_data.pop("custom_fields", {}) or {}
                                 patent = Patent(**patent_data)
                                 patent.custom_fields = custom_fields
@@ -363,6 +376,28 @@ def confirm_import(
         if database_id is not None:
             from app.services.database_service import DatabaseService
             DatabaseService.refresh_patent_count(db, database_id)
+        if batch is not None:
+            batch.processed_rows = total_rows
+            batch.inserted_count = inserted
+            batch.updated_count = updated
+            batch.skipped_count = skipped
+            batch.duplicate_count = duplicates_count
+            batch.error_count = error_count
+            batch.errors = errors[:20] if errors else None
+            batch.status = ImportBatchStatus.COMPLETED
+            batch.completed_at = datetime.utcnow()
+            db.add(batch)
+            db.commit()
+    except Exception as exc:
+        if batch is not None:
+            batch.status = ImportBatchStatus.FAILED
+            batch.processed_rows = min(batch.total_rows or 0, inserted + updated + skipped + error_count)
+            batch.error_count = max(error_count, 1)
+            batch.errors = [*errors[:19], {"error": str(exc)}]
+            batch.completed_at = datetime.utcnow()
+            db.add(batch)
+            db.commit()
+        raise
     finally:
         info = TEMP_FILES.pop(req.import_id, None)
         if info and os.path.exists(info["path"]):
@@ -381,7 +416,31 @@ def confirm_import(
         "database_id": database_id,
         "family_links": 0,
         "citation_links": 0,
+        "batch_id": batch.id if batch is not None else None,
     }
+
+
+@router.get("/import/batches", response_model=list[ImportBatchResponse])
+def list_import_batches(
+    status: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    query = db.query(ImportBatch)
+    if status:
+        try:
+            query = query.filter(ImportBatch.status == ImportBatchStatus(status))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"不支持的导入状态：{status}") from exc
+    return query.order_by(ImportBatch.created_at.desc(), ImportBatch.id.desc()).limit(limit).all()
+
+
+@router.get("/import/batches/{batch_id}", response_model=ImportBatchResponse)
+def get_import_batch(batch_id: int, db: Session = Depends(get_db)):
+    batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="导入批次不存在")
+    return batch
 
 
 def _process_relations(db: Session, patent: Patent, virtual: dict, database_id: Optional[int] = None):

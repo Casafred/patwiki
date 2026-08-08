@@ -429,7 +429,9 @@ class ImportBatchResponse(BaseSchema):
     inserted_count: int
     updated_count: int
     duplicate_count: int
+    skipped_count: int
     error_count: int
+    errors: Optional[list[dict[str, Any]]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime

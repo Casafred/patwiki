@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-09（完成 M3 关联字段体系）
+最近更新：2026-08-09（完成 M3 及 P2 导入历史基础能力）
 
 ---
 
@@ -66,11 +66,11 @@
 
 | ID | 任务 | 优先级 | 状态 | 备注 |
 |----|------|-------|------|------|
-| P2-1 | 统计看板补齐 4 个维度 | 低 | 未开始 | 申请趋势/类型分布/按产品/按分类 |
-| P2-2 | 导入历史页 + 后端 /import/batches 端点 | 低 | 未开始 | |
+| P2-1 | 统计看板补齐 4 个维度 | 低 | 已完成 | 2026-08-09 已有申请趋势/类型分布/按产品/按分类，并提供库/产品筛选 |
+| P2-2 | 导入历史页 + 后端 /import/batches 端点 | 低 | 已完成 | 2026-08-09 导入流程持久化批次状态、来源批次和错误摘要；新增列表/详情 API 与前端历史页 |
 | P2-3 | AI 值人工覆盖端点 + UI | 中 | 未开始 | GET/PUT/DELETE /patents/{id}/ai-values |
 | P2-4 | 单专利 wiki 分享页 | 低 | 未开始 | 技术主题分享 |
-| P2-5 | 修 /products N+1 查询 | 低 | 未开始 | |
+| P2-5 | 修 /products N+1 查询 | 低 | 已完成 | 2026-08-09 已使用按产品聚合计数查询 |
 | P2-6 | 搜索自动补全 | 低 | 未开始 | GET /search/suggest |
 | P2-7 | 专利引用/专利族关系图谱 | 低 | 未开始 | AntV G6 |
 
@@ -97,3 +97,5 @@
 | 2026-08-08 | P1-1~P1-8 | 新增管理台路由和页面，覆盖产品、项目、标签/标签组、部门/人员、产品线 CRUD；补齐对应后端 update/delete 接口和 Pydantic schema；管理台提供自定义字段入口；ImportModal 产品/项目下拉接入 store 并按产品过滤项目；bulk-update 改用 BulkUpdateRequest 请求体。通过 ESLint、TypeScript、Vite build、后端 compileall 和 diff check。 |
 | 2026-08-09 | P1-9 | 清理 backend/app/services/import_service.py 中无调用方的 preview_import、process_import、create/list/get_import_batch 方法及专属依赖，保留当前 imports API 使用的解析、映射和行转换链路。通过后端 compileall、前端 lint/build 和 diff check。 |
 | 2026-08-09 | M3 | 新增 CrossTableLink 与 Link/Lookup/Rollup 字段配置；新增关联字段 CRUD、目标记录搜索、Lookup/Rollup 单条与批量解析 API；专利表格接入 Link 搜索/添加/移除和 Lookup/Rollup 只读展示；新增 3 项服务/API 回归测试。已通过 unittest、compileall、ESLint、TypeScript、Vite build 与 diff check，并提交 4989752 推送 main。 |
+| 2026-08-09 | P2-1/P2-5 | 核对现有实现：StatsPage 与 /stats 已覆盖申请趋势、类型、产品、分类四个维度；/products 已使用一次聚合查询生成专利数，确认两项已完成。 |
+| 2026-08-09 | P2-2 | 导入确认流程新增 ImportBatch 持久化、处理进度/统计/错误状态和新专利 source_batch_id；新增 GET /import/batches、GET /import/batches/{id} 与导入历史页面/导航。通过 2 项历史 API 测试、compileall、ESLint、TypeScript、Vite build 和 diff check。 |

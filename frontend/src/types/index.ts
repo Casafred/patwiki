@@ -332,6 +332,7 @@ export interface ImportBatch {
   duplicate_count: number
   skipped_count: number
   error_count: number
+  errors?: JsonObject[]
   started_at?: string
   completed_at?: string
   created_at: string
@@ -364,6 +365,7 @@ export interface ImportResult {
   database_id?: number
   family_links?: number
   citation_links?: number
+  batch_id?: number | null
 }
 
 export interface Stats {
