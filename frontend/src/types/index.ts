@@ -418,6 +418,15 @@ export interface AITask {
   created_at?: string
 }
 
+export interface AIFieldValue {
+  field_key: string
+  value: JsonValue | null
+  generated_value: JsonValue | null
+  is_overridden: boolean
+  overridden_at?: string | null
+  updated_at?: string | null
+}
+
 export interface FieldMeta {
   key: string
   name: string

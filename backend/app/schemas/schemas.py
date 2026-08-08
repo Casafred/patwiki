@@ -457,6 +457,11 @@ class AITaskResponse(BaseSchema):
     completed_at: Optional[datetime]
 
 
+class AIValueOverrideRequest(BaseSchema):
+    field_key: str
+    value: Any
+
+
 class StatsResponse(BaseSchema):
     total_patents: int
     by_legal_status: dict[str, int]

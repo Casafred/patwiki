@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
-import type { Patent, Product, Project, Tag, CustomField, AITask, PatentHistory } from '../../types'
+import type { Patent, Product, Project, Tag, CustomField, AITask, AIFieldValue, PatentHistory } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 interface PatentDetailPageProps {
@@ -18,6 +18,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   const [editing, setEditing] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('basic')
   const [aiFields, setAIFields] = useState<CustomField[]>([])
+  const [aiValues, setAIValues] = useState<AIFieldValue[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -53,6 +54,16 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     }
   }, [patentId])
 
+  const loadAIValues = useCallback(async () => {
+    try {
+      const values = await aiApi.listValues(patentId)
+      setAIValues(values)
+    } catch (e) {
+      console.error('Failed to load AI values:', e)
+      setAIValues([])
+    }
+  }, [patentId])
+
   const loadMeta = useCallback(async () => {
     try {
       const [ai, ps, pjs, ts] = await Promise.all([
@@ -76,7 +87,8 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     void loadPatent()
     void loadMeta()
     void loadHistory()
-  }, [loadHistory, loadMeta, loadPatent])
+    void loadAIValues()
+  }, [loadAIValues, loadHistory, loadMeta, loadPatent])
 
   const handleSave = async () => {
     if (!patent) return
@@ -117,11 +129,11 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     }
   }
 
-  const handleAIProcess = async (fieldKey: string) => {
+  const handleAIProcess = async (fieldKey: string, forceRecalculate = false) => {
     if (!patent) return
     setAiProcessing(fieldKey)
     try {
-      const task = await aiApi.process([patent.id], fieldKey)
+      const task = await aiApi.process([patent.id], fieldKey, { force_recalculate: forceRecalculate })
       setAiTaskInfo(task)
       // 轮询任务状态
       pollTask(task.id)
@@ -141,13 +153,33 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         } else {
           setAiProcessing(null)
           // 完成后刷新专利数据
-          await loadPatent()
+          await Promise.all([loadPatent(), loadAIValues(), loadHistory()])
         }
       } catch {
         setAiProcessing(null)
       }
     }
     setTimeout(poll, 1500)
+  }
+
+  const handleAIOverride = async (fieldKey: string, value: string) => {
+    if (!patent) return
+    try {
+      await aiApi.overrideValue(patent.id, fieldKey, value)
+      await Promise.all([loadPatent(), loadAIValues(), loadHistory()])
+    } catch (error: unknown) {
+      alert('保存人工覆盖失败: ' + getErrorMessage(error, '未知错误'))
+    }
+  }
+
+  const handleClearAIOverride = async (fieldKey: string) => {
+    if (!patent) return
+    try {
+      await aiApi.clearOverride(patent.id, fieldKey)
+      await Promise.all([loadPatent(), loadAIValues(), loadHistory()])
+    } catch (error: unknown) {
+      alert('清除人工覆盖失败: ' + getErrorMessage(error, '未知错误'))
+    }
   }
 
   const updateField = (key: keyof PatentEditData, value: unknown) => {
@@ -259,7 +291,10 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           <AITab
             patent={patent}
             aiFields={aiFields}
+            aiValues={aiValues}
             onProcess={handleAIProcess}
+            onOverride={handleAIOverride}
+            onClearOverride={handleClearAIOverride}
             processing={aiProcessing}
             taskInfo={aiTaskInfo}
           />
@@ -548,14 +583,40 @@ function RiskTab({ patent, formData, editing, updateField }: {
 }
 
 // ============ AI 分析 Tab ============
-function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
+function formatAIValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return ''
+  return typeof value === 'string' ? value : JSON.stringify(value) ?? String(value)
+}
+
+function AITab({ patent, aiFields, aiValues, onProcess, onOverride, onClearOverride, processing, taskInfo }: {
   patent: Patent
   aiFields: CustomField[]
-  onProcess: (fieldKey: string) => void
+  aiValues: AIFieldValue[]
+  onProcess: (fieldKey: string, forceRecalculate?: boolean) => void
+  onOverride: (fieldKey: string, value: string) => Promise<void>
+  onClearOverride: (fieldKey: string) => Promise<void>
   processing: string | null
   taskInfo: AITask | null
 }) {
   const aiData = patent.ai_fields || {}
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [draftValue, setDraftValue] = useState('')
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+
+  const startEditing = (fieldKey: string, value: unknown) => {
+    setEditingKey(fieldKey)
+    setDraftValue(formatAIValue(value))
+  }
+
+  const saveOverride = async (fieldKey: string) => {
+    setSavingKey(fieldKey)
+    try {
+      await onOverride(fieldKey, draftValue)
+      setEditingKey(null)
+    } finally {
+      setSavingKey(null)
+    }
+  }
 
   return (
     <div>
@@ -584,37 +645,89 @@ function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
           <div className="empty-state-desc">AI 字段模板在系统初始化时自动创建，若未生成请检查后端 init_data</div>
         </div>
       ) : (
-        <div className="detail-grid">
-          {aiFields.map(field => {
-            const value = aiData[field.key]
-            const isProcessing = processing === field.key
-            return (
-              <Field key={field.id} label={field.name} full>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                  <div className="field-value" style={{
-                    flex: 1,
-                    padding: 12,
-                    background: value ? '#f8fafc' : '#fffbeb',
-                    border: `1px solid ${value ? '#e2e8f0' : '#fde68a'}`,
-                    borderRadius: 6,
-                    minHeight: 60,
-                    whiteSpace: 'pre-wrap',
-                    fontSize: 13,
-                  }}>
-                    {value ? (typeof value === 'object' ? JSON.stringify(value) : value) : '尚未生成，点击右侧按钮运行 AI 抽取'}
-                  </div>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => onProcess(field.key)}
-                    disabled={isProcessing || !!processing}
-                    style={{ flexShrink: 0 }}
-                  >
-                    {isProcessing ? '处理中' : '生成'}
-                  </button>
-                </div>
-                {field.description && (
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{field.description}</div>
-                )}
+         <div className="detail-grid">
+           {aiFields.map(field => {
+             const stored = aiValues.find(item => item.field_key === field.key)
+             const value = stored?.value ?? aiData[field.key]
+             const generatedValue = stored?.generated_value
+             const hasValue = value !== null && value !== undefined && value !== ''
+             const isOverridden = stored?.is_overridden === true
+             const isProcessing = processing === field.key
+             return (
+               <Field key={field.id} label={field.name} full>
+                 {editingKey === field.key ? (
+                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                     <textarea
+                       className="form-input"
+                       rows={4}
+                       value={draftValue}
+                       onChange={e => setDraftValue(e.target.value)}
+                       autoFocus
+                     />
+                     <div style={{ display: 'flex', gap: 8 }}>
+                       <button
+                         className="btn btn-primary"
+                         onClick={() => void saveOverride(field.key)}
+                         disabled={savingKey === field.key}
+                       >
+                         {savingKey === field.key ? '保存中...' : '保存覆盖'}
+                       </button>
+                       <button className="btn btn-secondary" onClick={() => setEditingKey(null)} disabled={savingKey === field.key}>
+                         取消
+                       </button>
+                     </div>
+                   </div>
+                 ) : (
+                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                     <div className="field-value" style={{
+                       flex: '1 1 420px',
+                       padding: 12,
+                       background: hasValue ? '#f8fafc' : '#fffbeb',
+                       border: `1px solid ${hasValue ? '#e2e8f0' : '#fde68a'}`,
+                       borderRadius: 6,
+                       minHeight: 60,
+                       whiteSpace: 'pre-wrap',
+                       fontSize: 13,
+                     }}>
+                       {hasValue ? formatAIValue(value) : '尚未生成，点击右侧按钮运行 AI 抽取'}
+                     </div>
+                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                       <button
+                         className="btn btn-primary"
+                         onClick={() => onProcess(field.key, hasValue || isOverridden)}
+                         disabled={isProcessing || !!processing}
+                         style={{ flexShrink: 0 }}
+                       >
+                         {isProcessing ? '处理中' : hasValue ? '重新生成' : '生成'}
+                       </button>
+                       <button
+                         className="btn btn-secondary"
+                         onClick={() => startEditing(field.key, value)}
+                         disabled={isProcessing || !!processing}
+                       >
+                         {isOverridden ? '编辑覆盖' : '人工覆盖'}
+                       </button>
+                       {isOverridden && (
+                         <button
+                           className="btn btn-secondary"
+                           onClick={() => void onClearOverride(field.key)}
+                           disabled={isProcessing || !!processing}
+                         >
+                           清除覆盖
+                         </button>
+                       )}
+                     </div>
+                   </div>
+                 )}
+                 {isOverridden && editingKey !== field.key && (
+                   <div style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>
+                     <span style={{ color: '#b45309', fontWeight: 600, marginRight: 6 }}>人工覆盖</span>
+                     AI 原值：{formatAIValue(generatedValue) || '暂无'}
+                   </div>
+                 )}
+                 {field.description && (
+                   <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{field.description}</div>
+                 )}
               </Field>
             )
           })}

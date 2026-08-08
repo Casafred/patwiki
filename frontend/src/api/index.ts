@@ -2,7 +2,7 @@ import api from '../lib/api'
 import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department, ProductLine,
-  AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
+  AITask, AIFieldValue, FieldMeta, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem,
@@ -374,6 +374,15 @@ export const aiApi = {
 
   listAIFields: (): Promise<CustomField[]> =>
     api.get('/ai/fields'),
+
+  listValues: (patentId: number): Promise<AIFieldValue[]> =>
+    api.get(`/patents/${patentId}/ai-values`),
+
+  overrideValue: (patentId: number, fieldKey: string, value: JsonValue): Promise<AIFieldValue> =>
+    api.put(`/patents/${patentId}/ai-values`, { field_key: fieldKey, value }),
+
+  clearOverride: (patentId: number, fieldKey: string): Promise<{ success: boolean; field_key: string; value: JsonValue | null }> =>
+    api.delete(`/patents/${patentId}/ai-values`, { params: { field_key: fieldKey } }),
 }
 
 export const exportApi = {

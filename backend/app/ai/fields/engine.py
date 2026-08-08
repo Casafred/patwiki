@@ -5,7 +5,7 @@ from typing import Optional, Any
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Patent, AITask, AIFieldValue, CustomField, AIFieldValue,
+    Patent, AITask, AIFieldValue, CustomField,
 )
 from app.config import settings
 
@@ -118,8 +118,25 @@ class AIFieldEngine:
             AIFieldValue.is_overridden == False,
         ).first()
 
-    def process_single(self, patent: Patent, field_def: CustomField, force: bool = False) -> Optional[str]:
+    def _decode_override_value(self, value: Optional[str]) -> Any:
+        if value is None:
+            return None
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return value
+
+    def process_single(self, patent: Patent, field_def: CustomField, force: bool = False) -> Optional[Any]:
         input_hash = self._calculate_input_hash(patent, field_def)
+
+        current_value = self.db.query(AIFieldValue).filter(
+            AIFieldValue.patent_id == patent.id,
+            AIFieldValue.field_key == field_def.key,
+        ).first()
+
+        # 人工值是当前生效值。普通批处理不能覆盖人工判断，只有强制重算才允许刷新。
+        if not force and current_value and current_value.is_overridden:
+            return self._decode_override_value(current_value.overridden_value)
 
         if not force:
             cached = self._get_cached_value(patent.id, field_def.key, input_hash)
@@ -157,8 +174,10 @@ class AIFieldEngine:
             ai_value.duration_ms = duration
             ai_value.prompt_version = "1.0"
             ai_value.is_overridden = False
+            ai_value.overridden_value = None
+            ai_value.overridden_at = None
 
-            current = patent.ai_fields or {}
+            current = dict(patent.ai_fields or {})
             current[field_def.key] = result
             patent.ai_fields = current
 

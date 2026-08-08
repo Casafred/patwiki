@@ -1,17 +1,18 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 import json
+from typing import Any
 
 from app.database import get_db
 from app.api.deps import get_pagination_params
 from app.schemas.schemas import (
-    Patent, PatentCreate, PatentUpdate, PatentListResponse, BulkUpdateRequest
+    AIValueOverrideRequest, Patent, PatentCreate, PatentUpdate, PatentListResponse, BulkUpdateRequest
 )
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
-from app.models import PatentHistory
+from app.models import AIFieldValue, CustomField, CustomFieldType, PatentHistory
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -90,6 +91,161 @@ def get_patent(patent_id: int, db: Session = Depends(get_db)):
     if not patent:
         raise HTTPException(status_code=404, detail="Patent not found")
     return patent
+
+
+def _serialize_ai_value(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _serialize_generated_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+
+
+def _decode_generated_value(value: str | None) -> Any:
+    if value is None:
+        return None
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, (dict, list, int, float, bool)):
+            return parsed
+    except (TypeError, ValueError):
+        pass
+    return value
+
+
+def _decode_override_value(value: str | None) -> Any:
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _is_ai_field(field: CustomField | None) -> bool:
+    if not field:
+        return False
+    actual_type = field.field_type.value if hasattr(field.field_type, "value") else str(field.field_type)
+    return actual_type == CustomFieldType.AI_FIELD.value
+
+
+def _ai_value_response(patent: Patent, db: Session) -> list[dict[str, Any]]:
+    rows = db.query(AIFieldValue).filter(AIFieldValue.patent_id == patent.id).all()
+    row_by_key = {row.field_key: row for row in rows}
+    ai_data = patent.ai_fields or {}
+    keys = list(dict.fromkeys([*ai_data.keys(), *(row.field_key for row in rows)]))
+    result = []
+    for field_key in keys:
+        row = row_by_key.get(field_key)
+        generated = _decode_generated_value(row.value) if row else ai_data.get(field_key)
+        overridden = bool(row and row.is_overridden)
+        effective = _decode_override_value(row.overridden_value) if overridden else generated
+        result.append({
+            "field_key": field_key,
+            "value": effective,
+            "generated_value": generated,
+            "is_overridden": overridden,
+            "overridden_at": row.overridden_at if row else None,
+            "updated_at": row.updated_at if row else None,
+        })
+    return result
+
+
+@router.get("/{patent_id}/ai-values")
+def list_ai_values(patent_id: int, db: Session = Depends(get_db)):
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+    return _ai_value_response(patent, db)
+
+
+@router.put("/{patent_id}/ai-values")
+def override_ai_value(
+    patent_id: int,
+    request: AIValueOverrideRequest,
+    db: Session = Depends(get_db),
+):
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+    field = db.query(CustomField).filter(CustomField.key == request.field_key).first()
+    if not _is_ai_field(field):
+        raise HTTPException(status_code=404, detail="AI field not found")
+
+    current = dict(patent.ai_fields or {})
+    old_value = current.get(request.field_key)
+    row = db.query(AIFieldValue).filter(
+        AIFieldValue.patent_id == patent.id,
+        AIFieldValue.field_key == request.field_key,
+    ).first()
+    if not row:
+        row = AIFieldValue(
+            patent_id=patent.id,
+            field_key=request.field_key,
+            value=_serialize_generated_value(old_value),
+        )
+        db.add(row)
+    row.is_overridden = True
+    row.overridden_value = _serialize_ai_value(request.value)
+    row.overridden_at = datetime.utcnow()
+    current[request.field_key] = request.value
+    patent.ai_fields = current
+    db.add(PatentHistory(
+        patent_id=patent.id,
+        field_key=f"ai_fields.{request.field_key}",
+        field_display_name=field.name,
+        old_value=str(old_value) if old_value is not None else None,
+        new_value=str(request.value) if request.value is not None else None,
+        source="manual",
+    ))
+    db.add(patent)
+    db.commit()
+    return next(item for item in _ai_value_response(patent, db) if item["field_key"] == request.field_key)
+
+
+@router.delete("/{patent_id}/ai-values")
+def clear_ai_value_override(
+    patent_id: int,
+    field_key: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+    field = db.query(CustomField).filter(CustomField.key == field_key).first()
+    if not _is_ai_field(field):
+        raise HTTPException(status_code=404, detail="AI field not found")
+    row = db.query(AIFieldValue).filter(
+        AIFieldValue.patent_id == patent.id,
+        AIFieldValue.field_key == field_key,
+    ).first()
+    if not row or not row.is_overridden:
+        raise HTTPException(status_code=404, detail="AI 字段当前没有人工覆盖")
+
+    current = dict(patent.ai_fields or {})
+    old_value = _decode_override_value(row.overridden_value)
+    generated = _decode_generated_value(row.value)
+    row.is_overridden = False
+    row.overridden_value = None
+    row.overridden_at = None
+    if generated is None:
+        current.pop(field_key, None)
+    else:
+        current[field_key] = generated
+    patent.ai_fields = current
+    db.add(PatentHistory(
+        patent_id=patent.id,
+        field_key=f"ai_fields.{field_key}",
+        field_display_name=field.name,
+        old_value=str(old_value) if old_value is not None else None,
+        new_value=str(generated) if generated is not None else None,
+        source="manual",
+    ))
+    db.add(patent)
+    db.commit()
+    return {"success": True, "field_key": field_key, "value": generated}
 
 
 @router.post("", response_model=Patent)
