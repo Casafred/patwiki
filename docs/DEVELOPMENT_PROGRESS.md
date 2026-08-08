@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-08（完成看板视图基础闭环，详见 docs/14-改造启动方案.md）
+最近更新：2026-08-08（完成 Windows 桌面应用 MSI/NSIS 本地构建验证）
 
 ---
 
@@ -19,7 +19,7 @@
 | P0-2 | 设置页（LLM API key 配置）+ 后端配置接口 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 全栈 | GET/PUT /settings + /settings/test-llm，配置持久化到 settings.json |
 | P0-3 | AI 批量处理入口 + 任务进度页 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 全栈 | 列表页批量AI按钮 + AITaskMonitor 页面 + GET /ai/tasks + DELETE /ai/tasks/{id} |
 | P0-4 | 修 PatentListPage 装饰性按钮 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 前端 | 全选/批量编辑/批量打标签/AI批量/行点击进详情/排序/分类筛选全部接入 |
-| P0-5 | Tauri 桌面应用打包构建 | 高 | 进行中 | 2026-07-19 | - | CI | tauri.conf.json 路径修复 + TS 编译错误清零，等待 Rust 编译产出 MSI/NSIS |
+| P0-5 | Tauri 桌面应用打包构建 | 高 | 已完成 | 2026-07-19 | 2026-08-08 | CI/桌面端 | scripts/build_windows.ps1 已统一图标、PyInstaller、前端和 Tauri 构建；固定 Tauri CLI 2.11.4，配置同时产出 MSI/NSIS；本地 Windows 已实际生成并校验两类安装包 |
 | P0-6 | 多维表格核心（字段系统+动态列+内联编辑+筛选） | 高 | 已完成 | 2026-07-20 | 2026-07-20 | 全栈 | 字段元数据API/单元格PATCH/自定义字段筛选排序；前端动态列渲染/列宽拖拽/列头菜单/内联编辑/高级筛选面板/字段显隐配置/新建自定义字段 |
 | P0-7 | 修复打包后端启动报错 + 端口冲突排查 | 高 | 已完成 | 2026-07-20 | 2026-07-20 | 全栈 | patwiki_backend.spec 补充 app.api.fields/app.services.field_registry 等 hidden imports；run.py 改为直接传入 app 对象，遇导入错误打印真实 traceback 而非 uvicorn 的 "Could not import module" |
 
@@ -86,3 +86,4 @@
 | 2026-07-19 | P0-8/9/10/11/12 | 完成 P0 第二阶段全部任务：1) 后端 models 拆分为 11 子模块，PatentDatabase 库模型 + Patent.database_id 外键，PatentProjectLink 替代简单 patent_project Table 新增多维属性；2) merge_service.Wiki 字段级合并 + ANNOTATION_FIELDS 标注类保护；relation_service 解析同族/引用号、MD5 哈希 family_id、占位 Patent 创建；import_service.suggest_mapping 自动为未知列建 CustomField（cf_ 前缀+短哈希），_row_to_patent_data 拆出虚拟字段（family_members/cited_patents/citing_patents），process_import/confirm_import 接入 merge+relation+database_id；3) DatabaseService 库 CRUD+归档+refresh-count，api/databases 路由，init_data 创建"默认数据库"，schemas 补 PatentDatabase schema；4) 前端 types 新增 PatentDatabase 类型与 ImportPreview/ImportResult 字段扩展，api 新增 databaseApi，store 新增 databases/currentDatabaseId，App.tsx 初始化加载库列表，Sidebar 顶部库切换器+新建库表单，PatentListPage 查询参数带 database_id，ImportModal 新增 chooseDatabase 步骤、显示"将自动创建 N 个新字段"提示、对 cf_ 字段标"新建字段"徽章、对虚拟字段标"关系入库"徽章、完成页显示同族/引用关联统计；5) patwiki_backend.spec 补全 12 个新模块 hiddenimports；6) 前端 npm run build 通过 0 错误，后端 init_db 验证 OK（1 默认库+6 AI字段） |
 | 2026-08-07 | P0-14 | 完成视图工作区第二批能力：新增分组查询接口、最多三级嵌套分组、默认折叠、条件格式运算符校验与配置接口；前端新增分组/条件格式配置面板、分组表头折叠和单元格条件着色。通过后端编译、接口回归与前端 npm run build。 |
 | 2026-08-08 | P0-15 | 完成看板视图基础闭环：新增看板分组/卡片查询与拖拽换列 API；前端新增 KanbanView，支持分组字段选择、卡片字段配置、详情跳转和跨列更新；自定义字段读取与视图写回链路同步修正。 |
+| 2026-08-08 | P0-5 | 新增 scripts/build_windows.ps1 作为本地与 CI 共用的 Windows 打包入口；统一依赖检查、图标生成、PyInstaller 后端构建、前端构建、固定 Tauri CLI 2.11.4 和 MSI/NSIS 产物校验；tauri.conf.json 同步声明 msi 与 nsis 目标，并修正 Tauri 在仓库根目录执行 beforeBuildCommand 的前端路径；本地实际生成 MSI 与 NSIS 安装包。 |

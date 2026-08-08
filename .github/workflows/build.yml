@@ -56,48 +56,16 @@ jobs:
           pip install -r requirements.txt
           pip install pillow
 
-      - name: Generate app icon
-        env:
-          PYTHONUTF8: 1
-          PYTHONIOENCODING: utf-8
-        run: python scripts/generate_icon.py
-
-      - name: Build backend (PyInstaller)
-        working-directory: backend
-        run: pyinstaller patwiki_backend.spec --noconfirm
-
-      - name: Verify backend artifact
+      - name: Build Windows package
         shell: pwsh
-        run: |
-          $exe = "backend/dist/patwiki-backend/patwiki-backend.exe"
-          if (Test-Path $exe) {
-            Write-Host "✅ 后端可执行文件已生成: $exe"
-            $size = (Get-Item $exe).Length / 1MB
-            Write-Host "   大小: $([math]::Round($size, 1)) MB"
-          } else {
-            Write-Host "❌ 后端可执行文件未找到"
-            exit 1
-          }
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli@latest
-
-      - name: Build Tauri app
-        working-directory: .
-        run: tauri build
-        env:
-          CI: true
+        run: .\scripts\build_windows.ps1
 
       - name: Upload MSI installer
         uses: actions/upload-artifact@v4
         with:
           name: patwiki-windows-msi
           path: src-tauri/target/release/bundle/msi/*.msi
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
       - name: Upload NSIS installer
@@ -105,5 +73,5 @@ jobs:
         with:
           name: patwiki-windows-nsis
           path: src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
