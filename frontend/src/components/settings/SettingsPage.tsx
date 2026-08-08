@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { settingsApi } from '../../api'
+import { getErrorMessage } from '../../lib/errors'
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
@@ -23,29 +24,34 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [saveMsg, setSaveMsg] = useState('')
 
-  useEffect(() => {
-    loadSettings()
-  }, [])
-
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       const data = await settingsApi.get()
-      setLLM((prev) => ({ ...prev, ...(data.llm || {}) }))
-      setHasApiKey(!!data.has_api_key)
-      setAiBatchConcurrency(data.ai_batch_concurrency ?? 3)
-      setAiUseCache(data.ai_use_cache ?? true)
+      const llmData = data.llm
+      if (llmData && typeof llmData === 'object' && !Array.isArray(llmData)) {
+        setLLM((prev) => ({ ...prev, ...(llmData as Partial<typeof prev>) }))
+      }
+      if (typeof data.has_api_key === 'boolean') setHasApiKey(data.has_api_key)
+      if (typeof data.ai_batch_concurrency === 'number') setAiBatchConcurrency(data.ai_batch_concurrency)
+      if (typeof data.ai_use_cache === 'boolean') setAiUseCache(data.ai_use_cache)
     } catch (e) {
       console.error('Failed to load settings:', e)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    // Settings are loaded from the backend after the component mounts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadSettings()
+  }, [loadSettings])
 
   const handleSave = async () => {
     setSaving(true)
     setSaveMsg('')
     try {
-      const payload: any = {
+      const payload = {
         llm: {
           ...llm,
           // 若用户没改 api_key，传空字符串让后端保留原值
@@ -59,8 +65,8 @@ export default function SettingsPage() {
       setApiKeyEdited(false)
       // 重新加载脱敏值
       await loadSettings()
-    } catch (e: any) {
-      setSaveMsg('保存失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      setSaveMsg('保存失败: ' + getErrorMessage(error))
     } finally {
       setSaving(false)
     }
@@ -76,10 +82,10 @@ export default function SettingsPage() {
         model: llm.llm_model,
       })
       setTestResult(result)
-    } catch (e: any) {
+    } catch (error: unknown) {
       setTestResult({
         success: false,
-        message: e?.response?.data?.detail || e?.message || '测试失败',
+        message: getErrorMessage(error, '测试失败'),
       })
     } finally {
       setTesting(false)

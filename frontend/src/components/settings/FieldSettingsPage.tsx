@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { customFieldApi } from '../../api'
 import type { CustomField } from '../../types'
 import { useAppStore } from '../../store'
+import { getErrorMessage } from '../../lib/errors'
 
 export default function FieldSettingsPage() {
   const [fields, setFields] = useState<CustomField[]>([])
@@ -19,11 +20,7 @@ export default function FieldSettingsPage() {
   })
   const { setCustomFields } = useAppStore()
 
-  useEffect(() => {
-    loadFields()
-  }, [])
-
-  const loadFields = async () => {
+  const loadFields = useCallback(async () => {
     try {
       const data = await customFieldApi.list()
       setFields(data)
@@ -32,7 +29,13 @@ export default function FieldSettingsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    // Load the field catalog after the component mounts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadFields()
+  }, [loadFields])
 
   const startEdit = (field: CustomField) => {
     setEditingId(field.id)
@@ -61,8 +64,8 @@ export default function FieldSettingsPage() {
       setCustomFields(fields.map(f => f.id === id ? updated : f))
       setEditingId(null)
       setEditForm({})
-    } catch (e: any) {
-      alert('保存失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('保存失败: ' + getErrorMessage(error))
     } finally {
       setSaving(false)
     }
@@ -87,8 +90,8 @@ export default function FieldSettingsPage() {
         is_active: true,
         ai_config: {},
       })
-    } catch (e: any) {
-      alert('创建失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('创建失败: ' + getErrorMessage(error))
     } finally {
       setSaving(false)
     }
@@ -103,8 +106,8 @@ export default function FieldSettingsPage() {
       const updatedList = fields.filter(f => f.id !== id)
       setFields(updatedList)
       setCustomFields(updatedList)
-    } catch (e: any) {
-      alert('删除失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('删除失败: ' + getErrorMessage(error))
     }
   }
 

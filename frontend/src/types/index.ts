@@ -1,3 +1,12 @@
+export type JsonPrimitive = string | number | boolean | null
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
+export type JsonObject = { [key: string]: JsonValue | undefined }
+
+export interface AIConfig extends JsonObject {
+  ai_enabled?: boolean
+  prompt_template?: string
+}
+
 export interface Patent {
   id: number
   application_number?: string
@@ -38,8 +47,8 @@ export interface Patent {
   application_status?: string
   scope_description?: string
   notes?: string
-  custom_fields?: Record<string, any>
-  ai_fields?: Record<string, any>
+  custom_fields?: JsonObject
+  ai_fields?: JsonObject
   // P2-8：同族聚拢相关
   family_id?: number | null
   family_size?: number | null
@@ -75,7 +84,7 @@ export interface ViewGroupField {
 
 export interface ConditionalFormatCondition {
   op: string
-  value?: any
+  value?: JsonValue
   unit?: 'day' | 'week' | 'month'
   style?: {
     bgColor?: string
@@ -94,7 +103,7 @@ export interface ConditionalFormatRule {
 }
 
 export interface ViewGroup {
-  key: any
+  key: JsonValue
   label: string
   field: string
   count: number
@@ -123,14 +132,14 @@ export interface PatentView {
   layout_type: ViewLayoutType
   is_department_master?: boolean
   is_archived?: boolean
-  filter_config?: Record<string, any>
+  filter_config?: JsonObject
   column_config?: { key: string; visible?: boolean; width?: number; order?: number }[]
   sort_config?: { sort_by?: string; sort_order?: 'asc' | 'desc' }
-  group_by_config?: { fields?: ViewGroupField[] } | Record<string, any>
+  group_by_config?: { fields?: ViewGroupField[] } | JsonObject
   conditional_formatting?: ConditionalFormatRule[]
-  kanban_config?: Record<string, any>
-  form_config?: Record<string, any>
-  gantt_config?: Record<string, any>
+  kanban_config?: JsonObject
+  form_config?: JsonObject
+  gantt_config?: JsonObject
   local_fields?: ViewLocalField[]
   created_at?: string
   updated_at?: string
@@ -138,7 +147,7 @@ export interface PatentView {
 
 export interface KanbanConfig {
   group_by_field: string
-  group_values?: any[]
+  group_values?: JsonValue[]
   card_fields: string[]
   card_title_field: string
 }
@@ -146,12 +155,12 @@ export interface KanbanConfig {
 export interface KanbanCard {
   id: number
   title: string
-  group_value: any
-  fields: Record<string, any>
+  group_value: JsonValue
+  fields: JsonObject
 }
 
 export interface KanbanGroup {
-  key: any
+  key: JsonValue
   label: string
   count: number
   cards: KanbanCard[]
@@ -184,7 +193,7 @@ export interface ViewPatentListResponse {
   page: number
   page_size: number
   view_id: number
-  view_filter_config?: Record<string, any>
+  view_filter_config?: JsonObject
   view_column_config?: PatentView['column_config']
 }
 
@@ -253,7 +262,7 @@ export interface CustomField {
   is_required?: boolean
   is_active?: boolean
   sort_order?: number
-  ai_config?: Record<string, any>
+  ai_config?: AIConfig
   created_at: string
   updated_at: string
 }
@@ -344,7 +353,7 @@ export interface AITask {
   processed_items: number
   success_count: number
   failed_count: number
-  errors?: any[] | null
+  errors?: AITaskError[] | null
   started_at?: string
   completed_at?: string
   created_at?: string
@@ -363,11 +372,11 @@ export interface FieldMeta {
   frozen?: boolean
   visible?: boolean
   is_system?: boolean
-  ai_config?: Record<string, any> | null
+  ai_config?: AIConfig | null
 }
 
 export interface CellUpdateRequest {
-  value: any
+  value: JsonValue
 }
 
 // 专利修改历史
@@ -413,5 +422,35 @@ export interface SharedDatabase extends PatentDatabase {
 export type FilterCondition = {
   field: string
   operator: 'eq' | 'contains' | 'gt' | 'lt' | 'gte' | 'lte' | 'in' | 'is_empty' | 'is_not_empty'
-  value?: any
+  value?: JsonValue
+}
+
+export interface AITaskError {
+  patent_id?: number
+  error?: string
+}
+
+export interface AnalyticsDimensionItem {
+  value: string
+  count: number
+  percentage: number
+}
+
+export interface AgentAnalysisResult {
+  requirement: string
+  base_stats: {
+    total: number
+    summary: string
+    dimensions: Record<string, AnalyticsDimensionItem[]>
+    filing_trend: { year: string; count: number }[]
+  }
+  ai_analysis: {
+    overview: string
+    key_findings: string[]
+    dimension_analysis: Record<string, string>
+    anomalies: string[]
+    recommendations: string[]
+    risk_warnings: string[]
+  }
+  created_at: string
 }

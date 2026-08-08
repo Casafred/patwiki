@@ -87,7 +87,7 @@ export default function ConditionalFormatPanel({ open, view, fields, onClose, on
                 <div key={rule.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 5 }}>
                   <span style={{ width: 90, fontWeight: 500 }}>{fieldName}</span>
                   <span style={{ color: '#6b7280' }}>{operatorName}</span>
-                  <span style={{ flex: 1 }}>{condition?.value ?? ''}</span>
+                  <span style={{ flex: 1 }}>{String(condition?.value ?? '')}</span>
                   <span style={{ width: 42, height: 22, background: condition?.style?.bgColor, border: '1px solid #d1d5db' }} title="背景预览" />
                   <button className="btn btn-xs btn-ghost" type="button" onClick={() => setRules(rules.filter(item => item.id !== rule.id))} title="删除规则">×</button>
                 </div>

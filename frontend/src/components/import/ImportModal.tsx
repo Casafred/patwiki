@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { importApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { ImportPreview, FieldMapping } from '../../types'
+import { getErrorMessage } from '../../lib/errors'
 
 interface ImportModalProps {
   onClose: () => void
@@ -82,6 +83,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   // P0-12：库列表为空时自动跳到 chooseDatabase；有库时默认 upload
   useEffect(() => {
     if (databases.length === 0) {
+      // Database availability is external state; update the workflow after the check.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStep('chooseDatabase')
     } else if (step === 'chooseDatabase' && currentDatabaseId) {
       setStep('upload')
@@ -100,8 +103,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setNewDbDesc('')
       setShowCreateDb(false)
       setStep('upload')
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || '创建库失败')
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, '创建库失败'))
     }
   }, [newDbName, newDbDesc, setDatabases, setCurrentDatabaseId])
 
@@ -125,8 +128,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       // P0-10：使用后端 suggested_mapping（已自动为未知列创建 CustomField）
       setMapping(result.suggested_mapping || {})
       setStep('mapping')
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || '上传失败，请检查文件格式')
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, '上传失败，请检查文件格式'))
     } finally {
       setUploading(false)
     }
@@ -157,8 +160,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       )
       setImportResult(result)
       setStep('complete')
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || '导入失败')
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, '导入失败'))
       setStep('mapping')
     } finally {
       setImporting(false)
@@ -305,8 +308,10 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   const input = document.createElement('input')
                   input.type = 'file'
                   input.accept = '.xlsx,.xls,.csv'
-                  input.onchange = (e: any) => {
-                    const f = e.target.files[0]
+                  input.onchange = (event: Event) => {
+                    const target = event.target
+                    if (!(target instanceof HTMLInputElement)) return
+                    const f = target.files?.[0]
                     if (f) setFile(f)
                   }
                   input.click()
@@ -332,7 +337,12 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                   <div>
                     <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>去重依据</label>
-                    <select className="form-input" value={dedupeField} onChange={(e) => setDedupeField(e.target.value as any)}>
+                    <select className="form-input" value={dedupeField} onChange={(e) => {
+                      const value = e.target.value
+                      if (value === 'both' || value === 'application_number' || value === 'publication_number') {
+                        setDedupeField(value)
+                      }
+                    }}>
                       <option value="both">申请号或公开号</option>
                       <option value="application_number">仅申请号</option>
                       <option value="publication_number">仅公开号</option>

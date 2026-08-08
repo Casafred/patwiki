@@ -1,21 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
 import { aiApi } from '../../api'
-import type { AITask } from '../../types'
-
-type AIFieldInfo = { key: string; name: string; description: string; ai_config: any }
+import type { AITask, CustomField } from '../../types'
+import { getErrorMessage } from '../../lib/errors'
 
 export default function AITaskMonitor() {
   const [tasks, setTasks] = useState<AITask[]>([])
-  const [aiFields, setAiFields] = useState<AIFieldInfo[]>([])
+  const [aiFields, setAiFields] = useState<CustomField[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [now, setNow] = useState(() => Date.now())
 
   const hasRunning = tasks.some(t => t.status === 'pending' || t.status === 'processing' || t.status === 'running')
 
   const loadTasks = useCallback(async () => {
     try {
-      const params: any = {}
+      const params: { status?: string } = {}
       if (statusFilter) params.status = statusFilter
       const data = await aiApi.listTasks(params)
       setTasks(data)
@@ -27,9 +27,16 @@ export default function AITaskMonitor() {
   }, [statusFilter])
 
   useEffect(() => {
-    loadTasks()
-    aiApi.listAIFields().then(setAiFields).catch(() => {})
+    // The request updates component state asynchronously after the effect runs.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadTasks()
+    void aiApi.listAIFields().then(setAiFields).catch(error => console.error('Failed to load AI fields:', error))
   }, [loadTasks])
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   // 自动刷新（有运行中任务时每 2 秒刷新一次）
   useEffect(() => {
@@ -47,8 +54,8 @@ export default function AITaskMonitor() {
     try {
       await aiApi.deleteTask(id)
       loadTasks()
-    } catch (e: any) {
-      alert('删除失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('删除失败: ' + getErrorMessage(error))
     }
   }
 
@@ -101,7 +108,7 @@ export default function AITaskMonitor() {
   const getDuration = (task: AITask) => {
     if (!task.started_at) return '-'
     const start = new Date(task.started_at).getTime()
-    const end = task.completed_at ? new Date(task.completed_at).getTime() : Date.now()
+    const end = task.completed_at ? new Date(task.completed_at).getTime() : now
     const sec = Math.floor((end - start) / 1000)
     if (sec < 60) return `${sec}秒`
     return `${Math.floor(sec / 60)}分${sec % 60}秒`
@@ -243,7 +250,7 @@ export default function AITaskMonitor() {
                       maxHeight: 150,
                       overflow: 'auto',
                     }}>
-                      {task.errors.slice(0, 10).map((err: any, i: number) => (
+                      {task.errors.slice(0, 10).map((err, i) => (
                         <div key={i} style={{ marginBottom: 4 }}>
                           专利 #{err.patent_id}: {err.error}
                         </div>

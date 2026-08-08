@@ -4,7 +4,8 @@ import type {
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department,
   AITask, FieldMeta, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
-  GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse,
+  GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
+  AgentAnalysisResult,
 } from '../types'
 
 export const fieldApi = {
@@ -56,7 +57,7 @@ export const viewApi = {
     description?: string
     view_type?: PatentView['view_type']
     layout_type?: PatentView['layout_type']
-    filter_config?: Record<string, any>
+    filter_config?: JsonObject
     column_config?: PatentView['column_config']
     sort_config?: PatentView['sort_config']
     group_by_config?: PatentView['group_by_config']
@@ -78,7 +79,7 @@ export const viewApi = {
     search?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
-    extra_filters?: Record<string, any>
+    extra_filters?: JsonObject
   } = {}): Promise<ViewPatentListResponse> => {
     const { extra_filters, ...query } = params
     return api.get(`/views/${viewId}/patents`, {
@@ -97,7 +98,7 @@ export const viewApi = {
     search?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
-    extra_filters?: Record<string, any>
+    extra_filters?: JsonObject
   } = {}): Promise<GroupedViewResponse> => {
     const { extra_filters, ...query } = params
     return api.get(`/views/${viewId}/grouped`, {
@@ -125,13 +126,13 @@ export const viewApi = {
 
   moveKanbanCard: (viewId: number, data: {
     patent_id: number
-    to_value: any
-    from_value?: any
+    to_value: JsonValue
+    from_value?: JsonValue
     changed_by?: string
-  }): Promise<{ success: boolean; patent_id: number; field_key: string; value: any }> =>
+  }): Promise<{ success: boolean; patent_id: number; field_key: string; value: JsonValue }> =>
     api.post(`/views/${viewId}/kanban/move`, data),
 
-  updateSharedField: (viewId: number, patentId: number, fieldKey: string, value: any): Promise<{
+  updateSharedField: (viewId: number, patentId: number, fieldKey: string, value: JsonValue): Promise<{
     success: boolean
     patent_id: number
     field_key: string
@@ -139,14 +140,14 @@ export const viewApi = {
 }
 
 export const patentApi = {
-  list: (params: Record<string, any> = {}): Promise<PatentListResponse> =>
+  list: (params: JsonObject = {}): Promise<PatentListResponse> =>
     api.get('/patents', { params }),
 
   get: (id: number): Promise<Patent> => api.get(`/patents/${id}`),
 
   create: (data: Partial<Patent>): Promise<Patent> => api.post('/patents', data),
 
-  update: (id: number, data: Partial<Patent>): Promise<Patent> => api.put(`/patents/${id}`, data),
+  update: (id: number, data: Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }): Promise<Patent> => api.put(`/patents/${id}`, data),
 
   delete: (id: number): Promise<{ success: boolean }> => api.delete(`/patents/${id}`),
 
@@ -164,7 +165,7 @@ export const patentApi = {
     dry_run: boolean
   }> => api.post('/patents/cleanup/invalid-placeholders', null, { params: { dry_run: dryRun } }),
 
-  updateCell: (patentId: number, fieldKey: string, value: any): Promise<Patent> =>
+  updateCell: (patentId: number, fieldKey: string, value: JsonValue): Promise<Patent> =>
     api.patch(`/patents/${patentId}/field/${fieldKey}`, { value } as CellUpdateRequest),
 
   // 修改历史
@@ -173,14 +174,14 @@ export const patentApi = {
 }
 
 export const productApi = {
-  list: (params: Record<string, any> = {}): Promise<Product[]> => api.get('/products', { params }),
+  list: (params: JsonObject = {}): Promise<Product[]> => api.get('/products', { params }),
   create: (data: Partial<Product>): Promise<Product> => api.post('/products', data),
   update: (id: number, data: Partial<Product>): Promise<Product> => api.put(`/products/${id}`, data),
   delete: (id: number): Promise<{ success: boolean }> => api.delete(`/products/${id}`),
 }
 
 export const projectApi = {
-  list: (params: Record<string, any> = {}): Promise<Project[]> => api.get('/projects', { params }),
+  list: (params: JsonObject = {}): Promise<Project[]> => api.get('/projects', { params }),
   create: (data: Partial<Project>): Promise<Project> => api.post('/projects', data),
   update: (id: number, data: Partial<Project>): Promise<Project> => api.put(`/projects/${id}`, data),
   delete: (id: number): Promise<{ success: boolean }> => api.delete(`/projects/${id}`),
@@ -199,7 +200,7 @@ export const tagGroupApi = {
 }
 
 export const customFieldApi = {
-  list: (params: Record<string, any> = {}): Promise<CustomField[]> => api.get('/custom-fields', { params }),
+  list: (params: JsonObject = {}): Promise<CustomField[]> => api.get('/custom-fields', { params }),
   create: (data: Partial<CustomField>): Promise<CustomField> => api.post('/custom-fields', data),
   update: (id: number, data: Partial<CustomField>): Promise<CustomField> => api.put(`/custom-fields/${id}`, data),
   delete: (id: number): Promise<{ success: boolean }> => api.delete(`/custom-fields/${id}`),
@@ -236,7 +237,7 @@ export const importApi = {
     })
   },
 
-  listBatches: (params: Record<string, any> = {}): Promise<ImportBatch[]> =>
+  listBatches: (params: JsonObject = {}): Promise<ImportBatch[]> =>
     api.get('/import/batches', { params }),
 
   getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
@@ -257,13 +258,13 @@ export const analyticsApi = {
     product_id?: number | null
     project_id?: number | null
     tag_id?: number | null
-    filters?: Record<string, any>
+    filters?: JsonObject
     top_n?: number
   }): Promise<{
     field_key: string
     total_distinct: number
     total_rows: number
-    items: { value: string; raw_value: any; count: number; percentage: number }[]
+    items: { value: string; raw_value: JsonValue; count: number; percentage: number }[]
   }> => api.post('/analytics/column-stats', data),
 
   statsToTags: (data: {
@@ -289,22 +290,10 @@ export const analyticsApi = {
     product_id?: number | null
     project_id?: number | null
     tag_id?: number | null
-    filters?: Record<string, any>
+    filters?: JsonObject
     dimensions?: string[]
     top_n?: number
-  }): Promise<{
-    requirement: string
-    base_stats: any
-    ai_analysis: {
-      overview: string
-      key_findings: string[]
-      dimension_analysis: Record<string, string>
-      anomalies: string[]
-      recommendations: string[]
-      risk_warnings: string[]
-    }
-    created_at: string
-  }> => api.post('/analytics/agent-analysis', data, { timeout: 180000 }),
+  }): Promise<AgentAnalysisResult> => api.post('/analytics/agent-analysis', data, { timeout: 180000 }),
 
   crossTab: (data: {
     row_field: string
@@ -312,9 +301,9 @@ export const analyticsApi = {
     database_id?: number | null
     product_id?: number | null
     project_id?: number | null
-    filters?: Record<string, any>
+    filters?: JsonObject
     top_n?: number
-  }): Promise<any> => api.post('/analytics/crosstab', data),
+  }): Promise<JsonValue> => api.post('/analytics/crosstab', data),
 }
 
 export const personApi = {
@@ -338,19 +327,19 @@ export const aiApi = {
 
   deleteTask: (id: number): Promise<{ success: boolean }> => api.delete(`/ai/tasks/${id}`),
 
-  listAIFields: (): Promise<{ key: string; name: string; description: string; ai_config: any }[]> =>
+  listAIFields: (): Promise<CustomField[]> =>
     api.get('/ai/fields'),
 }
 
 export const exportApi = {
-  exportPatents: (params: Record<string, any> = {}): Promise<Blob> =>
+  exportPatents: (params: JsonObject = {}): Promise<Blob> =>
     api.get('/export', { params, responseType: 'blob' }),
 }
 
 export const settingsApi = {
-  get: (): Promise<any> => api.get('/settings'),
+  get: (): Promise<JsonObject> => api.get('/settings'),
 
-  update: (payload: any): Promise<{ success: boolean; message: string }> =>
+  update: (payload: JsonObject): Promise<{ success: boolean; message: string }> =>
     api.put('/settings', payload),
 
   testLLM: (payload: { api_key?: string; base_url?: string; model?: string }): Promise<{ success: boolean; message: string }> =>

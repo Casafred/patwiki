@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, PatentView, User } from '../types'
+import type { Patent, Product, CustomField, Tag, Project, PatentDatabase, PatentView, User, JsonObject } from '../types'
 
 const CURRENT_USER_STORAGE_KEY = 'patwiki_current_user'
 const GROUP_BY_FAMILY_STORAGE_KEY = 'patwiki_group_by_family'
@@ -23,7 +23,7 @@ interface AppState {
   currentProductId: number | null
   loading: boolean
   selectedIds: number[]
-  filters: Record<string, any>
+  filters: JsonObject
   // P2-8：同族聚拢开关（localStorage 持久化）
   groupByFamily: boolean
   setGroupByFamily: (v: boolean) => void
@@ -38,7 +38,7 @@ interface AppState {
   setCurrentProductId: (id: number | null) => void
   setLoading: (loading: boolean) => void
   setSelectedIds: (ids: number[]) => void
-  setFilters: (filters: Record<string, any>) => void
+  setFilters: (filters: JsonObject) => void
   toggleSelect: (id: number) => void
   clearSelection: () => void
 }
@@ -77,15 +77,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     try { return localStorage.getItem(GROUP_BY_FAMILY_STORAGE_KEY) === 'true' } catch { return false }
   })(),
   setGroupByFamily: (v) => {
-    try { localStorage.setItem(GROUP_BY_FAMILY_STORAGE_KEY, String(v)) } catch {}
+    try { localStorage.setItem(GROUP_BY_FAMILY_STORAGE_KEY, String(v)) } catch { /* storage is optional */ }
     set({ groupByFamily: v })
   },
   currentUser: loadCurrentUserFromStorage(),
   setCurrentUser: (user) => {
     if (user) {
-      try { localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user)) } catch {}
+      try { localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user)) } catch { /* storage is optional */ }
     } else {
-      try { localStorage.removeItem(CURRENT_USER_STORAGE_KEY) } catch {}
+      try { localStorage.removeItem(CURRENT_USER_STORAGE_KEY) } catch { /* storage is optional */ }
     }
     set({ currentUser: user })
   },

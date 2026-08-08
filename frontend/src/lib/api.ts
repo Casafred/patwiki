@@ -5,7 +5,7 @@ import axios from 'axios'
  * - 开发模式（vite dev server）：用 /api，由 Vite proxy 转发到 127.0.0.1:8765
  * - 生产模式（Tauri 打包后）：直连 http://127.0.0.1:8765/api（后端已开启 CORS）
  */
-const isTauri = !!(window as any).__TAURI_INTERNALS__ || !!(window as any).__TAURI__
+const isTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window
 const BACKEND_PORT = 8765
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
 

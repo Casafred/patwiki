@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { statsApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Stats } from '../../types'
@@ -7,19 +7,13 @@ export default function StatsPage() {
   const { currentDatabaseId, currentProductId, databases, products } = useAppStore()
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
-  const [filterDbId, setFilterDbId] = useState<number | ''>('')
-  const [filterProdId, setFilterProdId] = useState<number | ''>('')
+  const [filterDbId, setFilterDbId] = useState<number | ''>(currentDatabaseId ?? '')
+  const [filterProdId, setFilterProdId] = useState<number | ''>(currentProductId ?? '')
 
-  useEffect(() => {
-    // 初始化筛选条件为当前库/产品
-    setFilterDbId(currentDatabaseId ?? '')
-    setFilterProdId(currentProductId ?? '')
-  }, [])  // 仅初始化一次
-
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, any> = {}
+      const params: { database_id?: number; product_id?: number } = {}
       if (filterDbId !== '') params.database_id = filterDbId
       if (filterProdId !== '') params.product_id = filterProdId
       const data = await statsApi.get(params)
@@ -29,11 +23,13 @@ export default function StatsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filterDbId, filterProdId])
 
   useEffect(() => {
-    loadStats()
-  }, [filterDbId, filterProdId])
+    // Statistics are synchronized with the selected filters through an async request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadStats()
+  }, [loadStats])
 
   const statusMap: Record<string, string> = {
     granted: '授权', examining: '实审中', published: '公开',
@@ -362,11 +358,11 @@ function DonutChart({ data, total }: { data: { label: string; value: number; col
   const filtered = data.filter(d => d.value > 0)
   const sum = filtered.reduce((s, d) => s + d.value, 0) || 1
 
-  let cumulative = 0
-  const arcs = filtered.map(d => {
-    const startAngle = (cumulative / sum) * Math.PI * 2 - Math.PI / 2
-    cumulative += d.value
-    const endAngle = (cumulative / sum) * Math.PI * 2 - Math.PI / 2
+  const arcs = filtered.map((d, index) => {
+    const cumulativeBefore = filtered.slice(0, index).reduce((value, item) => value + item.value, 0)
+    const cumulativeAfter = cumulativeBefore + d.value
+    const startAngle = (cumulativeBefore / sum) * Math.PI * 2 - Math.PI / 2
+    const endAngle = (cumulativeAfter / sum) * Math.PI * 2 - Math.PI / 2
     const x1 = cx + r * Math.cos(startAngle)
     const y1 = cy + r * Math.sin(startAngle)
     const x2 = cx + r * Math.cos(endAngle)

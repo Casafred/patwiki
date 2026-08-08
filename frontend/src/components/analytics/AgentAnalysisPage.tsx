@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { analyticsApi, databaseApi, fieldApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { PatentDatabase, FieldMeta } from '../../types'
+import type { PatentDatabase, FieldMeta, AgentAnalysisResult } from '../../types'
+import { getErrorMessage } from '../../lib/errors'
 
 const DIMENSION_LABELS: Record<string, string> = {
   legal_status: '法律状态',
@@ -25,19 +26,18 @@ export default function AgentAnalysisPage() {
   const [requirement, setRequirement] = useState('')
   const [databases, setDatabases] = useState<PatentDatabase[]>([])
   const [fields, setFields] = useState<FieldMeta[]>([])
-  const [selectedDb, setSelectedDb] = useState<number | ''>('')
+  const [selectedDb, setSelectedDb] = useState<number | ''>(currentDatabaseId ?? '')
   const [selectedDims, setSelectedDims] = useState<string[]>([
     'legal_status', 'patent_type', 'country', 'category', 'risk_level', 'applicant', 'inventor', 'ipc_main'
   ])
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<any>(null)
+  const [result, setResult] = useState<AgentAnalysisResult | null>(null)
   const [error, setError] = useState('')
 
-  useState(() => {
-    databaseApi.list().then(setDatabases).catch(() => {})
-    fieldApi.list().then(setFields).catch(() => {})
-    if (currentDatabaseId) setSelectedDb(currentDatabaseId)
-  })
+  useEffect(() => {
+    void databaseApi.list().then(setDatabases).catch(error => console.error('Failed to load databases:', error))
+    void fieldApi.list().then(setFields).catch(error => console.error('Failed to load fields:', error))
+  }, [])
 
   const handleAnalyze = async () => {
     if (!requirement.trim()) {
@@ -54,8 +54,8 @@ export default function AgentAnalysisPage() {
         dimensions: selectedDims.length > 0 ? selectedDims : undefined,
       })
       setResult(res)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || '分析失败')
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, '分析失败'))
     } finally {
       setLoading(false)
     }
@@ -186,7 +186,7 @@ export default function AgentAnalysisPage() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-                {Object.entries(result.base_stats.dimensions || {}).map(([dim, items]: [string, any]) => (
+                {Object.entries(result.base_stats.dimensions || {}).map(([dim, items]) => (
                   <div key={dim} style={{
                     border: '1px solid #e2e8f0', borderRadius: 6, padding: 12, background: '#fafbfc',
                   }}>
@@ -194,7 +194,7 @@ export default function AgentAnalysisPage() {
                       {DIMENSION_LABELS[dim] || dim}（{items.length}）
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
-                      {items.slice(0, 10).map((item: any, i: number) => (
+                      {items.slice(0, 10).map((item, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
                           <span style={{ flex: 1, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {item.value}
@@ -216,8 +216,8 @@ export default function AgentAnalysisPage() {
                 <div style={{ marginTop: 16, border: '1px solid #e2e8f0', borderRadius: 6, padding: 12, background: '#fafbfc' }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>申请年份趋势</div>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 80 }}>
-                    {result.base_stats.filing_trend.map((t: any, i: number) => {
-                      const max = Math.max(...result.base_stats.filing_trend.map((x: any) => x.count))
+                    {result.base_stats.filing_trend.map((t, i) => {
+                      const max = Math.max(...result.base_stats.filing_trend.map(x => x.count))
                       const h = max > 0 ? (t.count / max * 100) : 0
                       return (
                         <div key={i} style={{ flex: 1, minWidth: 30, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -273,7 +273,7 @@ export default function AgentAnalysisPage() {
                 <div style={{ marginBottom: 16 }}>
                   <h4 style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>📐 维度分析</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {Object.entries(result.ai_analysis.dimension_analysis).map(([dim, analysis]: [string, any]) => (
+                    {Object.entries(result.ai_analysis.dimension_analysis).map(([dim, analysis]) => (
                       <div key={dim} style={{
                         padding: 10, background: '#f8fafc', borderRadius: 4, fontSize: 12, lineHeight: 1.6,
                       }}>

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
 import type { Patent, Product, Project, Tag, CustomField, AITask, PatentHistory } from '../../types'
+import { getErrorMessage } from '../../lib/errors'
 
 interface PatentDetailPageProps {
   patentId: number
@@ -8,6 +9,7 @@ interface PatentDetailPageProps {
 }
 
 type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'history'
+type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
 export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageProps) {
   const [patent, setPatent] = useState<Patent | null>(null)
@@ -19,19 +21,13 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   const [products, setProducts] = useState<Product[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [tags, setTags] = useState<Tag[]>([])
-  const [formData, setFormData] = useState<Partial<Patent>>({})
+  const [formData, setFormData] = useState<PatentEditData>({})
   const [aiProcessing, setAiProcessing] = useState<string | null>(null)
   const [aiTaskInfo, setAiTaskInfo] = useState<AITask | null>(null)
   const [history, setHistory] = useState<PatentHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
 
-  useEffect(() => {
-    loadPatent()
-    loadMeta()
-    loadHistory()
-  }, [patentId])
-
-  const loadPatent = async () => {
+  const loadPatent = useCallback(async () => {
     setLoading(true)
     try {
       const data = await patentApi.get(patentId)
@@ -43,9 +39,9 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     } finally {
       setLoading(false)
     }
-  }
+  }, [patentId])
 
-  const loadHistory = async () => {
+  const loadHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
       const list = await patentApi.getHistory(patentId)
@@ -55,9 +51,9 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     } finally {
       setHistoryLoading(false)
     }
-  }
+  }, [patentId])
 
-  const loadMeta = async () => {
+  const loadMeta = useCallback(async () => {
     try {
       const [ai, ps, pjs, ts] = await Promise.all([
         aiApi.listAIFields(),
@@ -65,27 +61,28 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         projectApi.list(),
         tagApi.list(),
       ])
-      setAIFields(ai as any)
+      setAIFields(ai)
       setProducts(ps)
       setProjects(pjs)
       setTags(ts)
     } catch (e) {
       console.error('Failed to load meta:', e)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    // These requests synchronize the detail view with the selected patent.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadPatent()
+    void loadMeta()
+    void loadHistory()
+  }, [loadHistory, loadMeta, loadPatent])
 
   const handleSave = async () => {
     if (!patent) return
     setSaving(true)
     try {
-      const updates: any = { ...formData }
-      // 把编辑期间累积的 tag_ids/project_ids 带上
-      if ((patent as any)._editTagIds !== undefined) {
-        updates.tag_ids = (patent as any)._editTagIds
-      }
-      if ((patent as any)._editProjectIds !== undefined) {
-        updates.project_ids = (patent as any)._editProjectIds
-      }
+      const updates: PatentEditData = { ...formData }
       // 移除只读字段
       delete updates.id
       delete updates.created_at
@@ -94,14 +91,11 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       delete updates.tags
       delete updates.projects
       await patentApi.update(patent.id, updates)
-      // 清理编辑态临时数据
-      delete (patent as any)._editTagIds
-      delete (patent as any)._editProjectIds
       setEditing(false)
       await loadPatent()
       await loadHistory()
-    } catch (e: any) {
-      alert('保存失败: ' + (e?.message || '未知错误'))
+    } catch (error: unknown) {
+      alert('保存失败: ' + getErrorMessage(error, '未知错误'))
     } finally {
       setSaving(false)
     }
@@ -118,8 +112,8 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     try {
       await patentApi.delete(patent.id)
       onBack()
-    } catch (e: any) {
-      alert('删除失败: ' + (e?.message || '未知错误'))
+    } catch (error: unknown) {
+      alert('删除失败: ' + getErrorMessage(error, '未知错误'))
     }
   }
 
@@ -131,8 +125,8 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       setAiTaskInfo(task)
       // 轮询任务状态
       pollTask(task.id)
-    } catch (e: any) {
-      alert('AI 处理启动失败: ' + (e?.response?.data?.detail || e?.message || '请先在设置页配置 LLM API'))
+    } catch (error: unknown) {
+      alert('AI 处理启动失败: ' + getErrorMessage(error, '请先在设置页配置 LLM API'))
       setAiProcessing(null)
     }
   }
@@ -149,15 +143,15 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           // 完成后刷新专利数据
           await loadPatent()
         }
-      } catch (e) {
+      } catch {
         setAiProcessing(null)
       }
     }
     setTimeout(poll, 1500)
   }
 
-  const updateField = (key: keyof Patent, value: any) => {
-    setFormData(prev => ({ ...prev, [key]: value }))
+  const updateField = (key: keyof PatentEditData, value: unknown) => {
+    setFormData(prev => ({ ...prev, [key]: value } as PatentEditData))
   }
 
   if (loading) {
@@ -274,7 +268,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           <CustomTab patent={patent} editing={editing} updateField={updateField} />
         )}
         {activeTab === 'relations' && (
-          <RelationsTab patent={patent} tags={tags} projects={projects} editing={editing} updateField={updateField} />
+          <RelationsTab patent={patent} formData={formData} tags={tags} projects={projects} editing={editing} updateField={updateField} />
         )}
         {activeTab === 'history' && (
           <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
@@ -287,9 +281,9 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
 // ============ 基础著录 Tab ============
 function BasicInfoTab({ patent, formData, editing, updateField, products }: {
   patent: Patent
-  formData: Partial<Patent>
+  formData: PatentEditData
   editing: boolean
-  updateField: (key: keyof Patent, value: any) => void
+  updateField: (key: keyof PatentEditData, value: unknown) => void
   products: Product[]
 }) {
   return (
@@ -445,9 +439,9 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
 // ============ 技术信息 Tab ============
 function TechnicalTab({ patent, formData, editing, updateField }: {
   patent: Patent
-  formData: Partial<Patent>
+  formData: PatentEditData
   editing: boolean
-  updateField: (key: keyof Patent, value: any) => void
+  updateField: (key: keyof PatentEditData, value: unknown) => void
 }) {
   return (
     <div className="detail-grid">
@@ -499,9 +493,9 @@ function TechnicalTab({ patent, formData, editing, updateField }: {
 // ============ 风险与应用 Tab ============
 function RiskTab({ patent, formData, editing, updateField }: {
   patent: Patent
-  formData: Partial<Patent>
+  formData: PatentEditData
   editing: boolean
-  updateField: (key: keyof Patent, value: any) => void
+  updateField: (key: keyof PatentEditData, value: unknown) => void
 }) {
   return (
     <div className="detail-grid">
@@ -607,7 +601,7 @@ function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
                     whiteSpace: 'pre-wrap',
                     fontSize: 13,
                   }}>
-                    {value || '尚未生成，点击右侧按钮运行 AI 抽取'}
+                    {value ? (typeof value === 'object' ? JSON.stringify(value) : value) : '尚未生成，点击右侧按钮运行 AI 抽取'}
                   </div>
                   <button
                     className="btn btn-primary"
@@ -634,7 +628,7 @@ function AITab({ patent, aiFields, onProcess, processing, taskInfo }: {
 function CustomTab({ patent, editing, updateField }: {
   patent: Patent
   editing: boolean
-  updateField: (key: keyof Patent, value: any) => void
+  updateField: (key: keyof PatentEditData, value: unknown) => void
 }) {
   const customData = patent.custom_fields || {}
   const keys = Object.keys(customData)
@@ -653,7 +647,7 @@ function CustomTab({ patent, editing, updateField }: {
               {editing ? (
                 <input
                   className="form-input"
-                  value={customData[key] || ''}
+                  value={String(customData[key] ?? '')}
                   onChange={e => {
                     const newData = { ...customData, [key]: e.target.value }
                     updateField('custom_fields', newData)
@@ -669,20 +663,21 @@ function CustomTab({ patent, editing, updateField }: {
 }
 
 // ============ 关联关系 Tab ============
-function RelationsTab({ patent, tags, projects, editing, updateField }: {
+function RelationsTab({ patent, formData, tags, projects, editing, updateField }: {
   patent: Patent
+  formData: PatentEditData
   tags: Tag[]
   projects: Project[]
   editing: boolean
-  updateField: (key: keyof Patent, value: any) => void
+  updateField: (key: keyof PatentEditData, value: unknown) => void
 }) {
   const patentTags = patent.tags || []
   const patentProjects = patent.projects || []
 
   // 编辑态下从 patent 现有标签初始化，后续变更通过 updateField 写入 formData
   // 这里直接用 patent 数据作为初始选中态，保存时由父组件的 formData 决定
-  const currentTagIds = (editing ? ((patent as any)._editTagIds ?? patentTags.map(t => t.id)) : patentTags.map(t => t.id))
-  const currentProjectIds = (editing ? ((patent as any)._editProjectIds ?? patentProjects.map(p => p.id)) : patentProjects.map(p => p.id))
+  const currentTagIds = editing ? (formData.tag_ids ?? patentTags.map(t => t.id)) : patentTags.map(t => t.id)
+  const currentProjectIds = editing ? (formData.project_ids ?? patentProjects.map(p => p.id)) : patentProjects.map(p => p.id)
 
   return (
     <div className="detail-grid">
@@ -706,8 +701,7 @@ function RelationsTab({ patent, tags, projects, editing, updateField }: {
                       const next = e.target.checked
                         ? [...currentTagIds, tag.id]
                         : currentTagIds.filter((id: number) => id !== tag.id)
-                      ;(patent as any)._editTagIds = next
-                      updateField('tag_ids' as any, next)
+                      updateField('tag_ids', next)
                     }}
                     style={{ marginRight: 4 }}
                   />
@@ -747,8 +741,7 @@ function RelationsTab({ patent, tags, projects, editing, updateField }: {
                       const next = e.target.checked
                         ? [...currentProjectIds, proj.id]
                         : currentProjectIds.filter((id: number) => id !== proj.id)
-                      ;(patent as any)._editProjectIds = next
-                      updateField('project_ids' as any, next)
+                      updateField('project_ids', next)
                     }}
                   />
                   {proj.name} {proj.status && <span style={{ color: '#94a3b8' }}>({proj.status})</span>}

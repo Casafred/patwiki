@@ -3,8 +3,9 @@ import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, vi
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
-  ViewGroupField, ConditionalFormatRule,
+  ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue,
 } from '../../types'
+import { getErrorMessage } from '../../lib/errors'
 import GroupConfigPanel from '../views/GroupConfigPanel'
 import ConditionalFormatPanel from '../views/ConditionalFormatPanel'
 import KanbanView from '../views/KanbanView'
@@ -120,7 +121,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [bulkModule, setBulkModule] = useState('')
   const [bulkRiskLevel, setBulkRiskLevel] = useState('')
   const [aiFieldKey, setAiFieldKey] = useState('')
-  const [aiFields, setAiFields] = useState<{ key: string; name: string; description: string; ai_config: any }[]>([])
+  const [aiFields, setAiFields] = useState<CustomField[]>([])
   const [filterValues, setFilterValues] = useState<Record<string, string>>({})
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [newFieldName, setNewFieldName] = useState('')
@@ -167,7 +168,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             if (hiddenKeys.includes(f.key)) f.visible = false
           })
         }
-      } catch {}
+      } catch (error) { console.error('Failed to read hidden fields:', error) }
       setFields(fieldsData)
       const widths: Record<string, number> = {}
       fieldsData.forEach(f => {
@@ -191,7 +192,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const loadPatents = useCallback(async () => {
     setLoading(true)
     try {
-      const viewFilters: Record<string, any> = {}
+      const viewFilters: JsonObject = {}
       Object.entries(filterValues).forEach(([key, value]) => {
         if (value) viewFilters[key] = { contains: value }
       })
@@ -232,7 +233,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         return
       }
 
-      const params: Record<string, any> = {
+      const params: JsonObject = {
         page,
         page_size: pageSize,
         sort_by: sortField,
@@ -248,7 +249,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         params.group_by_family = true
       }
 
-      const allFilters: Record<string, any> = {}
+      const allFilters: JsonObject = {}
       Object.entries(filterValues).forEach(([key, value]) => {
         if (value) {
           allFilters[key] = { contains: value }
@@ -268,26 +269,33 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, views, setPatents, setLoading])
 
   useEffect(() => {
-    loadFields()
-    loadCustomFields()
+    // Field metadata is loaded asynchronously when the page mounts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadFields()
+    void loadCustomFields()
   }, [loadFields, loadCustomFields])
 
   useEffect(() => {
     if (fields.length > 0) {
-      loadPatents()
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadPatents()
     }
   }, [loadPatents, fields.length])
 
   useEffect(() => {
+    // Reset selection and pagination when the active data scope changes.
     clearSelection()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPage(1)
   }, [viewId, currentDatabaseId, clearSelection])
 
   useEffect(() => {
-    aiApi.listAIFields().then(setAiFields).catch(() => {})
+    void aiApi.listAIFields().then(setAiFields).catch(error => console.error('Failed to load AI fields:', error))
   }, [])
 
   useEffect(() => {
+    // Keep the input display in sync with pagination state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPageInputValue(String(page))
   }, [page])
 
@@ -373,7 +381,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       a.download = `patents_${new Date().toISOString().slice(0, 10)}.xlsx`
       a.click()
       window.URL.revokeObjectURL(url)
-    } catch (e) {
+    } catch {
       alert('导出失败')
     }
   }
@@ -388,9 +396,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       clearSelection()
       setPage(1)
       loadPatents()
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail
-      alert(detail || e?.message || '删除失败')
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '删除失败'))
     }
   }
 
@@ -415,9 +422,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       alert(`已删除 ${real.deleted_count} 条无效占位专利。`)
       setPage(1)
       loadPatents()
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail
-      alert(detail || e?.message || '清理失败')
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '清理失败'))
     }
   }
 
@@ -454,7 +460,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     setEditingCell({ patentId, fieldKey })
   }
 
-  const handleCellSave = async (patentId: number, fieldKey: string, value: any) => {
+  const handleCellSave = async (patentId: number, fieldKey: string, value: JsonValue) => {
     try {
       if (viewId !== null) {
         await viewApi.updateSharedField(viewId, patentId, fieldKey, value)
@@ -463,8 +469,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       }
       setEditingCell(null)
       loadPatents()
-    } catch (e: any) {
-      alert('保存失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('保存失败: ' + getErrorMessage(error))
     }
   }
 
@@ -477,7 +483,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       try {
         const hidden = next.filter(f => f.visible === false).map(f => f.key)
         localStorage.setItem('patwiki_hidden_fields', JSON.stringify(hidden))
-      } catch {}
+      } catch (error) { console.error('Failed to save hidden fields:', error) }
       return next
     })
     setActiveHeaderMenu(null)
@@ -493,7 +499,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         } else {
           localStorage.setItem('patwiki_hidden_fields', JSON.stringify(prev.map(f => f.key)))
         }
-      } catch {}
+      } catch (error) { console.error('Failed to clear hidden fields:', error) }
       return next
     })
   }
@@ -504,7 +510,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       const next = prev.map(f => ({ ...f, visible: true }))
       try {
         localStorage.removeItem('patwiki_hidden_fields')
-      } catch {}
+      } catch (error) { console.error('Failed to reset hidden fields:', error) }
       return next
     })
   }
@@ -609,7 +615,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       }
     }, 1500)
     return () => clearInterval(interval)
-  }, [activeAITasks.length, taskMeta])  // 依赖 taskMeta 以便完成时能拿到 meta
+  }, [activeAITasks, taskMeta, loadPatents])
 
   const handleQuickAI = async (patentId: number) => {
     if (aiFields.length === 0) {
@@ -622,8 +628,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       await startAITask([patentId], firstAiField.key)
       // 轮询由统一的 useEffect 接管；当任务完成时 loadPatents() 会刷新数据，
       // 同时清除 aiProcessingRow（通过下方 useEffect 监听）
-    } catch (e: any) {
-      alert('AI处理失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('AI处理失败: ' + getErrorMessage(error))
       setAiProcessingRow(null)
     }
   }
@@ -631,6 +637,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   // 当没有运行中的任务时，清除行 loading
   useEffect(() => {
     if (activeAITasks.length === 0 && aiProcessingRow !== null) {
+      // The task monitor is the external source of truth for this loading state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAiProcessingRow(null)
     }
   }, [activeAITasks.length, aiProcessingRow])
@@ -652,7 +660,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     setCreatingAIColumn(true)
     try {
       const key = (isAI ? 'ai_' : 'cf_') + Date.now().toString(36)
-      const payload: any = {
+      const payload: Partial<CustomField> = {
         key,
         name: newAIColumnName.trim(),
         field_type: isAI ? 'ai_field' : insertColType,
@@ -679,7 +687,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       try {
         const refreshedAiFields = await aiApi.listAIFields()
         setAiFields(refreshedAiFields)
-      } catch {}
+      } catch (error) { console.error('Failed to refresh AI fields:', error) }
       // AI列立即触发处理（用统一的 startAITask，自动加入监控面板）
       if (isAI) {
         const targetIds = processAll ? patents.map(p => p.id) : selectedIds
@@ -688,8 +696,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         } else {
           try {
             await startAITask(targetIds, key)
-          } catch (e: any) {
-            alert('AI列已创建，但启动AI任务失败: ' + (e?.response?.data?.detail || e?.message || '请先在设置页配置 LLM API'))
+          } catch (error: unknown) {
+            alert('AI列已创建，但启动AI任务失败: ' + getErrorMessage(error, '请先在设置页配置 LLM API'))
           }
         }
       } else {
@@ -702,8 +710,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       setInsertColType('text')
       setInsertColFrozen(false)
       loadPatents()
-    } catch (e: any) {
-      alert('创建列失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('创建列失败: ' + getErrorMessage(error))
     } finally {
       setCreatingAIColumn(false)
     }
@@ -748,8 +756,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         product_id: currentProductId || undefined,
       })
       setStatsData(result.items)
-    } catch (e: any) {
-      alert('统计失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('统计失败: ' + getErrorMessage(error))
     } finally {
       setStatsLoading(false)
     }
@@ -769,8 +777,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       alert(`已创建标签组"${result.group.name}"，共 ${result.total_tags} 个标签${autoApplyTags ? `，已为 ${result.applied_count} 条专利打标` : ''}`)
       setShowStatsToTags(false)
       setShowColumnStats(false)
-    } catch (e: any) {
-      alert('转换失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('转换失败: ' + getErrorMessage(error))
     } finally {
       setConvertingTags(false)
     }
@@ -799,8 +807,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       await loadFields()
       await loadCustomFields()
       loadPatents()
-    } catch (e: any) {
-      alert('创建字段失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('创建字段失败: ' + getErrorMessage(error))
     }
   }
 
@@ -810,8 +818,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       await customFieldApi.delete(id)
       await loadFields()
       await loadCustomFields()
-    } catch (e: any) {
-      alert('删除失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('删除失败: ' + getErrorMessage(error))
     }
   }
 
@@ -842,10 +850,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         try {
           const refreshedAiFields = await aiApi.listAIFields()
           setAiFields(refreshedAiFields)
-        } catch {}
+        } catch (error) { console.error('Failed to refresh AI fields:', error) }
       }
-    } catch (e: any) {
-      alert('删除列失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('删除列失败: ' + getErrorMessage(error))
     }
   }
 
@@ -865,8 +873,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         setSelectedIds(selectedIds.filter(id => id !== patentId))
       }
       await loadPatents()
-    } catch (e: any) {
-      alert('删除失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('删除失败: ' + getErrorMessage(error))
     }
   }
 
@@ -915,8 +923,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       setBulkRiskLevel('')
       clearSelection()
       loadPatents()
-    } catch (e: any) {
-      alert('批量更新失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } catch (error: unknown) {
+      alert('批量更新失败: ' + getErrorMessage(error))
     }
   }
 
@@ -930,8 +938,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       setShowAIBatch(false)
       setAiFieldKey('')
       clearSelection()
-    } catch (e: any) {
-      alert('启动 AI 任务失败: ' + (e?.response?.data?.detail || e?.message || '请先在设置页配置 LLM API'))
+    } catch (error: unknown) {
+      alert('启动 AI 任务失败: ' + getErrorMessage(error, '请先在设置页配置 LLM API'))
     }
   }
 
@@ -944,20 +952,20 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }
 
-  const getFieldValue = (patent: Patent, fieldKey: string): any => {
+  const getFieldValue = (patent: Patent, fieldKey: string): JsonValue => {
     const field = fields.find(f => f.key === fieldKey)
     if (!field) return null
     if (field.is_system) {
-      return (patent as any)[fieldKey]
+      return (patent as unknown as Record<string, JsonValue>)[fieldKey] ?? null
     }
     return patent.custom_fields?.[fieldKey] ?? patent.ai_fields?.[fieldKey] ?? null
   }
 
-  const formatValue = (value: any, field: FieldMeta): string => {
+  const formatValue = (value: JsonValue, field: FieldMeta): string => {
     if (value === null || value === undefined || value === '') return '-'
     if (field.field_type === 'date' && value) {
       try {
-        return new Date(value).toLocaleDateString('zh-CN')
+        return new Date(String(value)).toLocaleDateString('zh-CN')
       } catch {
         return String(value)
       }
@@ -1020,7 +1028,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     setPatents([], total)
   }, [setPatents])
 
-  const getConditionalCellStyle = (fieldKey: string, value: any): React.CSSProperties => {
+  const getConditionalCellStyle = (fieldKey: string, value: JsonValue): React.CSSProperties => {
     const rule = activeView?.conditional_formatting?.find(item => item.field === fieldKey)
     const condition = rule?.conditions?.find(item => {
       const empty = value === null || value === undefined || value === ''
@@ -1086,8 +1094,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       for (let i = 1; i <= totalPages; i++) pages.push(i)
     } else {
       pages.push(1)
-      let start = Math.max(2, page - 2)
-      let end = Math.min(totalPages - 1, page + 2)
+      const start = Math.max(2, page - 2)
+      const end = Math.min(totalPages - 1, page + 2)
       if (start > 2) pages.push('...')
       for (let i = start; i <= end; i++) pages.push(i)
       if (end < totalPages - 1) pages.push('...')
@@ -1096,8 +1104,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     return pages
   }
 
-  const renderCellEditor = (patent: Patent, field: FieldMeta, value: any) => {
-    const save = (v: any) => handleCellSave(patent.id, field.key, v)
+  const renderCellEditor = (patent: Patent, field: FieldMeta, value: JsonValue) => {
+    const save = (v: JsonValue) => handleCellSave(patent.id, field.key, v)
     const cancel = () => setEditingCell(null)
 
     const commonStyle: React.CSSProperties = {
@@ -1115,7 +1123,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         <select
           style={commonStyle}
           autoFocus
-          defaultValue={value || ''}
+          defaultValue={String(value ?? '')}
           onBlur={(e) => save(e.target.value || null)}
           onChange={(e) => {
             if (e.target.value) save(e.target.value)
@@ -1149,7 +1157,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         <textarea
           style={{ ...commonStyle, minHeight: 60, resize: 'vertical' }}
           autoFocus
-          defaultValue={value || ''}
+          defaultValue={String(value ?? '')}
           onBlur={(e) => save(e.target.value || null)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') cancel()
@@ -1164,7 +1172,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         type={field.field_type === 'number' ? 'number' : field.field_type === 'date' ? 'date' : 'text'}
         style={commonStyle}
         autoFocus
-        defaultValue={value || ''}
+        defaultValue={String(value ?? '')}
         onBlur={(e) => save(e.target.value || null)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') cancel()
@@ -1210,7 +1218,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
           >
-            {value || '-'}
+            {String(value ?? '-')}
           </div>
           {(patent.category || patent.subcategory) && (
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
@@ -1229,7 +1237,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
         >
-          {value || '-'}
+          {String(value ?? '-')}
         </span>
       )
     }
@@ -1340,7 +1348,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       {Object.keys(filterValues).length > 0 && (
         <div style={{ display: 'flex', gap: 6, padding: '6px 20px', background: '#fff', borderBottom: '1px solid #e5e7eb', flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: '#6b7280' }}>已筛选：</span>
-          {Object.entries(filterValues).filter(([_, v]) => v).map(([key, value]) => {
+          {Object.entries(filterValues).filter(([, v]) => v).map(([key, value]) => {
             const field = fields.find(f => f.key === key)
             return (
               <span key={key} className="filter-chip">
@@ -2206,7 +2214,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 <select
                   className="form-input"
                   value={insertColType}
-                  onChange={e => setInsertColType(e.target.value as any)}
+                  onChange={e => {
+                    const value = e.target.value
+                    if (['text', 'longtext', 'number', 'date', 'select', 'boolean', 'ai_field'].includes(value)) {
+                      setInsertColType(value as typeof insertColType)
+                    }
+                  }}
                 >
                   <option value="text">文本（手动填写）</option>
                   <option value="longtext">长文本（手动填写）</option>

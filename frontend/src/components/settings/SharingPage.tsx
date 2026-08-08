@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { sharingApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { User, DatabaseMember } from '../../types'
+import { getErrorMessage } from '../../lib/errors'
 
 export default function SharingPage() {
   const { currentUser, setCurrentUser, databases, currentDatabaseId } = useAppStore()
@@ -39,11 +40,15 @@ export default function SharingPage() {
   }, [selectedDbId])
 
   useEffect(() => {
-    loadUsers()
+    // The request updates state asynchronously after the effect starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadUsers()
   }, [loadUsers])
 
   useEffect(() => {
-    loadMembers()
+    // The request updates state asynchronously after the effect starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadMembers()
   }, [loadMembers])
 
   const handleCreateUser = async () => {
@@ -57,8 +62,8 @@ export default function SharingPage() {
       setNewUsername('')
       setNewDisplayName('')
       setShowCreateUser(false)
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || '创建用户失败')
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '创建用户失败'))
     }
   }
 
@@ -87,8 +92,8 @@ export default function SharingPage() {
       setAddMemberUsername('')
       setAddMemberRole('viewer')
       setShowAddMember(false)
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || '添加协作者失败')
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '添加协作者失败'))
     }
   }
 
@@ -97,8 +102,8 @@ export default function SharingPage() {
     try {
       await sharingApi.updateMember(selectedDbId, userId, role)
       setMembers(prev => prev.map(m => m.user_id === userId ? { ...m, role } : m))
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || '更新角色失败')
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '更新角色失败'))
     }
   }
 
@@ -108,8 +113,8 @@ export default function SharingPage() {
     try {
       await sharingApi.removeMember(selectedDbId, userId)
       setMembers(prev => prev.filter(m => m.user_id !== userId))
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || '移除失败')
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '移除失败'))
     }
   }
 
@@ -119,8 +124,8 @@ export default function SharingPage() {
     try {
       await databaseApi.setOwner(selectedDbId, userId)
       loadMembers()
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || '转移所有权失败')
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '转移所有权失败'))
     }
   }
 
