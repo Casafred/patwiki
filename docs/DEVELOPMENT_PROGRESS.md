@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-09（完成 P2-4 单专利 Wiki 分享页）
+最近更新：2026-08-09（完成 P2-6 搜索自动补全）
 
 ---
 
@@ -71,7 +71,7 @@
 | P2-3 | AI 值人工覆盖端点 + UI | 中 | 已完成 | 2026-08-09 完成 GET/PUT/DELETE /patents/{id}/ai-values；AI 引擎普通重算尊重人工值，强制重算可恢复生成值；详情页支持编辑/清除覆盖 |
 | P2-4 | 单专利 wiki 分享页 | 低 | 已完成 | 2026-08-09 新增随机 token 分享链接、撤销/过期控制、只读技术主题页与详情页生成/复制入口；公开 API 使用字段白名单，不输出内部 custom/AI JSON |
 | P2-5 | 修 /products N+1 查询 | 低 | 已完成 | 2026-08-09 已使用按产品聚合计数查询 |
-| P2-6 | 搜索自动补全 | 低 | 未开始 | GET /search/suggest |
+| P2-6 | 搜索自动补全 | 低 | 已完成 | 2026-08-09 新增 GET /search/suggest，支持标题、申请号、公开号、申请人、发明人、分类建议及数据库过滤；列表搜索框接入防抖、键盘和点击选择 |
 | P2-7 | 专利引用/专利族关系图谱 | 低 | 未开始 | AntV G6 |
 
 ---
@@ -101,3 +101,4 @@
 | 2026-08-09 | P2-2 | 导入确认流程新增 ImportBatch 持久化、处理进度/统计/错误状态和新专利 source_batch_id；新增 GET /import/batches、GET /import/batches/{id} 与导入历史页面/导航。通过 2 项历史 API 测试、compileall、ESLint、TypeScript、Vite build 和 diff check。 |
 | 2026-08-09 | P2-3 | 新增 AI 值人工覆盖 GET/PUT/DELETE API、覆盖状态与原始生成值返回、人工修改历史；AI 引擎普通重算保留人工覆盖，强制重算清除覆盖；详情页 AI Tab 接入编辑、清除和重新生成；新增 2 项回归测试。通过 7 项后端测试、compileall、ESLint、TypeScript、Vite build 和 diff check。 |
 | 2026-08-09 | P2-4 | 新增 PatentShare 模型与单专利分享链接 API（创建、列表、撤销、过期校验、访问统计）；新增公开只读技术主题页面、详情页生成/复制链接对话框；公开内容采用字段白名单；新增 2 项分享 API 回归测试。通过分享测试、compileall、ESLint、TypeScript、Vite build 和 diff check。 |
+| 2026-08-09 | P2-6 | 新增 GET /search/suggest 自动补全 API，按数据库过滤并对标题、申请号、公开号、申请人、发明人、分类建议去重排序；列表页搜索框接入防抖、鼠标选择、上下箭头与 Enter 选择；新增 2 项搜索 API 回归测试。通过全量后端测试、compileall、ESLint、TypeScript、Vite build 和 diff check。 |

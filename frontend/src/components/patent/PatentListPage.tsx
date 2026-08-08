@@ -1,9 +1,9 @@
 import { Fragment, useState, useEffect, useCallback } from 'react'
-import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi, linkApi } from '../../api'
+import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi, linkApi, searchApi } from '../../api'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
-  ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget,
+  ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget, SearchSuggestion,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import GroupConfigPanel from '../views/GroupConfigPanel'
@@ -210,6 +210,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [pageSize] = useState(50)
   const [searchText, setSearchText] = useState('')
   const [searchInputText, setSearchInputText] = useState('')
+  const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([])
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [sortField, setSortField] = useState<string>('filing_date')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [fields, setFields] = useState<FieldMeta[]>([])
@@ -455,6 +457,31 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   }, [page])
 
   useEffect(() => {
+    const query = searchInputText.trim()
+    if (query.length < 2) return
+
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void searchApi.suggest(query, currentDatabaseId).then(items => {
+        if (!cancelled) {
+          setSearchSuggestions(items)
+          setActiveSuggestionIndex(-1)
+        }
+      }).catch(error => {
+        if (!cancelled) {
+          console.error('Failed to load search suggestions:', error)
+          setSearchSuggestions([])
+        }
+      })
+    }, 220)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [currentDatabaseId, searchInputText])
+
+  useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (resizing) {
         const diff = e.clientX - resizing.startX
@@ -521,7 +548,42 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     setSearchText(searchInputText)
+    setSearchSuggestions([])
+    setActiveSuggestionIndex(-1)
     setPage(1)
+  }
+
+  const handleSearchInputChange = (value: string) => {
+    setSearchInputText(value)
+    setSearchSuggestions([])
+    setActiveSuggestionIndex(-1)
+  }
+
+  const applySearchSuggestion = (suggestion: SearchSuggestion) => {
+    setSearchInputText(suggestion.value)
+    setSearchText(suggestion.value)
+    setSearchSuggestions([])
+    setActiveSuggestionIndex(-1)
+    setPage(1)
+  }
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      setSearchSuggestions([])
+      setActiveSuggestionIndex(-1)
+      return
+    }
+    if (searchSuggestions.length === 0) return
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setActiveSuggestionIndex(index => (index + 1) % searchSuggestions.length)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setActiveSuggestionIndex(index => index <= 0 ? searchSuggestions.length - 1 : index - 1)
+    } else if (event.key === 'Enter' && activeSuggestionIndex >= 0) {
+      event.preventDefault()
+      applySearchSuggestion(searchSuggestions[activeSuggestionIndex])
+    }
   }
 
   const handleExport = async () => {
@@ -691,6 +753,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     setFilterValues({})
     setSearchText('')
     setSearchInputText('')
+    setSearchSuggestions([])
+    setActiveSuggestionIndex(-1)
     setPage(1)
   }
 
@@ -1462,16 +1526,40 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <form onSubmit={handleSearch} style={{ display: 'flex', gap: 4 }}>
-            <input
-              type="text"
-              className="form-input"
-              style={{ width: 260, height: 32, fontSize: 13 }}
-              placeholder="搜索专利号、标题、申请人..."
-              value={searchInputText}
-              onChange={(e) => setSearchInputText(e.target.value)}
-            />
-          </form>
+          <div className="search-suggest-wrap">
+            <form onSubmit={handleSearch} style={{ display: 'flex', gap: 4 }}>
+              <input
+                type="text"
+                className="form-input"
+                style={{ width: 260, height: 32, fontSize: 13 }}
+                placeholder="搜索专利号、标题、申请人..."
+                value={searchInputText}
+                onChange={(e) => handleSearchInputChange(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                aria-autocomplete="list"
+                aria-controls="patent-search-suggestions"
+              />
+            </form>
+            {searchSuggestions.length > 0 && (
+              <div id="patent-search-suggestions" className="search-suggest-menu" role="listbox">
+                {searchSuggestions.map((suggestion, index) => (
+                  <button
+                    type="button"
+                    key={`${suggestion.kind}-${suggestion.value}`}
+                    className={`search-suggest-item ${index === activeSuggestionIndex ? 'active' : ''}`}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={() => applySearchSuggestion(suggestion)}
+                    role="option"
+                    aria-selected={index === activeSuggestionIndex}
+                  >
+                    <span className="search-suggest-kind">{suggestion.kind_label}</span>
+                    <span className="search-suggest-value">{suggestion.label}</span>
+                    {suggestion.kind !== 'title' && <span className="search-suggest-title">{suggestion.patent_title}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             className={`btn btn-sm ${hasActiveFilters ? 'btn-primary' : 'btn-secondary'}`}
             onClick={handleClearAllFilters}

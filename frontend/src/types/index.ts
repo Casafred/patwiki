@@ -117,6 +117,15 @@ export interface PublicPatentShare {
   patent: PublicPatent
 }
 
+export interface SearchSuggestion {
+  kind: string
+  kind_label: string
+  value: string
+  label: string
+  patent_id: number
+  patent_title: string
+}
+
 // P0-8：库（PatentDatabase）类型
 export interface PatentDatabase {
   id: number

@@ -5,7 +5,7 @@ import type {
   AITask, AIFieldValue, FieldMeta, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
-  AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare,
+  AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
 } from '../types'
 
 export const fieldApi = {
@@ -217,6 +217,11 @@ export const patentShareApi = {
 
   getPublic: (token: string): Promise<PublicPatentShare> =>
     api.get(`/share/patents/${encodeURIComponent(token)}`),
+}
+
+export const searchApi = {
+  suggest: (query: string, databaseId?: number | null, limit = 8): Promise<SearchSuggestion[]> =>
+    api.get('/search/suggest', { params: { q: query, database_id: databaseId ?? undefined, limit } }),
 }
 
 export const productApi = {
