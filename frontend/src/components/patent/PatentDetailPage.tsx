@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
 import type { Patent, Product, Project, Tag, CustomField, AITask, AIFieldValue, PatentHistory } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import PatentShareDialog from './PatentShareDialog'
 
 interface PatentDetailPageProps {
   patentId: number
@@ -27,6 +28,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   const [aiTaskInfo, setAiTaskInfo] = useState<AITask | null>(null)
   const [history, setHistory] = useState<PatentHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [showShareDialog, setShowShareDialog] = useState(false)
 
   const loadPatent = useCallback(async () => {
     setLoading(true)
@@ -215,7 +217,8 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   ]
 
   return (
-    <div style={{ padding: '16px 20px', maxWidth: 1100 }}>
+    <>
+      <div style={{ padding: '16px 20px', maxWidth: 1100 }}>
       {/* 顶部导航 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <button className="btn btn-secondary" onClick={onBack}>返回列表</button>
@@ -247,6 +250,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           </>
         ) : (
           <>
+            <button className="btn btn-secondary" onClick={() => setShowShareDialog(true)}>分享</button>
             <button className="btn btn-primary" onClick={() => setEditing(true)}>编辑</button>
             <button className="btn btn-secondary" onClick={handleDelete} style={{ color: '#dc2626' }}>删除</button>
           </>
@@ -309,7 +313,11 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
         )}
       </div>
-    </div>
+      </div>
+      {showShareDialog && (
+        <PatentShareDialog patentId={patent.id} onClose={() => setShowShareDialog(false)} />
+      )}
+    </>
   )
 }
 

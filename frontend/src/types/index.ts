@@ -58,6 +58,65 @@ export interface Patent {
   updated_at: string
 }
 
+export interface PatentShare {
+  id: number
+  patent_id: number
+  token: string
+  title_override?: string | null
+  is_active: boolean
+  expires_at?: string | null
+  access_count: number
+  last_accessed_at?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  share_path: string
+}
+
+export interface PublicPatent {
+  id: number
+  title: string
+  application_number?: string | null
+  publication_number?: string | null
+  grant_number?: string | null
+  applicant?: string | null
+  inventor?: string | null
+  assignee?: string | null
+  agent?: string | null
+  filing_date?: string | null
+  publication_date?: string | null
+  grant_date?: string | null
+  priority_date?: string | null
+  priority_number?: string | null
+  priority_country?: string | null
+  country?: string | null
+  patent_type?: string | null
+  legal_status?: string | null
+  legal_status_date?: string | null
+  ipc_main?: string | null
+  ipc_all?: string | null
+  cpc_main?: string | null
+  cpc_all?: string | null
+  abstract?: string | null
+  category?: string | null
+  subcategory?: string | null
+  module?: string | null
+  technical_problem?: string | null
+  technical_solution?: string | null
+  technical_effect?: string | null
+  scope_description?: string | null
+  claims?: string | null
+  has_risk?: boolean | null
+  risk_level?: string | null
+  risk_description?: string | null
+  tags: { id: number; name: string; color?: string | null }[]
+  projects: { id: number; name: string }[]
+}
+
+export interface PublicPatentShare {
+  share: PatentShare
+  patent: PublicPatent
+}
+
 // P0-8：库（PatentDatabase）类型
 export interface PatentDatabase {
   id: number

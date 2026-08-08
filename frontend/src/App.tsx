@@ -12,6 +12,7 @@ import ImportModal from './components/import/ImportModal'
 import ImportHistoryPage from './components/import/ImportHistoryPage'
 import AITaskMonitor from './components/ai/AITaskMonitor'
 import ManagementPage from './components/management/ManagementPage'
+import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
 import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
@@ -54,7 +55,12 @@ function PatentDetailRoute() {
   return <PatentDetailPage patentId={parsedPatentId} onBack={() => navigate('/patents')} />
 }
 
-function App() {
+function PublicPatentShareRoute() {
+  const { token } = useParams<{ token: string }>()
+  return <PublicPatentSharePage token={token || ''} />
+}
+
+function WorkspaceApp() {
   const location = useLocation()
   const navigate = useNavigate()
   const currentPage = useMemo(() => getPageFromPath(location.pathname), [location.pathname])
@@ -186,6 +192,18 @@ function App() {
       )}
     </div>
   )
+}
+
+function App() {
+  const location = useLocation()
+  if (location.pathname.startsWith('/share/patents/')) {
+    return (
+      <Routes>
+        <Route path="share/patents/:token" element={<PublicPatentShareRoute />} />
+      </Routes>
+    )
+  }
+  return <WorkspaceApp />
 }
 
 export default App

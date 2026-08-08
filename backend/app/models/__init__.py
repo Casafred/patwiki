@@ -69,6 +69,9 @@ from app.models.view import PatentView, ViewLocalField, PatentViewFieldValue
 # 修改历史
 from app.models.history import PatentHistory
 
+# 单专利只读分享
+from app.models.share import PatentShare
+
 
 __all__ = [
     # enums
@@ -99,4 +102,6 @@ __all__ = [
     "PatentView", "ViewLocalField", "PatentViewFieldValue",
     # history
     "PatentHistory",
+    # public share
+    "PatentShare",
 ]

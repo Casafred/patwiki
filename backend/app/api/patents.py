@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import json
 from typing import Any
 
@@ -189,7 +189,7 @@ def override_ai_value(
         db.add(row)
     row.is_overridden = True
     row.overridden_value = _serialize_ai_value(request.value)
-    row.overridden_at = datetime.utcnow()
+    row.overridden_at = datetime.now(timezone.utc).replace(tzinfo=None)
     current[request.field_key] = request.value
     patent.ai_fields = current
     db.add(PatentHistory(

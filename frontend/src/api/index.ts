@@ -5,7 +5,7 @@ import type {
   AITask, AIFieldValue, FieldMeta, CellUpdateRequest, PatentDatabase,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
-  AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem,
+  AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare,
 } from '../types'
 
 export const fieldApi = {
@@ -203,6 +203,20 @@ export const patentApi = {
   // 修改历史
   getHistory: (patentId: number, limit: number = 100): Promise<PatentHistory[]> =>
     api.get(`/patents/${patentId}/history`, { params: { limit } }),
+}
+
+export const patentShareApi = {
+  list: (patentId: number): Promise<PatentShare[]> =>
+    api.get(`/patents/${patentId}/shares`),
+
+  create: (patentId: number, data: { title_override?: string; expires_at?: string | null } = {}): Promise<PatentShare> =>
+    api.post(`/patents/${patentId}/shares`, data),
+
+  revoke: (patentId: number, token: string): Promise<{ success: boolean; token: string }> =>
+    api.delete(`/patents/${patentId}/shares/${encodeURIComponent(token)}`),
+
+  getPublic: (token: string): Promise<PublicPatentShare> =>
+    api.get(`/share/patents/${encodeURIComponent(token)}`),
 }
 
 export const productApi = {

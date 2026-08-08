@@ -132,6 +132,7 @@ class Patent(Base):
     duplicate_of_patent = relationship("Patent", remote_side=[id])
     # 修改历史
     histories = relationship("PatentHistory", back_populates="patent", cascade="all, delete-orphan", order_by="PatentHistory.id.desc()")
+    shares = relationship("PatentShare", back_populates="patent", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("application_number", "country", name="_app_num_country_uc"),
