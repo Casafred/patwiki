@@ -1,4 +1,132 @@
-SYSTEM_FIELDS_REGISTRY = [
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Iterable, Mapping
+
+
+FieldMeta = dict[str, Any]
+
+
+class FieldHandler:
+    """字段适配器基类，统一字段元数据和记录值访问边界。"""
+
+    def list_fields(self, db) -> list[FieldMeta]:
+        return []
+
+    def get_field(self, key: str, db=None) -> FieldMeta | None:
+        return next((field for field in self.list_fields(db) if field.get("key") == key), None)
+
+    def read_value(self, record: Any, key: str) -> Any:
+        return getattr(record, key, None)
+
+    def write_value(self, record: Any, key: str, value: Any) -> None:
+        setattr(record, key, value)
+
+
+@dataclass(frozen=True)
+class SystemFieldHandler(FieldHandler):
+    definition: Mapping[str, Any]
+
+    def list_fields(self, db=None) -> list[FieldMeta]:
+        return [{**self.definition, "is_system": True}]
+
+
+class CustomFieldHandler(FieldHandler):
+    """把 CustomField 模型转换为表格统一字段元数据。"""
+
+    @staticmethod
+    def _field_type(field: Any) -> str:
+        return field.field_type.value if hasattr(field.field_type, "value") else str(field.field_type)
+
+    def list_fields(self, db) -> list[FieldMeta]:
+        if db is None:
+            return []
+        from app.models import CustomField
+
+        fields = db.query(CustomField).filter(CustomField.is_active == True).order_by(
+            CustomField.sort_order, CustomField.name
+        ).all()
+        return [self.to_meta(field) for field in fields]
+
+    def to_meta(self, field: Any) -> FieldMeta:
+        field_type = self._field_type(field)
+        is_formula = field_type == "formula"
+        return {
+            "key": field.key,
+            "name": field.name,
+            "field_type": field_type,
+            "group_name": field.group_name or "自定义",
+            "options": field.options,
+            "option_labels": None,
+            "width": 140,
+            "sortable": field_type in ("text", "number", "date", "select", "boolean"),
+            "filterable": True,
+            "editable": not is_formula,
+            "frozen": False,
+            "visible": True,
+            "is_system": False,
+            "is_ai": field.ai_config is not None,
+            "is_formula": is_formula,
+            "ai_config": field.ai_config,
+            "formula_config": field.formula_config,
+            "link_config": field.link_config,
+            "lookup_config": field.lookup_config,
+            "rollup_config": field.rollup_config,
+            "description": field.description,
+            "id": field.id,
+            "sort_order": field.sort_order,
+        }
+
+    def read_value(self, record: Any, key: str) -> Any:
+        return (getattr(record, "custom_fields", None) or {}).get(key)
+
+    def write_value(self, record: Any, key: str, value: Any) -> None:
+        values = dict(getattr(record, "custom_fields", None) or {})
+        values[key] = value
+        record.custom_fields = values
+
+
+class FieldRegistry:
+    """可扩展字段处理器注册表。"""
+
+    def __init__(self, handlers: Iterable[FieldHandler] = ()):
+        self._handlers: list[FieldHandler] = list(handlers)
+
+    def register(self, handler: FieldHandler) -> FieldHandler:
+        self._handlers.append(handler)
+        return handler
+
+    def list_fields(self, db=None) -> list[FieldMeta]:
+        fields: list[FieldMeta] = []
+        for handler in self._handlers:
+            fields.extend(handler.list_fields(db))
+        return fields
+
+    def get_field(self, key: str, db=None) -> FieldMeta | None:
+        for handler in self._handlers:
+            field = handler.get_field(key, db)
+            if field is not None:
+                return field
+        return None
+
+    def read_value(self, record: Any, key: str, db=None) -> Any:
+        handler = self._handler_for(key, db)
+        return handler.read_value(record, key) if handler else None
+
+    def write_value(self, record: Any, key: str, value: Any, db=None) -> None:
+        handler = self._handler_for(key, db)
+        if handler is None:
+            raise KeyError(f"Unknown field: {key}")
+        handler.write_value(record, key, value)
+
+    def _handler_for(self, key: str, db=None) -> FieldHandler | None:
+        for handler in self._handlers:
+            if handler.get_field(key, db) is not None:
+                return handler
+        return None
+
+
+SYSTEM_FIELD_DEFINITIONS = [
     {
         "key": "id",
         "name": "ID",
@@ -336,47 +464,15 @@ SYSTEM_FIELDS_REGISTRY = [
     },
 ]
 
-SYSTEM_FIELD_KEYS = {f["key"] for f in SYSTEM_FIELDS_REGISTRY}
+SYSTEM_FIELD_HANDLERS = tuple(SystemFieldHandler(definition) for definition in SYSTEM_FIELD_DEFINITIONS)
+SYSTEM_FIELDS_REGISTRY = [handler.list_fields()[0] for handler in SYSTEM_FIELD_HANDLERS]
+SYSTEM_FIELD_KEYS = {field["key"] for field in SYSTEM_FIELDS_REGISTRY}
+FIELD_REGISTRY = FieldRegistry((*SYSTEM_FIELD_HANDLERS, CustomFieldHandler()))
 
 
-def get_system_field_meta(key: str) -> dict | None:
-    for f in SYSTEM_FIELDS_REGISTRY:
-        if f["key"] == key:
-            return f
-    return None
+def get_system_field_meta(key: str) -> FieldMeta | None:
+    return next((field for field in SYSTEM_FIELDS_REGISTRY if field["key"] == key), None)
 
 
-def get_all_fields_meta(db) -> list[dict]:
-    from app.models import CustomField
-    fields = []
-    for sf in SYSTEM_FIELDS_REGISTRY:
-        fields.append({**sf, "is_system": True})
-    custom_fields = db.query(CustomField).filter(CustomField.is_active == True).order_by(CustomField.sort_order, CustomField.name).all()
-    for cf in custom_fields:
-        fields.append({
-            "key": cf.key,
-            "name": cf.name,
-            "field_type": cf.field_type.value if hasattr(cf.field_type, 'value') else str(cf.field_type),
-            "group_name": cf.group_name or "自定义",
-            "options": cf.options,
-            "option_labels": None,
-            "width": 140,
-            "sortable": cf.field_type.value in ("text", "number", "date", "select", "boolean") if hasattr(cf.field_type, 'value') else True,
-            "filterable": True,
-            "editable": True,
-            "frozen": False,
-            "visible": True,
-            "is_system": False,
-            "is_ai": (cf.ai_config is not None),
-            "is_formula": cf.field_type.value == "formula" if hasattr(cf.field_type, "value") else str(cf.field_type) == "formula",
-            "editable": False if (cf.field_type.value == "formula" if hasattr(cf.field_type, "value") else str(cf.field_type) == "formula") else True,
-            "ai_config": cf.ai_config,
-            "formula_config": cf.formula_config,
-            "link_config": cf.link_config,
-            "lookup_config": cf.lookup_config,
-            "rollup_config": cf.rollup_config,
-            "description": cf.description,
-            "id": cf.id,
-            "sort_order": cf.sort_order,
-        })
-    return fields
+def get_all_fields_meta(db) -> list[FieldMeta]:
+    return FIELD_REGISTRY.list_fields(db)

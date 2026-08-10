@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
@@ -21,6 +21,7 @@ from app.schemas.schemas import (
 )
 from app.services.formula_engine import FormulaError
 from app.services.formula_service import FormulaService
+from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(tags=["meta"])
 
@@ -71,7 +72,7 @@ def create_product(product_in: ProductCreate, db: Session = Depends(get_db)):
 def update_product(product_id: int, product_in: ProductUpdate, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise NotFoundException("Product not found")
     for field, value in product_in.model_dump(exclude_unset=True).items():
         setattr(product, field, value)
     db.commit()
@@ -83,7 +84,7 @@ def update_product(product_id: int, product_in: ProductUpdate, db: Session = Dep
 def delete_product(product_id: int, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise NotFoundException("Product not found")
     db.delete(product)
     db.commit()
     return {"success": True}
@@ -116,7 +117,7 @@ def create_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
 def update_project(project_id: int, project_in: ProjectUpdate, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise NotFoundException("Project not found")
     for field, value in project_in.model_dump(exclude_unset=True).items():
         setattr(project, field, value)
     db.commit()
@@ -128,7 +129,7 @@ def update_project(project_id: int, project_in: ProjectUpdate, db: Session = Dep
 def delete_project(project_id: int, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise NotFoundException("Project not found")
     db.delete(project)
     db.commit()
     return {"success": True}
@@ -152,7 +153,7 @@ def create_tag(tag_in: TagCreate, db: Session = Depends(get_db)):
 def update_tag(tag_id: int, tag_in: TagUpdate, db: Session = Depends(get_db)):
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
-        raise HTTPException(status_code=404, detail="Tag not found")
+        raise NotFoundException("Tag not found")
     for field, value in tag_in.model_dump(exclude_unset=True).items():
         setattr(tag, field, value)
     db.commit()
@@ -164,7 +165,7 @@ def update_tag(tag_id: int, tag_in: TagUpdate, db: Session = Depends(get_db)):
 def delete_tag(tag_id: int, db: Session = Depends(get_db)):
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
-        raise HTTPException(status_code=404, detail="Tag not found")
+        raise NotFoundException("Tag not found")
     db.delete(tag)
     db.commit()
     return {"success": True}
@@ -188,7 +189,7 @@ def create_tag_group(group_in: TagGroupCreate, db: Session = Depends(get_db)):
 def update_tag_group(group_id: int, group_in: TagGroupUpdate, db: Session = Depends(get_db)):
     group = db.query(TagGroup).filter(TagGroup.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Tag group not found")
+        raise NotFoundException("Tag group not found")
     for field, value in group_in.model_dump(exclude_unset=True).items():
         setattr(group, field, value)
     db.commit()
@@ -200,7 +201,7 @@ def update_tag_group(group_id: int, group_in: TagGroupUpdate, db: Session = Depe
 def delete_tag_group(group_id: int, db: Session = Depends(get_db)):
     group = db.query(TagGroup).filter(TagGroup.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Tag group not found")
+        raise NotFoundException("Tag group not found")
     db.delete(group)
     db.commit()
     return {"success": True}
@@ -235,7 +236,7 @@ def create_custom_field(field_in: CustomFieldCreate, db: Session = Depends(get_d
                 is_active=data.get("is_active", True),
             )
         except FormulaError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise BadRequestException(str(exc)) from exc
     field = CustomField(**data)
     db.add(field)
     db.commit()
@@ -247,7 +248,7 @@ def create_custom_field(field_in: CustomFieldCreate, db: Session = Depends(get_d
 def update_custom_field(field_id: int, field_in: CustomFieldUpdate, db: Session = Depends(get_db)):
     field = db.query(CustomField).filter(CustomField.id == field_id).first()
     if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
+        raise NotFoundException("Field not found")
     updates = field_in.model_dump(exclude_unset=True)
     target_type = updates.get("field_type")
     current_type = field.field_type.value if hasattr(field.field_type, "value") else str(field.field_type)
@@ -265,7 +266,7 @@ def update_custom_field(field_id: int, field_in: CustomFieldUpdate, db: Session 
         try:
             return FormulaService.update_formula_field(db, field, updates)
         except FormulaError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise BadRequestException(str(exc)) from exc
     for field_name, value in updates.items():
         setattr(field, field_name, value)
     db.commit()
@@ -277,7 +278,7 @@ def update_custom_field(field_id: int, field_in: CustomFieldUpdate, db: Session 
 def delete_custom_field(field_id: int, db: Session = Depends(get_db)):
     field = db.query(CustomField).filter(CustomField.id == field_id).first()
     if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
+        raise NotFoundException("Field not found")
     if field.field_type == CustomFieldType.FORMULA:
         FormulaService.delete_formula_field(db, field)
     else:
@@ -304,7 +305,7 @@ def create_department(dept_in: DepartmentCreate, db: Session = Depends(get_db)):
 def update_department(department_id: int, dept_in: DepartmentUpdate, db: Session = Depends(get_db)):
     dept = db.query(Department).filter(Department.id == department_id).first()
     if not dept:
-        raise HTTPException(status_code=404, detail="Department not found")
+        raise NotFoundException("Department not found")
     for field, value in dept_in.model_dump(exclude_unset=True).items():
         setattr(dept, field, value)
     db.commit()
@@ -316,7 +317,7 @@ def update_department(department_id: int, dept_in: DepartmentUpdate, db: Session
 def delete_department(department_id: int, db: Session = Depends(get_db)):
     dept = db.query(Department).filter(Department.id == department_id).first()
     if not dept:
-        raise HTTPException(status_code=404, detail="Department not found")
+        raise NotFoundException("Department not found")
     db.delete(dept)
     db.commit()
     return {"success": True}
@@ -340,7 +341,7 @@ def create_person(person_in: PersonCreate, db: Session = Depends(get_db)):
 def update_person(person_id: int, person_in: PersonUpdate, db: Session = Depends(get_db)):
     person = db.query(Person).filter(Person.id == person_id).first()
     if not person:
-        raise HTTPException(status_code=404, detail="Person not found")
+        raise NotFoundException("Person not found")
     for field, value in person_in.model_dump(exclude_unset=True).items():
         setattr(person, field, value)
     db.commit()
@@ -352,7 +353,7 @@ def update_person(person_id: int, person_in: PersonUpdate, db: Session = Depends
 def delete_person(person_id: int, db: Session = Depends(get_db)):
     person = db.query(Person).filter(Person.id == person_id).first()
     if not person:
-        raise HTTPException(status_code=404, detail="Person not found")
+        raise NotFoundException("Person not found")
     db.delete(person)
     db.commit()
     return {"success": True}
@@ -376,7 +377,7 @@ def create_product_line(pl_in: ProductLineCreate, db: Session = Depends(get_db))
 def update_product_line(product_line_id: int, pl_in: ProductLineUpdate, db: Session = Depends(get_db)):
     product_line = db.query(ProductLine).filter(ProductLine.id == product_line_id).first()
     if not product_line:
-        raise HTTPException(status_code=404, detail="Product line not found")
+        raise NotFoundException("Product line not found")
     for field, value in pl_in.model_dump(exclude_unset=True).items():
         setattr(product_line, field, value)
     db.commit()
@@ -388,7 +389,7 @@ def update_product_line(product_line_id: int, pl_in: ProductLineUpdate, db: Sess
 def delete_product_line(product_line_id: int, db: Session = Depends(get_db)):
     product_line = db.query(ProductLine).filter(ProductLine.id == product_line_id).first()
     if not product_line:
-        raise HTTPException(status_code=404, detail="Product line not found")
+        raise NotFoundException("Product line not found")
     db.delete(product_line)
     db.commit()
     return {"success": True}

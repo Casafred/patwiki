@@ -1,7 +1,7 @@
 """通用 Link / Lookup / Rollup API。"""
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -21,12 +21,13 @@ from app.services.link_service import (
     resolve_rollup,
     search_targets,
 )
+from app.core.exceptions import AppException, BadRequestException, NotFoundException
 
 router = APIRouter(tags=["links"])
 
 
-def _relation_error(error: ValueError) -> HTTPException:
-    return HTTPException(status_code=400, detail=str(error))
+def _relation_error(error: ValueError) -> BadRequestException:
+    return BadRequestException(str(error))
 
 
 @router.post("/links", response_model=LinkRecord)
@@ -43,7 +44,7 @@ def create_cross_table_link(request: LinkCreateRequest, db: Session = Depends(ge
         records = list_links(db, request.field_key, request.source_record_id, request.source_table)
         result = next((record for record in records if record["id"] == link.id), None)
         if not result:
-            raise HTTPException(status_code=500, detail="关联创建后无法读取记录")
+            raise AppException("LINK_READ_FAILED", "关联创建后无法读取记录", 500, "关联创建后无法读取记录")
         return result
     except ValueError as error:
         raise _relation_error(error) from error
@@ -62,7 +63,7 @@ def delete_cross_table_link(request: LinkDeleteRequest, db: Session = Depends(ge
     except ValueError as error:
         raise _relation_error(error) from error
     if not removed:
-        raise HTTPException(status_code=404, detail="关联不存在")
+        raise NotFoundException("关联不存在")
     return {"success": True}
 
 
@@ -111,7 +112,7 @@ def resolve_rollup_value(request: RelationResolveRequest, db: Session = Depends(
 @router.post("/relations/resolve-batch")
 def resolve_relations_batch(request: RelationBatchRequest, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     if len(request.record_ids) > 200:
-        raise HTTPException(status_code=400, detail="单次最多解析 200 条记录")
+        raise BadRequestException("单次最多解析 200 条记录")
     try:
         return resolve_relation_batch(db, request.field_key, request.record_ids, request.source_table)
     except ValueError as error:

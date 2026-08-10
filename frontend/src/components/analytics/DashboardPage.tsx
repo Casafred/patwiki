@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { dashboardApi, fieldApi } from '../../api'
+import { dashboardService as dashboardApi, fieldService as fieldApi } from '../../services'
 import { useAppStore } from '../../store'
 import type { Dashboard, DashboardCard, DashboardCardType, DashboardData, FieldMeta, JsonObject, JsonValue } from '../../types'
 import { getErrorMessage } from '../../lib/errors'

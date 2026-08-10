@@ -27,7 +27,9 @@ def _response(code: str, message: str, detail: Any = None, status_code: int = 40
 
 
 async def app_exception_handler(_request: Request, exc: AppException) -> JSONResponse:
-    return _response(exc.code, exc.message, exc.detail, exc.status_code)
+    # detail defaults to message so existing clients that read response.detail keep working.
+    detail = exc.message if exc.detail is None else exc.detail
+    return _response(exc.code, exc.message, detail, exc.status_code)
 
 
 async def http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:

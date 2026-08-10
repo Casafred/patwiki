@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models import CustomField
 from app.services.formula_engine import FormulaError
 from app.services.formula_service import FormulaService
+from app.core.exceptions import BadRequestException, NotFoundException
 
 
 router = APIRouter(prefix="/formula", tags=["formula"])
@@ -46,8 +47,8 @@ class FormulaRecalculateRequest(BaseModel):
     patent_ids: Optional[list[int]] = None
 
 
-def _formula_error(exc: FormulaError) -> HTTPException:
-    return HTTPException(status_code=400, detail=str(exc))
+def _formula_error(exc: FormulaError) -> BadRequestException:
+    return BadRequestException(str(exc))
 
 
 @router.get("/fields")
@@ -68,7 +69,7 @@ def create_formula_field(body: FormulaFieldCreateRequest, db: Session = Depends(
 def update_formula_field(field_id: int, body: FormulaFieldUpdateRequest, db: Session = Depends(get_db)):
     field = db.query(CustomField).filter(CustomField.id == field_id).first()
     if not field:
-        raise HTTPException(status_code=404, detail="公式字段不存在")
+        raise NotFoundException("公式字段不存在")
     updates = body.model_dump(exclude_unset=True)
     if "return_type" in updates:
         config = dict(field.formula_config or {})
@@ -85,7 +86,7 @@ def update_formula_field(field_id: int, body: FormulaFieldUpdateRequest, db: Ses
 def delete_formula_field(field_id: int, db: Session = Depends(get_db)):
     field = db.query(CustomField).filter(CustomField.id == field_id).first()
     if not field:
-        raise HTTPException(status_code=404, detail="公式字段不存在")
+        raise NotFoundException("公式字段不存在")
     try:
         FormulaService.delete_formula_field(db, field)
     except FormulaError as exc:
@@ -123,4 +124,3 @@ def recalculate_formula(
         return FormulaService.recalculate_all(db, formula_key=formula_key, patent_ids=body.patent_ids)
     except FormulaError as exc:
         raise _formula_error(exc) from exc
-

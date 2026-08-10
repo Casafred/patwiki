@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -14,6 +14,7 @@ from app.schemas.schemas import (
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
 from app.models import AIFieldValue, Citation, CustomField, CustomFieldType, Patent as PatentModel, PatentHistory
+from app.core.exceptions import NotFoundException
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -90,7 +91,7 @@ def list_patents(
 def get_patent(patent_id: int, db: Session = Depends(get_db)):
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     return patent
 
 
@@ -105,7 +106,7 @@ def get_patent_graph(
     """返回专利同族与引用关系图数据，供前端图谱组件直接渲染。"""
     root = db.query(PatentModel).filter(PatentModel.id == patent_id).first()
     if not root:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
 
     patents_by_id: dict[int, PatentModel] = {root.id: root}
     edges: list[dict[str, str]] = []
@@ -285,7 +286,7 @@ def _ai_value_response(patent: Patent, db: Session) -> list[dict[str, Any]]:
 def list_ai_values(patent_id: int, db: Session = Depends(get_db)):
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     return _ai_value_response(patent, db)
 
 
@@ -297,10 +298,10 @@ def override_ai_value(
 ):
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     field = db.query(CustomField).filter(CustomField.key == request.field_key).first()
     if not _is_ai_field(field):
-        raise HTTPException(status_code=404, detail="AI field not found")
+        raise NotFoundException("AI field not found")
 
     current = dict(patent.ai_fields or {})
     old_value = current.get(request.field_key)
@@ -341,16 +342,16 @@ def clear_ai_value_override(
 ):
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     field = db.query(CustomField).filter(CustomField.key == field_key).first()
     if not _is_ai_field(field):
-        raise HTTPException(status_code=404, detail="AI field not found")
+        raise NotFoundException("AI field not found")
     row = db.query(AIFieldValue).filter(
         AIFieldValue.patent_id == patent.id,
         AIFieldValue.field_key == field_key,
     ).first()
     if not row or not row.is_overridden:
-        raise HTTPException(status_code=404, detail="AI 字段当前没有人工覆盖")
+        raise NotFoundException("AI 字段当前没有人工覆盖")
 
     current = dict(patent.ai_fields or {})
     old_value = _decode_override_value(row.overridden_value)
@@ -385,14 +386,14 @@ def create_patent(patent_in: PatentCreate, db: Session = Depends(get_db)):
 def update_patent(patent_id: int, patent_in: PatentUpdate, db: Session = Depends(get_db)):
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     return PatentService.update_patent(db, patent, patent_in)
 
 
 @router.delete("/{patent_id}")
 def delete_patent(patent_id: int, db: Session = Depends(get_db)):
     if not PatentService.delete_patent(db, patent_id):
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     return {"success": True}
 
 
@@ -512,7 +513,7 @@ def get_patent_history(
     """查询专利的修改历史记录，按时间倒序。"""
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
 
     records = (
         db.query(PatentHistory)
@@ -547,5 +548,5 @@ def get_field_sources(patent_id: int, db: Session = Depends(get_db)):
     """
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     return ViewService.get_field_sources(db, patent_id)

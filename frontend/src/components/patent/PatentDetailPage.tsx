@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
+import {
+  patentService as patentApi,
+  productService as productApi,
+  projectService as projectApi,
+  tagService as tagApi,
+  aiService as aiApi,
+} from '../../services'
 import type { Patent, Product, Project, Tag, CustomField, AITask, AIFieldValue, PatentHistory } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import PatentShareDialog from './PatentShareDialog'

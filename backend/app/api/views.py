@@ -10,7 +10,7 @@
 - /databases/{db_id}/master-view         获取/创建部门总表视图
 - /patents/{pid}/field-sources           字段来源追溯
 """
-from fastapi import APIRouter, Depends, Query, HTTPException, Body
+from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.orm import Session
 from typing import Optional, Any
 import json
@@ -27,6 +27,7 @@ from app.schemas.schemas import (
 from app.services.view_service import ViewService
 from app.services.form_service import FormService
 from app.models import PatentView, ViewLocalField
+from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(prefix="/views", tags=["views"])
 
@@ -74,7 +75,7 @@ def create_view(view_in: PatentViewCreate, db: Session = Depends(get_db)):
             is_department_master=view_in.is_department_master or False,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise BadRequestException(str(e))
     return ViewService.to_dict(view)
 
 
@@ -82,7 +83,7 @@ def create_view(view_in: PatentViewCreate, db: Session = Depends(get_db)):
 def get_view(view_id: int, db: Session = Depends(get_db)):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     return ViewService.to_dict(view)
 
 
@@ -90,12 +91,12 @@ def get_view(view_id: int, db: Session = Depends(get_db)):
 def update_view(view_id: int, view_in: PatentViewUpdate, db: Session = Depends(get_db)):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     updates = view_in.model_dump(exclude_unset=True)
     try:
         view = ViewService.update_view(db, view, updates)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise BadRequestException(str(e))
     return ViewService.to_dict(view)
 
 
@@ -103,9 +104,9 @@ def update_view(view_id: int, view_in: PatentViewUpdate, db: Session = Depends(g
 def delete_view(view_id: int, db: Session = Depends(get_db)):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     if not ViewService.delete_view(db, view):
-        raise HTTPException(status_code=400, detail="部门总表视图不允许删除")
+        raise BadRequestException("部门总表视图不允许删除")
     return {"success": True}
 
 
@@ -113,9 +114,9 @@ def delete_view(view_id: int, db: Session = Depends(get_db)):
 def archive_view(view_id: int, db: Session = Depends(get_db)):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     if view.is_department_master:
-        raise HTTPException(status_code=400, detail="部门总表视图不允许归档")
+        raise BadRequestException("部门总表视图不允许归档")
     ViewService.archive_view(db, view)
     return ViewService.to_dict(view)
 
@@ -124,11 +125,11 @@ def archive_view(view_id: int, db: Session = Depends(get_db)):
 def get_form_view_definition(view_id: int, db: Session = Depends(get_db)):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     try:
         return FormService.get_definition(db, view)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
 
 
 @router.post("/{view_id}/form/submit")
@@ -139,11 +140,11 @@ def submit_form_view(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     try:
         patent = FormService.submit(db, view, body.data, patent_id=body.patent_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     return {"success": True, "patent_id": patent.id, "patent": patent}
 
 
@@ -155,13 +156,13 @@ def create_form_share_link(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     if view.layout_type != "form":
-        raise HTTPException(status_code=400, detail="只有表单视图可以创建分享链接")
+        raise BadRequestException("只有表单视图可以创建分享链接")
     try:
         link = FormService.create_share_link(db, view, body.expires_days)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     return FormService.serialize_share(link)
 
 
@@ -175,17 +176,17 @@ def get_gantt_view_data(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     ef = None
     if extra_filters:
         try:
             ef = json.loads(extra_filters)
         except (json.JSONDecodeError, TypeError) as exc:
-            raise HTTPException(status_code=400, detail="extra_filters must be valid JSON") from exc
+            raise BadRequestException("extra_filters must be valid JSON") from exc
     try:
         return ViewService.get_gantt_data(db, view, page_size=page_size, extra_filters=ef, search=search)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
 
 
 @router.post("/{view_id}/gantt/update-dates")
@@ -196,13 +197,13 @@ def update_gantt_view_dates(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     try:
         patent = ViewService.update_gantt_dates(
             db, view, body.patent_id, body.new_start, body.new_end, changed_by=body.changed_by,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     return {
         "success": True,
         "patent_id": patent.id,
@@ -228,7 +229,7 @@ def list_view_patents(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
 
     ef = None
     if extra_filters:
@@ -272,14 +273,14 @@ def get_grouped_view_patents(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
 
     ef = None
     if extra_filters:
         try:
             ef = json.loads(extra_filters)
         except (json.JSONDecodeError, TypeError):
-            raise HTTPException(status_code=400, detail="extra_filters must be valid JSON")
+            raise BadRequestException("extra_filters must be valid JSON")
 
     return ViewService.get_grouped_data(
         db, view, page=page, page_size=page_size, extra_filters=ef,
@@ -298,14 +299,14 @@ def get_kanban_view_data(
     """获取看板列和卡片数据。"""
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
 
     ef = None
     if extra_filters:
         try:
             ef = json.loads(extra_filters)
         except (json.JSONDecodeError, TypeError):
-            raise HTTPException(status_code=400, detail="extra_filters must be valid JSON")
+            raise BadRequestException("extra_filters must be valid JSON")
 
     return ViewService.get_kanban_data(
         db, view, page_size=page_size, extra_filters=ef, search=search,
@@ -321,13 +322,13 @@ def move_kanban_card(
     """拖拽卡片到另一列，并将分组字段写回主表。"""
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     try:
         patent = ViewService.move_kanban_card(
             db, view, body.patent_id, body.to_value, changed_by=body.changed_by,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise BadRequestException(str(e))
 
     config = ViewService.validate_kanban_config(view.kanban_config)
     return {
@@ -348,12 +349,12 @@ def update_group_config(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     config = body.get("group_by_config", body)
     try:
         view = ViewService.update_view(db, view, {"group_by_config": config})
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise BadRequestException(str(e))
     return {"success": True, "group_by_config": view.group_by_config or {"fields": []}}
 
 
@@ -365,12 +366,12 @@ def update_conditional_formatting(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     config = body.get("conditional_formatting", []) if isinstance(body, dict) else body
     try:
         view = ViewService.update_view(db, view, {"conditional_formatting": config})
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise BadRequestException(str(e))
     return {"success": True, "conditional_formatting": view.conditional_formatting or []}
 
 
@@ -385,13 +386,13 @@ def update_patent_field_in_view(
     """在视图中编辑共享字段——写入大表并记录来源视图。"""
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     try:
         patent = ViewService.update_shared_field_in_view(
             db, view, patent_id, field_key, body.value, changed_by=body.changed_by,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise BadRequestException(str(e))
     return {
         "success": True,
         "patent_id": patent.id,
@@ -407,7 +408,7 @@ def update_patent_field_in_view(
 def list_local_fields(view_id: int, db: Session = Depends(get_db)):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     return [ViewService.local_field_to_dict(f) for f in view.local_fields]
 
 
@@ -419,7 +420,7 @@ def create_local_field(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     try:
         field = ViewService.create_local_field(
             db, view,
@@ -433,7 +434,7 @@ def create_local_field(
             sort_order=field_in.sort_order,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise BadRequestException(str(e))
     return ViewService.local_field_to_dict(field)
 
 
@@ -449,7 +450,7 @@ def update_local_field(
         ViewLocalField.view_id == view_id,
     ).first()
     if not field:
-        raise HTTPException(status_code=404, detail="Local field not found")
+        raise NotFoundException("Local field not found")
     updates = field_in.model_dump(exclude_unset=True)
     field = ViewService.update_local_field(db, field, updates)
     return ViewService.local_field_to_dict(field)
@@ -462,9 +463,9 @@ def delete_local_field(view_id: int, field_id: int, db: Session = Depends(get_db
         ViewLocalField.view_id == view_id,
     ).first()
     if not field:
-        raise HTTPException(status_code=404, detail="Local field not found")
+        raise NotFoundException("Local field not found")
     if not ViewService.delete_local_field(db, field):
-        raise HTTPException(status_code=400, detail="已提升的字段不允许直接删除，请先取消提升")
+        raise BadRequestException("已提升的字段不允许直接删除，请先取消提升")
     return {"success": True}
 
 
@@ -480,13 +481,13 @@ def set_local_field_value(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     try:
         vfv = ViewService.set_local_field_value(
             db, view, patent_id, field_key, body.value, changed_by=body.changed_by,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise BadRequestException(str(e))
     return {
         "success": True,
         "patent_id": vfv.patent_id,
@@ -505,7 +506,7 @@ def get_local_field_value(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     values = ViewService.get_local_field_values(db, view, patent_id)
     return {
         "patent_id": patent_id,
@@ -526,15 +527,15 @@ def promote_local_field(
 ):
     view = ViewService.get_view(db, view_id)
     if not view:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise NotFoundException("View not found")
     field = db.query(ViewLocalField).filter(
         ViewLocalField.id == field_id,
         ViewLocalField.view_id == view_id,
     ).first()
     if not field:
-        raise HTTPException(status_code=404, detail="Local field not found")
+        raise NotFoundException("Local field not found")
     if field.is_promoted:
-        raise HTTPException(status_code=400, detail=f"字段已提升为全局字段：{field.promoted_field_key}")
+        raise BadRequestException(f"字段已提升为全局字段：{field.promoted_field_key}")
     cf = ViewService.promote_local_field(
         db, view, field,
         global_name=body.global_name,

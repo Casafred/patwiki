@@ -5,7 +5,7 @@
 - 库的所有者可添加/移除协作者，并设置角色（editor / viewer）
 - 不强制鉴权（MVP 阶段，所有 API 公开访问）
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import Optional
@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import User, DatabaseMembership, PatentDatabase
+from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(tags=["sharing"])
 
@@ -73,7 +74,7 @@ def list_users(db: Session = Depends(get_db)):
 @router.post("/users", response_model=UserOut)
 def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == user_in.username).first():
-        raise HTTPException(status_code=400, detail=f"用户名 '{user_in.username}' 已存在")
+        raise BadRequestException(f"用户名 '{user_in.username}' 已存在")
     user = User(
         username=user_in.username,
         display_name=user_in.display_name or user_in.username,
@@ -90,7 +91,7 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
 def get_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundException("User not found")
     return user
 
 
@@ -102,7 +103,7 @@ def list_members(database_id: int, db: Session = Depends(get_db)):
     """列出库的所有协作者（包括所有者）"""
     db_obj = db.query(PatentDatabase).filter(PatentDatabase.id == database_id).first()
     if not db_obj:
-        raise HTTPException(status_code=404, detail="Database not found")
+        raise NotFoundException("Database not found")
 
     members = db.query(DatabaseMembership).filter(DatabaseMembership.database_id == database_id).all()
     result = []
@@ -123,7 +124,7 @@ def add_member(database_id: int, member_in: MemberAdd, db: Session = Depends(get
     """添加协作者（按 user_id 或 username 查找用户）"""
     db_obj = db.query(PatentDatabase).filter(PatentDatabase.id == database_id).first()
     if not db_obj:
-        raise HTTPException(status_code=404, detail="Database not found")
+        raise NotFoundException("Database not found")
 
     # 找用户
     user = None
@@ -138,7 +139,7 @@ def add_member(database_id: int, member_in: MemberAdd, db: Session = Depends(get
             db.commit()
             db.refresh(user)
     if not user:
-        raise HTTPException(status_code=400, detail="必须提供 user_id 或 username")
+        raise BadRequestException("必须提供 user_id 或 username")
 
     # 已存在则更新角色
     existing = db.query(DatabaseMembership).filter(
@@ -177,11 +178,11 @@ def update_member(database_id: int, user_id: int, member_in: MemberUpdate, db: S
         DatabaseMembership.database_id == database_id,
     ).first()
     if not membership:
-        raise HTTPException(status_code=404, detail="Membership not found")
+        raise NotFoundException("Membership not found")
     if membership.role == "owner":
-        raise HTTPException(status_code=400, detail="不能修改所有者角色")
+        raise BadRequestException("不能修改所有者角色")
     if member_in.role not in ("editor", "viewer"):
-        raise HTTPException(status_code=400, detail="role 必须是 editor 或 viewer")
+        raise BadRequestException("role 必须是 editor 或 viewer")
     membership.role = member_in.role
     db.commit()
     db.refresh(membership)
@@ -199,9 +200,9 @@ def remove_member(database_id: int, user_id: int, db: Session = Depends(get_db))
         DatabaseMembership.database_id == database_id,
     ).first()
     if not membership:
-        raise HTTPException(status_code=404, detail="Membership not found")
+        raise NotFoundException("Membership not found")
     if membership.role == "owner":
-        raise HTTPException(status_code=400, detail="不能移除所有者")
+        raise BadRequestException("不能移除所有者")
     db.delete(membership)
     db.commit()
     return {"success": True}
@@ -215,7 +216,7 @@ def list_user_databases(user_id: int, db: Session = Depends(get_db)):
     """列出与某用户共享的所有库（含其角色）"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundException("User not found")
     memberships = db.query(DatabaseMembership).filter(DatabaseMembership.user_id == user_id).all()
     result = []
     for m in memberships:

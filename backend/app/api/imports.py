@@ -5,7 +5,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text, or_
@@ -22,6 +22,7 @@ from app.services.patent_service import PatentService
 from app.services.merge_service import merge_patent_data, _is_empty
 from app.config import settings
 from app.models import CustomField, ImportBatch, ImportBatchStatus, Patent
+from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(tags=["import"])
 
@@ -138,10 +139,7 @@ def confirm_import(
     # 从磁盘读取会话文件（不再依赖内存索引，避免后端重启导致会话丢失）
     temp_path = TEMP_DIR / f"{req.import_id}.bin"
     if not temp_path.exists():
-        raise HTTPException(
-            status_code=400,
-            detail="导入会话已过期或文件不存在，请重新上传文件"
-        )
+        raise BadRequestException("导入会话已过期或文件不存在，请重新上传文件")
     # 基于文件 mtime 检查 TTL，避免后端重启后 created_at 被重置
     file_mtime = temp_path.stat().st_mtime
     if time.time() - file_mtime > TEMP_TTL:
@@ -149,10 +147,7 @@ def confirm_import(
             os.remove(temp_path)
         except OSError:
             pass
-        raise HTTPException(
-            status_code=400,
-            detail=f"导入会话已过期（超过{TEMP_TTL // 3600}小时），请重新上传文件"
-        )
+        raise BadRequestException(f"导入会话已过期（超过{TEMP_TTL // 3600}小时），请重新上传文件")
     # 同步内存索引（便于 /import/batches 等查询）
     info = TEMP_FILES.get(req.import_id)
     if not info:
@@ -168,12 +163,12 @@ def confirm_import(
         from app.services.database_service import DatabaseService
         default_db = DatabaseService.get_default_database(db)
         if not default_db:
-            raise HTTPException(status_code=400, detail="未指定库且系统无默认库，请先创建库")
+            raise BadRequestException("未指定库且系统无默认库，请先创建库")
         database_id = default_db.id
     else:
         from app.services.database_service import DatabaseService
         if not DatabaseService.get_database(db, database_id):
-            raise HTTPException(status_code=400, detail=f"库不存在：{database_id}")
+            raise BadRequestException(f"库不存在：{database_id}")
 
     with open(info["path"], "rb") as f:
         content = f.read()
@@ -445,7 +440,7 @@ def list_import_batches(
         try:
             query = query.filter(ImportBatch.status == ImportBatchStatus(status))
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"不支持的导入状态：{status}") from exc
+            raise BadRequestException(f"不支持的导入状态：{status}") from exc
     return query.order_by(ImportBatch.created_at.desc(), ImportBatch.id.desc()).limit(limit).all()
 
 
@@ -453,7 +448,7 @@ def list_import_batches(
 def get_import_batch(batch_id: int, db: Session = Depends(get_db)):
     batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
     if not batch:
-        raise HTTPException(status_code=404, detail="导入批次不存在")
+        raise NotFoundException("导入批次不存在")
     return batch
 
 
@@ -507,7 +502,7 @@ def export_patents(
             has_risk=has_risk,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     return StreamingResponse(
         BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

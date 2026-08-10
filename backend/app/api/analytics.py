@@ -4,7 +4,7 @@
 - AGENTAI 看板：基层代码统计 + AI 多维分析（两阶段）
 - 统计结果转标签体系：把某列的去重值批量转为标签
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from typing import Optional, Any

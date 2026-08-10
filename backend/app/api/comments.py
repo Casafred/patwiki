@@ -3,22 +3,24 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Comment
 from app.schemas.schemas import CommentCreate, CommentResolveRequest, CommentUpdate
 from app.services.comment_service import CommentService
+from app.core.exceptions import BadRequestException, NotFoundException
 
 
 router = APIRouter(tags=["comments"])
 
 
-def _handle_error(exc: ValueError) -> HTTPException:
+def _handle_error(exc: ValueError) -> BadRequestException | NotFoundException:
     message = str(exc)
-    status = 404 if message in {"专利不存在", "评论不存在"} else 400
-    return HTTPException(status_code=status, detail=message)
+    if message in {"专利不存在", "评论不存在"}:
+        return NotFoundException(message)
+    return BadRequestException(message)
 
 
 @router.get("/patents/{patent_id}/comments")

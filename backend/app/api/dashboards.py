@@ -4,13 +4,14 @@ from __future__ import annotations
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Dashboard, PatentDatabase
 from app.schemas.schemas import DashboardCard, DashboardCardUpdate, DashboardCreate, DashboardUpdate
 from app.services.dashboard_service import DashboardService
+from app.core.exceptions import BadRequestException, NotFoundException
 
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
@@ -31,7 +32,7 @@ def _dashboard_dict(dashboard: Dashboard) -> dict:
 def _get_dashboard(db: Session, dashboard_id: int) -> Dashboard:
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+        raise NotFoundException("Dashboard not found")
     return dashboard
 
 
@@ -46,11 +47,11 @@ def list_dashboards(database_id: Optional[int] = None, db: Session = Depends(get
 @router.post("")
 def create_dashboard(body: DashboardCreate, db: Session = Depends(get_db)):
     if not db.query(PatentDatabase).filter(PatentDatabase.id == body.database_id).first():
-        raise HTTPException(status_code=404, detail="Database not found")
+        raise NotFoundException("Database not found")
     try:
         layout = DashboardService.normalize_layout(body.layout)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     dashboard = Dashboard(
         database_id=body.database_id,
         name=body.name.strip(),
@@ -76,7 +77,7 @@ def update_dashboard(dashboard_id: int, body: DashboardUpdate, db: Session = Dep
         try:
             updates["layout"] = DashboardService.normalize_layout(updates["layout"])
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise BadRequestException(str(exc)) from exc
     for key, value in updates.items():
         if key == "name" and value is not None:
             value = value.strip()
@@ -101,7 +102,7 @@ def get_dashboard_data(dashboard_id: int, view_id: Optional[int] = Query(None), 
     try:
         return DashboardService.get_data(db, dashboard, view_id=view_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
 
 
 @router.post("/{dashboard_id}/cards")
@@ -112,7 +113,7 @@ def add_dashboard_card(dashboard_id: int, body: DashboardCard, db: Session = Dep
     try:
         card = DashboardService.normalize_card(raw, len(dashboard.layout or []))
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     dashboard.layout = [*(dashboard.layout or []), card]
     db.add(dashboard)
     db.commit()
@@ -126,13 +127,13 @@ def update_dashboard_card(dashboard_id: int, card_id: str, body: DashboardCardUp
     cards = list(dashboard.layout or [])
     current = next((item for item in cards if item.get("id") == card_id), None)
     if current is None:
-        raise HTTPException(status_code=404, detail="Dashboard card not found")
+        raise NotFoundException("Dashboard card not found")
     raw = {**current, **body.model_dump(exclude_unset=True)}
     raw["id"] = card_id
     try:
         updated = DashboardService.normalize_card(raw, cards.index(current))
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     cards[cards.index(current)] = updated
     dashboard.layout = cards
     db.add(dashboard)
@@ -146,7 +147,7 @@ def delete_dashboard_card(dashboard_id: int, card_id: str, db: Session = Depends
     dashboard = _get_dashboard(db, dashboard_id)
     cards = [item for item in (dashboard.layout or []) if item.get("id") != card_id]
     if len(cards) == len(dashboard.layout or []):
-        raise HTTPException(status_code=404, detail="Dashboard card not found")
+        raise NotFoundException("Dashboard card not found")
     dashboard.layout = cards
     db.add(dashboard)
     db.commit()

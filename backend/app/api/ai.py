@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Optional
 import json
@@ -8,6 +8,7 @@ from app.database import get_db, SessionLocal
 from app.schemas.schemas import AIProcessRequest, AITaskResponse
 from app.models import AITask, Patent, AIFieldValue, CustomField
 from app.config import settings
+from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -20,7 +21,7 @@ async def start_ai_process(
 ):
     field = db.query(CustomField).filter(CustomField.key == req.field_key).first()
     if not field:
-        raise HTTPException(status_code=404, detail=f"AI field '{req.field_key}' not found")
+        raise NotFoundException(f"AI field '{req.field_key}' not found")
 
     task = AITask(
         task_type="field_calculation",
@@ -52,7 +53,7 @@ async def start_ai_process(
 def get_task_status(task_id: int, db: Session = Depends(get_db)):
     task = db.query(AITask).filter(AITask.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundException("Task not found")
     return task
 
 
@@ -92,9 +93,9 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     """删除任务记录（仅允许删除已完成/失败的任务）"""
     task = db.query(AITask).filter(AITask.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundException("Task not found")
     if task.status in ("pending", "processing", "running"):
-        raise HTTPException(status_code=400, detail="运行中的任务不能删除")
+        raise BadRequestException("运行中的任务不能删除")
     db.delete(task)
     db.commit()
     return {"success": True}

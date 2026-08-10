@@ -1,6 +1,15 @@
 import { Fragment, useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { patentApi, fieldApi, aiApi, customFieldApi, analyticsApi, viewApi, linkApi, searchApi } from '../../api'
+import {
+  patentService as patentApi,
+  fieldService as fieldApi,
+  aiService as aiApi,
+  customFieldService as customFieldApi,
+  analyticsService as analyticsApi,
+  viewService as viewApi,
+  relationService as linkApi,
+  searchService as searchApi,
+} from '../../services'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,

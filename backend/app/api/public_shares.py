@@ -3,12 +3,13 @@ from datetime import datetime, timezone
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import Patent, PatentShare
+from app.core.exceptions import NotFoundException
 
 router = APIRouter(tags=["patent-shares"])
 
@@ -68,7 +69,7 @@ def create_patent_share(
 ):
     patent = db.query(Patent).filter(Patent.id == patent_id).first()
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
 
     share = PatentShare(
         patent_id=patent_id,
@@ -85,7 +86,7 @@ def create_patent_share(
 @router.get("/patents/{patent_id}/shares", response_model=list[PatentShareOut])
 def list_patent_shares(patent_id: int, db: Session = Depends(get_db)):
     if not db.query(Patent.id).filter(Patent.id == patent_id).first():
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     shares = db.query(PatentShare).filter(
         PatentShare.patent_id == patent_id,
     ).order_by(PatentShare.id.desc()).all()
@@ -99,7 +100,7 @@ def revoke_patent_share(patent_id: int, token: str, db: Session = Depends(get_db
         PatentShare.token == token,
     ).first()
     if not share:
-        raise HTTPException(status_code=404, detail="Share link not found")
+        raise NotFoundException("Share link not found")
     share.is_active = False
     db.commit()
     return {"success": True, "token": token}
@@ -139,7 +140,7 @@ def get_public_patent_share(token: str, db: Session = Depends(get_db)):
         joinedload(PatentShare.patent).joinedload(Patent.projects),
     ).filter(PatentShare.token == token).first()
     if not share or not share.is_active or _is_expired(share):
-        raise HTTPException(status_code=404, detail="Share link not found or expired")
+        raise NotFoundException("Share link not found or expired")
 
     share.access_count = (share.access_count or 0) + 1
     share.last_accessed_at = datetime.now(timezone.utc).replace(tzinfo=None)

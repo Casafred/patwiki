@@ -4,7 +4,7 @@
 P0-13：新增 /databases/{id}/master-view 端点，获取或创建部门总表视图。
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,7 @@ from app.database import get_db
 from app.services.database_service import DatabaseService
 from app.services.view_service import ViewService
 from app.models import User
+from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(prefix="/databases", tags=["database"])
 
@@ -50,7 +51,7 @@ def list_databases(
 def get_default_database(db: Session = Depends(get_db)):
     database = DatabaseService.get_default_database(db)
     if not database:
-        raise HTTPException(status_code=404, detail="未找到任何数据库")
+        raise NotFoundException("未找到任何数据库")
     return DatabaseService.to_dict(database)
 
 
@@ -63,7 +64,7 @@ def create_database(
     owner_id = req.owner_id
     if owner_id is not None:
         if not db.query(User).filter(User.id == owner_id).first():
-            raise HTTPException(status_code=400, detail=f"用户不存在：{owner_id}")
+            raise BadRequestException(f"用户不存在：{owner_id}")
     database = DatabaseService.create_database(
         db,
         name=req.name,
@@ -85,9 +86,9 @@ def set_owner(
     """设置/转移库的所有者"""
     database = DatabaseService.get_database(db, database_id)
     if not database:
-        raise HTTPException(status_code=404, detail="数据库不存在")
+        raise NotFoundException("数据库不存在")
     if not db.query(User).filter(User.id == req.user_id).first():
-        raise HTTPException(status_code=400, detail=f"用户不存在：{req.user_id}")
+        raise BadRequestException(f"用户不存在：{req.user_id}")
     updated = DatabaseService.set_owner(db, database, req.user_id)
     return DatabaseService.to_dict(updated)
 
@@ -99,7 +100,7 @@ def get_database(
 ):
     database = DatabaseService.get_database(db, database_id)
     if not database:
-        raise HTTPException(status_code=404, detail="数据库不存在")
+        raise NotFoundException("数据库不存在")
     return DatabaseService.to_dict(database)
 
 
@@ -111,7 +112,7 @@ def update_database(
 ):
     database = DatabaseService.get_database(db, database_id)
     if not database:
-        raise HTTPException(status_code=404, detail="数据库不存在")
+        raise NotFoundException("数据库不存在")
     updated = DatabaseService.update_database(
         db,
         database,
@@ -131,9 +132,9 @@ def archive_database(
 ):
     database = DatabaseService.get_database(db, database_id)
     if not database:
-        raise HTTPException(status_code=404, detail="数据库不存在")
+        raise NotFoundException("数据库不存在")
     if database.is_default:
-        raise HTTPException(status_code=400, detail="默认数据库不可归档")
+        raise BadRequestException("默认数据库不可归档")
     archived = DatabaseService.archive_database(db, database)
     return DatabaseService.to_dict(archived)
 
@@ -152,24 +153,20 @@ def delete_database(
     """
     database = DatabaseService.get_database(db, database_id)
     if not database:
-        raise HTTPException(status_code=404, detail="数据库不存在")
+        raise NotFoundException("数据库不存在")
     if database.is_default:
-        raise HTTPException(status_code=400, detail="默认数据库不可删除")
+        raise BadRequestException("默认数据库不可删除")
     # 先查专利数，给前端更友好的提示
     from app.models import Patent as PatentModel
     from sqlalchemy import func as _func
     patent_count = db.query(_func.count(PatentModel.id)).filter(PatentModel.database_id == database_id).scalar()
     if patent_count and patent_count > 0 and not force:
-        raise HTTPException(
-            status_code=400,
-            detail=f"库中仍有 {patent_count} 条专利，无法直接删除。请先清空专利，或使用 force=true 级联删除（将一并删除所有专利）。",
+        raise BadRequestException(
+            f"库中仍有 {patent_count} 条专利，无法直接删除。请先清空专利，或使用 force=true 级联删除（将一并删除所有专利）。"
         )
     ok = DatabaseService.delete_database(db, database, force=force)
     if not ok:
-        raise HTTPException(
-            status_code=400,
-            detail="删除失败（可能为默认库或发生异常）",
-        )
+        raise BadRequestException("删除失败（可能为默认库或发生异常）")
     return {"success": True, "force": force, "deleted_patent_count": patent_count or 0}
 
 
@@ -191,7 +188,7 @@ def get_or_create_master_view(database_id: int, db: Session = Depends(get_db)):
     """
     database = DatabaseService.get_database(db, database_id)
     if not database:
-        raise HTTPException(status_code=404, detail="数据库不存在")
+        raise NotFoundException("数据库不存在")
 
     view = ViewService.get_department_master_view(db, database_id)
     if not view:

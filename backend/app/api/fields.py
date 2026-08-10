@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Any
@@ -9,6 +9,7 @@ from app.models import CustomField, CustomFieldType, Patent, PatentHistory
 from app.services.field_registry import get_all_fields_meta, SYSTEM_FIELD_KEYS, get_system_field_meta
 from app.services.patent_service import PatentService, _is_value_changed, _stringify_value
 from app.services.formula_service import FormulaService
+from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(tags=["fields"])
 
@@ -44,12 +45,12 @@ def update_cell(
 ):
     patent = db.query(Patent).filter(Patent.id == patent_id).first()
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
 
     history_entry = None
     if field_key in SYSTEM_FIELD_KEYS:
         if field_key in ("id", "created_at", "updated_at"):
-            raise HTTPException(status_code=400, detail=f"Field '{field_key}' is read-only")
+            raise BadRequestException(f"Field '{field_key}' is read-only")
         value = req.value
         if field_key in ("filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date") and value:
             try:
@@ -72,7 +73,7 @@ def update_cell(
     else:
         custom_field = db.query(CustomField).filter(CustomField.key == field_key).first()
         if custom_field and custom_field.field_type == CustomFieldType.FORMULA:
-            raise HTTPException(status_code=400, detail="公式字段为只读字段，不能直接编辑")
+            raise BadRequestException("公式字段为只读字段，不能直接编辑")
         # JSON 列没有 MutableDict 追踪，先复制再赋值才能稳定触发更新。
         current = dict(patent.custom_fields or {})
         old_v = current.get(field_key)
@@ -105,6 +106,6 @@ def update_fields_batch(
 ):
     patent = db.query(Patent).filter(Patent.id == patent_id).first()
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found")
+        raise NotFoundException("Patent not found")
     PatentService.update_patent(db, patent, updates, source="manual")
     return {"success": True}

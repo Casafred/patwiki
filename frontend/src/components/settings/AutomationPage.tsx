@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { automationApi, fieldApi, patentApi } from '../../api'
+import {
+  automationService as automationApi,
+  fieldService as fieldApi,
+  patentService as patentApi,
+} from '../../services'
 import { useAppStore } from '../../store'
 import type { AutomationLog, AutomationRule, FieldMeta, JsonObject } from '../../types'
 import { getErrorMessage } from '../../lib/errors'

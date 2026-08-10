@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import AutomationLog, AutomationRule, Patent, PatentDatabase
 from app.schemas.schemas import AutomationManualExecuteRequest, AutomationRuleCreate, AutomationRuleUpdate
 from app.services.automation_service import AutomationEngine
+from app.core.exceptions import BadRequestException, NotFoundException
 
 
 router = APIRouter(prefix="/automation", tags=["automation"])
@@ -55,11 +56,11 @@ def list_rules(database_id: Optional[int] = None, include_disabled: bool = True,
 @router.post("/rules")
 def create_rule(body: AutomationRuleCreate, db: Session = Depends(get_db)):
     if not db.query(PatentDatabase).filter(PatentDatabase.id == body.database_id).first():
-        raise HTTPException(status_code=404, detail="Database not found")
+        raise NotFoundException("Database not found")
     try:
         trigger, conditions, actions = _validate_rule(body.model_dump())
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     rule = AutomationRule(
         database_id=body.database_id,
         name=body.name.strip(),
@@ -80,7 +81,7 @@ def create_rule(body: AutomationRuleCreate, db: Session = Depends(get_db)):
 def get_rule(rule_id: int, db: Session = Depends(get_db)):
     rule = db.query(AutomationRule).filter(AutomationRule.id == rule_id).first()
     if not rule:
-        raise HTTPException(status_code=404, detail="Automation rule not found")
+        raise NotFoundException("Automation rule not found")
     return _rule_dict(rule)
 
 
@@ -88,7 +89,7 @@ def get_rule(rule_id: int, db: Session = Depends(get_db)):
 def update_rule(rule_id: int, body: AutomationRuleUpdate, db: Session = Depends(get_db)):
     rule = db.query(AutomationRule).filter(AutomationRule.id == rule_id).first()
     if not rule:
-        raise HTTPException(status_code=404, detail="Automation rule not found")
+        raise NotFoundException("Automation rule not found")
     updates = body.model_dump(exclude_unset=True)
     try:
         trigger, conditions, actions = AutomationEngine.validate_config(
@@ -97,7 +98,7 @@ def update_rule(rule_id: int, body: AutomationRuleUpdate, db: Session = Depends(
             updates.get("action_config", rule.action_config or []),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestException(str(exc)) from exc
     updates["trigger_config"] = trigger
     updates["condition_config"] = conditions
     updates["action_config"] = actions
@@ -115,7 +116,7 @@ def update_rule(rule_id: int, body: AutomationRuleUpdate, db: Session = Depends(
 def delete_rule(rule_id: int, db: Session = Depends(get_db)):
     rule = db.query(AutomationRule).filter(AutomationRule.id == rule_id).first()
     if not rule:
-        raise HTTPException(status_code=404, detail="Automation rule not found")
+        raise NotFoundException("Automation rule not found")
     db.delete(rule)
     db.commit()
     return {"success": True}
@@ -125,7 +126,7 @@ def delete_rule(rule_id: int, db: Session = Depends(get_db)):
 def toggle_rule(rule_id: int, db: Session = Depends(get_db)):
     rule = db.query(AutomationRule).filter(AutomationRule.id == rule_id).first()
     if not rule:
-        raise HTTPException(status_code=404, detail="Automation rule not found")
+        raise NotFoundException("Automation rule not found")
     rule.is_enabled = not rule.is_enabled
     db.add(rule)
     db.commit()
@@ -137,20 +138,20 @@ def toggle_rule(rule_id: int, db: Session = Depends(get_db)):
 def execute_rule(rule_id: int, body: AutomationManualExecuteRequest, db: Session = Depends(get_db)):
     rule = db.query(AutomationRule).filter(AutomationRule.id == rule_id).first()
     if not rule:
-        raise HTTPException(status_code=404, detail="Automation rule not found")
+        raise NotFoundException("Automation rule not found")
     if not rule.is_enabled:
-        raise HTTPException(status_code=400, detail="自动化规则已禁用")
+        raise BadRequestException("自动化规则已禁用")
     if body.patent_id is None:
-        raise HTTPException(status_code=400, detail="手动执行需要 patent_id")
+        raise BadRequestException("手动执行需要 patent_id")
     database = db.query(PatentDatabase).filter(PatentDatabase.id == rule.database_id).first()
     if not database:
-        raise HTTPException(status_code=404, detail="Database not found")
+        raise NotFoundException("Database not found")
     patent = db.query(Patent).filter(
         Patent.id == body.patent_id,
         Patent.database_id == rule.database_id,
     ).first()
     if not patent:
-        raise HTTPException(status_code=404, detail="Patent not found in rule database")
+        raise NotFoundException("Patent not found in rule database")
     result = AutomationEngine.on_event(db, "manual", patent_id=body.patent_id)
     return {"rule_id": rule.id, "results": [item for item in result if item["rule_id"] == rule.id]}
 
