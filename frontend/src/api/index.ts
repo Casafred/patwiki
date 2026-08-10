@@ -6,7 +6,7 @@ import type {
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
-  PatentGraphResponse, FormulaReturnType,
+  PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse,
 } from '../types'
 
 export const fieldApi = {
@@ -165,11 +165,42 @@ export const viewApi = {
   }): Promise<{ success: boolean; patent_id: number; field_key: string; value: JsonValue }> =>
     api.post(`/views/${viewId}/kanban/move`, data),
 
+  form: (viewId: number): Promise<FormDefinition> =>
+    api.get(`/views/${viewId}/form`),
+
+  submitForm: (viewId: number, data: JsonObject, patentId?: number | null): Promise<{
+    success: boolean
+    patent_id: number
+    patent: Patent
+  }> => api.post(`/views/${viewId}/form/submit`, { data, patent_id: patentId ?? null }),
+
+  createFormShare: (viewId: number, expiresDays?: number | null): Promise<FormShareLink> =>
+    api.post(`/views/${viewId}/form/share`, { expires_days: expiresDays ?? null }),
+
+  gantt: (viewId: number, params: { page_size?: number; search?: string } = {}): Promise<GanttResponse> =>
+    api.get(`/views/${viewId}/gantt`, { params }),
+
+  updateGanttDates: (viewId: number, data: {
+    patent_id: number
+    new_start: string
+    new_end: string
+    changed_by?: string
+  }): Promise<{ success: boolean; patent_id: number; new_start: string; new_end: string }> =>
+    api.post(`/views/${viewId}/gantt/update-dates`, data),
+
   updateSharedField: (viewId: number, patentId: number, fieldKey: string, value: JsonValue): Promise<{
     success: boolean
     patent_id: number
     field_key: string
   }> => api.patch(`/views/${viewId}/patents/${patentId}/field/${fieldKey}`, { value }),
+}
+
+export const formApi = {
+  getShared: (token: string): Promise<FormDefinition> =>
+    api.get(`/form/shared/${encodeURIComponent(token)}`),
+
+  submitShared: (token: string, data: JsonObject): Promise<{ success: boolean; patent_id: number }> =>
+    api.post(`/form/shared/${encodeURIComponent(token)}/submit`, { data }),
 }
 
 export const patentApi = {

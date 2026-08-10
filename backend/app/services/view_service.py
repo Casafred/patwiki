@@ -40,6 +40,20 @@ class ViewService:
         "card_fields": ["application_number", "title", "legal_status"],
         "card_title_field": "title",
     }
+    DEFAULT_FORM_CONFIG = {
+        "layout": "two_column",
+        "submit_label": "提交专利",
+        "sections": [],
+    }
+    DEFAULT_GANTT_CONFIG = {
+        "start_field": "filing_date",
+        "end_field": "grant_date",
+        "title_field": "title",
+        "group_by_field": "applicant",
+        "time_scale": "month",
+        "bar_color_field": "risk_level",
+        "bar_color_map": {},
+    }
 
     # ========== 视图 CRUD ==========
 
@@ -117,6 +131,8 @@ class ViewService:
             conditional_formatting or []
         )
         kanban_config = ViewService.validate_kanban_config(kanban_config or {})
+        form_config = ViewService.validate_form_config(form_config or {})
+        gantt_config = ViewService.validate_gantt_config(gantt_config or {})
 
         if is_department_master:
             existing = ViewService.get_department_master_view(db, database_id)
@@ -163,6 +179,10 @@ class ViewService:
             updates["kanban_config"] = ViewService.validate_kanban_config(
                 updates["kanban_config"]
             )
+        if "form_config" in updates:
+            updates["form_config"] = ViewService.validate_form_config(updates["form_config"])
+        if "gantt_config" in updates:
+            updates["gantt_config"] = ViewService.validate_gantt_config(updates["gantt_config"])
         for k, v in updates.items():
             if v is not None and hasattr(view, k):
                 setattr(view, k, v)
@@ -300,6 +320,87 @@ class ViewService:
         }
 
     @staticmethod
+    def validate_form_config(config: Any) -> dict:
+        """Normalize the persisted form layout without coupling to field metadata."""
+        if config in (None, {}):
+            return dict(ViewService.DEFAULT_FORM_CONFIG)
+        if not isinstance(config, dict):
+            raise ValueError("form_config must be an object")
+        layout = str(config.get("layout", "two_column"))
+        if layout not in {"single_column", "two_column"}:
+            raise ValueError("form_config.layout must be single_column or two_column")
+        raw_sections = config.get("sections") or []
+        if not isinstance(raw_sections, list) or len(raw_sections) > 50:
+            raise ValueError("form_config.sections must contain at most 50 sections")
+        sections = []
+        for raw_section in raw_sections:
+            if not isinstance(raw_section, dict):
+                raise ValueError("form sections must be objects")
+            raw_fields = raw_section.get("fields") or []
+            if not isinstance(raw_fields, list) or len(raw_fields) > 100:
+                raise ValueError("form section fields must be an array with at most 100 fields")
+            fields = []
+            for raw_field in raw_fields:
+                if isinstance(raw_field, str):
+                    raw_field = {"key": raw_field}
+                if not isinstance(raw_field, dict) or not str(raw_field.get("key", "")).strip():
+                    raise ValueError("form field configuration requires a key")
+                field = {
+                    "key": str(raw_field["key"]).strip(),
+                    "required": bool(raw_field.get("required", False)),
+                    "col_span": 2 if int(raw_field.get("col_span", 1) or 1) == 2 else 1,
+                }
+                if isinstance(raw_field.get("default"), (str, int, float, bool, type(None), list)):
+                    field["default"] = raw_field.get("default")
+                if raw_field.get("visible_when") is not None:
+                    if not isinstance(raw_field["visible_when"], dict):
+                        raise ValueError("form field visible_when must be an object")
+                    field["visible_when"] = raw_field["visible_when"]
+                fields.append(field)
+            section = {
+                "title": str(raw_section.get("title") or "未命名分区").strip(),
+                "fields": fields,
+            }
+            if raw_section.get("visible_when") is not None:
+                if not isinstance(raw_section["visible_when"], dict):
+                    raise ValueError("form section visible_when must be an object")
+                section["visible_when"] = raw_section["visible_when"]
+            sections.append(section)
+        return {
+            "layout": layout,
+            "submit_label": str(config.get("submit_label") or "提交专利").strip(),
+            "sections": sections,
+        }
+
+    @staticmethod
+    def validate_gantt_config(config: Any) -> dict:
+        """Normalize date fields and visual options for a gantt view."""
+        if config in (None, {}):
+            return dict(ViewService.DEFAULT_GANTT_CONFIG)
+        if not isinstance(config, dict):
+            raise ValueError("gantt_config must be an object")
+        time_scale = str(config.get("time_scale", "month"))
+        if time_scale not in {"day", "week", "month", "quarter", "year"}:
+            raise ValueError("gantt_config.time_scale is invalid")
+        start_field = str(config.get("start_field", "filing_date")).strip()
+        end_field = str(config.get("end_field", "grant_date")).strip()
+        if not start_field or not end_field or start_field == end_field:
+            raise ValueError("甘特视图需要不同的开始和结束日期字段")
+        group_by_field = str(config.get("group_by_field", "")).strip()
+        color_map = config.get("bar_color_map") or {}
+        if not isinstance(color_map, dict):
+            raise ValueError("gantt_config.bar_color_map must be an object")
+        return {
+            "start_field": start_field,
+            "end_field": end_field,
+            "title_field": str(config.get("title_field", "title")).strip() or "title",
+            "group_by_field": group_by_field,
+            "time_scale": time_scale,
+            "bar_color_field": str(config.get("bar_color_field", "")).strip(),
+            "bar_color_map": {str(key): str(value) for key, value in color_map.items()},
+        }
+
+    @staticmethod
     def get_kanban_data(
         db: Session,
         view: PatentView,
@@ -397,6 +498,106 @@ class ViewService:
         return ViewService.update_shared_field_in_view(
             db, view, patent_id, update_key, to_value, changed_by=changed_by,
         )
+
+    @staticmethod
+    def get_gantt_data(
+        db: Session,
+        view: PatentView,
+        page_size: int = 200,
+        extra_filters: Optional[dict] = None,
+        search: Optional[str] = None,
+    ) -> dict:
+        """Return date-bounded patents grouped for a gantt timeline."""
+        config = ViewService.validate_gantt_config(view.gantt_config)
+        patents, total = ViewService.list_view_patents(
+            db, view, page=1, page_size=min(max(page_size, 1), 1000),
+            extra_filters=extra_filters, search=search,
+        )
+        groups_by_key: dict[str, dict] = {}
+        ordered_keys: list[str] = []
+        time_start: Optional[date] = None
+        time_end: Optional[date] = None
+
+        def add_group(value: Any) -> dict:
+            key = _group_key(value)
+            if key not in groups_by_key:
+                groups_by_key[key] = {
+                    "key": None if value in (None, "") else value,
+                    "label": "未设置" if value in (None, "") else str(value),
+                    "items": [],
+                }
+                ordered_keys.append(key)
+            return groups_by_key[key]
+
+        for patent in patents:
+            item = ViewService.get_view_patent_with_local_fields(db, view, patent)
+            start = _parse_date(_get_item_field_value(item, config["start_field"]))
+            end = _parse_date(_get_item_field_value(item, config["end_field"]))
+            if not start or not end:
+                continue
+            if end < start:
+                start, end = end, start
+            title = _get_item_field_value(item, config["title_field"])
+            group_value = _get_item_field_value(item, config["group_by_field"]) if config["group_by_field"] else None
+            color_value = _get_item_field_value(item, config["bar_color_field"]) if config["bar_color_field"] else None
+            color = config["bar_color_map"].get(str(color_value), "#2563eb")
+            group = add_group(group_value)
+            group["items"].append({
+                "id": patent.id,
+                "title": str(title or patent.title or "未命名专利"),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "color": color,
+            })
+            time_start = start if time_start is None or start < time_start else time_start
+            time_end = end if time_end is None or end > time_end else time_end
+
+        return {
+            "view_id": view.id,
+            "total": total,
+            "returned": sum(len(group["items"]) for group in groups_by_key.values()),
+            "truncated": total > len(patents),
+            "config": config,
+            "groups": [groups_by_key[key] for key in ordered_keys],
+            "time_range": {
+                "start": time_start.isoformat() if time_start else None,
+                "end": time_end.isoformat() if time_end else None,
+            },
+        }
+
+    @staticmethod
+    def update_gantt_dates(
+        db: Session,
+        view: PatentView,
+        patent_id: int,
+        new_start: date,
+        new_end: date,
+        changed_by: Optional[str] = None,
+    ) -> Patent:
+        config = ViewService.validate_gantt_config(view.gantt_config)
+        if new_end < new_start:
+            raise ValueError("甘特任务结束日期不能早于开始日期")
+        patent = db.query(Patent).filter(
+            Patent.id == patent_id,
+            Patent.database_id == view.database_id,
+        ).first()
+        if not patent:
+            raise ValueError(f"专利 {patent_id} 不属于当前视图所在的库")
+
+        def update_field(field_key: str, value: Any) -> None:
+            update_key = field_key
+            if not field_key.startswith("custom_fields.") and field_key not in SYSTEM_FIELDS:
+                update_key = f"custom_fields.{field_key}"
+            if update_key.startswith("custom_fields."):
+                value = value.isoformat() if isinstance(value, (date, datetime)) else value
+            ViewService.update_shared_field_in_view(
+                db, view, patent_id, update_key, value, changed_by=changed_by,
+            )
+
+        update_field(config["start_field"], new_start)
+        update_field(config["end_field"], new_end)
+        db.refresh(patent)
+        return patent
 
     # ========== Grouping and conditional formatting ==========
 

@@ -22,8 +22,10 @@ from app.schemas.schemas import (
     ViewLocalField, ViewLocalFieldCreate, ViewLocalFieldUpdate,
     ViewFieldValueUpdate, ViewPatentCellUpdate,
     PromoteFieldRequest, FieldSourceInfo, KanbanMoveRequest,
+    FormSubmitRequest, FormShareCreateRequest, GanttDateUpdateRequest,
 )
 from app.services.view_service import ViewService
+from app.services.form_service import FormService
 from app.models import PatentView, ViewLocalField
 
 router = APIRouter(prefix="/views", tags=["views"])
@@ -116,6 +118,99 @@ def archive_view(view_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="部门总表视图不允许归档")
     ViewService.archive_view(db, view)
     return ViewService.to_dict(view)
+
+
+@router.get("/{view_id}/form")
+def get_form_view_definition(view_id: int, db: Session = Depends(get_db)):
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+    try:
+        return FormService.get_definition(db, view)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{view_id}/form/submit")
+def submit_form_view(
+    view_id: int,
+    body: FormSubmitRequest,
+    db: Session = Depends(get_db),
+):
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+    try:
+        patent = FormService.submit(db, view, body.data, patent_id=body.patent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "patent_id": patent.id, "patent": patent}
+
+
+@router.post("/{view_id}/form/share")
+def create_form_share_link(
+    view_id: int,
+    body: FormShareCreateRequest = Body(default=FormShareCreateRequest()),
+    db: Session = Depends(get_db),
+):
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+    if view.layout_type != "form":
+        raise HTTPException(status_code=400, detail="只有表单视图可以创建分享链接")
+    try:
+        link = FormService.create_share_link(db, view, body.expires_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FormService.serialize_share(link)
+
+
+@router.get("/{view_id}/gantt")
+def get_gantt_view_data(
+    view_id: int,
+    page_size: int = Query(200, ge=1, le=1000),
+    search: Optional[str] = Query(None),
+    extra_filters: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+    ef = None
+    if extra_filters:
+        try:
+            ef = json.loads(extra_filters)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail="extra_filters must be valid JSON") from exc
+    try:
+        return ViewService.get_gantt_data(db, view, page_size=page_size, extra_filters=ef, search=search)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{view_id}/gantt/update-dates")
+def update_gantt_view_dates(
+    view_id: int,
+    body: GanttDateUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise HTTPException(status_code=404, detail="View not found")
+    try:
+        patent = ViewService.update_gantt_dates(
+            db, view, body.patent_id, body.new_start, body.new_end, changed_by=body.changed_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "success": True,
+        "patent_id": patent.id,
+        "new_start": body.new_start.isoformat(),
+        "new_end": body.new_end.isoformat(),
+        "source_view_id": view.id,
+        "source_view_name": view.name,
+    }
 
 
 # ========== 视图数据查询 ==========

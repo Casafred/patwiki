@@ -13,6 +13,7 @@ import ImportHistoryPage from './components/import/ImportHistoryPage'
 import AITaskMonitor from './components/ai/AITaskMonitor'
 import ManagementPage from './components/management/ManagementPage'
 import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
+import { SharedFormView } from './components/views/FormView'
 import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
@@ -58,6 +59,11 @@ function PatentDetailRoute() {
 function PublicPatentShareRoute() {
   const { token } = useParams<{ token: string }>()
   return <PublicPatentSharePage token={token || ''} />
+}
+
+function SharedFormRoute() {
+  const { token } = useParams<{ token: string }>()
+  return <SharedFormView token={token || ''} />
 }
 
 function WorkspaceApp() {
@@ -200,6 +206,13 @@ function App() {
     return (
       <Routes>
         <Route path="share/patents/:token" element={<PublicPatentShareRoute />} />
+      </Routes>
+    )
+  }
+  if (location.pathname.startsWith('/shared-form/')) {
+    return (
+      <Routes>
+        <Route path="shared-form/:token" element={<SharedFormRoute />} />
       </Routes>
     )
   }

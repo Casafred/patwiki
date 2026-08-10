@@ -524,6 +524,22 @@ class PatentViewUpdate(BaseSchema):
     is_archived: Optional[bool] = None
 
 
+class FormSubmitRequest(BaseSchema):
+    data: dict[str, Any] = {}
+    patent_id: Optional[int] = None
+
+
+class FormShareCreateRequest(BaseSchema):
+    expires_days: Optional[int] = None
+
+
+class GanttDateUpdateRequest(BaseSchema):
+    patent_id: int
+    new_start: date
+    new_end: date
+    changed_by: Optional[str] = None
+
+
 class ViewLocalFieldBase(BaseSchema):
     key: str
     name: str

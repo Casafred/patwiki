@@ -52,6 +52,7 @@ a = Analysis(
         "app.api.views",  # P0-13 新增
         "app.api.formula",  # M1 公式字段
         "app.api.export",  # M1 数据导出
+        "app.api.form",  # M4 表单视图公开提交
         # 本项目模块 - models（P0-8 拆分为子模块）
         "app.models",
         "app.models.enums",
@@ -77,7 +78,9 @@ a = Analysis(
         "app.services.formula_engine",  # M1 公式字段
         "app.services.formula_service",  # M1 公式字段
         "app.services.export_service",  # M1 数据导出
+        "app.services.form_service",  # M4 表单视图
         "app.models.formula",  # M1 公式依赖
+        "app.models.form",  # M4 表单分享链接
         "app.ai.fields.engine",
         "init_data",
         # openai SDK 及其依赖

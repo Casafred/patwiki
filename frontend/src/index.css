@@ -1872,6 +1872,360 @@ input[type="checkbox"] {
 .patent-graph-dot.family { background: #0f766e; }
 .patent-graph-dot.citation { background: #64748b; }
 
+/* Form and Gantt views */
+.form-view,
+.gantt-view {
+  min-height: 100%;
+  background: #fff;
+}
+
+.form-view {
+  padding-bottom: 28px;
+}
+
+.form-view-toolbar,
+.gantt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.form-view-toolbar > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.form-view-toolbar strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-view-toolbar span,
+.form-view-field small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.form-view-toolbar-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.form-view-form {
+  width: min(960px, calc(100% - 32px));
+  margin: 20px auto 0;
+}
+
+.form-view-section {
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.form-view-section h3 {
+  margin: 0 0 14px;
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.form-view-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.form-view-single_column .form-view-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.form-view-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 5px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.form-view-field-wide {
+  grid-column: 1 / -1;
+}
+
+.form-view-field em {
+  color: #dc2626;
+  font-style: normal;
+}
+
+.form-view-textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.form-view-multi-select {
+  min-height: 86px;
+}
+
+.form-view-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  color: #334155;
+  font-weight: 400;
+}
+
+.form-view-checkbox input {
+  width: 15px;
+  height: 15px;
+  accent-color: #2563eb;
+}
+
+.form-view-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.form-view-success,
+.form-view-notice {
+  width: min(960px, calc(100% - 32px));
+  margin: 12px auto 0;
+  padding: 9px 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 5px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 12px;
+}
+
+.form-view-notice {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.form-view-error {
+  margin: 16px auto;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 5px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.form-view > .form-view-error {
+  width: min(960px, calc(100% - 32px));
+}
+
+.shared-form-page {
+  min-height: 100vh;
+  padding: 48px 20px 64px;
+  background: #f8fafc;
+}
+
+.shared-form-header {
+  width: min(960px, 100%);
+  margin: 0 auto 18px;
+}
+
+.shared-form-header span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.shared-form-header h1 {
+  margin-top: 7px;
+  color: #0f172a;
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.shared-form-page .form-view-form {
+  margin-top: 0;
+  padding: 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.gantt-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.gantt-toolbar {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.gantt-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.gantt-toolbar .form-input {
+  width: auto;
+  min-width: 130px;
+  height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.gantt-saving {
+  color: #2563eb;
+  font-size: 11px;
+}
+
+.gantt-scroll {
+  flex: 1;
+  min-width: 760px;
+  overflow: auto;
+  padding-bottom: 16px;
+}
+
+.gantt-header-row,
+.gantt-row {
+  display: flex;
+  min-width: calc(240px + var(--gantt-width, 900px));
+}
+
+.gantt-label-cell {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  flex: 0 0 240px;
+  width: 240px;
+  min-height: 38px;
+  padding: 8px 14px;
+  overflow: hidden;
+  border: 0;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gantt-header-row .gantt-label-cell {
+  z-index: 5;
+  min-height: 42px;
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.gantt-label-cell:hover {
+  background: #f8fafc;
+  color: #1d4ed8;
+}
+
+.gantt-timeline-header,
+.gantt-timeline {
+  position: relative;
+  flex: 0 0 var(--gantt-width, 900px);
+  width: var(--gantt-width, 900px);
+  background-image: linear-gradient(to right, #f1f5f9 1px, transparent 1px);
+  background-size: 72px 100%;
+}
+
+.gantt-timeline-header {
+  min-height: 42px;
+  border-bottom: 1px solid #e5e7eb;
+  background-color: #f8fafc;
+}
+
+.gantt-timeline-header span {
+  position: absolute;
+  top: 13px;
+  transform: translateX(-50%);
+  color: #64748b;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.gantt-group > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: calc(240px + var(--gantt-width, 900px));
+  padding: 7px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #eef2f7;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.gantt-group > header span {
+  min-width: 20px;
+  padding: 2px 5px;
+  border-radius: 9px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 10px;
+  text-align: center;
+}
+
+.gantt-timeline {
+  min-height: 38px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.gantt-bar {
+  position: absolute;
+  top: 8px;
+  min-width: 18px;
+  height: 22px;
+  padding: 4px 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  color: #fff;
+  cursor: grab;
+  font-size: 10px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.gantt-bar:hover {
+  filter: brightness(0.95);
+}
+
+.gantt-bar:active {
+  cursor: grabbing;
+}
+
 @media (max-width: 760px) {
   .public-share-header {
     padding: 0 20px;
@@ -1893,5 +2247,43 @@ input[type="checkbox"] {
 
   .patent-graph-panel {
     padding: 12px;
+  }
+
+  .form-view-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .form-view-field-wide {
+    grid-column: auto;
+  }
+
+  .form-view-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .form-view-toolbar-actions {
+    width: 100%;
+  }
+
+  .form-view-toolbar-actions .btn {
+    flex: 1;
+  }
+
+  .shared-form-page {
+    padding: 28px 12px 40px;
+  }
+
+  .shared-form-page .form-view-form {
+    padding: 12px;
+  }
+
+  .gantt-toolbar label {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .gantt-toolbar .form-input {
+    flex: 1;
   }
 }

@@ -69,6 +69,9 @@ from app.models.user import User, DatabaseMembership
 # 视图（小表）—— P0-13 新增
 from app.models.view import PatentView, ViewLocalField, PatentViewFieldValue
 
+# 表单视图公开提交链接
+from app.models.form import FormShareLink
+
 # 修改历史
 from app.models.history import PatentHistory
 
@@ -103,6 +106,7 @@ __all__ = [
     "User", "DatabaseMembership",
     # view (P0-13)
     "PatentView", "ViewLocalField", "PatentViewFieldValue",
+    "FormShareLink",
     # history
     "PatentHistory",
     # public share

@@ -282,6 +282,89 @@ export interface KanbanResponse {
   groups: KanbanGroup[]
 }
 
+export interface FormFieldConfig {
+  key: string
+  required?: boolean
+  col_span?: number
+  default?: JsonValue
+  visible_when?: JsonObject
+}
+
+export interface FormSectionConfig {
+  title: string
+  fields: FormFieldConfig[]
+  visible_when?: JsonObject
+}
+
+export interface FormConfig {
+  layout: 'single_column' | 'two_column'
+  submit_label: string
+  sections: FormSectionConfig[]
+}
+
+export interface FormFieldMeta {
+  key: string
+  name: string
+  field_type: string
+  options?: string[] | null
+  description?: string | null
+  is_required?: boolean
+}
+
+export interface FormDefinition {
+  view_id: number
+  view_name: string
+  database_id: number
+  config: FormConfig
+  fields: FormFieldMeta[]
+  public: boolean
+}
+
+export interface FormShareLink {
+  id: number
+  view_id: number
+  token: string
+  is_active: boolean
+  expires_at?: string | null
+  created_at?: string | null
+}
+
+export type GanttTimeScale = 'day' | 'week' | 'month' | 'quarter' | 'year'
+
+export interface GanttConfig {
+  start_field: string
+  end_field: string
+  title_field: string
+  group_by_field?: string
+  time_scale: GanttTimeScale
+  bar_color_field?: string
+  bar_color_map?: Record<string, string>
+}
+
+export interface GanttItem {
+  id: number
+  title: string
+  start: string
+  end: string
+  color: string
+}
+
+export interface GanttGroup {
+  key: JsonValue
+  label: string
+  items: GanttItem[]
+}
+
+export interface GanttResponse {
+  view_id: number
+  total: number
+  returned: number
+  truncated: boolean
+  config: GanttConfig
+  groups: GanttGroup[]
+  time_range: { start: string | null; end: string | null }
+}
+
 export interface ViewLocalField {
   id: number
   view_id: number

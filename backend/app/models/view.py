@@ -67,6 +67,9 @@ class PatentView(Base):
         "ViewLocalField", back_populates="view",
         cascade="all, delete-orphan", order_by="ViewLocalField.sort_order",
     )
+    form_share_links = relationship(
+        "FormShareLink", back_populates="view", cascade="all, delete-orphan",
+    )
 
 
 class ViewLocalField(Base):

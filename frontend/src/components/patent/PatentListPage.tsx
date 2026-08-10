@@ -9,6 +9,8 @@ import { getErrorMessage } from '../../lib/errors'
 import GroupConfigPanel from '../views/GroupConfigPanel'
 import ConditionalFormatPanel from '../views/ConditionalFormatPanel'
 import KanbanView from '../views/KanbanView'
+import FormView from '../views/FormView'
+import GanttView from '../views/GanttView'
 import ExportDialog from '../common/ExportDialog'
 
 interface PatentListPageProps {
@@ -1657,6 +1659,16 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             onViewChange={handleViewChange}
             onTotalChange={handleKanbanTotalChange}
           />
+        ) : activeView?.layout_type === 'form' ? (
+          <FormView view={activeView} onViewChange={handleViewChange} />
+        ) : activeView?.layout_type === 'gantt' ? (
+          <GanttView
+            view={activeView}
+            fields={fields}
+            onPatentClick={onPatentClick}
+            onViewChange={handleViewChange}
+            onTotalChange={handleKanbanTotalChange}
+          />
         ) : loading ? (
           <div className="loading-state">
             <div className="spinner" style={{ width: 24, height: 24, borderWidth: 2, marginBottom: 12 }}></div>
@@ -2071,7 +2083,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         )}
       </div>
 
-      {activeView?.layout_type !== 'kanban' && <div className="datagrid-footer">
+      {(activeView?.layout_type === 'table' || !activeView) && <div className="datagrid-footer">
         <span style={{ fontSize: 12, color: '#6b7280' }}>
           第 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, totalPatents)} 条，共 {totalPatents} 条
         </span>
