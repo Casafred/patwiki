@@ -2226,6 +2226,382 @@ input[type="checkbox"] {
   cursor: grabbing;
 }
 
+.attachment-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.attachment-list {
+  display: grid;
+  gap: 4px;
+}
+
+.attachment-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: #475569;
+  font-size: 11px;
+}
+
+.attachment-name {
+  overflow: hidden;
+  color: #1d4ed8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-size {
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.attachment-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  font-size: 11px;
+}
+
+.attachment-action:hover {
+  text-decoration: underline;
+}
+
+.attachment-action-danger {
+  color: #b91c1c;
+}
+
+.attachment-upload {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px 7px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 4px;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.attachment-upload.is-busy {
+  color: #94a3b8;
+  cursor: wait;
+}
+
+.attachment-upload input {
+  display: none;
+}
+
+.attachment-error {
+  color: #b91c1c;
+  font-size: 11px;
+}
+
+.dashboard-header,
+.dashboard-header-actions,
+.dashboard-toolbar,
+.automation-actions,
+.automation-rule-main,
+.automation-rule-meta,
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dashboard-header,
+.dashboard-rule-main {
+  justify-content: space-between;
+}
+
+.dashboard-header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dashboard-toolbar {
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.dashboard-toolbar .form-input {
+  width: auto;
+  min-width: 180px;
+}
+
+.dashboard-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 18px 0 10px;
+  color: #64748b;
+}
+
+.dashboard-summary strong {
+  color: #0f172a;
+  font-size: 24px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboard-card {
+  grid-column: span 4;
+  min-height: 150px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+.dashboard-card:nth-child(3n + 1) {
+  grid-column: span 4;
+}
+
+.dashboard-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.dashboard-card-header h3,
+.automation-rule h3 {
+  color: #334155;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dashboard-remove {
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.dashboard-metric-value {
+  color: #0f172a;
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.dashboard-progress-label {
+  display: flex;
+  justify-content: space-between;
+  color: #64748b;
+}
+
+.dashboard-progress-track,
+.dashboard-bar-track {
+  height: 8px;
+  overflow: hidden;
+  background: #e2e8f0;
+  border-radius: 999px;
+}
+
+.dashboard-progress-track {
+  margin-top: 16px;
+}
+
+.dashboard-progress-fill,
+.dashboard-bar-fill {
+  height: 100%;
+  background: #2563eb;
+  border-radius: inherit;
+}
+
+.dashboard-bars,
+.dashboard-line-chart {
+  display: grid;
+  gap: 9px;
+}
+
+.dashboard-bar-row,
+.dashboard-line-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.8fr) minmax(80px, 1.5fr) 30px;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.dashboard-bar-row > span,
+.dashboard-line-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-bar-row b,
+.dashboard-line-row b {
+  color: #334155;
+  text-align: right;
+}
+
+.dashboard-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #475569;
+  font-size: 12px;
+}
+
+.dashboard-mini-table td {
+  padding: 5px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.dashboard-mini-table td:last-child {
+  color: #1d4ed8;
+  text-align: right;
+  font-weight: 600;
+}
+
+.dashboard-empty,
+.muted-text,
+.section-heading span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.dashboard-card-form,
+.automation-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  align-items: end;
+  gap: 12px;
+  padding: 14px;
+  margin: 12px 0;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.dashboard-card-form label,
+.automation-form label {
+  display: grid;
+  gap: 5px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.automation-rule,
+.automation-log-panel {
+  padding: 16px;
+  margin-bottom: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.automation-rule.is-disabled {
+  opacity: 0.65;
+}
+
+.automation-rule-main {
+  justify-content: space-between;
+}
+
+.automation-rule-main p {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.automation-rule-meta {
+  margin: 12px 0;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.rule-status,
+.log-status {
+  display: inline-flex;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.rule-status.enabled,
+.log-status.success {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.rule-status.disabled,
+.log-status.skipped {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+.log-status.failed {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.section-heading {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.section-heading h3 {
+  color: #334155;
+  font-size: 14px;
+}
+
+.automation-log-list {
+  display: grid;
+}
+
+.automation-log-row {
+  display: grid;
+  grid-template-columns: 72px 70px 70px minmax(0, 1fr) 160px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.automation-log-row span:nth-child(4) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-log-row time {
+  text-align: right;
+  color: #94a3b8;
+}
+
+@media (max-width: 900px) {
+  .dashboard-card {
+    grid-column: span 6;
+  }
+
+  .dashboard-card-form,
+  .automation-form {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
+  .automation-log-row {
+    grid-template-columns: 72px 70px 70px minmax(0, 1fr);
+  }
+
+  .automation-log-row time {
+    display: none;
+  }
+}
+
 @media (max-width: 760px) {
   .public-share-header {
     padding: 0 20px;

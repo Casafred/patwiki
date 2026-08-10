@@ -8,6 +8,8 @@ import SettingsPage from './components/settings/SettingsPage'
 import FieldSettingsPage from './components/settings/FieldSettingsPage'
 import SharingPage from './components/settings/SharingPage'
 import AgentAnalysisPage from './components/analytics/AgentAnalysisPage'
+import DashboardPage from './components/analytics/DashboardPage'
+import AutomationPage from './components/settings/AutomationPage'
 import ImportModal from './components/import/ImportModal'
 import ImportHistoryPage from './components/import/ImportHistoryPage'
 import AITaskMonitor from './components/ai/AITaskMonitor'
@@ -18,11 +20,13 @@ import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } 
 import { useAppStore } from './store'
 import './index.css'
 
-export type Page = 'patents' | 'stats' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history'
+export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history'
 
 const pagePaths: Record<Page, string> = {
   patents: '/patents',
   stats: '/stats',
+  dashboard: '/dashboard',
+  automation: '/automation',
   settings: '/settings',
   fields: '/fields',
   management: '/management',
@@ -34,6 +38,8 @@ const pagePaths: Record<Page, string> = {
 
 function getPageFromPath(pathname: string): Page {
   if (pathname.startsWith('/stats')) return 'stats'
+  if (pathname.startsWith('/dashboard')) return 'dashboard'
+  if (pathname.startsWith('/automation')) return 'automation'
   if (pathname.startsWith('/settings')) return 'settings'
   if (pathname.startsWith('/fields')) return 'fields'
   if (pathname.startsWith('/management')) return 'management'
@@ -178,6 +184,8 @@ function WorkspaceApp() {
             <Route path="patents" element={<PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} />} />
             <Route path="patents/:patentId" element={<PatentDetailRoute />} />
             <Route path="stats" element={<StatsPage />} />
+            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="automation" element={<AutomationPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="fields" element={<FieldSettingsPage />} />
             <Route path="management" element={<ManagementPage />} />

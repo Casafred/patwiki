@@ -214,6 +214,18 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           数据看板
         </div>
         <div
+          className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
+          onClick={() => onNavigate('dashboard')}
+        >
+          可配置仪表盘
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'automation' ? 'active' : ''}`}
+          onClick={() => onNavigate('automation')}
+        >
+          自动化规则
+        </div>
+        <div
           className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`}
           onClick={() => onNavigate('agent-analysis')}
         >

@@ -62,6 +62,7 @@ class CustomFieldType(str, enum.Enum):
     LINK = "link"
     LOOKUP = "lookup"
     ROLLUP = "rollup"
+    ATTACHMENT = "attachment"
 
 
 class RelationType(str, enum.Enum):

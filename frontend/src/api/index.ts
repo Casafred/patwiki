@@ -6,7 +6,8 @@ import type {
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
-  PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse,
+  PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
+  Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog,
 } from '../types'
 
 export const fieldApi = {
@@ -201,6 +202,54 @@ export const formApi = {
 
   submitShared: (token: string, data: JsonObject): Promise<{ success: boolean; patent_id: number }> =>
     api.post(`/form/shared/${encodeURIComponent(token)}/submit`, { data }),
+}
+
+export const attachmentApi = {
+  upload: (data: FormData): Promise<AttachmentMeta> =>
+    api.post('/attachments/upload', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  list: (patentId: number, fieldKey?: string): Promise<AttachmentMeta[]> =>
+    api.get(`/attachments/patent/${patentId}`, { params: { field_key: fieldKey } }),
+  download: (attachmentId: number, preview = false): Promise<Blob> =>
+    api.get(`/attachments/${attachmentId}/${preview ? 'preview' : 'download'}`, { responseType: 'blob' }),
+  remove: (attachmentId: number): Promise<{ success: boolean }> =>
+    api.delete(`/attachments/${attachmentId}`),
+}
+
+export const dashboardApi = {
+  list: (databaseId?: number | null): Promise<Dashboard[]> =>
+    api.get('/dashboards', { params: { database_id: databaseId ?? undefined } }),
+  create: (data: { database_id: number; name: string; description?: string; layout?: DashboardCard[] }): Promise<Dashboard> =>
+    api.post('/dashboards', data),
+  update: (id: number, data: { name?: string; description?: string; layout?: DashboardCard[] }): Promise<Dashboard> =>
+    api.put(`/dashboards/${id}`, data),
+  remove: (id: number): Promise<{ success: boolean }> => api.delete(`/dashboards/${id}`),
+  data: (id: number, viewId?: number | null): Promise<DashboardData> =>
+    api.get(`/dashboards/${id}/data`, { params: { view_id: viewId ?? undefined } }),
+  addCard: (id: number, card: Omit<DashboardCard, 'id'> & { id?: string }): Promise<DashboardCard> =>
+    api.post(`/dashboards/${id}/cards`, card),
+  removeCard: (id: number, cardId: string): Promise<{ success: boolean }> =>
+    api.delete(`/dashboards/${id}/cards/${encodeURIComponent(cardId)}`),
+}
+
+export const automationApi = {
+  listRules: (databaseId?: number | null): Promise<AutomationRule[]> =>
+    api.get('/automation/rules', { params: { database_id: databaseId ?? undefined } }),
+  createRule: (data: {
+    database_id: number
+    name: string
+    priority?: number
+    trigger_config: JsonObject
+    condition_config: JsonObject[]
+    action_config: JsonObject[]
+  }): Promise<AutomationRule> => api.post('/automation/rules', data),
+  toggleRule: (id: number): Promise<AutomationRule> => api.post(`/automation/rules/${id}/toggle`),
+  removeRule: (id: number): Promise<{ success: boolean }> => api.delete(`/automation/rules/${id}`),
+  executeRule: (id: number, patentId: number): Promise<JsonObject> =>
+    api.post(`/automation/rules/${id}/execute`, { patent_id: patentId }),
+  logs: (databaseId?: number | null): Promise<AutomationLog[]> =>
+    api.get('/automation/logs', { params: { database_id: databaseId ?? undefined, limit: 80 } }),
+  scheduleTick: (databaseId?: number | null): Promise<JsonObject> =>
+    api.post('/automation/schedule/tick', undefined, { params: { database_id: databaseId ?? undefined } }),
 }
 
 export const patentApi = {

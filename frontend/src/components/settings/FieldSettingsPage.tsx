@@ -240,6 +240,7 @@ export default function FieldSettingsPage() {
     link: '关联',
     lookup: 'Lookup',
     rollup: 'Rollup',
+    attachment: '附件',
   }
 
   if (loading) {

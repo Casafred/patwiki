@@ -12,6 +12,7 @@ import KanbanView from '../views/KanbanView'
 import FormView from '../views/FormView'
 import GanttView from '../views/GanttView'
 import ExportDialog from '../common/ExportDialog'
+import AttachmentField from '../common/AttachmentField'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -229,7 +230,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [showBulkTag, setShowBulkTag] = useState(false)
   const [showAIBatch, setShowAIBatch] = useState(false)
   const [showInsertAIColumn, setShowInsertAIColumn] = useState(false)
-  const [insertColType, setInsertColType] = useState<'text' | 'longtext' | 'number' | 'date' | 'select' | 'boolean' | 'ai_field'>('text')
+  const [insertColType, setInsertColType] = useState<'text' | 'longtext' | 'number' | 'date' | 'select' | 'boolean' | 'attachment' | 'ai_field'>('text')
   const [insertColFrozen, setInsertColFrozen] = useState(false)
   const [newAIColumnName, setNewAIColumnName] = useState('')
   const [newAIPrompt, setNewAIPrompt] = useState('')
@@ -1410,6 +1411,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       return renderCellEditor(patent, field, value)
     }
 
+    if (field.field_type === 'attachment') {
+      return <AttachmentField patentId={patent.id} databaseId={currentDatabaseId} fieldKey={field.key} value={value} />
+    }
+
     if (field.field_type === 'link') {
       const links = relationData[field.key]?.[patent.id]?.links || []
       return links.length > 0 ? (
@@ -2493,7 +2498,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   value={insertColType}
                   onChange={e => {
                     const value = e.target.value
-                    if (['text', 'longtext', 'number', 'date', 'select', 'boolean', 'ai_field'].includes(value)) {
+                    if (['text', 'longtext', 'number', 'date', 'select', 'boolean', 'attachment', 'ai_field'].includes(value)) {
                       setInsertColType(value as typeof insertColType)
                     }
                   }}
@@ -2504,6 +2509,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   <option value="date">日期</option>
                   <option value="select">单选（下拉）</option>
                   <option value="boolean">是/否</option>
+                  <option value="attachment">附件</option>
                   <option value="ai_field">✨ AI列（自动生成）</option>
                 </select>
               </div>

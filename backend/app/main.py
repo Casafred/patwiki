@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -9,7 +11,26 @@ sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
 from app.config import settings
 from app.core.error_handler import register_exception_handlers
 from app.database import init_db
+from app.database import SessionLocal
 from app.api.api import api_router
+
+
+logger = logging.getLogger(__name__)
+
+
+async def _automation_scheduler():
+    """Poll lightweight schedule rules for the local desktop process."""
+    from app.services.automation_service import AutomationEngine
+
+    while True:
+        await asyncio.sleep(60)
+        db = SessionLocal()
+        try:
+            AutomationEngine.run_scheduled(db)
+        except Exception:
+            logger.exception("automation schedule tick failed")
+        finally:
+            db.close()
 
 
 @asynccontextmanager
@@ -17,7 +38,15 @@ async def lifespan(app: FastAPI):
     init_db()
     from init_data import init_default_data
     init_default_data()
-    yield
+    scheduler_task = asyncio.create_task(_automation_scheduler())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(

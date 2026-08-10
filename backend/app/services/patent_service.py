@@ -275,6 +275,8 @@ class PatentService:
         db.refresh(patent)
         from app.services.formula_service import FormulaService
         FormulaService.recalculate_patent(db, patent)
+        from app.services.automation_service import AutomationEngine
+        AutomationEngine.on_event(db, "record_created", patent_id=patent.id)
         return patent
 
     @staticmethod
@@ -374,6 +376,8 @@ class PatentService:
         if changed_fields:
             from app.services.formula_service import FormulaService
             FormulaService.on_field_changed(db, patent, changed_fields)
+            from app.services.automation_service import AutomationEngine
+            AutomationEngine.on_event(db, "field_changed", patent_id=patent.id, field_changes=changed_fields)
         return patent
 
     @staticmethod

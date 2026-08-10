@@ -265,6 +265,7 @@ def confirm_import(
         seen_app_nums: set[tuple[str, str]] = set()
         seen_pub_nums: set[tuple[str, str]] = set()
         pending_relations: list[tuple[Patent, dict]] = []
+        imported_patent_ids: set[int] = set()
 
         for i, rd in enumerate(rows_data):
             try:
@@ -340,6 +341,7 @@ def confirm_import(
                                     all_pub_nums[(pub_num, country)] = patent
 
                         if current_patent is not None:
+                            imported_patent_ids.add(current_patent.id)
                             has_rel = virtual["family_numbers"] or virtual["cited_numbers"] or virtual["citing_numbers"]
                             if has_rel:
                                 pending_relations.append((current_patent, virtual))
@@ -376,6 +378,14 @@ def confirm_import(
         # 导入可能一次修改多个依赖字段，统一按库重算公式，避免逐行重复计算。
         from app.services.formula_service import FormulaService
         FormulaService.recalculate_all(db, database_id=database_id)
+
+        from app.services.automation_service import AutomationEngine
+        for imported_patent_id in imported_patent_ids:
+            AutomationEngine.on_event(
+                db,
+                "record_imported",
+                patent_id=imported_patent_id,
+            )
 
         if database_id is not None:
             from app.services.database_service import DatabaseService

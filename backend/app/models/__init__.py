@@ -78,6 +78,11 @@ from app.models.history import PatentHistory
 # 单专利只读分享
 from app.models.share import PatentShare
 
+# 自动化规则与执行日志
+from app.models.automation import AutomationRule, AutomationLog
+from app.models.attachment import Attachment
+from app.models.dashboard import Dashboard
+
 
 __all__ = [
     # enums
@@ -111,4 +116,8 @@ __all__ = [
     "PatentHistory",
     # public share
     "PatentShare",
+    # automation
+    "AutomationRule", "AutomationLog",
+    "Attachment",
+    "Dashboard",
 ]

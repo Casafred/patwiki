@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Optional, Any
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class BaseSchema(BaseModel):
@@ -538,6 +538,63 @@ class GanttDateUpdateRequest(BaseSchema):
     new_start: date
     new_end: date
     changed_by: Optional[str] = None
+
+
+class AutomationRuleBase(BaseSchema):
+    name: str
+    description: Optional[str] = None
+    database_id: int
+    is_enabled: bool = True
+    priority: int = 0
+    trigger_config: dict[str, Any] = Field(default_factory=dict)
+    condition_config: list[dict[str, Any]] = Field(default_factory=list)
+    action_config: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AutomationRuleCreate(AutomationRuleBase):
+    pass
+
+
+class AutomationRuleUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    priority: Optional[int] = None
+    trigger_config: Optional[dict[str, Any]] = None
+    condition_config: Optional[list[dict[str, Any]]] = None
+    action_config: Optional[list[dict[str, Any]]] = None
+
+
+class AutomationManualExecuteRequest(BaseSchema):
+    patent_id: Optional[int] = None
+
+
+class DashboardCard(BaseSchema):
+    id: Optional[str] = None
+    type: str
+    title: str
+    config: dict[str, Any] = Field(default_factory=dict)
+    position: dict[str, int] = Field(default_factory=dict)
+
+
+class DashboardCreate(BaseSchema):
+    name: str
+    database_id: int
+    description: Optional[str] = None
+    layout: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DashboardUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    layout: Optional[list[dict[str, Any]]] = None
+
+
+class DashboardCardUpdate(BaseSchema):
+    type: Optional[str] = None
+    title: Optional[str] = None
+    config: Optional[dict[str, Any]] = None
+    position: Optional[dict[str, int]] = None
 
 
 class ViewLocalFieldBase(BaseSchema):

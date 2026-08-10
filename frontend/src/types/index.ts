@@ -620,7 +620,7 @@ export interface AIFieldValue {
 export interface FieldMeta {
   key: string
   name: string
-  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'lookup' | 'rollup' | 'formula' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating'
+  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'lookup' | 'rollup' | 'formula' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating' | 'attachment'
   group_name: string
   options?: string[] | null
   width?: number
@@ -637,6 +637,76 @@ export interface FieldMeta {
   link_config?: LinkConfig | null
   lookup_config?: LookupConfig | null
   rollup_config?: RollupConfig | null
+}
+
+export interface AttachmentMeta {
+  id: string
+  attachment_id: number
+  filename: string
+  file_path?: string
+  file_size: number
+  mime_type: string
+  uploaded_by?: string | null
+  uploaded_at?: string | null
+  download_url: string
+  preview_url: string
+}
+
+export type DashboardCardType = 'metric' | 'bar' | 'pie' | 'line' | 'progress' | 'table'
+
+export interface DashboardCard {
+  id: string
+  type: DashboardCardType
+  title: string
+  config: JsonObject
+  position: { x: number; y: number; w: number; h: number }
+  data?: JsonObject
+}
+
+export interface Dashboard {
+  id: number
+  database_id: number
+  name: string
+  description?: string | null
+  layout: DashboardCard[]
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface DashboardData {
+  dashboard_id: number
+  database_id: number
+  view_id?: number | null
+  total: number
+  cards: DashboardCard[]
+}
+
+export type AutomationTriggerType = 'field_changed' | 'record_created' | 'record_imported' | 'schedule' | 'manual'
+
+export interface AutomationRule {
+  id: number
+  database_id: number
+  name: string
+  description?: string | null
+  is_enabled: boolean
+  priority: number
+  trigger_config: JsonObject
+  condition_config: JsonObject[]
+  action_config: JsonObject[]
+  last_executed_at?: string | null
+  execution_count: number
+  failure_count: number
+}
+
+export interface AutomationLog {
+  id: number
+  rule_id: number
+  patent_id?: number | null
+  trigger_type: string
+  status: 'success' | 'failed' | 'skipped'
+  error_message?: string | null
+  details: JsonObject
+  executed_at?: string | null
 }
 
 export interface CellUpdateRequest {

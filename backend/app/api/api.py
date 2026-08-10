@@ -16,6 +16,9 @@ from app.api.search import router as search_router  # P2-6：搜索自动补全
 from app.api.formula import router as formula_router  # M1：公式字段
 from app.api.export import router as export_router  # M1：数据导出
 from app.api.form import router as form_router  # M4：公开表单
+from app.api.automation import router as automation_router  # M5：自动化规则
+from app.api.attachments import router as attachments_router  # M5：附件字段
+from app.api.dashboards import router as dashboards_router  # M5：可配置仪表盘
 
 api_router = APIRouter()
 api_router.include_router(databases_router)
@@ -34,3 +37,6 @@ api_router.include_router(search_router)
 api_router.include_router(formula_router)
 api_router.include_router(export_router)
 api_router.include_router(form_router)
+api_router.include_router(automation_router)
+api_router.include_router(attachments_router)
+api_router.include_router(dashboards_router)
