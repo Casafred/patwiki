@@ -56,6 +56,7 @@ a = Analysis(
         "app.api.automation",  # M5 自动化规则
         "app.api.attachments",  # M5 附件字段
         "app.api.dashboards",  # M5 可配置仪表盘
+        "app.api.comments",  # M6 协作评论
         # 本项目模块 - models（P0-8 拆分为子模块）
         "app.models",
         "app.models.enums",
@@ -85,11 +86,13 @@ a = Analysis(
         "app.services.automation_service",  # M5 自动化执行引擎
         "app.services.attachment_service",  # M5 附件服务
         "app.services.dashboard_service",  # M5 仪表盘聚合
+        "app.services.comment_service",  # M6 评论服务
         "app.models.formula",  # M1 公式依赖
         "app.models.form",  # M4 表单分享链接
         "app.models.automation",  # M5 自动化规则与日志
         "app.models.attachment",  # M5 附件元数据
         "app.models.dashboard",  # M5 仪表盘
+        "app.models.comment",  # M6 评论
         "app.ai.fields.engine",
         "init_data",
         # openai SDK 及其依赖

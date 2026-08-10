@@ -82,6 +82,7 @@ from app.models.share import PatentShare
 from app.models.automation import AutomationRule, AutomationLog
 from app.models.attachment import Attachment
 from app.models.dashboard import Dashboard
+from app.models.comment import Comment
 
 
 __all__ = [
@@ -120,4 +121,5 @@ __all__ = [
     "AutomationRule", "AutomationLog",
     "Attachment",
     "Dashboard",
+    "Comment",
 ]

@@ -709,6 +709,23 @@ export interface AutomationLog {
   executed_at?: string | null
 }
 
+export interface CommentRecord {
+  id: number
+  patent_id: number
+  parent_id?: number | null
+  author_id?: number | null
+  author_name: string
+  field_key?: string | null
+  content: string
+  mentions: string[]
+  is_resolved: boolean
+  resolved_by?: string | null
+  resolved_at?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  reply_count: number
+}
+
 export interface CellUpdateRequest {
   value: JsonValue
 }

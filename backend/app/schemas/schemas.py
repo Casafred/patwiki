@@ -597,6 +597,23 @@ class DashboardCardUpdate(BaseSchema):
     position: Optional[dict[str, int]] = None
 
 
+class CommentCreate(BaseSchema):
+    content: str
+    author_name: Optional[str] = None
+    author_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    field_key: Optional[str] = None
+
+
+class CommentUpdate(BaseSchema):
+    content: str
+
+
+class CommentResolveRequest(BaseSchema):
+    resolved: bool = True
+    resolved_by: Optional[str] = None
+
+
 class ViewLocalFieldBase(BaseSchema):
     key: str
     name: str

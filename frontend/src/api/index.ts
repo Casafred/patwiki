@@ -7,7 +7,7 @@ import type {
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
   PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
-  Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog,
+  Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
 } from '../types'
 
 export const fieldApi = {
@@ -250,6 +250,22 @@ export const automationApi = {
     api.get('/automation/logs', { params: { database_id: databaseId ?? undefined, limit: 80 } }),
   scheduleTick: (databaseId?: number | null): Promise<JsonObject> =>
     api.post('/automation/schedule/tick', undefined, { params: { database_id: databaseId ?? undefined } }),
+}
+
+export const commentApi = {
+  list: (patentId: number, params: { include_resolved?: boolean; field_key?: string } = {}): Promise<CommentRecord[]> =>
+    api.get(`/patents/${patentId}/comments`, { params }),
+  create: (patentId: number, data: {
+    content: string
+    author_name?: string
+    parent_id?: number | null
+    field_key?: string | null
+  }): Promise<CommentRecord> => api.post(`/patents/${patentId}/comments`, data),
+  get: (commentId: number): Promise<CommentRecord> => api.get(`/comments/${commentId}`),
+  update: (commentId: number, content: string): Promise<CommentRecord> => api.put(`/comments/${commentId}`, { content }),
+  resolve: (commentId: number, resolved: boolean, resolvedBy?: string): Promise<CommentRecord> =>
+    api.post(`/comments/${commentId}/resolve`, { resolved, resolved_by: resolvedBy }),
+  remove: (commentId: number): Promise<{ success: boolean }> => api.delete(`/comments/${commentId}`),
 }
 
 export const patentApi = {

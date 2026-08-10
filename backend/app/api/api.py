@@ -19,6 +19,7 @@ from app.api.form import router as form_router  # M4：公开表单
 from app.api.automation import router as automation_router  # M5：自动化规则
 from app.api.attachments import router as attachments_router  # M5：附件字段
 from app.api.dashboards import router as dashboards_router  # M5：可配置仪表盘
+from app.api.comments import router as comments_router  # M6：协作评论
 
 api_router = APIRouter()
 api_router.include_router(databases_router)
@@ -40,3 +41,4 @@ api_router.include_router(form_router)
 api_router.include_router(automation_router)
 api_router.include_router(attachments_router)
 api_router.include_router(dashboards_router)
+api_router.include_router(comments_router)

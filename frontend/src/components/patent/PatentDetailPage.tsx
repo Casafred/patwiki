@@ -4,13 +4,14 @@ import type { Patent, Product, Project, Tag, CustomField, AITask, AIFieldValue, 
 import { getErrorMessage } from '../../lib/errors'
 import PatentShareDialog from './PatentShareDialog'
 import PatentGraph from './PatentGraph'
+import CommentPanel from './CommentPanel'
 
 interface PatentDetailPageProps {
   patentId: number
   onBack: () => void
 }
 
-type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'history'
+type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'history' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
 export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageProps) {
@@ -30,6 +31,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   const [history, setHistory] = useState<PatentHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [showShareDialog, setShowShareDialog] = useState(false)
+  const [openCommentCount, setOpenCommentCount] = useState(0)
 
   const loadPatent = useCallback(async () => {
     setLoading(true)
@@ -215,6 +217,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     { key: 'custom', label: '自定义字段' },
     { key: 'relations', label: '关联关系' },
     { key: 'history', label: `修改历史${history.length > 0 ? ` (${history.length})` : ''}` },
+    { key: 'comments', label: `评论${openCommentCount > 0 ? ` (${openCommentCount})` : ''}` },
   ]
 
   return (
@@ -312,6 +315,9 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         )}
         {activeTab === 'history' && (
           <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
+        )}
+        {activeTab === 'comments' && (
+          <CommentPanel patentId={patent.id} onCountChange={setOpenCommentCount} />
         )}
       </div>
       </div>
