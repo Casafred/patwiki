@@ -95,10 +95,11 @@ function WorkspaceApp() {
   const searchParamsString = searchParams.toString()
   const currentPage = useMemo(() => getPageFromPath(location.pathname), [location.pathname])
   const [showImport, setShowImport] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const {
     setProducts, setCustomFields, setTags, setProjects,
     setDatabases, setCurrentDatabaseId, currentDatabaseId,
-    setViews, setCurrentViewId, currentViewId,
+    setViews, setCurrentViewId, currentViewId, databases,
   } = useAppStore()
   const routeDatabaseId = getDatabaseIdFromPath(location.pathname)
   const queryDatabaseId = Number(searchParams.get('db'))
@@ -181,19 +182,41 @@ function WorkspaceApp() {
 
   const handleNavigate = (page: Page) => {
     navigate(currentDatabaseId ? `/db/${currentDatabaseId}/${pageSegments[page]}` : `/${pageSegments[page]}`)
+    setSidebarOpen(false)
   }
 
+  const pageTitles: Record<Page, string> = {
+    patents: '专利工作区',
+    stats: '数据看板',
+    dashboard: '可配置仪表盘',
+    automation: '自动化规则',
+    settings: '系统设置',
+    fields: '字段管理',
+    management: '管理台',
+    'ai-tasks': 'AI 任务',
+    'agent-analysis': '智能分析',
+    sharing: '协作与权限',
+    'import-history': '导入历史',
+  }
+  const currentDatabase = databases.find(database => database.id === currentDatabaseId)
+
   return (
-    <div className="app-container">
+    <div className={`app-container ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <Sidebar
         currentPage={currentPage}
         onNavigate={handleNavigate}
       />
+      <button className="sidebar-scrim" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />
       <div className="main-content">
         <header className="header">
+          <button className="mobile-nav-toggle" onClick={() => setSidebarOpen(true)} aria-label="打开导航">☰</button>
+          <div className="header-context">
+            <div className="header-kicker">{currentDatabase?.name || 'PatWiki'}</div>
+            <h2>{pageTitles[currentPage]}</h2>
+          </div>
           <div className="header-actions">
             <button className="btn btn-primary" onClick={() => setShowImport(true)}>
-              导入Excel
+              导入数据
             </button>
             <button
               className="btn btn-secondary"
@@ -205,13 +228,7 @@ function WorkspaceApp() {
               className="btn btn-secondary"
               onClick={() => handleNavigate('stats')}
             >
-              统计
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={() => handleNavigate('settings')}
-            >
-              设置
+              数据看板
             </button>
           </div>
         </header>

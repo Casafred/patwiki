@@ -113,6 +113,7 @@
 
 | 日期 | 任务ID | 变更内容 |
 |------|--------|---------|
+| 2026-08-11 | UI-1 | 重构前端工作台界面：统一侧栏、顶部上下文、专利列表工具区、视图工具区、筛选/批量操作区、专利详情页与管理台的层级和响应式布局；保留原有导入、视图、编辑、导出、AI 与管理功能。通过 ESLint、TypeScript、Vite build 与 diff check。 |
 | 2026-07-19 | P0-0 | 修复 generate_icon.py 在 Windows cp1252 环境下的 UnicodeEncodeError：脚本顶部 reconfigure stdout/stderr 为 utf-8、去掉 emoji、workflow 加 PYTHONUTF8=1 |
 | 2026-07-19 | P0-1 | 新增 PatentDetailPage.tsx（6 个 Tab：基础著录/技术信息/风险与应用/AI 分析/自定义字段/关联关系），支持查看+编辑+保存+删除+AI 单条生成 |
 | 2026-07-19 | P0-2 | 新增 backend/app/api/settings.py（GET/PUT /settings + /settings/test-llm），配置持久化到 settings.json；新增前端 SettingsPage.tsx；AI 引擎每次调用前从 settings.json 读最新配置；openai SDK 作为 langchain 兜底 |

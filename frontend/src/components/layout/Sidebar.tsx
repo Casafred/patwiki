@@ -127,239 +127,109 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">
-        <h1>PatWiki</h1>
-        <p>专利多维知识管理系统</p>
+      <div className="sidebar-brand">
+        <div className="brand-mark">PW</div>
+        <div>
+          <h1>PatWiki</h1>
+          <p>专利知识工作台</p>
+        </div>
+      </div>
+
+      <div className="sidebar-database">
+        <div className="sidebar-label-row">
+          <span className="sidebar-label">当前专利库</span>
+          <span className="sidebar-count">{databases.length}</span>
+        </div>
+        <select
+          className="database-select"
+          value={currentDatabaseId ?? ''}
+          onChange={(e) => handleDatabaseChange(Number(e.target.value))}
+          aria-label="选择当前专利库"
+        >
+          {databases.length === 0 && <option value="">无可用库</option>}
+          {databases.map(d => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </select>
+        {currentDatabaseId !== null && databases.find(d => d.id === currentDatabaseId) && (
+          <div className="database-meta">
+            {databases.find(d => d.id === currentDatabaseId)?.patent_count ?? 0} 条专利
+          </div>
+        )}
+        {showAddDatabase ? (
+          <div className="sidebar-form">
+            <input className="sidebar-input" placeholder="库名称" value={newDbName} onChange={(e) => setNewDbName(e.target.value)} autoFocus />
+            <input className="sidebar-input" placeholder="描述（可选）" value={newDbDesc} onChange={(e) => setNewDbDesc(e.target.value)} />
+            <div className="sidebar-form-actions">
+              <button className="sidebar-action primary" onClick={handleAddDatabase}>创建</button>
+              <button className="sidebar-action" onClick={() => { setShowAddDatabase(false); setNewDbName(''); setNewDbDesc('') }}>取消</button>
+            </div>
+          </div>
+        ) : (
+          <div className="sidebar-inline-actions">
+            <button className="sidebar-link" onClick={() => setShowAddDatabase(true)}>+ 新建专利库</button>
+            {currentDatabaseId !== null && databases.find(d => d.id === currentDatabaseId && !d.is_default) && (
+              <button className="sidebar-link danger" onClick={handleDeleteDatabase} title="删除当前库及库内专利">删除</button>
+            )}
+          </div>
+        )}
       </div>
 
       <nav className="sidebar-nav">
-        {/* P0-11：库切换器 - 顶部 */}
-        <div className="nav-section">专利库</div>
-        <div style={{ padding: '0 12px 12px', borderBottom: '1px solid #1e293b', marginBottom: 8 }}>
-          <select
-            className="form-input"
-            style={{ width: '100%', fontSize: 13, padding: '6px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
-            value={currentDatabaseId ?? ''}
-            onChange={(e) => handleDatabaseChange(Number(e.target.value))}
-          >
-            {databases.length === 0 && <option value="">无可用库</option>}
-            {databases.map(d => (
-              <option key={d.id} value={d.id}>
-                {d.name}{d.patent_count !== undefined ? ` (${d.patent_count})` : ''}
-              </option>
-            ))}
-          </select>
-          {showAddDatabase ? (
-            <div style={{ marginTop: 8 }}>
-              <input
-                className="form-input"
-                style={{ fontSize: 12, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', marginBottom: 4 }}
-                placeholder="库名称（如：电钻专利库）"
-                value={newDbName}
-                onChange={(e) => setNewDbName(e.target.value)}
-                autoFocus
-              />
-              <input
-                className="form-input"
-                style={{ fontSize: 12, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', marginBottom: 4 }}
-                placeholder="描述（可选）"
-                value={newDbDesc}
-                onChange={(e) => setNewDbDesc(e.target.value)}
-              />
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-primary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={handleAddDatabase}>
-                  创建
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  style={{ fontSize: 11, padding: '3px 8px', background: 'transparent', border: '1px solid #475569', color: '#cbd5e1' }}
-                  onClick={() => { setShowAddDatabase(false); setNewDbName(''); setNewDbDesc('') }}
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-              <div
-                className="product-item"
-                style={{ color: '#64748b', fontStyle: 'italic', flex: 1 }}
-                onClick={() => setShowAddDatabase(true)}
-              >
-                + 新建库
-              </div>
-              {currentDatabaseId !== null && databases.find(d => d.id === currentDatabaseId && !d.is_default) && (
-                <div
-                  className="product-item"
-                  style={{ color: '#ef4444', fontStyle: 'italic', flexShrink: 0, padding: '4px 8px' }}
-                  onClick={handleDeleteDatabase}
-                  title="删除当前库（连同库内所有专利一并删除，不可恢复）"
-                >
-                  🗑 删除库
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <div className="sidebar-section-title">工作台</div>
+        <button className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`} onClick={() => handleProductClick(null)}>全部专利</button>
+        <button className={`nav-item ${currentPage === 'stats' ? 'active' : ''}`} onClick={() => onNavigate('stats')}>数据看板</button>
+        <button className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard')}>可配置仪表盘</button>
 
-        <div
-          className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`}
-          onClick={() => handleProductClick(null)}
-        >
-          全部专利
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'stats' ? 'active' : ''}`}
-          onClick={() => onNavigate('stats')}
-        >
-          数据看板
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
-          onClick={() => onNavigate('dashboard')}
-        >
-          可配置仪表盘
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'automation' ? 'active' : ''}`}
-          onClick={() => onNavigate('automation')}
-        >
-          自动化规则
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`}
-          onClick={() => onNavigate('agent-analysis')}
-        >
-          AGENTAI 分析
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`}
-          onClick={() => onNavigate('ai-tasks')}
-        >
-          AI 任务
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'fields' ? 'active' : ''}`}
-          onClick={() => onNavigate('fields')}
-        >
-          字段管理
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'management' ? 'active' : ''}`}
-          onClick={() => onNavigate('management')}
-        >
-          管理台
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`}
-          onClick={() => onNavigate('sharing')}
-        >
-          协作与权限
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`}
-          onClick={() => onNavigate('import-history')}
-        >
-          导入历史
-        </div>
-        <div
-          className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
-          onClick={() => onNavigate('settings')}
-        >
-          设置
-        </div>
+        <div className="sidebar-section-title">智能与自动化</div>
+        <button className={`nav-item ${currentPage === 'automation' ? 'active' : ''}`} onClick={() => onNavigate('automation')}>自动化规则</button>
+        <button className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`} onClick={() => onNavigate('agent-analysis')}>智能分析</button>
+        <button className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`} onClick={() => onNavigate('ai-tasks')}>AI 任务</button>
 
         <ViewSwitcher onOpenView={() => onNavigate('patents')} />
 
-        <div className="nav-section">产品分类</div>
+        <div className="sidebar-section-title sidebar-section-title-row">
+          <span>产品分类</span>
+          <button className="sidebar-add" onClick={() => setShowAddProduct(true)} title="新增产品">+</button>
+        </div>
         <div className="product-list">
           {products.map((p) => (
-            <div
-              key={p.id}
-              className={`product-item ${currentProductId === p.id ? 'active' : ''}`}
-              onClick={() => handleProductClick(p.id)}
-            >
-              {p.name}
-              {p.patent_count !== undefined && p.patent_count > 0 && (
-                <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>
-                  {p.patent_count}
-                </span>
-              )}
-            </div>
+            <button key={p.id} className={`product-item ${currentProductId === p.id ? 'active' : ''}`} onClick={() => handleProductClick(p.id)}>
+              <span className="product-dot" />
+              <span className="product-name">{p.name}</span>
+              {p.patent_count !== undefined && <span className="product-count">{p.patent_count}</span>}
+            </button>
           ))}
+          {products.length === 0 && <div className="sidebar-empty">暂无产品分类</div>}
         </div>
-
-        {showAddProduct ? (
-          <div style={{ padding: '8px 20px' }}>
-            <input
-              className="form-input"
-              style={{ fontSize: 13, padding: '6px 8px', background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
-              placeholder="产品名称"
-              value={newProductName}
-              onChange={(e) => setNewProductName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddProduct()}
-              autoFocus
-            />
-            <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-              <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={handleAddProduct}>
-                确定
-              </button>
-              <button
-                className="btn btn-secondary"
-                style={{ fontSize: 12, padding: '4px 10px', background: 'transparent', border: '1px solid #475569', color: '#cbd5e1' }}
-                onClick={() => { setShowAddProduct(false); setNewProductName('') }}
-              >
-                取消
-              </button>
+        {showAddProduct && (
+          <div className="sidebar-form product-form">
+            <input className="sidebar-input" placeholder="产品名称" value={newProductName} onChange={(e) => setNewProductName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddProduct()} autoFocus />
+            <div className="sidebar-form-actions">
+              <button className="sidebar-action primary" onClick={handleAddProduct}>创建</button>
+              <button className="sidebar-action" onClick={() => { setShowAddProduct(false); setNewProductName('') }}>取消</button>
             </div>
-          </div>
-        ) : (
-          <div
-            className="product-item"
-            style={{ color: '#64748b', fontStyle: 'italic' }}
-            onClick={() => setShowAddProduct(true)}
-          >
-            + 新增产品
           </div>
         )}
+
+        <div className="sidebar-section-title">管理</div>
+        <button className={`nav-item ${currentPage === 'fields' ? 'active' : ''}`} onClick={() => onNavigate('fields')}>字段管理</button>
+        <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management')}>管理台</button>
+        <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing')}>协作与权限</button>
+        <button className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`} onClick={() => onNavigate('import-history')}>导入历史</button>
+        <button className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>设置</button>
       </nav>
 
-      {/* 当前用户身份（底部） */}
-      <div
-        style={{
-          padding: '10px 16px', borderTop: '1px solid #1e293b', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}
-        onClick={() => onNavigate('sharing')}
-        title="点击管理协作与权限"
-      >
-        {currentUser ? (
-          <>
-            <div style={{
-              width: 28, height: 28, borderRadius: '50%', background: '#3b82f6',
-              color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 12, fontWeight: 600, flexShrink: 0,
-            }}>
-              {(currentUser.display_name || currentUser.username).charAt(0).toUpperCase()}
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {currentUser.display_name || currentUser.username}
-              </div>
-              <div style={{ fontSize: 10, color: '#64748b' }}>@{currentUser.username}</div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div style={{
-              width: 28, height: 28, borderRadius: '50%', background: '#475569',
-              color: '#cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 12, fontWeight: 600, flexShrink: 0,
-            }}>?</div>
-            <div style={{ fontSize: 12, color: '#94a3b8' }}>未选择身份</div>
-          </>
-        )}
-      </div>
+      <button className="sidebar-account" onClick={() => onNavigate('sharing')} title="管理协作与权限">
+        <div className={`account-avatar ${currentUser ? '' : 'muted'}`}>
+          {currentUser ? (currentUser.display_name || currentUser.username).charAt(0).toUpperCase() : '?'}
+        </div>
+        <div className="account-info">
+          <strong>{currentUser?.display_name || currentUser?.username || '未选择身份'}</strong>
+          {currentUser && <span>@{currentUser.username}</span>}
+        </div>
+        <span className="account-arrow">›</span>
+      </button>
     </aside>
   )
 }

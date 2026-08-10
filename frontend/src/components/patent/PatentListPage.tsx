@@ -1576,21 +1576,20 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f3f4f6' }}>
       <div className="datagrid-toolbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="datagrid-toolbar-heading">
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#111827' }}>
             {activeView?.name || '专利列表'}
           </h2>
-          <span style={{ fontSize: 13, color: '#6b7280' }}>
+          <span className="datagrid-toolbar-count">
             共 {totalPatents} 件{currentProductId ? ' · 当前产品筛选中' : ''}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="datagrid-toolbar-actions">
           <div className="search-suggest-wrap">
-            <form onSubmit={handleSearch} style={{ display: 'flex', gap: 4 }}>
+            <form className="datagrid-search-form" onSubmit={handleSearch}>
               <input
                 type="text"
-                className="form-input"
-                style={{ width: 260, height: 32, fontSize: 13 }}
+                className="form-input datagrid-search-input"
                 placeholder="搜索专利号、标题、申请人..."
                 value={searchInputText}
                 onChange={(e) => handleSearchInputChange(e.target.value)}
@@ -1620,35 +1619,36 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             )}
           </div>
           <button
-            className={`btn btn-sm ${hasActiveFilters ? 'btn-primary' : 'btn-secondary'}`}
+            className={`btn btn-sm ${hasActiveFilters ? 'btn-primary' : 'btn-secondary'} datagrid-clear-filters`}
             onClick={handleClearAllFilters}
             style={{ display: hasActiveFilters ? 'inline-flex' : 'none' }}
           >
             清除筛选
           </button>
+          <div className="datagrid-action-group">
+            <button
+              className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'} family-toggle`}
+              onClick={() => { setGroupByFamily(!groupByFamily); setPage(1) }}
+              title="开启后，同族专利会排在一起显示，并在行左侧标注同族编号和成员数"
+            >
+              🧲 同族聚拢 {groupByFamily ? 'ON' : 'OFF'}
+            </button>
+            <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
+              列管理
+            </button>
+          </div>
           <button
-            className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => { setGroupByFamily(!groupByFamily); setPage(1) }}
-            title="开启后，同族专利会排在一起显示，并在行左侧标注同族编号和成员数"
-            style={groupByFamily ? { background: '#7c3aed', borderColor: '#7c3aed' } : {}}
-          >
-            🧲 同族聚拢 {groupByFamily ? 'ON' : 'OFF'}
-          </button>
-          <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
-            列管理
-          </button>
-          <button
-            className="btn btn-sm btn-primary"
+            className="btn btn-sm btn-primary datagrid-primary-action"
             onClick={() => openInsertAIDialog()}
             title="插入新列（普通列或AI列）"
           >
             + 插入新列
           </button>
-          <button className="btn btn-sm btn-secondary" onClick={handleExport}>
+          <button className="btn btn-sm btn-secondary datagrid-export-action" onClick={handleExport}>
             导出
           </button>
           <button
-            className="btn btn-sm btn-secondary"
+            className="btn btn-sm btn-secondary datagrid-utility-action"
             onClick={handleCleanupPlaceholders}
             title="扫描并清理 title=待补全 且专利号格式不合法的历史残留记录（如日期+专利号合并的乱码）"
             style={{ color: '#dc2626' }}
@@ -1659,7 +1659,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       </div>
 
       {activeView && activeView.layout_type === 'table' && (
-        <div style={{ display: 'flex', gap: 6, padding: '6px 20px', background: '#fff', borderBottom: '1px solid #e5e7eb' }}>
+        <div className="view-tools-bar">
           <button
             className={`btn btn-sm ${getViewGroupFields(activeView).length > 0 ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setShowGroupConfig(true)}
@@ -1675,7 +1675,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             条件格式
           </button>
           {getViewGroupFields(activeView).length > 0 && (
-            <span style={{ alignSelf: 'center', fontSize: 11, color: '#6b7280' }}>
+            <span className="view-tools-summary">
               已按 {getViewGroupFields(activeView).map(item => fields.find(field => field.key === item.field)?.name || item.field).join(' / ')} 分组
             </span>
           )}
@@ -1683,7 +1683,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       )}
 
       {Object.keys(filterValues).length > 0 && (
-        <div style={{ display: 'flex', gap: 6, padding: '6px 20px', background: '#fff', borderBottom: '1px solid #e5e7eb', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="filter-bar">
           <span style={{ fontSize: 11, color: '#6b7280' }}>已筛选：</span>
           {Object.entries(filterValues).filter(([, v]) => v).map(([key, value]) => {
             const field = fields.find(f => f.key === key)
@@ -1699,22 +1699,22 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
       {selectedIds.length > 0 && (
         <div className="selection-bar">
-          <span style={{ fontSize: 13, color: '#1e40af', fontWeight: 500 }}>
+          <span className="selection-summary">
             已选中 {selectedIds.length} 件专利
           </span>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="selection-actions">
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)}>批量编辑</button>
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)}>批量打标签</button>
             <button className="btn btn-xs btn-primary" onClick={() => setShowAIBatch(true)}>AI批量处理</button>
             <button
-              className="btn btn-xs btn-secondary"
+              className="btn btn-xs btn-danger"
               onClick={handleBulkDelete}
               style={{ color: '#dc2626', borderColor: '#fecaca' }}
             >
               批量删除
             </button>
           </div>
-          <button className="btn btn-xs btn-ghost" onClick={clearSelection} style={{ marginLeft: 'auto' }}>
+          <button className="btn btn-xs btn-ghost selection-clear" onClick={clearSelection}>
             取消选择
           </button>
         </div>
@@ -1745,8 +1745,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             <span style={{ fontSize: 13, color: '#6b7280' }}>加载中...</span>
           </div>
         ) : patents.length === 0 ? (
-          <div className="empty-state">
-            <div style={{ fontSize: 40, marginBottom: 12, color: '#d1d5db' }}>[ ]</div>
+          <div className="empty-state patent-empty-state">
+            <div className="empty-state-icon" aria-hidden="true">[ ]</div>
             <div style={{ fontSize: 15, fontWeight: 500, color: '#374151', marginBottom: 6 }}>暂无专利数据</div>
             <div style={{ fontSize: 13, color: '#9ca3af' }}>点击右上角"导入"按钮导入专利数据，或先在左侧创建产品分类</div>
           </div>

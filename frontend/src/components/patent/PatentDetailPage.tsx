@@ -228,20 +228,20 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
 
   return (
     <>
-      <div style={{ padding: '16px 20px', maxWidth: 1100 }}>
+      <div className="detail-page">
       {/* 顶部导航 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <button className="btn btn-secondary" onClick={onBack}>返回列表</button>
-        <div style={{ flex: 1 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#0f172a' }}>
+      <div className="detail-header">
+        <button className="btn btn-ghost detail-back" onClick={onBack}>‹ 返回专利列表</button>
+        <div className="detail-identity">
+          <h2>
             {patent.title}
           </h2>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
-            {patent.application_number && <span>申请号: {patent.application_number}</span>}
-            {patent.publication_number && <span> | 公开号: {patent.publication_number}</span>}
-            {patent.grant_number && <span> | 授权号: {patent.grant_number}</span>}
+          <div className="detail-identifiers">
+            {patent.application_number && <span>申请号 {patent.application_number}</span>}
+            {patent.publication_number && <span>公开号 {patent.publication_number}</span>}
+            {patent.grant_number && <span>授权号 {patent.grant_number}</span>}
           </div>
-          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+          <div className="detail-meta">
             {patent.created_at && <span>创建于 {new Date(patent.created_at).toLocaleString('zh-CN')}</span>}
             {patent.updated_at && patent.updated_at !== patent.created_at && (
               <span> · 最后修改于 {new Date(patent.updated_at).toLocaleString('zh-CN')}</span>
@@ -251,39 +251,31 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
             )}
           </div>
         </div>
-        {editing ? (
-          <>
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? '保存中...' : '保存'}
-            </button>
-            <button className="btn btn-secondary" onClick={handleCancelEdit}>取消</button>
-          </>
-        ) : (
-          <>
-            <button className="btn btn-secondary" onClick={() => setShowShareDialog(true)}>分享</button>
-            <button className="btn btn-primary" onClick={() => setEditing(true)}>编辑</button>
-            <button className="btn btn-secondary" onClick={handleDelete} style={{ color: '#dc2626' }}>删除</button>
-          </>
-        )}
+        <div className="detail-actions">
+          {editing ? (
+            <>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '保存修改'}</button>
+              <button className="btn btn-secondary" onClick={handleCancelEdit}>取消</button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-secondary" onClick={() => setShowShareDialog(true)}>分享</button>
+              <button className="btn btn-primary" onClick={() => setEditing(true)}>编辑专利</button>
+              <button className="btn btn-danger" onClick={handleDelete}>删除</button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Tab 导航 */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid #e2e8f0', marginBottom: 20 }}>
+      <div className="detail-tabs" role="tablist" aria-label="专利详情分区">
         {tabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            style={{
-              padding: '10px 16px',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              fontSize: 14,
-              fontWeight: activeTab === tab.key ? 600 : 400,
-              color: activeTab === tab.key ? '#2563eb' : '#64748b',
-              borderBottom: activeTab === tab.key ? '2px solid #2563eb' : '2px solid transparent',
-              marginBottom: '-2px',
-            }}
+            className={`detail-tab ${activeTab === tab.key ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === tab.key}
           >
             {tab.label}
           </button>
@@ -291,7 +283,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       </div>
 
       {/* Tab 内容 */}
-      <div>
+      <div className="detail-content">
         {activeTab === 'basic' && (
           <BasicInfoTab patent={patent} formData={formData} editing={editing} updateField={updateField} products={products} />
         )}
