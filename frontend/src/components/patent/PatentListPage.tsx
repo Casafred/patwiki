@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { patentApi, fieldApi, aiApi, customFieldApi, analyticsApi, viewApi, linkApi, searchApi } from '../../api'
 import { useAppStore } from '../../store'
 import type {
@@ -21,6 +22,23 @@ interface PatentListPageProps {
 
 type SortOrder = 'asc' | 'desc'
 type RelationCellData = { links?: LinkRecord[]; value?: JsonValue; aggregation?: string }
+
+function readPageParam(params: URLSearchParams): number {
+  const page = Number(params.get('page'))
+  return Number.isInteger(page) && page > 0 ? page : 1
+}
+
+function readFilterParam(params: URLSearchParams): Record<string, string> {
+  const raw = params.get('filters')
+  if (!raw) return {}
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value === 'string'))
+  } catch {
+    return {}
+  }
+}
 
 const DEFAULT_COLUMN_WIDTH = 150
 
@@ -207,17 +225,19 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
-    groupByFamily, setGroupByFamily, views, setViews,
+    groupByFamily, setGroupByFamily, views, setViews, setCurrentProductId,
   } = useAppStore()
 
-  const [page, setPage] = useState(1)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const searchParamsString = searchParams.toString()
+  const [page, setPage] = useState(() => readPageParam(searchParams))
   const [pageSize] = useState(50)
-  const [searchText, setSearchText] = useState('')
-  const [searchInputText, setSearchInputText] = useState('')
+  const [searchText, setSearchText] = useState(() => searchParams.get('q') || '')
+  const [searchInputText, setSearchInputText] = useState(() => searchParams.get('q') || '')
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([])
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
-  const [sortField, setSortField] = useState<string>('filing_date')
-  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [sortField, setSortField] = useState<string>(() => searchParams.get('sort') || 'filing_date')
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() => searchParams.get('order') === 'asc' ? 'asc' : 'desc')
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
@@ -249,7 +269,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [bulkRiskLevel, setBulkRiskLevel] = useState('')
   const [aiFieldKey, setAiFieldKey] = useState('')
   const [aiFields, setAiFields] = useState<CustomField[]>([])
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({})
+  const [filterValues, setFilterValues] = useState<Record<string, string>>(() => readFilterParam(searchParams))
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [relationData, setRelationData] = useState<Record<string, Record<number, RelationCellData>>>({})
   const [newFieldName, setNewFieldName] = useState('')
@@ -429,6 +449,42 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       setLoading(false)
     }
   }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, views, setPatents, setLoading])
+
+  // Browser back/forward rehydrates list state from the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(searchParamsString)
+    const urlProductId = Number(params.get('product'))
+    if (params.has('product') && Number.isInteger(urlProductId) && urlProductId > 0 && urlProductId !== currentProductId) {
+      setCurrentProductId(urlProductId)
+    }
+    const urlFamily = params.get('family') === '1'
+    if (params.has('family') && urlFamily !== groupByFamily) setGroupByFamily(urlFamily)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPage(readPageParam(params))
+    setSearchText(params.get('q') || '')
+    setSearchInputText(params.get('q') || '')
+    setSortField(params.get('sort') || 'filing_date')
+    setSortOrder(params.get('order') === 'asc' ? 'asc' : 'desc')
+    setFilterValues(readFilterParam(params))
+  }, [currentProductId, groupByFamily, searchParamsString, setCurrentProductId, setGroupByFamily])
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    const setOrDelete = (key: string, value: string | null) => {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
+    setOrDelete('db', currentDatabaseId === null ? null : String(currentDatabaseId))
+    setOrDelete('view', viewId === null ? null : String(viewId))
+    setOrDelete('product', currentProductId === null ? null : String(currentProductId))
+    setOrDelete('q', searchText.trim() || null)
+    setOrDelete('page', page > 1 ? String(page) : null)
+    setOrDelete('sort', sortField !== 'filing_date' ? sortField : null)
+    setOrDelete('order', sortOrder !== 'desc' ? sortOrder : null)
+    setOrDelete('family', groupByFamily ? '1' : null)
+    setOrDelete('filters', Object.keys(filterValues).length > 0 ? JSON.stringify(filterValues) : null)
+    if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
+  }, [currentDatabaseId, currentProductId, filterValues, groupByFamily, page, searchParams, searchParamsString, searchText, setSearchParams, sortField, sortOrder, viewId])
 
   useEffect(() => {
     // Field metadata is loaded asynchronously when the page mounts.

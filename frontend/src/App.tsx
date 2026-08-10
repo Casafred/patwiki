@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar'
 import PatentListPage from './components/patent/PatentListPage'
 import PatentDetailPage from './components/patent/PatentDetailPage'
@@ -22,44 +22,60 @@ import './index.css'
 
 export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history'
 
-const pagePaths: Record<Page, string> = {
-  patents: '/patents',
-  stats: '/stats',
-  dashboard: '/dashboard',
-  automation: '/automation',
-  settings: '/settings',
-  fields: '/fields',
-  management: '/management',
-  'ai-tasks': '/ai-tasks',
-  'agent-analysis': '/agent-analysis',
-  sharing: '/sharing',
-  'import-history': '/import-history',
+const pageSegments: Record<Page, string> = {
+  patents: 'patents',
+  stats: 'stats',
+  dashboard: 'dashboard',
+  automation: 'automation',
+  settings: 'settings',
+  fields: 'fields',
+  management: 'management',
+  'ai-tasks': 'ai-tasks',
+  'agent-analysis': 'agent-analysis',
+  sharing: 'sharing',
+  'import-history': 'import-history',
 }
 
 function getPageFromPath(pathname: string): Page {
-  if (pathname.startsWith('/stats')) return 'stats'
-  if (pathname.startsWith('/dashboard')) return 'dashboard'
-  if (pathname.startsWith('/automation')) return 'automation'
-  if (pathname.startsWith('/settings')) return 'settings'
-  if (pathname.startsWith('/fields')) return 'fields'
-  if (pathname.startsWith('/management')) return 'management'
-  if (pathname.startsWith('/ai-tasks')) return 'ai-tasks'
-  if (pathname.startsWith('/agent-analysis')) return 'agent-analysis'
-  if (pathname.startsWith('/sharing')) return 'sharing'
-  if (pathname.startsWith('/import-history')) return 'import-history'
+  const segment = pathname.match(/^\/db\/\d+\/([^/]+)/)?.[1] || pathname.split('/')[1]
+  const page = Object.entries(pageSegments).find(([, value]) => value === segment)?.[0]
+  if (page) return page as Page
   return 'patents'
+}
+
+function getDatabaseIdFromPath(pathname: string): number | null {
+  const value = pathname.match(/^\/db\/(\d+)(?:\/|$)/)?.[1]
+  const databaseId = value ? Number(value) : NaN
+  return Number.isInteger(databaseId) && databaseId > 0 ? databaseId : null
+}
+
+function DatabaseRouteScope({ children }: { children: ReactNode }) {
+  const { databaseId } = useParams<{ databaseId: string }>()
+  const parsedDatabaseId = Number(databaseId)
+  const { setCurrentDatabaseId, setCurrentViewId } = useAppStore()
+
+  useEffect(() => {
+    if (!Number.isInteger(parsedDatabaseId) || parsedDatabaseId <= 0) return
+    setCurrentDatabaseId(parsedDatabaseId)
+    setCurrentViewId(null)
+  }, [parsedDatabaseId, setCurrentDatabaseId, setCurrentViewId])
+
+  if (!Number.isInteger(parsedDatabaseId) || parsedDatabaseId <= 0) {
+    return <Navigate to="/patents" replace />
+  }
+  return <>{children}</>
 }
 
 function PatentDetailRoute() {
   const navigate = useNavigate()
-  const { patentId } = useParams<{ patentId: string }>()
+  const { patentId, databaseId } = useParams<{ patentId: string; databaseId?: string }>()
   const parsedPatentId = Number(patentId)
 
   if (!Number.isInteger(parsedPatentId) || parsedPatentId <= 0) {
-    return <Navigate to="/patents" replace />
+    return <Navigate to={databaseId ? `/db/${databaseId}/patents` : '/patents'} replace />
   }
 
-  return <PatentDetailPage patentId={parsedPatentId} onBack={() => navigate('/patents')} />
+  return <PatentDetailPage patentId={parsedPatentId} onBack={() => navigate(databaseId ? `/db/${databaseId}/patents` : '/patents')} />
 }
 
 function PublicPatentShareRoute() {
@@ -75,6 +91,8 @@ function SharedFormRoute() {
 function WorkspaceApp() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const currentPage = useMemo(() => getPageFromPath(location.pathname), [location.pathname])
   const [showImport, setShowImport] = useState(false)
   const {
@@ -82,6 +100,9 @@ function WorkspaceApp() {
     setDatabases, setCurrentDatabaseId, currentDatabaseId,
     setViews, setCurrentViewId, currentViewId,
   } = useAppStore()
+  const routeDatabaseId = getDatabaseIdFromPath(location.pathname)
+  const queryDatabaseId = Number(searchParams.get('db'))
+  const requestedDatabaseId = routeDatabaseId || (Number.isInteger(queryDatabaseId) && queryDatabaseId > 0 ? queryDatabaseId : null)
 
   useEffect(() => {
     if (currentDatabaseId === null) return
@@ -92,7 +113,10 @@ function WorkspaceApp() {
           views = [await viewApi.master(currentDatabaseId)]
         }
         setViews(views)
-        const preferred = views.find(view => view.is_department_master) || views[0]
+        const requestedViewId = Number(new URLSearchParams(searchParamsString).get('view'))
+        const preferred = views.find(view => view.id === requestedViewId)
+          || views.find(view => view.is_department_master)
+          || views[0]
         setCurrentViewId(preferred?.id ?? null)
       } catch (e) {
         console.error('Failed to load views:', e)
@@ -101,7 +125,7 @@ function WorkspaceApp() {
       }
     }
     void loadViews()
-  }, [currentDatabaseId, setCurrentViewId, setViews])
+  }, [currentDatabaseId, searchParamsString, setCurrentViewId, setViews])
 
   const loadMeta = useCallback(async () => {
     try {
@@ -117,19 +141,32 @@ function WorkspaceApp() {
       setTags(tags)
       setProjects(projects)
       setDatabases(databases)
-      // 默认选中第一个库（优先 is_default）
-      if (currentDatabaseId === null && databases.length > 0) {
+      const requestedDatabase = requestedDatabaseId !== null
+        ? databases.find(database => database.id === requestedDatabaseId)
+        : undefined
+      // URL 中的库优先于本地默认库，保证刷新后仍停留在原工作区。
+      if (requestedDatabase) {
+        if (currentDatabaseId !== requestedDatabase.id) setCurrentDatabaseId(requestedDatabase.id)
+      } else if (currentDatabaseId === null && databases.length > 0) {
         const def = databases.find(d => d.is_default) || databases[0]
         setCurrentDatabaseId(def.id)
       }
     } catch (e) {
       console.error('Failed to load meta data:', e)
     }
-  }, [currentDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProducts, setProjects, setTags])
+  }, [currentDatabaseId, requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProducts, setProjects, setTags])
 
   useEffect(() => {
     void loadMeta()
   }, [loadMeta])
+
+  useEffect(() => {
+    if (currentDatabaseId === null || currentViewId === null) return
+    const next = new URLSearchParams(searchParams)
+    if (!routeDatabaseId) next.set('db', String(currentDatabaseId))
+    next.set('view', String(currentViewId))
+    if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
+  }, [currentDatabaseId, currentViewId, routeDatabaseId, searchParams, searchParamsString, setSearchParams])
 
   const handleImportSuccess = () => {
     setShowImport(false)
@@ -139,11 +176,11 @@ function WorkspaceApp() {
   }
 
   const handlePatentClick = (id: number) => {
-    navigate(`/patents/${id}`)
+    navigate(currentDatabaseId ? `/db/${currentDatabaseId}/patents/${id}` : `/patents/${id}`)
   }
 
   const handleNavigate = (page: Page) => {
-    navigate(pagePaths[page])
+    navigate(currentDatabaseId ? `/db/${currentDatabaseId}/${pageSegments[page]}` : `/${pageSegments[page]}`)
   }
 
   return (
@@ -180,7 +217,19 @@ function WorkspaceApp() {
         </header>
         <div className="content-area">
           <Routes>
-            <Route index element={<Navigate to="/patents" replace />} />
+            <Route index element={<Navigate to={currentDatabaseId ? `/db/${currentDatabaseId}/patents` : '/patents'} replace />} />
+            <Route path="db/:databaseId/patents" element={<DatabaseRouteScope><PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/patents/:patentId" element={<DatabaseRouteScope><PatentDetailRoute /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/stats" element={<DatabaseRouteScope><StatsPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/dashboard" element={<DatabaseRouteScope><DashboardPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/automation" element={<DatabaseRouteScope><AutomationPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/settings" element={<DatabaseRouteScope><SettingsPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/fields" element={<DatabaseRouteScope><FieldSettingsPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/management" element={<DatabaseRouteScope><ManagementPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/sharing" element={<DatabaseRouteScope><SharingPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/import-history" element={<DatabaseRouteScope><ImportHistoryPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/ai-tasks" element={<DatabaseRouteScope><AITaskMonitor /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/agent-analysis" element={<DatabaseRouteScope><AgentAnalysisPage /></DatabaseRouteScope>} />
             <Route path="patents" element={<PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} />} />
             <Route path="patents/:patentId" element={<PatentDetailRoute />} />
             <Route path="stats" element={<StatsPage />} />

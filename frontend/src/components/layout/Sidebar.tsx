@@ -13,7 +13,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const {
     products, currentProductId, setCurrentProductId, setProducts,
     databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
-    currentUser,
+    currentUser, setCurrentViewId,
   } = useAppStore()
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [newProductName, setNewProductName] = useState('')
@@ -61,6 +61,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   // P0-11：库切换
   const handleDatabaseChange = (id: number) => {
     setCurrentDatabaseId(id)
+    setCurrentViewId(null)
     setCurrentProductId(null)
     onNavigate('patents')
   }
