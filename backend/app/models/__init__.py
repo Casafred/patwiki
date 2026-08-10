@@ -48,6 +48,9 @@ from app.models.field import CustomField
 # 通用跨表关联
 from app.models.cross_table_link import CrossTableLink
 
+# 公式字段依赖
+from app.models.formula import FormulaDependency
+
 # 库（P0-8 新增）
 from app.models.database import PatentDatabase
 
@@ -87,7 +90,7 @@ __all__ = [
     # tag
     "TagGroup", "Tag",
     # field
-    "CustomField", "CrossTableLink",
+    "CustomField", "CrossTableLink", "FormulaDependency",
     # database
     "PatentDatabase",
     # patent

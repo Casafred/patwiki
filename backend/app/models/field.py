@@ -24,6 +24,8 @@ class CustomField(Base):
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
     ai_config = Column(JSON)
+    # 公式字段配置：{"expression": "...", "return_type": "text|number|date|boolean"}
+    formula_config = Column(JSON)
     # 通用关联字段配置：Link / Lookup / Rollup
     link_config = Column(JSON)
     lookup_config = Column(JSON)

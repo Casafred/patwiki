@@ -3,6 +3,7 @@ import { customFieldApi } from '../../api'
 import type { CustomField, LinkConfig, LookupConfig, RollupConfig } from '../../types'
 import { useAppStore } from '../../store'
 import { getErrorMessage } from '../../lib/errors'
+import FormulaEditor from './FormulaEditor'
 
 interface RelationConfigFieldsProps {
   fieldType?: string
@@ -12,6 +13,17 @@ interface RelationConfigFieldsProps {
 }
 
 function RelationConfigFields({ fieldType, field, availableFields, onChange }: RelationConfigFieldsProps) {
+  if (fieldType === 'formula') {
+    return (
+      <FormulaEditor
+        value={field.formula_config}
+        fieldKey={field.key}
+        availableFields={availableFields}
+        onChange={formula_config => onChange({ formula_config })}
+      />
+    )
+  }
+
   if (fieldType === 'link') {
     const config: LinkConfig = field.link_config || {
       target_table: 'projects',
@@ -112,6 +124,7 @@ export default function FieldSettingsPage() {
     field_type: 'text',
     is_active: true,
     ai_config: {},
+    formula_config: { expression: '', return_type: 'text' },
   })
   const { setCustomFields } = useAppStore()
 
@@ -145,6 +158,7 @@ export default function FieldSettingsPage() {
       link_config: field.link_config ? { ...field.link_config } : undefined,
       lookup_config: field.lookup_config ? { ...field.lookup_config } : undefined,
       rollup_config: field.rollup_config ? { ...field.rollup_config } : undefined,
+      formula_config: field.formula_config ? { ...field.formula_config } : undefined,
       group_name: field.group_name,
     })
   }
@@ -187,6 +201,7 @@ export default function FieldSettingsPage() {
         field_type: 'text',
         is_active: true,
         ai_config: {},
+        formula_config: { expression: '', return_type: 'text' },
       })
     } catch (error: unknown) {
       alert('创建失败: ' + getErrorMessage(error))
@@ -221,6 +236,7 @@ export default function FieldSettingsPage() {
     number: '数字',
     date: '日期',
     boolean: '是/否',
+    formula: '公式',
     link: '关联',
     lookup: 'Lookup',
     rollup: 'Rollup',
@@ -292,6 +308,7 @@ export default function FieldSettingsPage() {
                 <option value="number">数字</option>
                 <option value="date">日期</option>
                 <option value="boolean">是/否</option>
+                <option value="formula">公式</option>
                 <option value="link">关联记录（Link）</option>
                 <option value="lookup">查找引用（Lookup）</option>
                 <option value="rollup">汇总计算（Rollup）</option>
@@ -330,7 +347,7 @@ export default function FieldSettingsPage() {
             </button>
             <button className="btn btn-secondary" onClick={() => {
               setShowAddForm(false)
-              setNewField({ key: '', name: '', field_type: 'text', is_active: true, ai_config: {} })
+              setNewField({ key: '', name: '', field_type: 'text', is_active: true, ai_config: {}, formula_config: { expression: '', return_type: 'text' } })
             }}>
               取消
             </button>
@@ -374,6 +391,7 @@ export default function FieldSettingsPage() {
                       <option value="number">数字</option>
                       <option value="date">日期</option>
                       <option value="boolean">是/否</option>
+                      <option value="formula">公式</option>
                       <option value="link">关联记录（Link）</option>
                       <option value="lookup">查找引用（Lookup）</option>
                       <option value="rollup">汇总计算（Rollup）</option>
@@ -530,6 +548,11 @@ export default function FieldSettingsPage() {
                         WebkitBoxOrient: 'vertical',
                       }}>
                         {field.ai_config.prompt_template}
+                      </div>
+                    )}
+                    {field.field_type === 'formula' && field.formula_config?.expression && (
+                      <div style={{ marginTop: 8, padding: 8, background: '#eff6ff', borderRadius: 4, fontSize: 11, color: '#1e40af', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                        {field.formula_config.expression}
                       </div>
                     )}
                   </div>

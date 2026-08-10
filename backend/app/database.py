@@ -87,6 +87,8 @@ def _ensure_column_migration():
          "ALTER TABLE custom_fields ADD COLUMN lookup_config JSON"),
         ("custom_fields", "rollup_config",
          "ALTER TABLE custom_fields ADD COLUMN rollup_config JSON"),
+        ("custom_fields", "formula_config",
+         "ALTER TABLE custom_fields ADD COLUMN formula_config JSON"),
     ]
 
     with engine.begin() as conn:

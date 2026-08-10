@@ -342,6 +342,9 @@ class ImportService:
 
             # 自定义字段
             if field_key in all_custom_fields:
+                if all_custom_fields[field_key].field_type == CustomFieldType.FORMULA:
+                    # 公式字段由引擎计算，导入数据不能覆盖计算结果。
+                    continue
                 custom[field_key] = value
                 continue
 

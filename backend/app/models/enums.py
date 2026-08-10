@@ -58,6 +58,7 @@ class CustomFieldType(str, enum.Enum):
     URL = "url"
     RATING = "rating"
     AI_FIELD = "ai_field"
+    FORMULA = "formula"
     LINK = "link"
     LOOKUP = "lookup"
     ROLLUP = "rollup"

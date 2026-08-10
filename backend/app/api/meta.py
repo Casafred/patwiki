@@ -19,6 +19,8 @@ from app.schemas.schemas import (
     Person as PersonSchema, PersonCreate, PersonUpdate,
     ProductLine as ProductLineSchema, ProductLineCreate, ProductLineUpdate,
 )
+from app.services.formula_engine import FormulaError
+from app.services.formula_service import FormulaService
 
 router = APIRouter(tags=["meta"])
 
@@ -217,7 +219,24 @@ def list_custom_fields(
 
 @router.post("/custom-fields", response_model=CustomFieldSchema)
 def create_custom_field(field_in: CustomFieldCreate, db: Session = Depends(get_db)):
-    field = CustomField(**field_in.model_dump())
+    data = field_in.model_dump()
+    if data.get("field_type") == CustomFieldType.FORMULA.value:
+        config = data.pop("formula_config", None) or {}
+        try:
+            return FormulaService.create_formula_field(
+                db,
+                key=data["key"],
+                name=data["name"],
+                expression=config.get("expression", ""),
+                return_type=config.get("return_type", "text"),
+                group_name=data.get("group_name") or "公式",
+                description=data.get("description"),
+                sort_order=data.get("sort_order") or 0,
+                is_active=data.get("is_active", True),
+            )
+        except FormulaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    field = CustomField(**data)
     db.add(field)
     db.commit()
     db.refresh(field)
@@ -229,7 +248,25 @@ def update_custom_field(field_id: int, field_in: CustomFieldUpdate, db: Session 
     field = db.query(CustomField).filter(CustomField.id == field_id).first()
     if not field:
         raise HTTPException(status_code=404, detail="Field not found")
-    for field_name, value in field_in.model_dump(exclude_unset=True).items():
+    updates = field_in.model_dump(exclude_unset=True)
+    target_type = updates.get("field_type")
+    current_type = field.field_type.value if hasattr(field.field_type, "value") else str(field.field_type)
+    if target_type == CustomFieldType.FORMULA.value or current_type == CustomFieldType.FORMULA.value:
+        if target_type and target_type != CustomFieldType.FORMULA.value:
+            FormulaService.remove_formula_dependencies(db, field.key)
+            field.formula_config = None
+            updates.pop("formula_config", None)
+            for field_name, value in updates.items():
+                setattr(field, field_name, value)
+            db.commit()
+            db.refresh(field)
+            return field
+        updates.pop("field_type", None)
+        try:
+            return FormulaService.update_formula_field(db, field, updates)
+        except FormulaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    for field_name, value in updates.items():
         setattr(field, field_name, value)
     db.commit()
     db.refresh(field)
@@ -241,8 +278,11 @@ def delete_custom_field(field_id: int, db: Session = Depends(get_db)):
     field = db.query(CustomField).filter(CustomField.id == field_id).first()
     if not field:
         raise HTTPException(status_code=404, detail="Field not found")
-    db.delete(field)
-    db.commit()
+    if field.field_type == CustomFieldType.FORMULA:
+        FormulaService.delete_formula_field(db, field)
+    else:
+        db.delete(field)
+        db.commit()
     return {"success": True}
 
 

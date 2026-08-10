@@ -273,6 +273,8 @@ class PatentService:
         db.add(patent)
         db.commit()
         db.refresh(patent)
+        from app.services.formula_service import FormulaService
+        FormulaService.recalculate_patent(db, patent)
         return patent
 
     @staticmethod
@@ -295,7 +297,7 @@ class PatentService:
             source_view_name: 来源视图名（冗余存储，视图删除后仍可读）
         """
         if isinstance(patent_in, dict):
-            update_data = patent_in
+            update_data = dict(patent_in)
         else:
             update_data = patent_in.model_dump(exclude_unset=True)
 
@@ -312,6 +314,7 @@ class PatentService:
             pass
 
         history_entries: list[PatentHistory] = []
+        changed_fields: set[str] = set()
 
         def _make_history(field: str, old_value, new_value) -> PatentHistory:
             """构造历史记录（自动注入来源视图信息）。"""
@@ -339,15 +342,18 @@ class PatentService:
                     continue
                 setattr(patent, field, value)
                 history_entries.append(_make_history(field, old_value, value))
+                changed_fields.add(field)
 
         # 自定义字段修改
         if custom_fields_data is not None:
-            current = patent.custom_fields or {}
+            # JSON 列没有 MutableDict 追踪，先复制再赋值才能稳定触发 SQLAlchemy 更新。
+            current = dict(patent.custom_fields or {})
             for k, v in custom_fields_data.items():
                 old_v = current.get(k)
                 if not _is_value_changed(old_v, v):
                     continue
                 history_entries.append(_make_history(f"custom_fields.{k}", old_v, v))
+                changed_fields.add(k)
             current.update(custom_fields_data)
             patent.custom_fields = current
 
@@ -365,6 +371,9 @@ class PatentService:
             db.add(h)
         db.commit()
         db.refresh(patent)
+        if changed_fields:
+            from app.services.formula_service import FormulaService
+            FormulaService.on_field_changed(db, patent, changed_fields)
         return patent
 
     @staticmethod

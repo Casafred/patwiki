@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text, or_
 from typing import Optional
@@ -373,6 +373,10 @@ def confirm_import(
 
         print(f"[PatWiki] 导入完成: 新增:{inserted} 更新:{updated} 跳过:{skipped} 错误:{error_count}", flush=True)
 
+        # 导入可能一次修改多个依赖字段，统一按库重算公式，避免逐行重复计算。
+        from app.services.formula_service import FormulaService
+        FormulaService.recalculate_all(db, database_id=database_id)
+
         if database_id is not None:
             from app.services.database_service import DatabaseService
             DatabaseService.refresh_patent_count(db, database_id)
@@ -478,56 +482,24 @@ def export_patents(
     has_risk: Optional[bool] = None,
     db: Session = Depends(get_db),
 ):
-    tag_ids = [tag_id] if tag_id else None
-    patents, total = PatentService.list_patents(
-        db, page=1, page_size=100000,
-        search=search, database_id=database_id, product_id=product_id, project_id=project_id,
-        tag_ids=tag_ids, legal_status=legal_status, category=category,
-        has_risk=has_risk,
-    )
+    from app.services.export_service import ExportService
 
-    rows = []
-    for p in patents:
-        row = {
-            "申请号": p.application_number or "",
-            "公开号": p.publication_number or "",
-            "标题": p.title,
-            "摘要": p.abstract or "",
-            "申请人": p.applicant or "",
-            "发明人": p.inventor or "",
-            "申请日": p.filing_date.isoformat() if p.filing_date else "",
-            "公开日": p.publication_date.isoformat() if p.publication_date else "",
-            "授权日": p.grant_date.isoformat() if p.grant_date else "",
-            "法律状态": p.legal_status or "",
-            "专利类型": p.patent_type or "",
-            "国家": p.country or "",
-            "IPC主分类": p.ipc_main or "",
-            "分类": p.category or "",
-            "子分类": p.subcategory or "",
-            "是否有风险": "是" if p.has_risk else "否",
-            "风险等级": p.risk_level or "",
-            "模块": p.module or "",
-            "技术问题": p.technical_problem or "",
-            "技术效果": p.technical_effect or "",
-            "技术方案": p.technical_solution or "",
-            "备注": p.notes or "",
-        }
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="专利数据")
-
-    output.seek(0)
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    tmp.write(output.getvalue())
-    tmp.close()
-
-    return FileResponse(
-        tmp.name,
-        filename=f"patents_export_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+    try:
+        data = ExportService.export_to_excel(
+            db,
+            search=search,
+            database_id=database_id,
+            product_id=product_id,
+            project_id=project_id,
+            tag_ids=[tag_id] if tag_id else None,
+            legal_status=legal_status,
+            category=category,
+            has_risk=has_risk,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StreamingResponse(
+        BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="patwiki_export.xlsx"'},
     )

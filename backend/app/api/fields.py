@@ -5,9 +5,10 @@ from typing import Any
 from datetime import date
 
 from app.database import get_db
-from app.models import Patent, PatentHistory
+from app.models import CustomField, CustomFieldType, Patent, PatentHistory
 from app.services.field_registry import get_all_fields_meta, SYSTEM_FIELD_KEYS, get_system_field_meta
 from app.services.patent_service import PatentService, _is_value_changed, _stringify_value
+from app.services.formula_service import FormulaService
 
 router = APIRouter(tags=["fields"])
 
@@ -69,7 +70,11 @@ def update_cell(
             )
         setattr(patent, field_key, value)
     else:
-        current = patent.custom_fields or {}
+        custom_field = db.query(CustomField).filter(CustomField.key == field_key).first()
+        if custom_field and custom_field.field_type == CustomFieldType.FORMULA:
+            raise HTTPException(status_code=400, detail="公式字段为只读字段，不能直接编辑")
+        # JSON 列没有 MutableDict 追踪，先复制再赋值才能稳定触发更新。
+        current = dict(patent.custom_fields or {})
         old_v = current.get(field_key)
         if _is_value_changed(old_v, req.value):
             history_entry = PatentHistory(
@@ -88,6 +93,7 @@ def update_cell(
         db.add(history_entry)
     db.commit()
     db.refresh(patent)
+    FormulaService.on_field_changed(db, patent, [field_key])
     return {"success": True}
 
 

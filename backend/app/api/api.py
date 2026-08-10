@@ -13,6 +13,8 @@ from app.api.views import router as views_router  # P0-13 新增
 from app.api.links import router as links_router  # M3：通用关联字段
 from app.api.public_shares import router as public_shares_router  # P2-4：单专利 Wiki 分享
 from app.api.search import router as search_router  # P2-6：搜索自动补全
+from app.api.formula import router as formula_router  # M1：公式字段
+from app.api.export import router as export_router  # M1：数据导出
 
 api_router = APIRouter()
 api_router.include_router(databases_router)
@@ -28,3 +30,5 @@ api_router.include_router(views_router)
 api_router.include_router(links_router)
 api_router.include_router(public_shares_router)
 api_router.include_router(search_router)
+api_router.include_router(formula_router)
+api_router.include_router(export_router)

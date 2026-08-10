@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useCallback } from 'react'
-import { patentApi, fieldApi, exportApi, aiApi, customFieldApi, analyticsApi, viewApi, linkApi, searchApi } from '../../api'
+import { patentApi, fieldApi, aiApi, customFieldApi, analyticsApi, viewApi, linkApi, searchApi } from '../../api'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
@@ -9,6 +9,7 @@ import { getErrorMessage } from '../../lib/errors'
 import GroupConfigPanel from '../views/GroupConfigPanel'
 import ConditionalFormatPanel from '../views/ConditionalFormatPanel'
 import KanbanView from '../views/KanbanView'
+import ExportDialog from '../common/ExportDialog'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -279,6 +280,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set())
   const [showGroupConfig, setShowGroupConfig] = useState(false)
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
+  const [showExportDialog, setShowExportDialog] = useState(false)
 
   const loadRelationData = useCallback(async () => {
     const relationFields = fields.filter(field => ['link', 'lookup', 'rollup'].includes(field.field_type))
@@ -586,22 +588,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }
 
-  const handleExport = async () => {
-    try {
-      const blob = await exportApi.exportPatents({
-        product_id: currentProductId || undefined,
-        database_id: currentDatabaseId || undefined,
-      })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `patents_${new Date().toISOString().slice(0, 10)}.xlsx`
-      a.click()
-      window.URL.revokeObjectURL(url)
-    } catch {
-      alert('导出失败')
-    }
-  }
+  const handleExport = () => setShowExportDialog(true)
 
   // 批量删除选中的专利
   const handleBulkDelete = async () => {
@@ -2967,6 +2954,16 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           fields={fields}
           onClose={() => setShowConditionalConfig(false)}
           onSave={saveConditionalFormatting}
+        />
+      )}
+      {showExportDialog && (
+        <ExportDialog
+          fields={fields}
+          databaseId={currentDatabaseId}
+          viewId={viewId}
+          search={searchText}
+          filters={filterValues}
+          onClose={() => setShowExportDialog(false)}
         />
       )}
     </div>

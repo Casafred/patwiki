@@ -7,6 +7,13 @@ export interface AIConfig extends JsonObject {
   prompt_template?: string
 }
 
+export type FormulaReturnType = 'text' | 'number' | 'date' | 'boolean'
+
+export interface FormulaConfig {
+  expression: string
+  return_type: FormulaReturnType
+}
+
 export interface Patent {
   id: number
   application_number?: string
@@ -371,6 +378,7 @@ export interface CustomField {
   is_active?: boolean
   sort_order?: number
   ai_config?: AIConfig
+  formula_config?: FormulaConfig
   link_config?: LinkConfig
   lookup_config?: LookupConfig
   rollup_config?: RollupConfig
@@ -529,7 +537,7 @@ export interface AIFieldValue {
 export interface FieldMeta {
   key: string
   name: string
-  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'lookup' | 'rollup' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating'
+  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'lookup' | 'rollup' | 'formula' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating'
   group_name: string
   options?: string[] | null
   width?: number
@@ -540,6 +548,9 @@ export interface FieldMeta {
   visible?: boolean
   is_system?: boolean
   ai_config?: AIConfig | null
+  formula_config?: FormulaConfig | null
+  is_formula?: boolean
+  dependencies?: string[]
   link_config?: LinkConfig | null
   lookup_config?: LookupConfig | null
   rollup_config?: RollupConfig | null

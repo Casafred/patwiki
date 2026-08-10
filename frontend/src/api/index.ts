@@ -6,7 +6,7 @@ import type {
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
-  PatentGraphResponse,
+  PatentGraphResponse, FormulaReturnType,
 } from '../types'
 
 export const fieldApi = {
@@ -370,6 +370,41 @@ export const personApi = {
   delete: (id: number): Promise<{ success: boolean }> => api.delete(`/people/${id}`),
 }
 
+export const formulaApi = {
+  list: (): Promise<Array<CustomField & { dependencies?: string[] }>> => api.get('/formula/fields'),
+  create: (data: {
+    key: string
+    name: string
+    expression: string
+    return_type: FormulaReturnType
+    group_name?: string
+    description?: string
+    sort_order?: number
+    is_active?: boolean
+  }): Promise<CustomField> => api.post('/formula/fields', data),
+  update: (id: number, data: {
+    name?: string
+    expression?: string
+    return_type?: FormulaReturnType
+    group_name?: string
+    description?: string
+    sort_order?: number
+    is_active?: boolean
+  }): Promise<CustomField> => api.put(`/formula/fields/${id}`, data),
+  validate: (expression: string, formulaKey?: string): Promise<{
+    valid: boolean
+    expression: string
+    dependencies: string[]
+    error?: string | null
+  }> => api.post('/formula/validate', { expression, formula_key: formulaKey }),
+  functions: (): Promise<Array<{ name: string; category: string; description: string }>> => api.get('/formula/functions'),
+  recalculate: (formulaKey: string, patentIds?: number[]): Promise<{
+    patent_count: number
+    formula_count: number
+    errors: Record<string, number>
+  }> => api.post(`/formula/recalculate/${encodeURIComponent(formulaKey)}`, { patent_ids: patentIds }),
+}
+
 export const departmentApi = {
   list: (): Promise<Department[]> => api.get('/departments'),
   create: (data: Partial<Department>): Promise<Department> => api.post('/departments', data),
@@ -411,6 +446,10 @@ export const aiApi = {
 export const exportApi = {
   exportPatents: (params: JsonObject = {}): Promise<Blob> =>
     api.get('/export', { params, responseType: 'blob' }),
+  excel: (payload: JsonObject): Promise<Blob> =>
+    api.post('/export/excel', payload, { responseType: 'blob' }),
+  csv: (payload: JsonObject): Promise<Blob> =>
+    api.post('/export/csv', payload, { responseType: 'blob' }),
 }
 
 export const settingsApi = {

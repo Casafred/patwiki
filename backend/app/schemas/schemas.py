@@ -234,6 +234,7 @@ class CustomFieldBase(BaseSchema):
     is_active: Optional[bool] = True
     sort_order: Optional[int] = 0
     ai_config: Optional[dict[str, Any]] = None
+    formula_config: Optional[dict[str, Any]] = None
     link_config: Optional[dict[str, Any]] = None
     lookup_config: Optional[dict[str, Any]] = None
     rollup_config: Optional[dict[str, Any]] = None
@@ -254,6 +255,7 @@ class CustomFieldUpdate(BaseSchema):
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
     ai_config: Optional[dict[str, Any]] = None
+    formula_config: Optional[dict[str, Any]] = None
     link_config: Optional[dict[str, Any]] = None
     lookup_config: Optional[dict[str, Any]] = None
     rollup_config: Optional[dict[str, Any]] = None
