@@ -6,6 +6,7 @@ import type {
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
+  PatentGraphResponse,
 } from '../types'
 
 export const fieldApi = {
@@ -203,6 +204,9 @@ export const patentApi = {
   // 修改历史
   getHistory: (patentId: number, limit: number = 100): Promise<PatentHistory[]> =>
     api.get(`/patents/${patentId}/history`, { params: { limit } }),
+
+  getGraph: (patentId: number, params: { depth?: number; include_family?: boolean; include_citations?: boolean } = {}): Promise<PatentGraphResponse> =>
+    api.get(`/patents/${patentId}/graph`, { params }),
 }
 
 export const patentShareApi = {

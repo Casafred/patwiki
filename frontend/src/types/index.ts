@@ -126,6 +126,37 @@ export interface SearchSuggestion {
   patent_title: string
 }
 
+export interface PatentGraphNode {
+  id: string
+  patent_id: number
+  kind: 'root' | 'family' | 'citation' | string
+  label: string
+  title: string
+  number: string
+  is_placeholder: boolean
+}
+
+export interface PatentGraphEdge {
+  id: string
+  source: string
+  target: string
+  relation: 'family' | 'citation' | string
+  label: string
+}
+
+export interface PatentGraphResponse {
+  root_id: number
+  depth: number
+  nodes: PatentGraphNode[]
+  edges: PatentGraphEdge[]
+  counts: {
+    nodes: number
+    edges: number
+    family_edges: number
+    citation_edges: number
+  }
+}
+
 // P0-8：库（PatentDatabase）类型
 export interface PatentDatabase {
   id: number

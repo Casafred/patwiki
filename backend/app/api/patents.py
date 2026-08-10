@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import date, datetime, timezone
@@ -12,7 +13,7 @@ from app.schemas.schemas import (
 )
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
-from app.models import AIFieldValue, CustomField, CustomFieldType, PatentHistory
+from app.models import AIFieldValue, Citation, CustomField, CustomFieldType, Patent as PatentModel, PatentHistory
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -91,6 +92,133 @@ def get_patent(patent_id: int, db: Session = Depends(get_db)):
     if not patent:
         raise HTTPException(status_code=404, detail="Patent not found")
     return patent
+
+
+@router.get("/{patent_id}/graph")
+def get_patent_graph(
+    patent_id: int,
+    depth: int = Query(1, ge=1, le=2),
+    include_family: bool = Query(True),
+    include_citations: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    """返回专利同族与引用关系图数据，供前端图谱组件直接渲染。"""
+    root = db.query(PatentModel).filter(PatentModel.id == patent_id).first()
+    if not root:
+        raise HTTPException(status_code=404, detail="Patent not found")
+
+    patents_by_id: dict[int, PatentModel] = {root.id: root}
+    edges: list[dict[str, str]] = []
+    edge_ids: set[str] = set()
+    frontier = {root.id}
+    visited_ids = {root.id}
+
+    def add_edge(edge_id: str, source: int, target: int, relation: str, label: str):
+        if edge_id in edge_ids or source == target:
+            return
+        edge_ids.add(edge_id)
+        edges.append({
+            "id": edge_id,
+            "source": f"patent:{source}",
+            "target": f"patent:{target}",
+            "relation": relation,
+            "label": label,
+        })
+
+    for _ in range(depth):
+        if not frontier:
+            break
+        next_frontier: set[int] = set()
+
+        if include_family:
+            frontier_patents = db.query(PatentModel).filter(PatentModel.id.in_(frontier)).all()
+            family_ids = {patent.family_id for patent in frontier_patents if patent.family_id is not None}
+            if family_ids:
+                family_members = db.query(PatentModel).filter(PatentModel.family_id.in_(family_ids)).all()
+                for member in family_members:
+                    patents_by_id[member.id] = member
+                for family_id in family_ids:
+                    members = [item for item in family_members if item.family_id == family_id]
+                    if not members:
+                        continue
+                    anchor = min(members, key=lambda item: item.id)
+                    for member in members:
+                        if member.id != anchor.id:
+                            add_edge(
+                                f"family:{family_id}:{anchor.id}:{member.id}",
+                                anchor.id,
+                                member.id,
+                                "family",
+                                "同族",
+                            )
+                    next_frontier.update(member.id for member in members if member.id not in frontier)
+
+        if include_citations:
+            citation_rows = db.query(Citation).filter(or_(
+                Citation.citing_patent_id.in_(frontier),
+                Citation.cited_patent_id.in_(frontier),
+            )).all()
+            citation_patent_ids = {
+                patent_id
+                for citation in citation_rows
+                for patent_id in (citation.citing_patent_id, citation.cited_patent_id)
+            }
+            citation_patents = db.query(PatentModel).filter(
+                PatentModel.id.in_(citation_patent_ids)
+            ).all() if citation_patent_ids else []
+            citation_patents_by_id = {patent.id: patent for patent in citation_patents}
+            for citation in citation_rows:
+                citing = citation_patents_by_id.get(citation.citing_patent_id)
+                cited = citation_patents_by_id.get(citation.cited_patent_id)
+                if not citing or not cited:
+                    continue
+                patents_by_id[citing.id] = citing
+                patents_by_id[cited.id] = cited
+                add_edge(
+                    f"citation:{citation.id}",
+                    citation.citing_patent_id,
+                    citation.cited_patent_id,
+                    "citation",
+                    "引用",
+                )
+                if citing.id not in frontier:
+                    next_frontier.add(citing.id)
+                if cited.id not in frontier:
+                    next_frontier.add(cited.id)
+
+        frontier = next_frontier - visited_ids
+        visited_ids.update(frontier)
+
+    root_family_id = root.family_id
+    nodes = []
+    for patent in patents_by_id.values():
+        number = patent.publication_number or patent.application_number or f"专利 #{patent.id}"
+        title = patent.title or number
+        kind = "root" if patent.id == root.id else (
+            "family" if root_family_id is not None and patent.family_id == root_family_id else "citation"
+        )
+        nodes.append({
+            "id": f"patent:{patent.id}",
+            "patent_id": patent.id,
+            "kind": kind,
+            "label": title[:26] + ("..." if len(title) > 26 else ""),
+            "title": title,
+            "number": number,
+            "is_placeholder": title == "待补全",
+        })
+
+    return {
+        "root_id": root.id,
+        "depth": depth,
+        "nodes": nodes,
+        "edges": edges,
+        "counts": {
+            "nodes": len(nodes),
+            "edges": len(edges),
+            "family_edges": sum(edge["relation"] == "family" for edge in edges),
+            "citation_edges": sum(edge["relation"] == "citation" for edge in edges),
+        },
+    }
 
 
 def _serialize_ai_value(value: Any) -> str:

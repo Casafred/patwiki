@@ -3,6 +3,7 @@ import { patentApi, productApi, projectApi, tagApi, aiApi } from '../../api'
 import type { Patent, Product, Project, Tag, CustomField, AITask, AIFieldValue, PatentHistory } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import PatentShareDialog from './PatentShareDialog'
+import PatentGraph from './PatentGraph'
 
 interface PatentDetailPageProps {
   patentId: number
@@ -882,6 +883,10 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField }
           </div>
         )}
       </Field>
+
+      <div style={{ gridColumn: '1 / -1' }}>
+        <PatentGraph patentId={patent.id} />
+      </div>
     </div>
   )
 }
