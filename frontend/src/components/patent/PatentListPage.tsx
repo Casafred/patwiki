@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import {
   patentService as patentApi,
   fieldService as fieldApi,
@@ -16,6 +16,7 @@ import type {
   ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget, SearchSuggestion,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import Icon from '../common/Icon'
 import GroupConfigPanel from '../views/GroupConfigPanel'
 import ConditionalFormatPanel from '../views/ConditionalFormatPanel'
 import KanbanView from '../views/KanbanView'
@@ -237,8 +238,16 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     groupByFamily, setGroupByFamily, views, setViews, setCurrentProductId,
   } = useAppStore()
 
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const searchParamsString = searchParams.toString()
+  const routeDatabaseId = Number(location.pathname.match(/^\/db\/(\d+)(?:\/|$)/)?.[1])
+  const queryDatabaseId = Number(searchParams.get('db'))
+  const activeDatabaseId = Number.isInteger(routeDatabaseId) && routeDatabaseId > 0
+    ? routeDatabaseId
+    : Number.isInteger(queryDatabaseId) && queryDatabaseId > 0
+      ? queryDatabaseId
+      : currentDatabaseId
   const [page, setPage] = useState(() => readPageParam(searchParams))
   const [pageSize] = useState(50)
   const [searchText, setSearchText] = useState(() => searchParams.get('q') || '')
@@ -249,6 +258,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => searchParams.get('order') === 'asc' ? 'asc' : 'desc')
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
+  const [undoStack, setUndoStack] = useState<Array<{ patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
+  const [redoStack, setRedoStack] = useState<Array<{ patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
   const [headerFilterText, setHeaderFilterText] = useState<string>('')
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
@@ -365,6 +376,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       fieldsData.forEach(f => {
         widths[f.key] = f.width || DEFAULT_COLUMN_WIDTH
       })
+      try {
+        const saved = JSON.parse(localStorage.getItem('patwiki_column_widths') || '{}') as Record<string, unknown>
+        Object.entries(saved).forEach(([key, value]) => {
+          if (typeof value === 'number' && value >= 80 && value <= 1200 && key in widths) widths[key] = value
+        })
+      } catch (error) { console.error('Failed to read column widths:', error) }
       setColumnWidths(widths)
     } catch (e) {
       console.error('Failed to load fields:', e)
@@ -390,6 +407,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
       if (viewId !== null) {
         const activeViewForLoad = views.find(view => view.id === viewId)
+        if (!activeViewForLoad || activeViewForLoad.database_id !== activeDatabaseId) {
+          setGroupedGroups([])
+          setPatents([], 0)
+          return
+        }
         if (activeViewForLoad?.layout_type === 'kanban') {
           setGroupedGroups([])
           setPatents([], 0)
@@ -431,8 +453,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         sort_order: sortOrder,
       }
       if (searchText) params.search = searchText
-      if (currentDatabaseId !== null && currentDatabaseId !== undefined) {
-        params.database_id = currentDatabaseId
+      if (activeDatabaseId !== null && activeDatabaseId !== undefined) {
+        params.database_id = activeDatabaseId
       }
       if (currentProductId) params.product_id = currentProductId
       // P2-8：大表直查（无产品筛选）时透传同族聚拢开关
@@ -457,7 +479,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, currentDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, views, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, views, setPatents, setLoading])
 
   // Browser back/forward rehydrates list state from the URL.
   useEffect(() => {
@@ -483,7 +505,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       if (value) next.set(key, value)
       else next.delete(key)
     }
-    setOrDelete('db', currentDatabaseId === null ? null : String(currentDatabaseId))
+    setOrDelete('db', activeDatabaseId === null ? null : String(activeDatabaseId))
     setOrDelete('view', viewId === null ? null : String(viewId))
     setOrDelete('product', currentProductId === null ? null : String(currentProductId))
     setOrDelete('q', searchText.trim() || null)
@@ -493,7 +515,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     setOrDelete('family', groupByFamily ? '1' : null)
     setOrDelete('filters', Object.keys(filterValues).length > 0 ? JSON.stringify(filterValues) : null)
     if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
-  }, [currentDatabaseId, currentProductId, filterValues, groupByFamily, page, searchParams, searchParamsString, searchText, setSearchParams, sortField, sortOrder, viewId])
+  }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, page, searchParams, searchParamsString, searchText, setSearchParams, sortField, sortOrder, viewId])
 
   useEffect(() => {
     // Field metadata is loaded asynchronously when the page mounts.
@@ -512,9 +534,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   useEffect(() => {
     // Reset selection and pagination when the active data scope changes.
     clearSelection()
+    // The history belongs to the active database/view scope.
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setUndoStack([])
+    setRedoStack([])
     setPage(1)
-  }, [viewId, currentDatabaseId, clearSelection])
+  }, [viewId, activeDatabaseId, clearSelection])
 
   useEffect(() => {
     void aiApi.listAIFields().then(setAiFields).catch(error => console.error('Failed to load AI fields:', error))
@@ -532,7 +557,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
     let cancelled = false
     const timer = window.setTimeout(() => {
-      void searchApi.suggest(query, currentDatabaseId).then(items => {
+      void searchApi.suggest(query, activeDatabaseId).then(items => {
         if (!cancelled) {
           setSearchSuggestions(items)
           setActiveSuggestionIndex(-1)
@@ -549,28 +574,36 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [currentDatabaseId, searchInputText])
+  }, [activeDatabaseId, searchInputText])
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       if (resizing) {
         const diff = e.clientX - resizing.startX
         const newWidth = Math.max(80, resizing.startWidth + diff)
         setColumnWidths(prev => ({ ...prev, [resizing.fieldKey]: newWidth }))
       }
     }
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
+      if (resizing) {
+        setColumnWidths(widths => {
+          try { localStorage.setItem('patwiki_column_widths', JSON.stringify(widths)) } catch (error) { console.error('Failed to save column widths:', error) }
+          return widths
+        })
+      }
       setResizing(null)
     }
     if (resizing) {
-      document.addEventListener('mousemove', handleMouseMove)
-      document.addEventListener('mouseup', handleMouseUp)
+      document.addEventListener('pointermove', handlePointerMove)
+      document.addEventListener('pointerup', handlePointerUp)
+      document.addEventListener('pointercancel', handlePointerUp)
       document.body.style.cursor = 'col-resize'
       document.body.style.userSelect = 'none'
     }
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('pointermove', handlePointerMove)
+      document.removeEventListener('pointerup', handlePointerUp)
+      document.removeEventListener('pointercancel', handlePointerUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
@@ -733,6 +766,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   }
 
   const handleCellSave = async (patentId: number, fieldKey: string, value: JsonValue) => {
+    const before = getFieldValue(patents.find(patent => patent.id === patentId) || ({} as Patent), fieldKey)
     try {
       if (viewId !== null) {
         await viewApi.updateSharedField(viewId, patentId, fieldKey, value)
@@ -740,6 +774,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         await patentApi.updateCell(patentId, fieldKey, value)
       }
       setEditingCell(null)
+      if (JSON.stringify(before) !== JSON.stringify(value)) {
+        setUndoStack(prev => [...prev.slice(-49), { patentId, fieldKey, before, after: value }])
+        setRedoStack([])
+      }
       loadPatents()
     } catch (error: unknown) {
       alert('保存失败: ' + getErrorMessage(error))
@@ -812,6 +850,52 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     setActiveSuggestionIndex(-1)
     setPage(1)
   }
+
+  const applyEditCommand = async (command: { patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }, value: JsonValue) => {
+    if (viewId !== null) await viewApi.updateSharedField(viewId, command.patentId, command.fieldKey, value)
+    else await patentApi.updateCell(command.patentId, command.fieldKey, value)
+  }
+
+  const handleUndo = async () => {
+    const command = undoStack[undoStack.length - 1]
+    if (!command) return
+    try {
+      await applyEditCommand(command, command.before)
+      setUndoStack(prev => prev.slice(0, -1))
+      setRedoStack(prev => [...prev, command])
+      await loadPatents()
+    } catch (error: unknown) { alert('撤回失败: ' + getErrorMessage(error)) }
+  }
+
+  const handleRedo = async () => {
+    const command = redoStack[redoStack.length - 1]
+    if (!command) return
+    try {
+      await applyEditCommand(command, command.after)
+      setRedoStack(prev => prev.slice(0, -1))
+      setUndoStack(prev => [...prev, command])
+      await loadPatents()
+    } catch (error: unknown) { alert('重做失败: ' + getErrorMessage(error)) }
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
+      if ((event.target as HTMLElement)?.closest('input, textarea, select')) return
+      event.preventDefault()
+      if (event.shiftKey) void handleRedo()
+      else void handleUndo()
+    }
+    const onRedo = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'y') return
+      if ((event.target as HTMLElement)?.closest('input, textarea, select')) return
+      event.preventDefault()
+      void handleRedo()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onRedo)
+    return () => { document.removeEventListener('keydown', onKeyDown); document.removeEventListener('keydown', onRedo) }
+  })
 
   // 从 prompt 模板解析引用的列名（{xxx} 占位符）
   const parseReferencedColumns = (prompt: string): string[] => {
@@ -917,7 +1001,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }, [activeAITasks.length, aiProcessingRow])
 
-  const handleInsertAIColumn = async (processAll: boolean) => {
+  const handleInsertAIColumn = async () => {
     if (!newAIColumnName.trim()) {
       alert('请输入新列名称')
       return
@@ -962,21 +1046,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         const refreshedAiFields = await aiApi.listAIFields()
         setAiFields(refreshedAiFields)
       } catch (error) { console.error('Failed to refresh AI fields:', error) }
-      // AI列立即触发处理（用统一的 startAITask，自动加入监控面板）
-      if (isAI) {
-        const targetIds = processAll ? patents.map(p => p.id) : selectedIds
-        if (targetIds.length === 0) {
-          alert('AI列已创建。选中专利后可点击行内 ✨ 按钮或使用"AI批量处理"运行该列')
-        } else {
-          try {
-            await startAITask(targetIds, key)
-          } catch (error: unknown) {
-            alert('AI列已创建，但启动AI任务失败: ' + getErrorMessage(error, '请先在设置页配置 LLM API'))
-          }
-        }
-      } else {
-        alert(`新列"${newAIColumnName.trim()}"已创建`)
-      }
+      alert(isAI
+        ? `AI 分析列"${newAIColumnName.trim()}"已创建。请选中记录后使用批量处理执行。`
+        : `新列"${newAIColumnName.trim()}"已创建`)
       setShowInsertAIColumn(false)
       setNewAIColumnName('')
       setNewAIPrompt('')
@@ -991,8 +1063,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }
 
-  const openInsertAIDialog = (anchorFieldKey?: string) => {
+  const openInsertAIDialog = (anchorFieldKey?: string, mode: typeof insertColType = 'text') => {
     setActiveHeaderMenu(null)
+    setInsertColType(mode)
+    setNewAIColumnName('')
+    setNewAIPrompt('')
+    setNewColumnOptions('')
     // 预填一个引用锚点列的 prompt 模板
     if (anchorFieldKey) {
       const f = fields.find(x => x.key === anchorFieldKey)
@@ -1026,7 +1102,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     try {
       const result = await analyticsApi.columnStats({
         field_key: fieldKey,
-        database_id: currentDatabaseId ?? undefined,
+        database_id: activeDatabaseId ?? undefined,
         product_id: currentProductId || undefined,
       })
       setStatsData(result.items)
@@ -1045,7 +1121,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         field_key: statsFieldKey,
         group_name: tagGroupName.trim() || '自动分类',
         auto_apply_to_patents: autoApplyTags,
-        database_id: currentDatabaseId ?? undefined,
+        database_id: activeDatabaseId ?? undefined,
         product_id: currentProductId || undefined,
       })
       alert(`已创建标签组"${result.group.name}"，共 ${result.total_tags} 个标签${autoApplyTags ? `，已为 ${result.applied_count} 条专利打标` : ''}`)
@@ -1270,7 +1346,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     return map[level || 'none'] || '-'
   }
 
-  const activeView = views.find(view => view.id === viewId)
+  const activeView = views.find(view => view.id === viewId && view.database_id === activeDatabaseId)
   const groupPresentation = groupedGroups.length > 0
     ? getGroupPresentation(groupedGroups, collapsedGroupKeys)
     : null
@@ -1477,7 +1553,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
 
     if (field.field_type === 'attachment') {
-      return <AttachmentField patentId={patent.id} databaseId={currentDatabaseId} fieldKey={field.key} value={value} />
+      return <AttachmentField patentId={patent.id} databaseId={activeDatabaseId} fieldKey={field.key} value={value} />
     }
 
     if (field.field_type === 'link') {
@@ -1626,15 +1702,21 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             清除筛选
           </button>
           <div className="datagrid-action-group">
+            <button className="btn btn-sm btn-secondary history-action" onClick={() => void handleUndo()} disabled={undoStack.length === 0} title="撤回最近一次单元格编辑">
+              <Icon name="undo" />
+            </button>
+            <button className="btn btn-sm btn-secondary history-action" onClick={() => void handleRedo()} disabled={redoStack.length === 0} title="重做最近一次单元格编辑">
+              <Icon name="redo" />
+            </button>
             <button
               className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'} family-toggle`}
               onClick={() => { setGroupByFamily(!groupByFamily); setPage(1) }}
               title="开启后，同族专利会排在一起显示，并在行左侧标注同族编号和成员数"
             >
-              🧲 同族聚拢 {groupByFamily ? 'ON' : 'OFF'}
+              <Icon name="table" /> 同族聚拢 {groupByFamily ? 'ON' : 'OFF'}
             </button>
             <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
-              列管理
+              <Icon name="columns" /> 列管理
             </button>
           </div>
           <button
@@ -1644,8 +1726,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           >
             + 插入新列
           </button>
+          <button className="btn btn-sm btn-secondary" onClick={() => openInsertAIDialog(undefined, 'ai_field')} title="创建 AI 分析列">
+            <Icon name="sparkles" /> AI 分析列
+          </button>
           <button className="btn btn-sm btn-secondary datagrid-export-action" onClick={handleExport}>
-            导出
+            <Icon name="download" /> 导出
           </button>
           <button
             className="btn btn-sm btn-secondary datagrid-utility-action"
@@ -1751,7 +1836,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             <div style={{ fontSize: 13, color: '#9ca3af' }}>点击右上角"导入"按钮导入专利数据，或先在左侧创建产品分类</div>
           </div>
         ) : (
-          <table className="data-grid" style={{ minWidth: '100%' }}>
+          <table className="data-grid" style={{ width: 'max-content', minWidth: '100%' }}>
+            <colgroup>
+              <col style={{ width: 40 }} />
+              <col style={{ width: 70 }} />
+              {visibleFields.map(field => <col key={field.key} style={{ width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH }} />)}
+            </colgroup>
             <thead>
               <tr>
                 <th className="col-checkbox" style={{ width: 40, minWidth: 40, maxWidth: 40 }}>
@@ -1851,7 +1941,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       </div>
                       <div
                         className="col-resize-handle"
-                        onMouseDown={(e) => {
+                        onPointerDown={(e) => {
                           e.preventDefault()
                           e.stopPropagation()
                           setResizing({
@@ -1860,6 +1950,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                             startWidth: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
                           })
                         }}
+                        title="拖动调整列宽"
                       />
                       {activeHeaderMenu === field.key && (
                         <div className="col-header-menu" onClick={e => e.stopPropagation()}>
@@ -1916,19 +2007,19 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                             className="menu-item"
                             onClick={() => openInsertAIDialog(field.key)}
                           >
-                            <span style={{ color: '#2563eb' }}>✨ 基于此列插入新列</span>
+                            <span style={{ color: '#2563eb' }}><Icon name="sparkles" /> 基于此列插入新列</span>
                           </div>
                           <div
                             className="menu-item"
                             onClick={() => handleToggleFreeze(field.key)}
                           >
-                            <span>{frozenFields.has(field.key) ? '🔓 取消冻结' : '🔒 冻结此列'}</span>
+                            <span><Icon name={frozenFields.has(field.key) ? 'unlock' : 'lock'} /> {frozenFields.has(field.key) ? '取消冻结' : '冻结此列'}</span>
                           </div>
                           <div
                             className="menu-item"
                             onClick={() => openColumnStats(field.key)}
                           >
-                            <span style={{ color: '#0891b2' }}>📊 统计此列</span>
+                            <span style={{ color: '#0891b2' }}><Icon name="chart" /> 统计此列</span>
                           </div>
                           {field.field_type === 'ai_field' && (
                             <div
@@ -1943,7 +2034,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                                 startAITask(patents.map(p => p.id), field.key)
                               }}
                             >
-                              <span style={{ color: '#7c3aed' }}>⚡ 批量处理此列（所有可见行）</span>
+                              <span style={{ color: '#7c3aed' }}><Icon name="activity" /> 批量处理此列（所有可见行）</span>
                             </div>
                           )}
                           <div
@@ -2064,7 +2155,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                         }}
                         title="AI快速分析"
                       >
-                        {aiProcessingRow === p.id ? '⟳' : '✨'}
+                        <Icon name={aiProcessingRow === p.id ? 'refresh' : 'sparkles'} size={14} />
                       </button>
                     </div>
                   </td>
@@ -2138,7 +2229,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                           }}
                           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.35' }}
-                        >⬇</button>
+                        ><Icon name="download" size={12} /></button>
                       )}
                     </td>
                     )
@@ -2227,7 +2318,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             <input
               type="text"
               className="form-input"
-              placeholder="🔍 搜索列名..."
+              placeholder="搜索列名..."
               value={columnSearch}
               onChange={(e) => setColumnSearch(e.target.value)}
               style={{ flex: 1, height: 32, fontSize: 13 }}
@@ -2295,7 +2386,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                           fontSize: 11, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
                         }}
                       >
-                        {isFrozen ? '🔒 冻结' : '🔓'}
+                        <Icon name={isFrozen ? 'lock' : 'unlock'} size={13} />{isFrozen ? ' 冻结' : ''}
                       </button>
                       {!field.is_system && (
                         <button
@@ -2411,7 +2502,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
               padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe',
               borderRadius: 6, fontSize: 12, color: '#1e40af', lineHeight: 1.6,
             }}>
-              💡 选择下方任一 AI 字段，点击"运行"按钮即可对选中的 <strong>{selectedIds.length}</strong> 条专利批量执行 AI 分析。
+              <Icon name="sparkles" size={15} /> 选择下方任一 AI 字段，点击"运行"按钮即可对选中的 <strong>{selectedIds.length}</strong> 条专利批量执行 AI 分析。
               结果将自动回填到对应列，并在右下角显示进度。
             </div>
 
@@ -2420,7 +2511,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 padding: 20, textAlign: 'center', color: '#6b7280',
                 border: '1px dashed #d1d5db', borderRadius: 6,
               }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>🤖</div>
+                <div style={{ marginBottom: 8, color: '#6d28d9' }}><Icon name="sparkles" size={28} /></div>
                 <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>暂无 AI 字段</div>
                 <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>
                   请先通过"+ 插入新列"创建一个 AI 列并配置 Prompt 模板
@@ -2454,7 +2545,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                         <span style={{
                           fontSize: 16, padding: '2px 6px',
                           background: '#ede9fe', color: '#6d28d9', borderRadius: 3,
-                        }}>✨</span>
+                        }}><Icon name="sparkles" size={16} /></span>
                         <strong style={{ flex: 1, fontSize: 13, color: '#1f2937' }}>{f.name}</strong>
                         <button
                           className="btn btn-xs btn-primary"
@@ -2467,7 +2558,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                             clearSelection()
                           }}
                         >
-                          ▶ 运行
+                          <Icon name="play" size={13} /> 运行
                         </button>
                       </div>
                       {f.description && (
@@ -2507,7 +2598,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   disabled={!aiFieldKey}
                   title={!aiFieldKey ? '请先点击上方任一 AI 字段以选中' : '对选中的专利运行选中的 AI 字段'}
                 >
-                  ▶ 启动 AI 任务{aiFieldKey ? `（${aiFields.find(f => f.key === aiFieldKey)?.name}）` : ''}
+                  <Icon name="play" size={13} /> 启动 AI 任务{aiFieldKey ? `（${aiFields.find(f => f.key === aiFieldKey)?.name}）` : ''}
                 </button>
               </div>
             )}
@@ -2538,7 +2629,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
               color: '#1e40af',
               lineHeight: 1.6,
             }}>
-              💡 像Excel一样插入新列。普通列可手动填值；<strong>AI列</strong>会根据你指定的 Prompt 和已有列内容自动生成。
+              新建字段分为两步：先保存字段配置，再按需执行。<strong>AI 分析列</strong>会根据 Prompt 和已有列内容生成结果。
               在 Prompt 中使用 <code>{'{field_key}'}</code> 引用列，例如 <code>{'{title}'}</code>、<code>{'{abstract}'}</code>、<code>{'{applicant}'}</code>、<code>{'{claims}'}</code>。
             </div>
 
@@ -2575,7 +2666,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   <option value="select">单选（下拉）</option>
                   <option value="boolean">是/否</option>
                   <option value="attachment">附件</option>
-                  <option value="ai_field">✨ AI列（自动生成）</option>
+                  <option value="ai_field">AI 分析列</option>
                 </select>
               </div>
             </div>
@@ -2650,7 +2741,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   {selectedIds.length > 0 ? (
                     <strong style={{ color: '#2563eb' }}>选中的 {selectedIds.length} 条专利</strong>
                   ) : (
-                    <span>未选中专利，将仅创建字段。可在创建后通过行内 ✨ 按钮或"AI批量处理"运行。</span>
+                    <span>未选中专利，将仅创建字段。创建后可在选中记录时使用 AI 批量处理运行。</span>
                   )}
                 </div>
               </>
@@ -2672,10 +2763,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
               </button>
               <button
                 className="btn btn-primary"
-                onClick={() => handleInsertAIColumn(false)}
+                onClick={() => void handleInsertAIColumn()}
                 disabled={creatingAIColumn}
               >
-                {creatingAIColumn ? '创建中...' : (insertColType === 'ai_field' ? '创建并处理' : '创建列')}
+                {creatingAIColumn ? '创建中...' : (insertColType === 'ai_field' ? '创建 AI 列' : '创建列')}
               </button>
             </div>
           </div>
@@ -2711,7 +2802,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                     style={{ fontSize: 12, padding: '4px 10px' }}
                     onClick={() => setShowStatsToTags(true)}
                   >
-                    🏷️ 转为分类标签
+                    <Icon name="tag" /> 转为分类标签
                   </button>
                 </div>
 
@@ -2814,16 +2905,16 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       {patent.title?.slice(0, 30) || `#${patent.id}`}
                     </div>
                     <div className="menu-item" onClick={() => onPatentClick(contextMenu.patentId!)}>
-                      📋 查看详情
+                      <Icon name="file" /> 查看详情
                     </div>
                     {fieldName && (
                       <div className="menu-item" onClick={() => handleCopyCell(contextMenu.patentId!, contextMenu.fieldKey!)}>
-                        📎 复制"{fieldName}"的值
+                        <Icon name="copy" /> 复制"{fieldName}"的值
                       </div>
                     )}
                     <div className="menu-divider" />
                     <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => handleDeletePatent(contextMenu.patentId!)}>
-                      🗑 删除此行
+                      <Icon name="trash" /> 删除此行
                     </div>
                   </>
                 )}
@@ -2849,17 +2940,17 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   {sortField === field.key && sortOrder === 'asc' ? '↓ 降序排列' : '↑ 升序排列'}
                 </div>
                 <div className="menu-item" onClick={() => handleToggleFreeze(field.key)}>
-                  {isFrozen ? '🔓 取消冻结' : '🔒 冻结此列'}
+                  <Icon name={isFrozen ? 'unlock' : 'lock'} /> {isFrozen ? '取消冻结' : '冻结此列'}
                 </div>
                 <div className="menu-item" onClick={() => handleToggleFieldVisible(field.key)}>
                   隐藏此列
                 </div>
                 <div className="menu-item" onClick={() => openColumnStats(field.key)}>
-                  📊 统计此列
+                  <Icon name="chart" /> 统计此列
                 </div>
                 <div className="menu-divider" />
                 <div className="menu-item" style={{ color: '#2563eb' }} onClick={() => openInsertAIDialog(field.key)}>
-                  ✨ 基于此列插入新列
+                  <Icon name="sparkles" /> 基于此列插入新列
                 </div>
                 {isAI && (
                   <div className="menu-item" style={{ color: '#7c3aed' }} onClick={() => {
@@ -2867,13 +2958,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                     if (!confirm(`将用此 AI 配置处理当前列表的 ${patents.length} 行，是否继续？`)) return
                     startAITask(patents.map(p => p.id), field.key)
                   }}>
-                    ⚡ 批量处理此列（所有可见行）
+                    <Icon name="activity" /> 批量处理此列（所有可见行）
                   </div>
                 )}
                 <div className="menu-divider" />
                 {isCustom && cf ? (
                   <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => handleDeleteColumnByKey(field.key)}>
-                    🗑 删除此列
+                    <Icon name="trash" /> 删除此列
                   </div>
                 ) : (
                   <div className="menu-item" style={{ color: '#9ca3af', cursor: 'default' }}>
@@ -2915,10 +3006,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           >
             <span style={{ fontWeight: 600 }}>
               {activeAITasks.length > 0
-                ? `🤖 AI 任务运行中 (${activeAITasks.length})`
-                : '✅ AI 任务已完成'}
+                ? <><Icon name="sparkles" size={14} /> AI 任务运行中 ({activeAITasks.length})</>
+                : <><Icon name="check" size={14} /> AI 任务已完成</>}
             </span>
-            <span>{aiPanelOpen ? '▼' : '▲'}</span>
+            <Icon name={aiPanelOpen ? 'chevron-down' : 'chevron-up'} size={14} />
           </div>
           {aiPanelOpen && (
             <div style={{ maxHeight: 420, overflowY: 'auto' }}>
@@ -3002,7 +3093,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <strong style={{ color: '#065f46', fontSize: 13 }}>
-                      ✅ {recentCompleted.meta?.fieldName || 'AI 字段'}
+                      <Icon name="check" size={14} /> {recentCompleted.meta?.fieldName || 'AI 字段'}
                     </strong>
                     <span style={{ color: '#047857', fontSize: 11 }}>
                       #{recentCompleted.taskId} · 完成
@@ -3042,7 +3133,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       {showExportDialog && (
         <ExportDialog
           fields={fields}
-          databaseId={currentDatabaseId}
+          databaseId={activeDatabaseId}
           viewId={viewId}
           search={searchText}
           filters={filterValues}

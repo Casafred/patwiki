@@ -7,6 +7,7 @@ from io import BytesIO
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import BadRequestException
 from app.models import (
     CustomField, CustomFieldType, LegalStatus, PatentType, RiskLevel
 )
@@ -73,8 +74,13 @@ STANDARD_FIELD_MAPPINGS = {
     # P0-10：同族/引用列（虚拟字段，单独处理）
     "同族专利号": "family_members",
     "同族": "family_members",
+    "同族列": "family_members",
+    "同族关系": "family_members",
+    "同族号码": "family_members",
     "同族公开号": "family_members",
     "同族成员": "family_members",
+    "family": "family_members",
+    "family members": "family_members",
     "引用专利": "cited_patents",
     "引用专利号": "cited_patents",
     "引用文献": "cited_patents",
@@ -179,10 +185,25 @@ def auto_create_custom_field(db: Session, column_name: str) -> str:
 class ImportService:
     @staticmethod
     def parse_excel(file_content: bytes, filename: str) -> tuple[pd.DataFrame, list[str]]:
-        if filename.endswith(".xls"):
-            df = pd.read_excel(BytesIO(file_content), engine="xlrd", dtype=str)
-        else:
-            df = pd.read_excel(BytesIO(file_content), engine="openpyxl", dtype=str)
+        suffix = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
+        if not file_content:
+            raise BadRequestException("上传文件为空")
+        if suffix not in {"csv", "xls", "xlsx"}:
+            raise BadRequestException("仅支持 .xlsx、.xls 或 .csv 文件")
+        try:
+            if suffix == "csv":
+                try:
+                    df = pd.read_csv(BytesIO(file_content), dtype=str, encoding="utf-8-sig")
+                except UnicodeDecodeError:
+                    df = pd.read_csv(BytesIO(file_content), dtype=str, encoding="gb18030")
+            elif suffix == "xls":
+                df = pd.read_excel(BytesIO(file_content), engine="xlrd", dtype=str)
+            else:
+                df = pd.read_excel(BytesIO(file_content), engine="openpyxl", dtype=str)
+        except BadRequestException:
+            raise
+        except Exception as exc:
+            raise BadRequestException(f"无法读取文件，请确认文件未损坏且扩展名正确：{exc}") from exc
 
         df = df.fillna("")
         columns = [str(c).strip() for c in df.columns]

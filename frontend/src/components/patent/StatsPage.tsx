@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { statsApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Stats } from '../../types'
+import Icon from '../common/Icon'
 
 export default function StatsPage() {
   const { currentDatabaseId, currentProductId, databases, products } = useAppStore()
@@ -116,7 +117,7 @@ export default function StatsPage() {
       </div>
 
       {/* 申请趋势柱状图 */}
-      <Card title="📅 申请趋势（按年份）" subtitle={`共 ${stats.filing_trend.length} 年数据`}>
+      <Card title={<><Icon name="chart" /> 申请趋势（按年份）</>} subtitle={`共 ${stats.filing_trend.length} 年数据`}>
         {stats.filing_trend.length > 0 ? (
           <BarChartTrend data={stats.filing_trend} />
         ) : (
@@ -126,7 +127,7 @@ export default function StatsPage() {
 
       {/* 法律状态分布 + 专利类型分布 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <Card title="⚖️ 法律状态分布">
+        <Card title={<><Icon name="activity" /> 法律状态分布</>}>
           <DonutChart
             data={Object.entries(stats.by_legal_status).map(([k, v]) => ({
               label: statusMap[k] || k, value: v, color: statusColors[k] || '#94a3b8',
@@ -134,7 +135,7 @@ export default function StatsPage() {
             total={stats.total_patents}
           />
         </Card>
-        <Card title="📋 专利类型分布">
+        <Card title={<><Icon name="file" /> 专利类型分布</>}>
           <BarList
             data={Object.entries(stats.by_patent_type).map(([k, v]) => ({
               label: typeMap[k] || k, value: v, color: '#0ea5e9',
@@ -146,7 +147,7 @@ export default function StatsPage() {
 
       {/* 风险等级 + 国别分布 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <Card title="⚠️ 风险等级分布">
+        <Card title={<><Icon name="activity" /> 风险等级分布</>}>
           <BarList
             data={Object.entries(stats.by_risk_level).map(([k, v]) => ({
               label: riskMap[k] || k, value: v, color: riskColors[k] || '#94a3b8',
@@ -154,7 +155,7 @@ export default function StatsPage() {
             total={stats.total_patents}
           />
         </Card>
-        <Card title="🌍 国别分布">
+        <Card title={<><Icon name="dashboard" /> 国别分布</>}>
           <BarList
             data={Object.entries(stats.by_country || {}).map(([k, v]) => ({
               label: k, value: v, color: '#10b981',
@@ -166,7 +167,7 @@ export default function StatsPage() {
 
       {/* 按产品分布 + 按分类分布 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <Card title="📦 按产品分布（Top 10）">
+        <Card title={<><Icon name="table" /> 按产品分布（Top 10）</>}>
           <BarList
             data={stats.by_product.slice(0, 10).map(p => ({
               label: p.name || '(未命名)', value: p.count, color: '#7c3aed',
@@ -174,7 +175,7 @@ export default function StatsPage() {
             total={stats.total_patents}
           />
         </Card>
-        <Card title="🏷️ 按业务分类分布">
+        <Card title={<><Icon name="tag" /> 按业务分类分布</>}>
           {Object.keys(stats.by_category).length > 0 ? (
             <BarList
               data={Object.entries(stats.by_category).map(([k, v]) => ({
@@ -190,7 +191,7 @@ export default function StatsPage() {
 
       {/* Top IPC + Top 申请人 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <Card title="🔩 Top 15 IPC 主分类">
+        <Card title={<><Icon name="columns" /> Top 15 IPC 主分类</>}>
           {stats.top_ipcs && stats.top_ipcs.length > 0 ? (
             <RankList
               data={stats.top_ipcs.map(i => ({ name: i.code, count: i.count }))}
@@ -199,7 +200,7 @@ export default function StatsPage() {
             <Empty text="暂无 IPC 数据" />
           )}
         </Card>
-        <Card title="🏢 Top 10 申请人">
+        <Card title={<><Icon name="users" /> Top 10 申请人</>}>
           {stats.top_applicants.length > 0 ? (
             <RankList data={stats.top_applicants.slice(0, 10).map(a => ({ name: a.name, count: a.count }))} />
           ) : (
@@ -209,7 +210,7 @@ export default function StatsPage() {
       </div>
 
       {/* Top 10 发明人 */}
-      <Card title="👤 Top 10 发明人">
+      <Card title={<><Icon name="users" /> Top 10 发明人</>}>
         {stats.top_inventors.length > 0 ? (
           <RankList data={stats.top_inventors.slice(0, 10).map(a => ({ name: a.name, count: a.count }))} />
         ) : (
@@ -231,7 +232,7 @@ function KpiCard({ label, value, color }: { label: string; value: number; color:
   )
 }
 
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Card({ title, subtitle, children }: { title: React.ReactNode; subtitle?: string; children: React.ReactNode }) {
   return (
     <div className="table-container" style={{ marginBottom: 16 }}>
       <div style={{ padding: '10px 16px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

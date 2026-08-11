@@ -16,6 +16,7 @@ import AITaskMonitor from './components/ai/AITaskMonitor'
 import ManagementPage from './components/management/ManagementPage'
 import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
 import { SharedFormView } from './components/views/FormView'
+import Icon from './components/common/Icon'
 import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
@@ -96,6 +97,13 @@ function WorkspaceApp() {
   const currentPage = useMemo(() => getPageFromPath(location.pathname), [location.pathname])
   const [showImport, setShowImport] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('patwiki_sidebar_collapsed') === '1'
+    } catch {
+      return false
+    }
+  })
   const {
     setProducts, setCustomFields, setTags, setProjects,
     setDatabases, setCurrentDatabaseId, currentDatabaseId,
@@ -106,12 +114,13 @@ function WorkspaceApp() {
   const requestedDatabaseId = routeDatabaseId || (Number.isInteger(queryDatabaseId) && queryDatabaseId > 0 ? queryDatabaseId : null)
 
   useEffect(() => {
-    if (currentDatabaseId === null) return
+    const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
+    if (activeDatabaseId === null) return
     const loadViews = async () => {
       try {
-        let views = await viewApi.list(currentDatabaseId)
+        let views = await viewApi.list(activeDatabaseId)
         if (views.length === 0) {
-          views = [await viewApi.master(currentDatabaseId)]
+          views = [await viewApi.master(activeDatabaseId)]
         }
         setViews(views)
         const requestedViewId = Number(new URLSearchParams(searchParamsString).get('view'))
@@ -126,7 +135,7 @@ function WorkspaceApp() {
       }
     }
     void loadViews()
-  }, [currentDatabaseId, searchParamsString, setCurrentViewId, setViews])
+  }, [currentDatabaseId, requestedDatabaseId, searchParamsString, setCurrentViewId, setViews])
 
   const loadMeta = useCallback(async () => {
     try {
@@ -177,12 +186,22 @@ function WorkspaceApp() {
   }
 
   const handlePatentClick = (id: number) => {
-    navigate(currentDatabaseId ? `/db/${currentDatabaseId}/patents/${id}` : `/patents/${id}`)
+    const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
+    navigate(activeDatabaseId ? `/db/${activeDatabaseId}/patents/${id}` : `/patents/${id}`)
   }
 
-  const handleNavigate = (page: Page) => {
-    navigate(currentDatabaseId ? `/db/${currentDatabaseId}/${pageSegments[page]}` : `/${pageSegments[page]}`)
+  const handleNavigate = (page: Page, databaseId = requestedDatabaseId ?? currentDatabaseId) => {
+    navigate(databaseId ? `/db/${databaseId}/${pageSegments[page]}` : `/${pageSegments[page]}`)
     setSidebarOpen(false)
+  }
+
+  const handleSidebarCollapse = (collapsed: boolean) => {
+    setSidebarCollapsed(collapsed)
+    try {
+      localStorage.setItem('patwiki_sidebar_collapsed', collapsed ? '1' : '0')
+    } catch {
+      // Preferences are optional when storage is unavailable.
+    }
   }
 
   const pageTitles: Record<Page, string> = {
@@ -198,18 +217,21 @@ function WorkspaceApp() {
     sharing: '协作与权限',
     'import-history': '导入历史',
   }
-  const currentDatabase = databases.find(database => database.id === currentDatabaseId)
+  const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
+  const currentDatabase = databases.find(database => database.id === activeDatabaseId)
 
   return (
-    <div className={`app-container ${sidebarOpen ? 'sidebar-open' : ''}`}>
+    <div className={`app-container ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <Sidebar
         currentPage={currentPage}
         onNavigate={handleNavigate}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={handleSidebarCollapse}
       />
       <button className="sidebar-scrim" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />
       <div className="main-content">
         <header className="header">
-          <button className="mobile-nav-toggle" onClick={() => setSidebarOpen(true)} aria-label="打开导航">☰</button>
+          <button className="mobile-nav-toggle" onClick={() => setSidebarOpen(true)} aria-label="打开导航" title="打开导航"><Icon name="menu" /></button>
           <div className="header-context">
             <div className="header-kicker">{currentDatabase?.name || 'PatWiki'}</div>
             <h2>{pageTitles[currentPage]}</h2>

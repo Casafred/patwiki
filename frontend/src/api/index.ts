@@ -363,9 +363,8 @@ export const importApi = {
   upload: (file: File): Promise<ImportPreview> => {
     const formData = new FormData()
     formData.append('file', file)
-    return api.post('/import/preview', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
+    // Let the browser/Axios add the multipart boundary.
+    return api.post('/import/preview', formData)
   },
 
   confirmImport: (

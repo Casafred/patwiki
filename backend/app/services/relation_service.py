@@ -16,7 +16,7 @@ from app.models import (
 
 # 同族/引用列的常见分隔符：分号、逗号、顿号、竖线、换行、Tab、连续空格（≥2）
 # 竖线 | 是 incopat 等导出工具常见分隔符；连续空格用于应对无显式分隔符但用空格对齐的情况
-SPLIT_PATTERN = re.compile(r"[;；,，、|\n\r\t]+|\s{2,}")
+SPLIT_PATTERN = re.compile(r"[;；,，、|/\\\n\r\t]+|\s{2,}")
 
 # 专利号格式校验：必须同时含字母和数字，长度 5-30，仅允许字母数字和连字符
 _PATENT_NUM_RE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9\-]+$")
@@ -94,11 +94,12 @@ def _find_or_create_patent_by_number(
     number = normalized
 
     # 优先按申请号找
-    existing = db.query(Patent).filter(Patent.application_number == number).first()
+    scope = [Patent.database_id == database_id] if database_id is not None else []
+    existing = db.query(Patent).filter(Patent.application_number == number, *scope).first()
     if existing:
         return existing
     # 再按公开号找
-    existing = db.query(Patent).filter(Patent.publication_number == number).first()
+    existing = db.query(Patent).filter(Patent.publication_number == number, *scope).first()
     if existing:
         return existing
 

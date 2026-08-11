@@ -3,13 +3,16 @@ import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 import ViewSwitcher from '../views/ViewSwitcher'
 import type { Page } from '../../App'
+import Icon from '../common/Icon'
 
 interface SidebarProps {
   currentPage: Page
-  onNavigate: (page: Page) => void
+  onNavigate: (page: Page, databaseId?: number | null) => void
+  collapsed: boolean
+  onToggleCollapse: (collapsed: boolean) => void
 }
 
-export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCollapse }: SidebarProps) {
   const {
     products, currentProductId, setCurrentProductId, setProducts,
     databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
@@ -40,7 +43,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
   const handleProductClick = (productId: number | null) => {
     setCurrentProductId(productId)
-    onNavigate('patents')
+    onNavigate('patents', currentDatabaseId)
   }
 
   const handleAddProduct = async () => {
@@ -52,7 +55,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       setCurrentProductId(product.id)
       setNewProductName('')
       setShowAddProduct(false)
-      onNavigate('patents')
+      onNavigate('patents', currentDatabaseId)
     } catch {
       alert('创建产品失败')
     }
@@ -63,7 +66,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     setCurrentDatabaseId(id)
     setCurrentViewId(null)
     setCurrentProductId(null)
-    onNavigate('patents')
+    onNavigate('patents', id)
   }
 
   // P0-11：新建库
@@ -81,6 +84,9 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       setNewDbName('')
       setNewDbDesc('')
       setShowAddDatabase(false)
+      setCurrentProductId(null)
+      setCurrentViewId(null)
+      onNavigate('patents', db.id)
     } catch {
       alert('创建库失败')
     }
@@ -116,7 +122,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       } else {
         setCurrentDatabaseId(null)
       }
-      onNavigate('patents')
+      onNavigate('patents', refreshed.length > 0 ? refreshed[0].id : null)
     } catch (e: unknown) {
       const detail = e && typeof e === 'object' && 'response' in e
         ? (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail
@@ -133,6 +139,15 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           <h1>PatWiki</h1>
           <p>专利知识工作台</p>
         </div>
+        <button
+          type="button"
+          className="sidebar-collapse-toggle"
+          onClick={() => onToggleCollapse(!collapsed)}
+          aria-label={collapsed ? '展开导航栏' : '收起导航栏'}
+          title={collapsed ? '展开导航栏' : '收起导航栏'}
+        >
+          <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} />
+        </button>
       </div>
 
       <div className="sidebar-database">
@@ -177,16 +192,16 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
       <nav className="sidebar-nav">
         <div className="sidebar-section-title">工作台</div>
-        <button className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`} onClick={() => handleProductClick(null)}>全部专利</button>
-        <button className={`nav-item ${currentPage === 'stats' ? 'active' : ''}`} onClick={() => onNavigate('stats')}>数据看板</button>
-        <button className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard')}>可配置仪表盘</button>
+        <button className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`} onClick={() => handleProductClick(null)} title="全部专利"><Icon name="table" /><span className="nav-label">全部专利</span></button>
+        <button className={`nav-item ${currentPage === 'stats' ? 'active' : ''}`} onClick={() => onNavigate('stats', currentDatabaseId)} title="数据看板"><Icon name="chart" /><span className="nav-label">数据看板</span></button>
+        <button className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard', currentDatabaseId)} title="可配置仪表盘"><Icon name="dashboard" /><span className="nav-label">可配置仪表盘</span></button>
 
         <div className="sidebar-section-title">智能与自动化</div>
-        <button className={`nav-item ${currentPage === 'automation' ? 'active' : ''}`} onClick={() => onNavigate('automation')}>自动化规则</button>
-        <button className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`} onClick={() => onNavigate('agent-analysis')}>智能分析</button>
-        <button className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`} onClick={() => onNavigate('ai-tasks')}>AI 任务</button>
+        <button className={`nav-item ${currentPage === 'automation' ? 'active' : ''}`} onClick={() => onNavigate('automation', currentDatabaseId)} title="自动化规则"><Icon name="automation" /><span className="nav-label">自动化规则</span></button>
+        <button className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`} onClick={() => onNavigate('agent-analysis', currentDatabaseId)} title="智能分析"><Icon name="sparkles" /><span className="nav-label">智能分析</span></button>
+        <button className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`} onClick={() => onNavigate('ai-tasks', currentDatabaseId)} title="AI 任务"><Icon name="activity" /><span className="nav-label">AI 任务</span></button>
 
-        <ViewSwitcher onOpenView={() => onNavigate('patents')} />
+        <ViewSwitcher onOpenView={() => onNavigate('patents', currentDatabaseId)} />
 
         <div className="sidebar-section-title sidebar-section-title-row">
           <span>产品分类</span>
@@ -213,14 +228,14 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
         )}
 
         <div className="sidebar-section-title">管理</div>
-        <button className={`nav-item ${currentPage === 'fields' ? 'active' : ''}`} onClick={() => onNavigate('fields')}>字段管理</button>
-        <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management')}>管理台</button>
-        <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing')}>协作与权限</button>
-        <button className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`} onClick={() => onNavigate('import-history')}>导入历史</button>
-        <button className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>设置</button>
+        <button className={`nav-item ${currentPage === 'fields' ? 'active' : ''}`} onClick={() => onNavigate('fields', currentDatabaseId)} title="字段管理"><Icon name="columns" /><span className="nav-label">字段管理</span></button>
+        <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management', currentDatabaseId)} title="管理台"><Icon name="settings" /><span className="nav-label">管理台</span></button>
+        <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing', currentDatabaseId)} title="协作与权限"><Icon name="users" /><span className="nav-label">协作与权限</span></button>
+        <button className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`} onClick={() => onNavigate('import-history', currentDatabaseId)} title="导入历史"><Icon name="history" /><span className="nav-label">导入历史</span></button>
+        <button className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings', currentDatabaseId)} title="设置"><Icon name="sliders" /><span className="nav-label">设置</span></button>
       </nav>
 
-      <button className="sidebar-account" onClick={() => onNavigate('sharing')} title="管理协作与权限">
+      <button className="sidebar-account" onClick={() => onNavigate('sharing', currentDatabaseId)} title="管理协作与权限">
         <div className={`account-avatar ${currentUser ? '' : 'muted'}`}>
           {currentUser ? (currentUser.display_name || currentUser.username).charAt(0).toUpperCase() : '?'}
         </div>

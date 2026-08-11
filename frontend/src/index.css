@@ -792,16 +792,17 @@ input, select, textarea {
 
 .col-resize-handle {
   position: absolute;
-  right: 0;
+  right: -5px;
   top: 0;
   bottom: 0;
-  width: 4px;
+  width: 10px;
   cursor: col-resize;
   z-index: 20;
+  touch-action: none;
 }
 
 .col-resize-handle:hover {
-  background: #2563eb;
+  background: rgba(37, 99, 235, 0.35);
 }
 
 .badge {
@@ -2912,6 +2913,73 @@ body {
   border-bottom: 1px solid #2a3b40;
 }
 
+.sidebar-collapse-toggle {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  place-items: center;
+  border: 1px solid #385257;
+  border-radius: 6px;
+  background: transparent;
+  color: #9ab1b2;
+}
+
+.sidebar-collapse-toggle:hover {
+  background: #20383d;
+  color: #f2fbfa;
+}
+
+.sidebar-collapsed .sidebar {
+  width: 68px;
+}
+
+.sidebar-collapsed .sidebar-brand {
+  justify-content: center;
+  padding-right: 10px;
+  padding-left: 10px;
+}
+
+.sidebar-collapsed .sidebar-brand > div:not(.brand-mark),
+.sidebar-collapsed .sidebar-database,
+.sidebar-collapsed .sidebar-section-title,
+.sidebar-collapsed .view-switcher,
+.sidebar-collapsed .product-list,
+.sidebar-collapsed .sidebar-account .account-info,
+.sidebar-collapsed .sidebar-account .account-arrow,
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .sidebar-form,
+.sidebar-collapsed .sidebar-inline-actions {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-brand .sidebar-collapse-toggle {
+  margin-left: 0;
+}
+
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 9px 0;
+  border-left: 0;
+}
+
+.sidebar-collapsed .sidebar-account {
+  justify-content: center;
+  padding: 13px 0;
+}
+
+.history-action {
+  width: 32px;
+  justify-content: center;
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+.history-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 .brand-mark {
   display: grid;
   width: 34px;
@@ -3498,6 +3566,53 @@ body {
 }
 
 @media (max-width: 900px) {
+  /* A collapsed desktop rail should open as a full navigation drawer on mobile. */
+  .sidebar-open.sidebar-collapsed .sidebar {
+    width: 252px;
+  }
+
+  .sidebar-open.sidebar-collapsed .sidebar-brand {
+    justify-content: flex-start;
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .sidebar-open.sidebar-collapsed .sidebar-brand .sidebar-collapse-toggle {
+    margin-left: auto;
+  }
+
+  .sidebar-open.sidebar-collapsed .sidebar-brand > div:not(.brand-mark),
+  .sidebar-open.sidebar-collapsed .sidebar-database,
+  .sidebar-open.sidebar-collapsed .sidebar-section-title,
+  .sidebar-open.sidebar-collapsed .view-switcher,
+  .sidebar-open.sidebar-collapsed .product-list,
+  .sidebar-open.sidebar-collapsed .sidebar-form,
+  .sidebar-open.sidebar-collapsed .sidebar-inline-actions,
+  .sidebar-open.sidebar-collapsed .sidebar-account .account-info,
+  .sidebar-open.sidebar-collapsed .sidebar-account .account-arrow,
+  .sidebar-open.sidebar-collapsed .nav-label {
+    display: revert;
+  }
+
+  .sidebar-open.sidebar-collapsed .sidebar-inline-actions {
+    display: flex;
+  }
+
+  .sidebar-open.sidebar-collapsed .sidebar-account .account-info {
+    display: flex;
+  }
+
+  .sidebar-open.sidebar-collapsed .nav-item {
+    justify-content: flex-start;
+    padding: 9px 14px;
+    border-left: 3px solid transparent;
+  }
+
+  .sidebar-open.sidebar-collapsed .sidebar-account {
+    justify-content: flex-start;
+    padding: 13px 14px;
+  }
+
   .sidebar {
     position: fixed;
     top: 0;

@@ -3,6 +3,7 @@ import { analyticsApi, databaseApi, fieldApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { PatentDatabase, FieldMeta, AgentAnalysisResult } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import Icon from '../common/Icon'
 
 const DIMENSION_LABELS: Record<string, string> = {
   legal_status: '法律状态',
@@ -140,7 +141,7 @@ export default function AgentAnalysisPage() {
 
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-primary" onClick={handleAnalyze} disabled={loading}>
-            {loading ? '分析中（基层统计+AI分析）...' : '🚀 开始智能分析'}
+            {loading ? '分析中（基层统计+AI分析）...' : <><Icon name="sparkles" /> 开始智能分析</>}
           </button>
           <button className="btn btn-secondary" onClick={() => { setRequirement(''); setResult(null); setError('') }}>
             清空
@@ -254,13 +255,13 @@ export default function AgentAnalysisPage() {
                   padding: 12, background: '#f0f9ff', borderRadius: 6, marginBottom: 16,
                   fontSize: 13, color: '#0c4a6e', lineHeight: 1.7,
                 }}>
-                  <strong>📊 总体概述：</strong>{result.ai_analysis.overview}
+                  <strong><Icon name="chart" /> 总体概述：</strong>{result.ai_analysis.overview}
                 </div>
               )}
 
               {result.ai_analysis.key_findings && result.ai_analysis.key_findings.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>🔍 关键发现</h4>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}><Icon name="filter" /> 关键发现</h4>
                   <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#334155', lineHeight: 1.8 }}>
                     {result.ai_analysis.key_findings.map((f: string, i: number) => (
                       <li key={i}>{f}</li>
@@ -271,7 +272,7 @@ export default function AgentAnalysisPage() {
 
               {result.ai_analysis.dimension_analysis && Object.keys(result.ai_analysis.dimension_analysis).length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>📐 维度分析</h4>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}><Icon name="dashboard" /> 维度分析</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {Object.entries(result.ai_analysis.dimension_analysis).map(([dim, analysis]) => (
                       <div key={dim} style={{
@@ -287,7 +288,7 @@ export default function AgentAnalysisPage() {
 
               {result.ai_analysis.anomalies && result.ai_analysis.anomalies.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#dc2626', marginBottom: 8 }}>⚠️ 异常点</h4>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#dc2626', marginBottom: 8 }}><Icon name="activity" /> 异常点</h4>
                   <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#7f1d1d', lineHeight: 1.8 }}>
                     {result.ai_analysis.anomalies.map((a: string, i: number) => (
                       <li key={i}>{a}</li>
@@ -298,7 +299,7 @@ export default function AgentAnalysisPage() {
 
               {result.ai_analysis.recommendations && result.ai_analysis.recommendations.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#15803d', marginBottom: 8 }}>💡 建议</h4>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#15803d', marginBottom: 8 }}><Icon name="check" /> 建议</h4>
                   <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#14532d', lineHeight: 1.8 }}>
                     {result.ai_analysis.recommendations.map((r: string, i: number) => (
                       <li key={i}>{r}</li>
@@ -309,7 +310,7 @@ export default function AgentAnalysisPage() {
 
               {result.ai_analysis.risk_warnings && result.ai_analysis.risk_warnings.length > 0 && (
                 <div>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#b45309', marginBottom: 8 }}>🚨 风险提示</h4>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, color: '#b45309', marginBottom: 8 }}><Icon name="activity" /> 风险提示</h4>
                   <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#78350f', lineHeight: 1.8 }}>
                     {result.ai_analysis.risk_warnings.map((r: string, i: number) => (
                       <li key={i}>{r}</li>

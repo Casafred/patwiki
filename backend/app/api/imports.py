@@ -182,6 +182,8 @@ def confirm_import(
     duplicates_count = 0
     skipped = 0
     error_count = 0
+    family_links = 0
+    citation_links = 0
     BATCH_SIZE = 500
     batch: ImportBatch | None = None
 
@@ -240,7 +242,7 @@ def confirm_import(
                 (Patent.application_number == num) & (Patent.country == ctry)
                 for num, ctry in app_nums_to_check
             ]
-            existing_patents = db.query(Patent).filter(or_(*app_conditions)).all()
+            existing_patents = db.query(Patent).filter(Patent.database_id == database_id, or_(*app_conditions)).all()
             for p in existing_patents:
                 if p.application_number:
                     all_app_nums[(p.application_number.strip(), p.country or "CN")] = p
@@ -250,7 +252,7 @@ def confirm_import(
                 (Patent.publication_number == num) & (Patent.country == ctry)
                 for num, ctry in pub_nums_to_check
             ]
-            existing_patents_pub = db.query(Patent).filter(or_(*pub_conditions)).all()
+            existing_patents_pub = db.query(Patent).filter(Patent.database_id == database_id, or_(*pub_conditions)).all()
             for p in existing_patents_pub:
                 if p.publication_number:
                     all_pub_nums[(p.publication_number.strip(), p.country or "CN")] = p
@@ -345,7 +347,9 @@ def confirm_import(
                     db.commit()
                     for cp, vv in pending_relations:
                         try:
-                            _process_relations(db, cp, vv, database_id)
+                            relation_result = _process_relations(db, cp, vv, database_id)
+                            family_links += relation_result["family_links"]
+                            citation_links += relation_result["citation_links"]
                         except Exception as rel_err:
                             print(f"[PatWiki] 关系处理警告(patent_id={cp.id}): {rel_err}", flush=True)
                     db.commit()
@@ -363,7 +367,9 @@ def confirm_import(
         db.commit()
         for cp, vv in pending_relations:
             try:
-                _process_relations(db, cp, vv, database_id)
+                relation_result = _process_relations(db, cp, vv, database_id)
+                family_links += relation_result["family_links"]
+                citation_links += relation_result["citation_links"]
             except Exception as rel_err:
                 print(f"[PatWiki] 关系处理警告(patent_id={cp.id}): {rel_err}", flush=True)
         db.commit()
@@ -423,8 +429,8 @@ def confirm_import(
         "errors": error_count,
         "error_details": errors[:20] if errors else [],
         "database_id": database_id,
-        "family_links": 0,
-        "citation_links": 0,
+        "family_links": family_links,
+        "citation_links": citation_links,
         "batch_id": batch.id if batch is not None else None,
     }
 
@@ -458,12 +464,18 @@ def _process_relations(db: Session, patent: Patent, virtual: dict, database_id: 
         process_citations,
         process_citing_patents,
     )
+    family_links = 0
+    citation_links = 0
     if virtual["family_numbers"]:
-        process_family_members(db, patent, virtual["family_numbers"], database_id=database_id)
+        family_result = process_family_members(db, patent, virtual["family_numbers"], database_id=database_id)
+        family_links += family_result["members_linked"]
     if virtual["cited_numbers"]:
-        process_citations(db, patent, virtual["cited_numbers"], database_id=database_id)
+        citation_result = process_citations(db, patent, virtual["cited_numbers"], database_id=database_id)
+        citation_links += citation_result["links"]
     if virtual["citing_numbers"]:
-        process_citing_patents(db, patent, virtual["citing_numbers"], database_id=database_id)
+        citation_result = process_citing_patents(db, patent, virtual["citing_numbers"], database_id=database_id)
+        citation_links += citation_result["links"]
+    return {"family_links": family_links, "citation_links": citation_links}
 
 
 @router.get("/stats", response_model=StatsResponse)
