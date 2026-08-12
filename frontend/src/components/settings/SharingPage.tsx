@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { sharingApi, databaseApi, departmentApi } from '../../api'
+import { sharingApi, databaseApi, departmentApi, productLineApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { User, DatabaseMember, Department } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -9,18 +9,27 @@ export default function SharingPage() {
   const [users, setUsers] = useState<User[]>([])
   const [members, setMembers] = useState<DatabaseMember[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
+  const [productLines, setProductLines] = useState<Array<{ id: number; name: string; code?: string; department_id?: number | null }>>([])
   const [selectedDbId, setSelectedDbId] = useState<number | null>(currentDatabaseId)
 
   // 新建用户
   const [showCreateUser, setShowCreateUser] = useState(false)
   const [newUsername, setNewUsername] = useState('')
+  const [newEmployeeNo, setNewEmployeeNo] = useState('')
   const [newDisplayName, setNewDisplayName] = useState('')
   const [newUserRole, setNewUserRole] = useState<'admin' | 'member'>('member')
   const [newUserDeptId, setNewUserDeptId] = useState<string>('')
+  const [newUserGroupId, setNewUserGroupId] = useState<string>('')
+  const [newUserProductLineId, setNewUserProductLineId] = useState<string>('')
+  const [newUserOrgRole, setNewUserOrgRole] = useState('')
 
   // 编辑用户角色/部门
   const [editingUserId, setEditingUserId] = useState<number | null>(null)
   const [editDeptId, setEditDeptId] = useState<string>('')
+  const [editEmployeeNo, setEditEmployeeNo] = useState('')
+  const [editGroupId, setEditGroupId] = useState<string>('')
+  const [editProductLineId, setEditProductLineId] = useState<string>('')
+  const [editOrgRole, setEditOrgRole] = useState('')
 
   // 添加成员
   const [showAddMember, setShowAddMember] = useState(false)
@@ -45,6 +54,14 @@ export default function SharingPage() {
     }
   }, [])
 
+  const loadProductLines = useCallback(async () => {
+    try {
+      setProductLines(await productLineApi.list())
+    } catch (error: unknown) {
+      console.error('Failed to load product lines:', error)
+    }
+  }, [])
+
   const loadMembers = useCallback(async () => {
     if (!selectedDbId) { setMembers([]); return }
     try {
@@ -66,6 +83,10 @@ export default function SharingPage() {
   }, [loadDepartments])
 
   useEffect(() => {
+    void loadProductLines()
+  }, [loadProductLines])
+
+  useEffect(() => {
     // The request updates state asynchronously after the effect starts.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadMembers()
@@ -78,23 +99,35 @@ export default function SharingPage() {
         username: newUsername.trim(),
         display_name: newDisplayName.trim() || undefined,
         role: newUserRole,
+        employee_no: newEmployeeNo.trim() || undefined,
         department_id: newUserDeptId ? Number(newUserDeptId) : undefined,
+        group_id: newUserGroupId ? Number(newUserGroupId) : undefined,
+        product_line_id: newUserProductLineId ? Number(newUserProductLineId) : undefined,
+        organization_role: newUserOrgRole.trim() || undefined,
       })
       setUsers(prev => [...prev, user])
       setNewUsername('')
+      setNewEmployeeNo('')
       setNewDisplayName('')
       setNewUserRole('member')
       setNewUserDeptId('')
+      setNewUserGroupId('')
+      setNewUserProductLineId('')
+      setNewUserOrgRole('')
       setShowCreateUser(false)
     } catch (error: unknown) {
       alert(getErrorMessage(error, '创建用户失败'))
     }
   }
 
-  const handleUpdateUserDept = async (userId: number, deptId: string) => {
+  const handleUpdateUser = async (userId: number) => {
     try {
       const updated = await sharingApi.updateUser(userId, {
-        department_id: deptId ? Number(deptId) : null,
+        employee_no: editEmployeeNo.trim() || null,
+        department_id: editDeptId ? Number(editDeptId) : null,
+        group_id: editGroupId ? Number(editGroupId) : null,
+        product_line_id: editProductLineId ? Number(editProductLineId) : null,
+        organization_role: editOrgRole.trim() || null,
       })
       setUsers(prev => prev.map(u => u.id === updated.id ? updated : u))
       setEditingUserId(null)
@@ -268,6 +301,10 @@ export default function SharingPage() {
               />
             </div>
             <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>工号</label>
+              <input style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }} value={newEmployeeNo} onChange={e => setNewEmployeeNo(e.target.value)} placeholder="例如：RD-001" />
+            </div>
+            <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>显示名称</label>
               <input
                 style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
@@ -299,6 +336,24 @@ export default function SharingPage() {
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>小组</label>
+              <select style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, background: '#fff' }} value={newUserGroupId} onChange={e => setNewUserGroupId(e.target.value)}>
+                <option value="">不指定小组</option>
+                {departments.filter(d => d.parent_id === Number(newUserDeptId)).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>产品线</label>
+              <select style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, background: '#fff' }} value={newUserProductLineId} onChange={e => setNewUserProductLineId(e.target.value)}>
+                <option value="">不指定产品线</option>
+                {productLines.map(line => <option key={line.id} value={line.id}>{line.code ? `${line.code} - ` : ''}{line.name}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>业务身份</label>
+              <input style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }} value={newUserOrgRole} onChange={e => setNewUserOrgRole(e.target.value)} placeholder="如：研发工程师、检索" />
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button
@@ -478,8 +533,11 @@ export default function SharingPage() {
               <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
                 <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>用户</th>
                 <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>用户名</th>
+                <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>工号</th>
                 <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>系统角色</th>
                 <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>部门</th>
+                <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>小组 / 业务身份</th>
+                <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>产品线</th>
                 <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>状态</th>
                 <th style={{ textAlign: 'right', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>操作</th>
               </tr>
@@ -502,6 +560,9 @@ export default function SharingPage() {
                       </div>
                     </td>
                     <td style={{ padding: '8px 4px', color: '#9ca3af' }}>@{u.username}</td>
+                    <td style={{ padding: '8px 4px', color: '#64748b' }}>
+                      {isEditing ? <input style={{ width: 90, fontSize: 11, padding: '3px 5px' }} value={editEmployeeNo} onChange={e => setEditEmployeeNo(e.target.value)} /> : (u.employee_no || '-')}
+                    </td>
                     <td style={{ padding: '8px 4px' }}>
                       {isEditing ? (
                         <select
@@ -521,6 +582,20 @@ export default function SharingPage() {
                           {u.role === 'admin' ? '管理员' : '成员'}
                         </span>
                       )}
+                    </td>
+                    <td style={{ padding: '8px 4px', color: '#64748b' }}>
+                      {isEditing ? (
+                        <div style={{ display: 'grid', gap: 4 }}>
+                          <select style={{ fontSize: 11, padding: '2px 6px' }} value={editGroupId} onChange={e => setEditGroupId(e.target.value)}>
+                            <option value="">无小组</option>
+                            {departments.filter(d => d.parent_id === Number(editDeptId)).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                          </select>
+                          <input style={{ fontSize: 11, padding: '3px 5px' }} value={editOrgRole} onChange={e => setEditOrgRole(e.target.value)} placeholder="业务身份" />
+                        </div>
+                      ) : <>{u.group_name || '-'}{u.organization_role ? ` / ${u.organization_role}` : ''}</>}
+                    </td>
+                    <td style={{ padding: '8px 4px', color: '#64748b' }}>
+                      {isEditing ? <select style={{ fontSize: 11, padding: '2px 6px' }} value={editProductLineId} onChange={e => setEditProductLineId(e.target.value)}><option value="">无产品线</option>{productLines.map(line => <option key={line.id} value={line.id}>{line.code || line.name}</option>)}</select> : (u.product_line_name || '-')}
                     </td>
                     <td style={{ padding: '8px 4px' }}>
                       {isEditing ? (
@@ -554,7 +629,7 @@ export default function SharingPage() {
                         <>
                           <button
                             style={{ fontSize: 11, padding: '2px 8px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', marginRight: 4 }}
-                            onClick={() => handleUpdateUserDept(u.id, editDeptId)}
+                            onClick={() => handleUpdateUser(u.id)}
                           >
                             保存
                           </button>
@@ -569,7 +644,14 @@ export default function SharingPage() {
                         <>
                           <button
                             style={{ fontSize: 11, padding: '2px 8px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: 4, cursor: 'pointer', marginRight: 4 }}
-                            onClick={() => { setEditingUserId(u.id); setEditDeptId(u.department_id ? String(u.department_id) : '') }}
+                            onClick={() => {
+                              setEditingUserId(u.id)
+                              setEditEmployeeNo(u.employee_no || '')
+                              setEditDeptId(u.department_id ? String(u.department_id) : '')
+                              setEditGroupId(u.group_id ? String(u.group_id) : '')
+                              setEditProductLineId(u.product_line_id ? String(u.product_line_id) : '')
+                              setEditOrgRole(u.organization_role || '')
+                            }}
                           >
                             编辑
                           </button>

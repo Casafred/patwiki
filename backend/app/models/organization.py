@@ -11,11 +11,18 @@ class Department(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), unique=True, nullable=False)
+    code = Column(String(50), unique=True)
+    department_type = Column(String(30), default="other", nullable=False)
+    parent_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
     description = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
 
     members = relationship("Person", back_populates="department")
-    users = relationship("User", back_populates="department")
+    users = relationship("User", foreign_keys="User.department_id", back_populates="department")
+    group_users = relationship("User", foreign_keys="User.group_id", back_populates="group")
+    parent = relationship("Department", remote_side=[id], back_populates="children")
+    children = relationship("Department", back_populates="parent", cascade="all")
+    product_lines = relationship("ProductLine", back_populates="department")
 
 
 class Person(Base):
@@ -44,10 +51,12 @@ class ProductLine(Base):
     name = Column(String(200), unique=True, nullable=False)
     description = Column(Text)
     code = Column(String(50), unique=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     products = relationship("Product", back_populates="product_line")
+    department = relationship("Department", back_populates="product_lines")
 
 
 class Product(Base):

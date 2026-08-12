@@ -367,6 +367,9 @@ class Person(PersonBase):
 
 class DepartmentBase(BaseSchema):
     name: str
+    code: Optional[str] = None
+    department_type: str = "other"
+    parent_id: Optional[int] = None
     description: Optional[str] = None
 
 
@@ -387,6 +390,7 @@ class Department(DepartmentBase):
 class ProductLineBase(BaseSchema):
     name: str
     code: Optional[str] = None
+    department_id: Optional[int] = None
     description: Optional[str] = None
 
 

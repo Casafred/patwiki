@@ -184,7 +184,19 @@ def auto_create_custom_field(db: Session, column_name: str) -> str:
 
 class ImportService:
     @staticmethod
-    def parse_excel(file_content: bytes, filename: str) -> tuple[pd.DataFrame, list[str]]:
+    def list_sheets(file_content: bytes, filename: str) -> list[str]:
+        suffix = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
+        if suffix == 'csv':
+            return []
+        try:
+            engine = 'xlrd' if suffix == 'xls' else 'openpyxl'
+            workbook = pd.ExcelFile(BytesIO(file_content), engine=engine)
+            return [str(name) for name in workbook.sheet_names]
+        except Exception as exc:
+            raise BadRequestException(f"无法读取 Excel Sheet：{exc}") from exc
+
+    @staticmethod
+    def parse_excel(file_content: bytes, filename: str, sheet_name: str | int | None = None) -> tuple[pd.DataFrame, list[str]]:
         suffix = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
         if not file_content:
             raise BadRequestException("上传文件为空")
@@ -197,9 +209,9 @@ class ImportService:
                 except UnicodeDecodeError:
                     df = pd.read_csv(BytesIO(file_content), dtype=str, encoding="gb18030")
             elif suffix == "xls":
-                df = pd.read_excel(BytesIO(file_content), engine="xlrd", dtype=str)
+                df = pd.read_excel(BytesIO(file_content), engine="xlrd", dtype=str, sheet_name=0 if sheet_name is None else sheet_name)
             else:
-                df = pd.read_excel(BytesIO(file_content), engine="openpyxl", dtype=str)
+                df = pd.read_excel(BytesIO(file_content), engine="openpyxl", dtype=str, sheet_name=0 if sheet_name is None else sheet_name)
         except BadRequestException:
             raise
         except Exception as exc:

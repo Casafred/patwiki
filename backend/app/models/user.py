@@ -18,12 +18,18 @@ class User(Base):
     display_name = Column(String(200))
     email = Column(String(255))
     role = Column(String(50), default="member")  # admin / member
+    employee_no = Column(String(50), unique=True, nullable=True, index=True)
     department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
+    group_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
+    product_line_id = Column(Integer, ForeignKey("product_lines.id", ondelete="SET NULL"), nullable=True, index=True)
+    organization_role = Column(String(100), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    department = relationship("Department", back_populates="users")
+    department = relationship("Department", foreign_keys=[department_id], back_populates="users")
+    group = relationship("Department", foreign_keys=[group_id], back_populates="group_users")
+    product_line = relationship("ProductLine", foreign_keys=[product_line_id])
     database_memberships = relationship("DatabaseMembership", back_populates="user", cascade="all, delete-orphan")
 
 

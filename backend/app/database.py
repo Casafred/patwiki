@@ -98,6 +98,14 @@ def _ensure_column_migration():
         # 用户与部门打通
         ("users", "department_id",
          "ALTER TABLE users ADD COLUMN department_id INTEGER REFERENCES departments(id)"),
+        ("users", "employee_no", "ALTER TABLE users ADD COLUMN employee_no VARCHAR(50)"),
+        ("users", "group_id", "ALTER TABLE users ADD COLUMN group_id INTEGER REFERENCES departments(id)"),
+        ("users", "product_line_id", "ALTER TABLE users ADD COLUMN product_line_id INTEGER REFERENCES product_lines(id)"),
+        ("users", "organization_role", "ALTER TABLE users ADD COLUMN organization_role VARCHAR(100)"),
+        ("departments", "code", "ALTER TABLE departments ADD COLUMN code VARCHAR(50)"),
+        ("departments", "department_type", "ALTER TABLE departments ADD COLUMN department_type VARCHAR(30) DEFAULT 'other'"),
+        ("departments", "parent_id", "ALTER TABLE departments ADD COLUMN parent_id INTEGER REFERENCES departments(id)"),
+        ("product_lines", "department_id", "ALTER TABLE product_lines ADD COLUMN department_id INTEGER REFERENCES departments(id)"),
     ]
 
     with engine.begin() as conn:
@@ -151,6 +159,18 @@ def _ensure_column_migration():
                 conn.execute(text("CREATE INDEX ix_users_department_id ON users (department_id)"))
             except Exception:
                 pass
+        for table, index_name, column in [
+            ("users", "ix_users_employee_no", "employee_no"),
+            ("users", "ix_users_group_id", "group_id"),
+            ("users", "ix_users_product_line_id", "product_line_id"),
+            ("departments", "ix_departments_parent_id", "parent_id"),
+            ("product_lines", "ix_product_lines_department_id", "department_id"),
+        ]:
+            if not has_index(table, index_name):
+                try:
+                    conn.execute(text(f"CREATE INDEX {index_name} ON {table} ({column})"))
+                except Exception:
+                    pass
 
 
 def init_db():

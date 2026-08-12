@@ -1,5 +1,29 @@
 from app.database import SessionLocal, init_db
-from app.models import Department, TagGroup, CustomField, CustomFieldType, PatentDatabase
+from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase
+
+
+def _ensure_organization_structure(db):
+    patent = db.query(Department).filter(Department.code == "PATENT").first()
+    if not patent:
+        patent = Department(name="专利部门", code="PATENT", department_type="patent", description="专利检索、分析与保护")
+        db.add(patent)
+        db.flush()
+
+    research = db.query(Department).filter(Department.code == "R_AND_D").first()
+    if not research:
+        research = Department(name="研发部门", code="R_AND_D", department_type="r_and_d", description="产品研发与项目管理")
+        db.add(research)
+        db.flush()
+
+    groups = [("PATENT_SEARCH", "检索"), ("PATENT_ANALYSIS", "分析"), ("PATENT_PROTECTION", "保护")]
+    for code, name in groups:
+        if not db.query(Department).filter(Department.code == code).first():
+            db.add(Department(name=name, code=code, department_type="other", parent_id=patent.id))
+
+    for code in ("PRO", "DIY", "OPE", "FGA", "CI"):
+        if not db.query(ProductLine).filter(ProductLine.code == code).first():
+            db.add(ProductLine(name=code, code=code, department_id=research.id, description=f"{code} 研发产品线"))
+    db.commit()
 
 
 def init_default_data():
@@ -13,6 +37,8 @@ def init_default_data():
             ]
             db.add_all(departments)
             db.flush()
+
+        _ensure_organization_structure(db)
 
         # P0-11：默认数据库（库是顶层品类容器）
         if db.query(PatentDatabase).count() == 0:

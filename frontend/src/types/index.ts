@@ -444,6 +444,7 @@ export interface ProductLine {
   id: number
   name: string
   code?: string
+  department_id?: number | null
   description?: string
   created_at?: string
   updated_at?: string
@@ -535,6 +536,8 @@ export interface ImportPreview {
   preview_rows: Record<string, string>[]
   total_rows: number
   suggested_mapping: Record<string, string>
+  sheets?: string[]
+  selected_sheet?: string | null
   // P0-11：返回库列表供选择
   databases?: PatentDatabase[]
   default_database_id?: number | null
@@ -589,6 +592,9 @@ export interface Person {
 export interface Department {
   id: number
   name: string
+  code?: string
+  department_type?: 'patent' | 'r_and_d' | 'other' | string
+  parent_id?: number | null
   description?: string
   members?: Person[]
   created_at?: string
@@ -768,8 +774,14 @@ export interface User {
   display_name?: string
   email?: string
   role: string  // admin / member
+  employee_no?: string | null
   department_id?: number | null
   department_name?: string | null
+  group_id?: number | null
+  group_name?: string | null
+  product_line_id?: number | null
+  product_line_name?: string | null
+  organization_role?: string | null
   is_active: boolean
   created_at?: string
 }

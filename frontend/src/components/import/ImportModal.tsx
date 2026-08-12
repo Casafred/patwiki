@@ -67,6 +67,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   )
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
+  const [selectedSheet, setSelectedSheet] = useState<string | null>(null)
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [selectedDatabaseId, setSelectedDatabaseId] = useState<number | ''>(
     currentDatabaseId ?? ''
@@ -87,6 +88,12 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [uploading, setUploading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
+
+  const selectFile = (nextFile: File) => {
+    setFile(nextFile)
+    setPreview(null)
+    setSelectedSheet(null)
+  }
 
   // P0-12：新建库表单
   const [showCreateDb, setShowCreateDb] = useState(false)
@@ -166,13 +173,33 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     setUploading(true)
     setError('')
     try {
-      const result = await importApi.upload(file)
+      const result = await importApi.upload(file, selectedSheet)
       setPreview(result)
+      setSelectedSheet(result.selected_sheet || null)
+      if ((result.sheets?.length || 0) > 1 && !selectedSheet) {
+        setStep('upload')
+        return
+      }
       // P0-10：使用后端 suggested_mapping（已自动为未知列创建 CustomField）
       setMapping(result.suggested_mapping || {})
       setStep('mapping')
     } catch (error: unknown) {
       setError(getErrorMessage(error, '上传失败，请检查文件格式'))
+    } finally {
+      setUploading(false)
+    }
+  }, [file, selectedSheet])
+
+  const handleSheetChange = useCallback(async (sheet: string) => {
+    if (!file) return
+    setUploading(true)
+    setError('')
+    try {
+      const result = await importApi.upload(file, sheet)
+      setPreview(result)
+      setSelectedSheet(result.selected_sheet || sheet)
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, '读取 Sheet 失败'))
     } finally {
       setUploading(false)
     }
@@ -201,6 +228,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
         selectedProjectId || undefined,
         currentDatabaseId,
         selectedViewId || undefined,
+        selectedSheet || undefined,
       )
       // 防御：后端返回空体或异常时 result 可能为 undefined，
       // 若直接进入 complete 步骤会导致渲染条件不满足而白屏。
@@ -222,6 +250,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
             localStorage.setItem('patwiki_hidden_fields', JSON.stringify(hidden.filter(key => !importedKeys.includes(String(key)))))
           }
         }
+        localStorage.setItem('patwiki_force_visible_fields', JSON.stringify(importedKeys))
       } catch {
         // Column preferences are optional and must not block a successful import.
       }
@@ -231,7 +260,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     } finally {
       setImporting(false)
     }
-  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId])
+  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId, selectedSheet])
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose()
@@ -366,7 +395,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   e.currentTarget.style.borderColor = '#cbd5e1'
                   const f = e.dataTransfer.files[0]
                   if (f && (f.name.endsWith('.xlsx') || f.name.endsWith('.xls') || f.name.endsWith('.csv'))) {
-                    setFile(f)
+                    selectFile(f)
                   }
                 }}
                 onClick={() => {
@@ -377,7 +406,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                     const target = event.target
                     if (!(target instanceof HTMLInputElement)) return
                     const f = target.files?.[0]
-                    if (f) setFile(f)
+                    if (f) selectFile(f)
                   }
                   input.click()
                 }}
@@ -396,6 +425,20 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   </div>
                 )}
               </div>
+
+              {preview?.sheets && preview.sheets.length > 1 && (
+                <div style={{ marginTop: 16, padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                  <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>选择导入 Sheet</label>
+                  <select
+                    className="form-input"
+                    value={selectedSheet || preview.selected_sheet || preview.sheets[0]}
+                    disabled={uploading}
+                    onChange={e => void handleSheetChange(e.target.value)}
+                  >
+                    {preview.sheets.map(sheet => <option key={sheet} value={sheet}>{sheet}</option>)}
+                  </select>
+                </div>
+              )}
 
               <div style={{ marginTop: 20 }}>
                 <p style={{ fontSize: 13, color: '#64748b', marginBottom: 8 }}>导入选项</p>

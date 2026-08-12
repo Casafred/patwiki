@@ -77,16 +77,23 @@ class ConfirmImportRequest(BaseModel):
     product_id: Optional[int] = None
     project_id: Optional[int] = None
     database_id: Optional[int] = None
+    sheet_name: Optional[str] = None
     view_id: Optional[int] = None  # P0-14：导入到指定视图（为空则导入到库的主视图）
 
 
 @router.post("/import/preview")
 async def preview_import(
     file: UploadFile = File(...),
+    sheet_name: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     content = await file.read()
-    df, columns = ImportService.parse_excel(content, file.filename or "upload.xlsx")
+    filename = file.filename or "upload.xlsx"
+    sheets = ImportService.list_sheets(content, filename)
+    selected_sheet = sheet_name or (sheets[0] if sheets else None)
+    if selected_sheet and sheets and selected_sheet not in sheets:
+        raise BadRequestException(f"Sheet 不存在：{selected_sheet}")
+    df, columns = ImportService.parse_excel(content, filename, selected_sheet)
     suggested_mapping = ImportService.suggest_mapping(columns, db)
 
     preview_rows_list = []
@@ -116,6 +123,8 @@ async def preview_import(
         "suggested_mapping": suggested_mapping,
         "databases": [DatabaseService.to_dict(d) for d in databases],
         "default_database_id": default_db.id if default_db else None,
+        "sheets": sheets,
+        "selected_sheet": selected_sheet,
     }
 
 
@@ -199,7 +208,7 @@ def confirm_import(
         db.add(batch)
         db.flush()
 
-        df, _ = ImportService.parse_excel(content, filename)
+        df, _ = ImportService.parse_excel(content, filename, req.sheet_name)
         total_rows = len(df)
         batch.total_rows = total_rows
         print(f"[PatWiki] 开始导入 {total_rows} 条数据...", flush=True)

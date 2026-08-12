@@ -373,9 +373,10 @@ export const customFieldApi = {
 }
 
 export const importApi = {
-  upload: (file: File): Promise<ImportPreview> => {
+  upload: (file: File, sheetName?: string | null): Promise<ImportPreview> => {
     const formData = new FormData()
     formData.append('file', file)
+    if (sheetName) formData.append('sheet_name', sheetName)
     // Let the browser/Axios add the multipart boundary.
     return api.post('/import/preview', formData)
   },
@@ -389,6 +390,7 @@ export const importApi = {
     projectId?: number,
     databaseId?: number,
     viewId?: number,
+    sheetName?: string,
   ): Promise<ImportResult> => {
     return api.post('/import/confirm', {
       import_id: importId,
@@ -399,6 +401,7 @@ export const importApi = {
       project_id: projectId,
       database_id: databaseId,
       view_id: viewId,
+      sheet_name: sheetName,
     }, {
       timeout: 600000,
     })
@@ -592,7 +595,11 @@ export const sharingApi = {
     display_name?: string
     email?: string
     role?: string
+    employee_no?: string | null
     department_id?: number | null
+    group_id?: number | null
+    product_line_id?: number | null
+    organization_role?: string | null
   }): Promise<User> => api.post('/users', data),
 
   getUser: (userId: number): Promise<User> => api.get(`/users/${userId}`),
@@ -601,7 +608,11 @@ export const sharingApi = {
     display_name?: string
     email?: string
     role?: string
+    employee_no?: string | null
     department_id?: number | null
+    group_id?: number | null
+    product_line_id?: number | null
+    organization_role?: string | null
     is_active?: boolean
   }): Promise<User> => api.put(`/users/${userId}`, data),
 

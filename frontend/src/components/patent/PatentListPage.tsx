@@ -54,6 +54,10 @@ function readFilterParam(params: URLSearchParams): Record<string, string> {
 }
 
 const DEFAULT_COLUMN_WIDTH = 150
+const DEFAULT_VISIBLE_CONTENT_FIELDS = new Set([
+  'title', 'application_number', 'publication_number', 'abstract', 'claims',
+  'technical_problem', 'technical_solution', 'technical_effect',
+])
 
 function getViewGroupFields(view?: PatentView): ViewGroupField[] {
   const config = view?.group_by_config
@@ -388,17 +392,38 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const loadFields = useCallback(async (forceVisibleKeys: string[] = []) => {
     try {
       const fieldsData = await fieldApi.list()
+      const persistedForcedVisible = (() => {
+        try {
+          const parsed = JSON.parse(localStorage.getItem('patwiki_force_visible_fields') || '[]') as unknown
+          return Array.isArray(parsed) ? parsed.map(String) : []
+        } catch {
+          return []
+        }
+      })()
+      const forcedVisible = new Set([...persistedForcedVisible, ...forceVisibleKeys, ...DEFAULT_VISIBLE_CONTENT_FIELDS])
       // 应用 localStorage 持久化的可见性设置
       try {
         const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
         if (hiddenRaw) {
           const hiddenKeys: string[] = JSON.parse(hiddenRaw)
           fieldsData.forEach(f => {
-            if (hiddenKeys.includes(f.key) && !forceVisibleKeys.includes(f.key)) f.visible = false
+            if (hiddenKeys.includes(f.key) && !forcedVisible.has(f.key)) f.visible = false
           })
         }
       } catch (error) { console.error('Failed to read hidden fields:', error) }
+      fieldsData.forEach(field => {
+        if (forcedVisible.has(field.key)) field.visible = true
+      })
       setFields(fieldsData)
+      try {
+        const savedFrozen = JSON.parse(localStorage.getItem('patwiki_frozen_fields') || 'null') as unknown
+        const frozen = Array.isArray(savedFrozen)
+          ? savedFrozen.map(String)
+          : fieldsData.filter(field => field.frozen === true).map(field => field.key)
+        setFrozenFields(new Set(frozen))
+      } catch {
+        setFrozenFields(new Set(fieldsData.filter(field => field.frozen === true).map(field => field.key)))
+      }
       const widths: Record<string, number> = {}
       fieldsData.forEach(f => {
         widths[f.key] = f.width || DEFAULT_COLUMN_WIDTH
@@ -1140,6 +1165,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       } else {
         next.add(fieldKey)
       }
+      try {
+        localStorage.setItem('patwiki_frozen_fields', JSON.stringify([...next]))
+      } catch (error) { console.error('Failed to save frozen fields:', error) }
       return next
     })
   }
@@ -1947,13 +1975,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 {visibleFields.map(field => {
                   const hasFilter = !!filterValues[field.key]
                   const isFilterable = field.filterable !== false
-                  const isFrozen = field.frozen || frozenFields.has(field.key)
+                  const isFrozen = frozenFields.has(field.key)
                   // 计算冻结列的 left 偏移：checkbox(40) + 操作(70) + 前面所有冻结列宽度
                   let leftOffset = 40 + 70
                   if (isFrozen) {
                     for (const f of visibleFields) {
                       if (f.key === field.key) break
-                      if (f.frozen || frozenFields.has(f.key)) {
+                      if (frozenFields.has(f.key)) {
                         leftOffset += columnWidths[f.key] || DEFAULT_COLUMN_WIDTH
                       }
                     }
@@ -2254,12 +2282,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                     </div>
                   </td>
                   {visibleFields.map(field => {
-                    const isFrozen = field.frozen || frozenFields.has(field.key)
+                    const isFrozen = frozenFields.has(field.key)
                     let leftOffset = 40 + 70
                     if (isFrozen) {
                       for (const f of visibleFields) {
                         if (f.key === field.key) break
-                        if (f.frozen || frozenFields.has(f.key)) {
+                        if (frozenFields.has(f.key)) {
                           leftOffset += columnWidths[f.key] || DEFAULT_COLUMN_WIDTH
                         }
                       }
@@ -2445,7 +2473,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 </div>
                 {flds.map(field => {
                   const visible = field.visible !== false
-                  const isFrozen = field.frozen || frozenFields.has(field.key)
+                  const isFrozen = frozenFields.has(field.key)
                   return (
                     <div
                       key={field.key}
@@ -3130,7 +3158,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             if (!field) return null
             const isCustom = !field.is_system
             const cf = customFields.find(c => c.key === field.key)
-            const isFrozen = field.frozen || frozenFields.has(field.key)
+            const isFrozen = frozenFields.has(field.key)
             const isAI = field.field_type === 'ai_field'
             return (
               <>

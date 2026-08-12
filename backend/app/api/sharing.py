@@ -13,7 +13,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 from app.database import get_db
-from app.models import User, DatabaseMembership, PatentDatabase
+from app.models import User, DatabaseMembership, PatentDatabase, Department, ProductLine
 from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(tags=["sharing"])
@@ -27,7 +27,11 @@ class UserCreate(BaseModel):
     display_name: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = "member"
+    employee_no: Optional[str] = None
     department_id: Optional[int] = None
+    group_id: Optional[int] = None
+    product_line_id: Optional[int] = None
+    organization_role: Optional[str] = None
 
 
 class UserOut(BaseModel):
@@ -41,8 +45,14 @@ class UserOut(BaseModel):
     display_name: Optional[str] = None
     email: Optional[str] = None
     role: str
+    employee_no: Optional[str] = None
     department_id: Optional[int] = None
     department_name: Optional[str] = None
+    group_id: Optional[int] = None
+    group_name: Optional[str] = None
+    product_line_id: Optional[int] = None
+    product_line_name: Optional[str] = None
+    organization_role: Optional[str] = None
     is_active: bool
     created_at: Optional[datetime] = None
 
@@ -73,8 +83,21 @@ class MemberUpdate(BaseModel):
 # ============================================================
 @router.get("/users", response_model=list[UserOut])
 def list_users(db: Session = Depends(get_db)):
-    users = db.query(User).options(joinedload(User.department)).order_by(User.created_at).all()
-    return users
+    users = db.query(User).options(joinedload(User.department), joinedload(User.group), joinedload(User.product_line)).order_by(User.created_at).all()
+    return [_user_out(user) for user in users]
+
+
+def _user_out(user: User) -> UserOut:
+    return UserOut(
+        id=user.id, username=user.username, display_name=user.display_name, email=user.email,
+        role=user.role, employee_no=user.employee_no, department_id=user.department_id,
+        department_name=user.department.name if user.department else None,
+        group_id=user.group_id, group_name=user.group.name if user.group else None,
+        product_line_id=user.product_line_id,
+        product_line_name=user.product_line.name if user.product_line else None,
+        organization_role=user.organization_role, is_active=user.is_active,
+        created_at=user.created_at,
+    )
 
 
 @router.post("/users", response_model=UserOut)
@@ -86,42 +109,55 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
         display_name=user_in.display_name or user_in.username,
         email=user_in.email,
         role=user_in.role or "member",
+        employee_no=user_in.employee_no,
         department_id=user_in.department_id,
+        group_id=user_in.group_id,
+        product_line_id=user_in.product_line_id,
+        organization_role=user_in.organization_role,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    db.refresh(user, attribute_names=["department"])
-    return user
+    user = db.query(User).options(joinedload(User.department), joinedload(User.group), joinedload(User.product_line)).filter(User.id == user.id).first()
+    return _user_out(user)
 
 
 @router.get("/users/{user_id}", response_model=UserOut)
 def get_user(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).options(joinedload(User.department)).filter(User.id == user_id).first()
+    user = db.query(User).options(joinedload(User.department), joinedload(User.group), joinedload(User.product_line)).filter(User.id == user_id).first()
     if not user:
         raise NotFoundException("User not found")
-    return user
+    return _user_out(user)
 
 
 class UserUpdate(BaseModel):
     display_name: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = None
+    employee_no: Optional[str] = None
     department_id: Optional[int] = None
+    group_id: Optional[int] = None
+    product_line_id: Optional[int] = None
+    organization_role: Optional[str] = None
     is_active: Optional[bool] = None
 
 
 @router.put("/users/{user_id}", response_model=UserOut)
 def update_user(user_id: int, user_in: UserUpdate, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).options(joinedload(User.department), joinedload(User.group), joinedload(User.product_line)).filter(User.id == user_id).first()
     if not user:
         raise NotFoundException("User not found")
     for field, value in user_in.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
+    if user.group_id and user.department_id:
+        group = db.query(Department).filter(Department.id == user.group_id).first()
+        if group and group.parent_id not in (None, user.department_id) and group.id != user.department_id:
+            raise BadRequestException("所选小组不属于当前部门")
+    if user.product_line_id and not db.query(ProductLine).filter(ProductLine.id == user.product_line_id).first():
+        raise BadRequestException("产品线不存在")
     db.commit()
-    db.refresh(user)
-    db.refresh(user, attribute_names=["department"])
-    return user
+    user = db.query(User).options(joinedload(User.department), joinedload(User.group), joinedload(User.product_line)).filter(User.id == user_id).first()
+    return _user_out(user)
 
 
 # ============================================================
