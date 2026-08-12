@@ -165,6 +165,13 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
         selectedProjectId || undefined,
         currentDatabaseId,
       )
+      // 防御：后端返回空体或异常时 result 可能为 undefined，
+      // 若直接进入 complete 步骤会导致渲染条件不满足而白屏。
+      if (!result || typeof result !== 'object') {
+        setError('导入返回异常，请检查数据后重试')
+        setStep('mapping')
+        return
+      }
       setImportResult(result)
       setStep('complete')
     } catch (error: unknown) {

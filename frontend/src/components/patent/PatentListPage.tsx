@@ -236,7 +236,16 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     patents, totalPatents, currentProductId, currentDatabaseId, loading,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
     groupByFamily, setGroupByFamily, views, setViews, setCurrentProductId,
+    dataVersion,
   } = useAppStore()
+
+  // 用 ref 保存 views，避免 views 变化时 loadPatents 被重建触发重渲染循环。
+  // 原因：App.tsx 的视图加载 effect 依赖 searchParamsString，每次 URL 变化（含
+  // 翻页）都会重跑并 setViews(新数组) → loadPatents 因依赖 views 被重建 →
+  // loadPatents effect 重跑 → 又触发 URL 同步 → 又导致 searchParamsString 变化
+  // → 死循环。改用 ref 后 loadPatents 不再依赖 views，循环被打破。
+  const viewsRef = useRef(views)
+  viewsRef.current = views
 
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -415,7 +424,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       // 不再清空表格——而是降级走大表直查，避免“切库/翻页后数据消失”。
       // 这样在 loadViews 异步加载新视图的间隙，用户仍能看到目标库的数据。
       if (viewId !== null) {
-        const activeViewForLoad = views.find(view => view.id === viewId)
+        const activeViewForLoad = viewsRef.current.find(view => view.id === viewId)
         const viewMatchesDb = !!activeViewForLoad && activeViewForLoad.database_id === activeDatabaseId
         if (viewMatchesDb) {
           if (activeViewForLoad?.layout_type === 'kanban') {
@@ -491,7 +500,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, views, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, dataVersion, setPatents, setLoading])
 
   // Browser back/forward rehydrates list state from the URL.
   useEffect(() => {

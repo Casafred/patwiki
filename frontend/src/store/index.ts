@@ -30,6 +30,9 @@ interface AppState {
   // 权限管理 MVP：当前用户（localStorage 持久化）
   currentUser: User | null
   setCurrentUser: (user: User | null) => void
+  // 数据版本号：导入/删除等操作后自增，驱动列表软刷新（替代 window.location.reload）
+  dataVersion: number
+  bumpDataVersion: () => void
   setPatents: (patents: Patent[], total: number) => void
   setProducts: (products: Product[]) => void
   setCustomFields: (fields: CustomField[]) => void
@@ -89,6 +92,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ currentUser: user })
   },
+
+  dataVersion: 0,
+  bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
 
   setPatents: (patents, total) => set({ patents, totalPatents: total }),
   setProducts: (products) => set({ products }),

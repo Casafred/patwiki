@@ -243,11 +243,8 @@ def list_view_patents(
         search=search, sort_by=sort_by, sort_order=sort_order,
     )
 
-    # 返回时附带视图本地字段值
-    items = []
-    for p in patents:
-        item = ViewService.get_view_patent_with_local_fields(db, view, p)
-        items.append(item)
+    # 批量返回视图本地字段值（避免 N+1：逐条查询 patent_view_field_values）
+    items = ViewService.get_view_patents_with_local_fields_batch(db, view, patents)
 
     return {
         "total": total,

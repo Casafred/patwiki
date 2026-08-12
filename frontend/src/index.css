@@ -790,7 +790,9 @@ input, select, textarea {
   text-align: center;
 }
 
-.col-resize-handle {
+/* 使用更高特异性的选择器，覆盖 .data-grid th > * { position: relative }，
+   否则 resize handle 会变成 relative 定位，无法吸附到列右边缘，拖拽失效。 */
+.data-grid th .col-resize-handle {
   position: absolute;
   right: -5px;
   top: 0;
@@ -801,7 +803,7 @@ input, select, textarea {
   touch-action: none;
 }
 
-.col-resize-handle:hover {
+.data-grid th .col-resize-handle:hover {
   background: rgba(37, 99, 235, 0.35);
 }
 

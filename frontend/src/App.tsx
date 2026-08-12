@@ -108,6 +108,7 @@ function WorkspaceApp() {
     setProducts, setCustomFields, setTags, setProjects,
     setDatabases, setCurrentDatabaseId, currentDatabaseId,
     setViews, setCurrentViewId, currentViewId, databases,
+    bumpDataVersion,
   } = useAppStore()
   const routeDatabaseId = getDatabaseIdFromPath(location.pathname)
   const queryDatabaseId = Number(searchParams.get('db'))
@@ -188,9 +189,11 @@ function WorkspaceApp() {
 
   const handleImportSuccess = () => {
     setShowImport(false)
-    if (currentPage === 'patents' && !location.pathname.includes('/patents/')) {
-      window.location.reload()
-    }
+    // 软刷新：刷新数据库计数 + 驱动 PatentListPage 重新加载列表。
+    // 不用 window.location.reload()：硬刷新会导致整页重建，叠加 N+1 查询时
+    // 后端响应缓慢，页面长时间白屏。
+    void loadMeta()
+    bumpDataVersion()
   }
 
   const handlePatentClick = (id: number) => {

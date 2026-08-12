@@ -416,9 +416,10 @@ class ViewService:
         )
         group_field = config["group_by_field"]
         card_fields = config["card_fields"]
+        # 批量预加载本地字段值，避免 N+1
+        items = ViewService.get_view_patents_with_local_fields_batch(db, view, patents)
         cards = []
-        for patent in patents:
-            item = ViewService.get_view_patent_with_local_fields(db, view, patent)
+        for patent, item in zip(patents, items):
             group_value = _get_item_field_value(item, group_field)
             card_values = {
                 field: _get_item_field_value(item, field) for field in card_fields
@@ -529,8 +530,9 @@ class ViewService:
                 ordered_keys.append(key)
             return groups_by_key[key]
 
-        for patent in patents:
-            item = ViewService.get_view_patent_with_local_fields(db, view, patent)
+        # 批量预加载本地字段值，避免 N+1
+        items = ViewService.get_view_patents_with_local_fields_batch(db, view, patents)
+        for patent, item in zip(patents, items):
             start = _parse_date(_get_item_field_value(item, config["start_field"]))
             end = _parse_date(_get_item_field_value(item, config["end_field"]))
             if not start or not end:
@@ -792,6 +794,41 @@ class ViewService:
             f.key: local_values_map.get(f.key) for f in view.local_fields
         }
         return patent_dict
+
+    @staticmethod
+    def get_view_patents_with_local_fields_batch(
+        db: Session, view: PatentView, patents: list[Patent]
+    ) -> list[dict]:
+        """批量返回多个专利在视图中可见的所有字段值（共享字段 + 视图本地字段）。
+
+        替代逐条调用 get_view_patent_with_local_fields 的 N+1 模式：
+        一次性用 IN 子句拉回当前页所有专利的本地字段值，再在内存里按
+        patent_id 分组拼装，将 N 次查询降为 1 次。
+        """
+        if not patents:
+            return []
+
+        # 一次查询拉回所有专利的本地字段值
+        patent_ids = [p.id for p in patents]
+        rows = db.query(PatentViewFieldValue).filter(
+            PatentViewFieldValue.view_id == view.id,
+            PatentViewFieldValue.patent_id.in_(patent_ids),
+        ).all()
+
+        # 按 patent_id 分组
+        local_values_by_patent: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            local_values_by_patent.setdefault(row.patent_id, {})[row.field_key] = row.value
+
+        items = []
+        for patent in patents:
+            patent_dict = _patent_to_dict(patent)
+            lv_map = local_values_by_patent.get(patent.id, {})
+            patent_dict["view_local_fields"] = {
+                f.key: lv_map.get(f.key) for f in view.local_fields
+            }
+            items.append(patent_dict)
+        return items
 
     # ========== 视图本地字段 CRUD ==========
 
