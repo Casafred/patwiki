@@ -297,6 +297,76 @@ input, select, textarea {
   margin-top: 2px;
 }
 
+/* Shared workspace pages: a consistent, dense surface for every sidebar tool. */
+.page-container {
+  width: min(1360px, 100%);
+  padding: 20px;
+}
+
+.page-container .page-header {
+  padding: 0;
+  margin: 0 0 16px;
+}
+
+.settings-page,
+.sharing-page {
+  max-width: 1080px;
+}
+
+.agent-analysis-page {
+  max-width: 1240px;
+}
+
+.page-container > div[style*="background: white"],
+.page-container > div[style*="background: '#fff'"] {
+  border-color: #dfe5ed !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.sharing-page > div:not(.page-header),
+.agent-analysis-page > div:not(.page-header) {
+  border-radius: 6px !important;
+}
+
+.content-area > .page-container,
+.content-area > .management-page,
+.content-area > .automation-page,
+.content-area > .dashboard-page {
+  min-height: 100%;
+}
+
+.management-page,
+.automation-page,
+.dashboard-page {
+  padding: 20px !important;
+}
+
+.management-tabs,
+.dashboard-toolbar,
+.automation-form,
+.automation-log-panel,
+.management-table,
+.automation-rule,
+.dashboard-card {
+  border-color: #dfe5ed !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.empty-state {
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+@media (max-width: 760px) {
+  .page-container,
+  .management-page,
+  .automation-page,
+  .dashboard-page {
+    padding: 14px !important;
+  }
+}
+
 .toolbar {
   display: flex;
   gap: 6px;

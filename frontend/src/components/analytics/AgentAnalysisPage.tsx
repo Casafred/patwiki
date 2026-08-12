@@ -67,8 +67,8 @@ export default function AgentAnalysisPage() {
   }
 
   return (
-    <div style={{ padding: '16px 20px', maxWidth: 1200 }}>
-      <div style={{ marginBottom: 20 }}>
+    <div className="page-container agent-analysis-page">
+      <div className="page-header">
         <h2 className="page-title">AGENTAI 智能分析看板</h2>
         <p className="page-subtitle">输入分析需求，指定数据范围，系统会先做基层代码统计，再交给AI做多维分析</p>
       </div>

@@ -63,8 +63,8 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
 
   // P0-11：库切换
   const handleDatabaseChange = (id: number) => {
-    setCurrentDatabaseId(id)
-    setCurrentViewId(null)
+    if (id === currentDatabaseId) return
+    // URL is the source of truth; App loads the new database's views after navigation.
     setCurrentProductId(null)
     onNavigate('patents', id)
   }

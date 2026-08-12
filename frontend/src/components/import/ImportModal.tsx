@@ -211,6 +211,20 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       }
       setImportResult(result)
       setStep('complete')
+      // Imported mappings can create custom fields. Clear stale local column hiding
+      // so newly available claim and metadata columns are visible immediately.
+      try {
+        const importedKeys = fieldMappings.map(item => item.target_field).filter(Boolean)
+        const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
+        if (hiddenRaw) {
+          const hidden = JSON.parse(hiddenRaw) as unknown
+          if (Array.isArray(hidden)) {
+            localStorage.setItem('patwiki_hidden_fields', JSON.stringify(hidden.filter(key => !importedKeys.includes(String(key)))))
+          }
+        }
+      } catch {
+        // Column preferences are optional and must not block a successful import.
+      }
     } catch (error: unknown) {
       setError(getErrorMessage(error, '导入失败'))
       setStep('mapping')

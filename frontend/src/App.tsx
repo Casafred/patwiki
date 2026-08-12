@@ -53,13 +53,14 @@ function getDatabaseIdFromPath(pathname: string): number | null {
 function DatabaseRouteScope({ children }: { children: ReactNode }) {
   const { databaseId } = useParams<{ databaseId: string }>()
   const parsedDatabaseId = Number(databaseId)
-  const { setCurrentDatabaseId, setCurrentViewId } = useAppStore()
+  const { currentDatabaseId, setCurrentDatabaseId, setCurrentViewId } = useAppStore()
 
   useEffect(() => {
     if (!Number.isInteger(parsedDatabaseId) || parsedDatabaseId <= 0) return
+    if (currentDatabaseId === parsedDatabaseId) return
     setCurrentDatabaseId(parsedDatabaseId)
     setCurrentViewId(null)
-  }, [parsedDatabaseId, setCurrentDatabaseId, setCurrentViewId])
+  }, [currentDatabaseId, parsedDatabaseId, setCurrentDatabaseId, setCurrentViewId])
 
   if (!Number.isInteger(parsedDatabaseId) || parsedDatabaseId <= 0) {
     return <Navigate to="/patents" replace />
@@ -97,6 +98,7 @@ function WorkspaceApp() {
   const currentPage = useMemo(() => getPageFromPath(location.pathname), [location.pathname])
   const [showImport, setShowImport] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const lastLoadedViewsDatabaseId = useRef<number | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem('patwiki_sidebar_collapsed') === '1'
@@ -113,6 +115,7 @@ function WorkspaceApp() {
   const routeDatabaseId = getDatabaseIdFromPath(location.pathname)
   const queryDatabaseId = Number(searchParams.get('db'))
   const requestedDatabaseId = routeDatabaseId || (Number.isInteger(queryDatabaseId) && queryDatabaseId > 0 ? queryDatabaseId : null)
+  const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
 
   // 用 ref 保存 URL 中的 view 参数，供视图加载 effect 读取，
   // 避免 effect 依赖 searchParamsString（每次翻页/搜索/排序 URL 变化都会
@@ -123,8 +126,8 @@ function WorkspaceApp() {
   viewParamRef.current = searchParams.get('view')
 
   useEffect(() => {
-    const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
     if (activeDatabaseId === null) return
+    if (lastLoadedViewsDatabaseId.current === activeDatabaseId && currentViewId !== null) return
     // 本 effect 仅在库切换时运行（不依赖 searchParamsString）。
     // 防止快速切库时旧请求覆盖新状态：cancelled 标志丢弃过时响应。
     let cancelled = false
@@ -143,6 +146,7 @@ function WorkspaceApp() {
           || views.find(view => view.is_department_master)
           || views[0]
         setCurrentViewId(preferred?.id ?? null)
+        lastLoadedViewsDatabaseId.current = activeDatabaseId
       } catch (e) {
         if (cancelled) return
         console.error('Failed to load views:', e)
@@ -152,7 +156,7 @@ function WorkspaceApp() {
     }
     void loadViews()
     return () => { cancelled = true }
-  }, [currentDatabaseId, requestedDatabaseId, setCurrentViewId, setViews])
+  }, [activeDatabaseId, currentViewId, setCurrentViewId, setViews])
 
   const loadMeta = useCallback(async () => {
     try {
@@ -181,7 +185,7 @@ function WorkspaceApp() {
     } catch (e) {
       console.error('Failed to load meta data:', e)
     }
-  }, [currentDatabaseId, requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProducts, setProjects, setTags])
+  }, [requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProducts, setProjects, setTags])
 
   useEffect(() => {
     void loadMeta()
@@ -236,7 +240,6 @@ function WorkspaceApp() {
     sharing: '协作与权限',
     'import-history': '导入历史',
   }
-  const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
   const currentDatabase = databases.find(database => database.id === activeDatabaseId)
 
   return (

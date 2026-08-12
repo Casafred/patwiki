@@ -175,8 +175,11 @@ export default function SharingPage() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 960, margin: '0 auto' }}>
-      <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 24 }}>权限管理与协作</h2>
+    <div className="page-container sharing-page">
+      <div className="page-header">
+        <h2 className="page-title">权限管理与协作</h2>
+        <p className="page-subtitle">管理成员身份、部门归属与专利库访问权限</p>
+      </div>
 
       {/* 当前用户 */}
       <div style={{

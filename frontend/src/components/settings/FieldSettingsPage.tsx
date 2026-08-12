@@ -253,7 +253,7 @@ export default function FieldSettingsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div className="page-container settings-page">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 className="page-title">字段管理</h2>

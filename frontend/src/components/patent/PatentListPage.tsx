@@ -385,7 +385,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     void loadRelationData()
   }, [loadRelationData])
 
-  const loadFields = useCallback(async () => {
+  const loadFields = useCallback(async (forceVisibleKeys: string[] = []) => {
     try {
       const fieldsData = await fieldApi.list()
       // 应用 localStorage 持久化的可见性设置
@@ -394,7 +394,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         if (hiddenRaw) {
           const hiddenKeys: string[] = JSON.parse(hiddenRaw)
           fieldsData.forEach(f => {
-            if (hiddenKeys.includes(f.key)) f.visible = false
+            if (hiddenKeys.includes(f.key) && !forceVisibleKeys.includes(f.key)) f.visible = false
           })
         }
       } catch (error) { console.error('Failed to read hidden fields:', error) }
@@ -558,6 +558,15 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     void loadFields()
     void loadCustomFields()
   }, [loadFields, loadCustomFields])
+
+  useEffect(() => {
+    // Imports and field-management changes alter the column registry. Reload it
+    // before the refreshed records render so mapped fields appear in the grid.
+    if (dataVersion > 0) {
+      void loadFields()
+      void loadCustomFields()
+    }
+  }, [dataVersion, loadCustomFields, loadFields])
 
   // 打开批量打标签弹窗时加载标签列表
   useEffect(() => {
@@ -1499,6 +1508,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
     const configByKey = new Map(columnConfig.map(column => [column.key, column]))
     return baseFields
+      // A view configuration predates newly imported fields. Fields missing from
+      // that configuration default to visible instead of being silently omitted.
       .filter(field => configByKey.get(field.key)?.visible !== false)
       .sort((a, b) => {
         const aOrder = configByKey.get(a.key)?.order ?? Number.MAX_SAFE_INTEGER
