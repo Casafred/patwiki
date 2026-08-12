@@ -23,9 +23,22 @@ class AttachmentService:
         "image/png": {".png"},
         "image/jpeg": {".jpg", ".jpeg"},
         "image/gif": {".gif"},
+        "image/webp": {".webp"},
         "application/msword": {".doc"},
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {".docx"},
+        "application/vnd.ms-powerpoint": {".ppt"},
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": {".pptx"},
+        "application/vnd.ms-excel": {".xls"},
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {".xlsx"},
+        "text/csv": {".csv"},
+        "message/rfc822": {".eml"},
+        "application/vnd.ms-outlook": {".msg"},
+    }
+
+    EXTENSION_MIME_TYPES: dict[str, str] = {
+        extension: mime_type
+        for mime_type, extensions in ALLOWED_TYPES.items()
+        for extension in extensions
     }
 
     @classmethod
@@ -76,8 +89,13 @@ class AttachmentService:
         filename = Path(upload.filename or "attachment").name
         extension = Path(filename).suffix.lower()
         mime_type = (upload.content_type or "").lower()
-        if mime_type not in cls.ALLOWED_TYPES or extension not in cls.ALLOWED_TYPES[mime_type]:
-            raise ValueError("不支持的附件类型，仅允许 PDF、图片、Word 或 Excel 文件")
+        expected_mime_type = cls.EXTENSION_MIME_TYPES.get(extension)
+        if not expected_mime_type:
+            raise ValueError("不支持的附件类型，仅允许 PDF、图片、Word、Excel、PPT 或 Outlook 邮件")
+        # Browsers often report Office and Outlook files as application/octet-stream.
+        # The extension remains the allow-list boundary and the stored MIME type is normalized.
+        if mime_type in {"", "application/octet-stream"} or extension not in cls.ALLOWED_TYPES.get(mime_type, set()):
+            mime_type = expected_mime_type
 
         relative_dir = Path("attachments") / str(database_id) / str(patent_id)
         target_dir = settings.FILES_DIR / relative_dir

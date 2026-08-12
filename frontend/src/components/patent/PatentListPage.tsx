@@ -389,9 +389,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     void loadRelationData()
   }, [loadRelationData])
 
-  const loadFields = useCallback(async (forceVisibleKeys: string[] = []) => {
+  const loadFields = useCallback(async (forceVisibleKeys: string[] = [], refresh = false) => {
     try {
-      const fieldsData = await fieldApi.list()
+      const fieldsData = await fieldApi.list(refresh)
       const persistedForcedVisible = (() => {
         try {
           const parsed = JSON.parse(localStorage.getItem('patwiki_force_visible_fields') || '[]') as unknown
@@ -417,12 +417,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       setFields(fieldsData)
       try {
         const savedFrozen = JSON.parse(localStorage.getItem('patwiki_frozen_fields') || 'null') as unknown
-        const frozen = Array.isArray(savedFrozen)
-          ? savedFrozen.map(String)
-          : fieldsData.filter(field => field.frozen === true).map(field => field.key)
+        const frozen = Array.isArray(savedFrozen) ? savedFrozen.map(String) : []
         setFrozenFields(new Set(frozen))
       } catch {
-        setFrozenFields(new Set(fieldsData.filter(field => field.frozen === true).map(field => field.key)))
+        setFrozenFields(new Set())
       }
       const widths: Record<string, number> = {}
       fieldsData.forEach(f => {
@@ -588,7 +586,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     // Imports and field-management changes alter the column registry. Reload it
     // before the refreshed records render so mapped fields appear in the grid.
     if (dataVersion > 0) {
-      void loadFields()
+      void loadFields([], true)
       void loadCustomFields()
     }
   }, [dataVersion, loadCustomFields, loadFields])

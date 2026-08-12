@@ -536,6 +536,8 @@ export interface ImportPreview {
   preview_rows: Record<string, string>[]
   total_rows: number
   suggested_mapping: Record<string, string>
+  mapping_issues?: { column: string; target_field?: string; reason: string }[]
+  available_fields?: FieldMeta[]
   sheets?: string[]
   selected_sheet?: string | null
   // P0-11：返回库列表供选择
@@ -554,7 +556,8 @@ export interface ImportResult {
   updated: number
   skipped: number
   errors: number
-  error_details?: { row: number; error: string }[]
+  error_details?: { row: number; status?: string; reason?: string; error?: string; patent_id?: number }[]
+  row_reports?: { row: number; status: string; reason: string; patent_id?: number }[]
   // P0-10：关系入库统计
   database_id?: number
   family_links?: number

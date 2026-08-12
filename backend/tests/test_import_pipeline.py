@@ -8,7 +8,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.core.exceptions import BadRequestException
-from app.models import Patent, PatentDatabase
+from app.models import CustomField, CustomFieldType, Patent, PatentDatabase
+from app.services.field_registry import get_all_fields_meta
 from app.services.import_service import ImportService
 from app.services.relation_service import parse_patent_numbers, process_family_members
 
@@ -83,6 +84,54 @@ class ImportPipelineTest(unittest.TestCase):
                 {member.application_number or member.publication_number for member in members},
                 {"US12304034B2", "CN209954561U", "EP3468749B1"},
             )
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_mapping_validation_preserves_every_source_column(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        try:
+            field = CustomField(
+                key="cf_formula",
+                name="计算结果",
+                field_type=CustomFieldType.FORMULA,
+                is_active=True,
+            )
+            db.add(field)
+            db.commit()
+
+            issues = ImportService.validate_mapping(
+                ["标题", "未映射列", "公式列", "附件列"],
+                {
+                    "标题": "title",
+                    "公式列": "cf_formula",
+                    "附件列": "attachments",
+                },
+                db,
+            )
+            self.assertEqual({issue["column"] for issue in issues}, {"未映射列", "公式列", "附件列"})
+            self.assertIn("attachments", {field["key"] for field in get_all_fields_meta(db)})
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_invalid_dates_are_reported_instead_of_silently_dropped(self):
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        try:
+            with self.assertRaisesRegex(ValueError, "日期值无法识别"):
+                ImportService._row_to_patent_data(
+                    {"标题": "测试", "申请日": "not-a-date"},
+                    {"标题": "title", "申请日": "filing_date"},
+                    db,
+                )
         finally:
             db.close()
             engine.dispose()

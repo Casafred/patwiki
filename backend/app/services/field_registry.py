@@ -86,6 +86,37 @@ class CustomFieldHandler(FieldHandler):
         record.custom_fields = values
 
 
+class PatentAttachmentFieldHandler(FieldHandler):
+    """The built-in attachment field is stored alongside other extensible values."""
+
+    definition: FieldMeta = {
+        "key": "attachments",
+        "name": "关联附件",
+        "field_type": "attachment",
+        "group_name": "文档",
+        "options": None,
+        "width": 260,
+        "sortable": False,
+        "filterable": False,
+        "editable": True,
+        "frozen": False,
+        "visible": True,
+        "is_system": False,
+        "description": "与专利关联的邮件、演示文稿、专利原文、图片和会议材料",
+    }
+
+    def list_fields(self, db=None) -> list[FieldMeta]:
+        return [dict(self.definition)]
+
+    def read_value(self, record: Any, key: str) -> Any:
+        return (getattr(record, "custom_fields", None) or {}).get(key)
+
+    def write_value(self, record: Any, key: str, value: Any) -> None:
+        values = dict(getattr(record, "custom_fields", None) or {})
+        values[key] = value
+        record.custom_fields = values
+
+
 class FieldRegistry:
     """可扩展字段处理器注册表。"""
 
@@ -491,7 +522,7 @@ SYSTEM_FIELD_DEFINITIONS = [
 SYSTEM_FIELD_HANDLERS = tuple(SystemFieldHandler(definition) for definition in SYSTEM_FIELD_DEFINITIONS)
 SYSTEM_FIELDS_REGISTRY = [handler.list_fields()[0] for handler in SYSTEM_FIELD_HANDLERS]
 SYSTEM_FIELD_KEYS = {field["key"] for field in SYSTEM_FIELDS_REGISTRY}
-FIELD_REGISTRY = FieldRegistry((*SYSTEM_FIELD_HANDLERS, CustomFieldHandler()))
+FIELD_REGISTRY = FieldRegistry((*SYSTEM_FIELD_HANDLERS, PatentAttachmentFieldHandler(), CustomFieldHandler()))
 
 
 def get_system_field_meta(key: str) -> FieldMeta | None:

@@ -82,8 +82,8 @@ class AIOverrideApiTest(unittest.TestCase):
         self.assertTrue(current["is_overridden"])
 
         fake_llm = _FakeLLM()
-        with patch.object(AIFieldEngine, "_get_llm", return_value=fake_llm):
-            result = AIFieldEngine(self.db).process_single(self.patent, self.field)
+        with patch.object(AIFieldEngine, "_get_llm", return_value=(fake_llm, "test-model")):
+            result, _ = AIFieldEngine(self.db).process_single(self.patent, self.field)
         self.assertEqual(result, "人工修订值")
         self.assertEqual(fake_llm.calls, 0)
 
@@ -106,8 +106,8 @@ class AIOverrideApiTest(unittest.TestCase):
         )
 
         fake_llm = _FakeLLM()
-        with patch.object(AIFieldEngine, "_get_llm", return_value=fake_llm):
-            result = AIFieldEngine(self.db).process_single(self.patent, self.field, force=True)
+        with patch.object(AIFieldEngine, "_get_llm", return_value=(fake_llm, "test-model")):
+            result, _ = AIFieldEngine(self.db).process_single(self.patent, self.field, force=True)
 
         self.assertEqual(result, "重新生成的 AI 值")
         self.assertEqual(fake_llm.calls, 1)

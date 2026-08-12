@@ -19,6 +19,7 @@ from app.database import get_db, SessionLocal, engine
 from app.schemas.schemas import ImportBatchResponse, StatsResponse
 from app.services.import_service import ImportService
 from app.services.patent_service import PatentService
+from app.services.field_registry import get_all_fields_meta
 from app.services.merge_service import merge_patent_data, _is_empty
 from app.config import settings
 from app.models import CustomField, ImportBatch, ImportBatchStatus, Patent
@@ -94,7 +95,7 @@ async def preview_import(
     if selected_sheet and sheets and selected_sheet not in sheets:
         raise BadRequestException(f"Sheet 不存在：{selected_sheet}")
     df, columns = ImportService.parse_excel(content, filename, selected_sheet)
-    suggested_mapping = ImportService.suggest_mapping(columns, db)
+    suggested_mapping, mapping_issues = ImportService.suggest_mapping(columns, db)
 
     preview_rows_list = []
     for _, row in df.head(3).iterrows():
@@ -121,6 +122,8 @@ async def preview_import(
         "preview_rows": preview_rows_list,
         "total_rows": len(df),
         "suggested_mapping": suggested_mapping,
+        "mapping_issues": mapping_issues,
+        "available_fields": get_all_fields_meta(db),
         "databases": [DatabaseService.to_dict(d) for d in databases],
         "default_database_id": default_db.id if default_db else None,
         "sheets": sheets,
@@ -208,7 +211,12 @@ def confirm_import(
         db.add(batch)
         db.flush()
 
-        df, _ = ImportService.parse_excel(content, filename, req.sheet_name)
+        df, columns = ImportService.parse_excel(content, filename, req.sheet_name)
+        mapping_issues = ImportService.validate_mapping(columns, mapping, db)
+        if mapping_issues:
+            raise BadRequestException("导入已阻止：请解决所有字段映射问题后再导入", detail={
+                "mapping_issues": mapping_issues,
+            })
         total_rows = len(df)
         batch.total_rows = total_rows
         print(f"[PatWiki] 开始导入 {total_rows} 条数据...", flush=True)
@@ -216,6 +224,7 @@ def confirm_import(
         custom_fields_cache = {cf.key: cf for cf in db.query(CustomField).all()}
 
         rows_data = []
+        row_reports: list[dict] = []
         for idx, (_, row) in enumerate(df.iterrows()):
             try:
                 row_dict = row.to_dict()
@@ -241,7 +250,9 @@ def confirm_import(
                     "row_num": idx + 2,
                 })
             except Exception as e:
-                errors.append({"row": idx + 2, "error": str(e)})
+                report = {"row": idx + 2, "status": "error_mapping", "reason": str(e)}
+                errors.append(report)
+                row_reports.append(report)
                 error_count += 1
 
         all_app_nums: dict[tuple[str, str], Patent] = {}
@@ -306,6 +317,7 @@ def confirm_import(
 
                     if not patent_data.get("title"):
                         skipped += 1
+                        row_reports.append({"row": rd["row_num"], "status": "skipped_missing_title", "reason": "标题为空，无法创建专利"})
                     else:
                         existing = None
                         if req.dedupe_by in ("both", "application_number") and app_num:
@@ -323,8 +335,10 @@ def confirm_import(
                                 _apply_patent_update(existing, merged)
                                 updated += 1
                                 current_patent = existing
+                                row_reports.append({"row": rd["row_num"], "status": "updated_duplicate", "reason": "与已有专利重复，已按字段合并更新", "patent_id": existing.id})
                             else:
                                 skipped += 1
+                                row_reports.append({"row": rd["row_num"], "status": "skipped_duplicate", "reason": "与已有专利重复，已按设置跳过", "patent_id": existing.id})
                         else:
                             is_batch_dup = False
                             if app_num and (app_num, country) in seen_app_nums:
@@ -345,10 +359,13 @@ def confirm_import(
                                         _apply_patent_update(existing_in_batch, merged)
                                         updated += 1
                                         current_patent = existing_in_batch
+                                        row_reports.append({"row": rd["row_num"], "status": "updated_duplicate", "reason": "与本次导入的前一行重复，已合并更新", "patent_id": existing_in_batch.id})
                                     else:
                                         skipped += 1
+                                        row_reports.append({"row": rd["row_num"], "status": "skipped_duplicate", "reason": "与本次导入的前一行重复，已按设置跳过", "patent_id": existing_in_batch.id})
                                 else:
                                     skipped += 1
+                                    row_reports.append({"row": rd["row_num"], "status": "skipped_duplicate", "reason": "与本次导入的前一行重复，但未能定位到目标记录"})
                             else:
                                 if app_num:
                                     seen_app_nums.add((app_num, country))
@@ -363,6 +380,7 @@ def confirm_import(
                                 db.flush()
                                 inserted += 1
                                 current_patent = patent
+                                row_reports.append({"row": rd["row_num"], "status": "created", "reason": "已创建", "patent_id": patent.id})
                                 if app_num:
                                     all_app_nums[(app_num, country)] = patent
                                 if pub_num:
@@ -390,7 +408,9 @@ def confirm_import(
                     print(f"[PatWiki] 已处理 {progress}/{total_rows} ({pct}%) 新增:{inserted} 更新:{updated} 跳过:{skipped} 错误:{error_count}", flush=True)
 
             except Exception as e:
-                errors.append({"row": rd["row_num"], "error": str(e)})
+                report = {"row": rd["row_num"], "status": "error_database", "reason": str(e)}
+                errors.append(report)
+                row_reports.append(report)
                 error_count += 1
                 if error_count <= 10:
                     print(f"[PatWiki] 第 {rd['row_num']} 行错误: {e}", flush=True)
@@ -429,7 +449,7 @@ def confirm_import(
             batch.skipped_count = skipped
             batch.duplicate_count = duplicates_count
             batch.error_count = error_count
-            batch.errors = errors[:20] if errors else None
+            batch.errors = [report for report in row_reports if report["status"] != "created"] or None
             batch.status = ImportBatchStatus.COMPLETED
             batch.completed_at = datetime.utcnow()
             db.add(batch)
@@ -453,12 +473,13 @@ def confirm_import(
                 pass
 
     return {
-        "total": inserted + updated + skipped + error_count,
+        "total": total_rows,
         "created": inserted,
         "updated": updated,
         "skipped": skipped,
         "errors": error_count,
-        "error_details": errors[:20] if errors else [],
+        "error_details": errors,
+        "row_reports": row_reports,
         "database_id": database_id,
         "family_links": family_links,
         "citation_links": citation_links,

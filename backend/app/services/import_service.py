@@ -11,11 +11,13 @@ from app.core.exceptions import BadRequestException
 from app.models import (
     CustomField, CustomFieldType, LegalStatus, PatentType, RiskLevel
 )
+from app.services.field_registry import SYSTEM_FIELD_KEYS
 from app.services.relation_service import parse_patent_numbers
 
 
 # 虚拟字段：不直接写入 Patent 主表，由 relation_service 处理
 VIRTUAL_FIELDS = {"family_members", "cited_patents", "citing_patents"}
+IMPORT_BLOCKED_FIELDS = {"attachments"}
 
 # CustomField 的 key 前缀（与 field_registry 的 system_field 区分）
 CUSTOM_FIELD_KEY_PREFIX = "cf_"
@@ -224,7 +226,7 @@ class ImportService:
         return df, columns
 
     @staticmethod
-    def suggest_mapping(columns: list[str], db: Session) -> dict[str, str]:
+    def suggest_mapping(columns: list[str], db: Session) -> tuple[dict[str, str], list[dict[str, str]]]:
         """对每列生成映射目标。
 
         返回结构：
@@ -234,6 +236,7 @@ class ImportService:
         未匹配列自动创建 CustomField，按设计文档 3.3。
         """
         mapping: dict[str, str] = {}
+        mapping_issues: list[dict[str, str]] = []
 
         custom_fields = db.query(CustomField).all()
         custom_field_by_name = {cf.name: cf.key for cf in custom_fields}
@@ -269,11 +272,37 @@ class ImportService:
                 mapping[col_clean] = new_key
                 # 刷新缓存，避免同一次导入重复创建
                 custom_field_by_name[col_clean] = new_key
-            except Exception:
-                # 创建失败则忽略该列
-                pass
+            except Exception as exc:
+                mapping_issues.append({
+                    "column": col_clean,
+                    "reason": f"无法创建自定义字段：{exc}",
+                })
 
-        return mapping
+        return mapping, mapping_issues
+
+    @staticmethod
+    def validate_mapping(columns: list[str], mapping: dict[str, str], db: Session) -> list[dict[str, str]]:
+        """Return every mapping problem before any row can be written."""
+        custom_fields = {field.key: field for field in db.query(CustomField).all()}
+        issues: list[dict[str, str]] = []
+        for column in columns:
+            target = (mapping.get(column) or "").strip()
+            if not target:
+                issues.append({"column": column, "reason": "未映射目标字段"})
+                continue
+            if target in IMPORT_BLOCKED_FIELDS:
+                issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入"})
+                continue
+            if target in VIRTUAL_FIELDS or target in SYSTEM_FIELD_KEYS:
+                continue
+            custom_field = custom_fields.get(target)
+            if not custom_field:
+                issues.append({"column": column, "target_field": target, "reason": "目标字段不存在"})
+            elif custom_field.field_type == CustomFieldType.FORMULA:
+                issues.append({"column": column, "target_field": target, "reason": "公式字段由系统计算，不能导入"})
+            elif custom_field.field_type == CustomFieldType.ATTACHMENT:
+                issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入"})
+        return issues
 
     @staticmethod
     def _parse_date(value: Any) -> Optional[datetime.date]:
@@ -375,9 +404,8 @@ class ImportService:
 
             # 自定义字段
             if field_key in all_custom_fields:
-                if all_custom_fields[field_key].field_type == CustomFieldType.FORMULA:
-                    # 公式字段由引擎计算，导入数据不能覆盖计算结果。
-                    continue
+                if all_custom_fields[field_key].field_type in (CustomFieldType.FORMULA, CustomFieldType.ATTACHMENT):
+                    raise ValueError(f"字段 '{field_key}' 不支持从 Excel 写入")
                 custom[field_key] = value
                 continue
 
@@ -385,8 +413,9 @@ class ImportService:
             if field_key in ["filing_date", "publication_date", "grant_date",
                            "priority_date", "legal_status_date"]:
                 parsed = ImportService._parse_date(value)
-                if parsed:
-                    data[field_key] = parsed
+                if not parsed:
+                    raise ValueError(f"字段 '{excel_col}' 的日期值无法识别：{value}")
+                data[field_key] = parsed
             elif field_key == "has_risk":
                 data[field_key] = ImportService._parse_bool(value)
             elif field_key == "legal_status":
@@ -405,6 +434,8 @@ class ImportService:
                               "risk_description", "module", "application_status",
                               "scope_description", "notes", "legal_status_details"]:
                 data[field_key] = value
+            else:
+                raise ValueError(f"未知的导入目标字段：{field_key}")
 
         data["custom_fields"] = custom
         return data, virtual

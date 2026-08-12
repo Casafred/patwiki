@@ -19,7 +19,7 @@ class ArchitectureTest(unittest.TestCase):
     def test_field_registry_keeps_compatibility_exports_and_handlers(self):
         fields = FIELD_REGISTRY.list_fields()
         self.assertTrue(fields)
-        self.assertEqual(set(SYSTEM_FIELD_KEYS), {field["key"] for field in fields})
+        self.assertEqual(set(SYSTEM_FIELD_KEYS) | {"attachments"}, {field["key"] for field in fields})
         self.assertEqual(get_system_field_meta("title")["name"], "标题")
         self.assertEqual(get_all_fields_meta(None), fields)
 

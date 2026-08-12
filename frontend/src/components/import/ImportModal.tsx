@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { importApi, databaseApi, viewApi } from '../../api'
+import { fieldService } from '../../services'
 import { useAppStore } from '../../store'
 import type { ImportPreview, FieldMapping, PatentView } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -84,6 +85,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [importResult, setImportResult] = useState<{
     total: number; created: number; updated: number; skipped: number; errors: number;
     family_links?: number; citation_links?: number;
+    error_details?: { row: number; status?: string; reason?: string; error?: string; patent_id?: number }[]
+    row_reports?: { row: number; status: string; reason: string; patent_id?: number }[]
   } | null>(null)
   const [uploading, setUploading] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -198,6 +201,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       const result = await importApi.upload(file, sheet)
       setPreview(result)
       setSelectedSheet(result.selected_sheet || sheet)
+      setMapping(result.suggested_mapping || {})
     } catch (error: unknown) {
       setError(getErrorMessage(error, '读取 Sheet 失败'))
     } finally {
@@ -212,12 +216,18 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setStep('chooseDatabase')
       return
     }
+    const unmappedColumns = preview.detected_columns.filter(column => !mapping[column])
+    if (unmappedColumns.length > 0) {
+      setError(`以下 Excel 列尚未映射，已阻止导入以保证数据完整：${unmappedColumns.join('、')}`)
+      return
+    }
     setImporting(true)
     setStep('processing')
     try {
-      const fieldMappings: FieldMapping[] = Object.entries(mapping)
-        .filter(([, target]) => target)
-        .map(([source, target]) => ({ source_column: source, target_field: target }))
+      const fieldMappings: FieldMapping[] = preview.detected_columns.map(source => ({
+        source_column: source,
+        target_field: mapping[source] || '',
+      }))
 
       const result = await importApi.confirmImport(
         preview.import_id,
@@ -239,6 +249,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       }
       setImportResult(result)
       setStep('complete')
+      fieldService.invalidate()
       // Imported mappings can create custom fields. Clear stale local column hiding
       // so newly available claim and metadata columns are visible immediately.
       try {
@@ -250,7 +261,9 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
             localStorage.setItem('patwiki_hidden_fields', JSON.stringify(hidden.filter(key => !importedKeys.includes(String(key)))))
           }
         }
-        localStorage.setItem('patwiki_force_visible_fields', JSON.stringify(importedKeys))
+        const previousForced = JSON.parse(localStorage.getItem('patwiki_force_visible_fields') || '[]') as unknown
+        const previousKeys = Array.isArray(previousForced) ? previousForced.map(String) : []
+        localStorage.setItem('patwiki_force_visible_fields', JSON.stringify([...new Set([...previousKeys, ...importedKeys])]))
       } catch {
         // Column preferences are optional and must not block a successful import.
       }
@@ -426,6 +439,12 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                 )}
               </div>
 
+              {preview && (preview.mapping_issues?.length || 0) > 0 && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 12 }}>
+                  {preview.mapping_issues?.map(issue => <div key={issue.column}>{issue.column}: {issue.reason}</div>)}
+                </div>
+              )}
+
               {preview?.sheets && preview.sheets.length > 1 && (
                 <div style={{ marginTop: 16, padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
                   <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>选择导入 Sheet</label>
@@ -504,12 +523,19 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                               value={mappedKey}
                               onChange={(e) => setMapping(prev => ({ ...prev, [col]: e.target.value }))}
                             >
-                              <option value="">-- 不导入 --</option>
+                              <option value="">-- 必须映射 --</option>
                               <optgroup label="系统字段">
                                 {Object.entries(SYSTEM_FIELD_LABELS).map(([f, l]) => (
                                   <option key={f} value={f}>{l} ({f})</option>
                                 ))}
                               </optgroup>
+                              {(preview.available_fields || []).filter(field => !field.is_system && field.key !== mappedKey).length > 0 && (
+                                <optgroup label="已有自定义字段">
+                                  {(preview.available_fields || []).filter(field => !field.is_system && field.key !== mappedKey).map(field => (
+                                    <option key={field.key} value={field.key}>{field.name} ({field.key})</option>
+                                  ))}
+                                </optgroup>
+                              )}
                               {isNewField && (
                                 <optgroup label="新建自定义字段">
                                   <option value={mappedKey}>新建：{col}</option>
@@ -656,7 +682,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
             </div>
           )}
 
-          {step === 'complete' && importResult && (
+              {step === 'complete' && importResult && (
             <div style={{ textAlign: 'center', padding: 20 }}>
               <h4 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>导入完成！</h4>
               <div style={{ display: 'flex', justifyContent: 'center', gap: 24, marginBottom: 24, flexWrap: 'wrap' }}>
@@ -691,6 +717,18 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   </div>
                 )}
               </div>
+              {(importResult.row_reports || importResult.error_details || []).filter(report => report.status !== 'created').length > 0 && (
+                <div style={{ textAlign: 'left', maxHeight: 220, overflowY: 'auto', marginBottom: 20, border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead><tr style={{ background: '#f8fafc' }}><th style={{ padding: 8, textAlign: 'left' }}>行号</th><th style={{ padding: 8, textAlign: 'left' }}>结果</th><th style={{ padding: 8, textAlign: 'left' }}>原因</th></tr></thead>
+                    <tbody>
+                      {(importResult.row_reports || importResult.error_details || []).filter(report => report.status !== 'created').map((report, index) => (
+                        <tr key={`${report.row}-${index}`} style={{ borderTop: '1px solid #f1f5f9' }}><td style={{ padding: 8 }}>{report.row}</td><td style={{ padding: 8 }}>{report.status || '错误'}</td><td style={{ padding: 8 }}>{report.reason || ('error' in report ? report.error : undefined) || '未知原因'}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               <button className="btn btn-primary" onClick={onSuccess}>完成</button>
             </div>
           )}

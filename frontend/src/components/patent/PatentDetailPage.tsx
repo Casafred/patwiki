@@ -11,13 +11,14 @@ import { getErrorMessage } from '../../lib/errors'
 import PatentShareDialog from './PatentShareDialog'
 import PatentGraph from './PatentGraph'
 import CommentPanel from './CommentPanel'
+import AttachmentField from '../common/AttachmentField'
 
 interface PatentDetailPageProps {
   patentId: number
   onBack: () => void
 }
 
-type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'custom' | 'relations' | 'history' | 'comments'
+type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'history' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
 export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageProps) {
@@ -220,6 +221,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     { key: 'technical', label: '技术信息' },
     { key: 'risk', label: '风险与应用' },
     { key: 'ai', label: 'AI 分析' },
+    { key: 'attachments', label: '关联附件' },
     { key: 'custom', label: '自定义字段' },
     { key: 'relations', label: '关联关系' },
     { key: 'history', label: `修改历史${history.length > 0 ? ` (${history.length})` : ''}` },
@@ -314,6 +316,9 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         {activeTab === 'history' && (
           <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
         )}
+        {activeTab === 'attachments' && (
+          <AttachmentsTab patent={patent} />
+        )}
         {activeTab === 'comments' && (
           <CommentPanel patentId={patent.id} onCountChange={setOpenCommentCount} />
         )}
@@ -323,6 +328,22 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         <PatentShareDialog patentId={patent.id} onClose={() => setShowShareDialog(false)} />
       )}
     </>
+  )
+}
+
+function AttachmentsTab({ patent }: { patent: Patent }) {
+  return (
+    <div>
+      <div style={{ color: '#64748b', fontSize: 13, marginBottom: 14 }}>
+        将 Outlook 邮件、分享 PPT、专利原文 PDF、样机图片、Excel、Word 和会议材料直接关联到本专利。
+      </div>
+      <AttachmentField
+        patentId={patent.id}
+        databaseId={patent.database_id ?? null}
+        fieldKey="attachments"
+        value={patent.custom_fields?.attachments ?? null}
+      />
+    </div>
   )
 }
 
