@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { aiApi } from '../../api'
-import type { AITask, CustomField } from '../../types'
+import type { AITask, AITaskRequestSample, AITaskResponseSample, CustomField } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 export default function AITaskMonitor() {
@@ -257,6 +257,91 @@ export default function AITaskMonitor() {
                       ))}
                       {task.errors.length > 10 && (
                         <div style={{ color: '#64748b', marginTop: 4 }}>...共 {task.errors.length} 条错误</div>
+                      )}
+                    </div>
+                  </details>
+                )}
+
+                {/* P0-15：请求内容样本 */}
+                {task.request_content && Array.isArray(task.request_content) && task.request_content.length > 0 && (
+                  <details style={{ marginTop: 8 }}>
+                    <summary style={{ cursor: 'pointer', fontSize: 12, color: '#2563eb' }}>
+                      请求内容样本 ({task.request_content.length})
+                    </summary>
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {task.request_content.slice(0, 5).map((sample: AITaskRequestSample, i: number) => (
+                        <div
+                          key={i}
+                          style={{
+                            padding: 8,
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 4,
+                            fontSize: 11,
+                          }}
+                        >
+                          <div style={{ color: '#64748b', marginBottom: 4 }}>
+                            专利 #{sample.patent_id ?? '-'}
+                          </div>
+                          <pre style={{
+                            margin: 0,
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            color: '#1e293b',
+                            maxHeight: 200,
+                            overflow: 'auto',
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                          }}>
+                            {sample.prompt || '(空)'}
+                          </pre>
+                        </div>
+                      ))}
+                      {task.request_content.length > 5 && (
+                        <div style={{ color: '#94a3b8', fontSize: 11 }}>...共 {task.request_content.length} 条样本</div>
+                      )}
+                    </div>
+                  </details>
+                )}
+
+                {/* P0-15：返回内容样本 */}
+                {task.response_content && Array.isArray(task.response_content) && task.response_content.length > 0 && (
+                  <details style={{ marginTop: 8 }}>
+                    <summary style={{ cursor: 'pointer', fontSize: 12, color: '#16a34a' }}>
+                      返回内容样本 ({task.response_content.length})
+                    </summary>
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {task.response_content.slice(0, 5).map((sample: AITaskResponseSample, i: number) => (
+                        <div
+                          key={i}
+                          style={{
+                            padding: 8,
+                            background: '#f0fdf4',
+                            border: '1px solid #bbf7d0',
+                            borderRadius: 4,
+                            fontSize: 11,
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ color: '#64748b' }}>专利 #{sample.patent_id ?? '-'}</span>
+                            {sample.model && (
+                              <span style={{ color: '#94a3b8' }}>实际模型: {sample.model}</span>
+                            )}
+                          </div>
+                          <pre style={{
+                            margin: 0,
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            color: '#166534',
+                            maxHeight: 200,
+                            overflow: 'auto',
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                          }}>
+                            {sample.response || '(空)'}
+                          </pre>
+                        </div>
+                      ))}
+                      {task.response_content.length > 5 && (
+                        <div style={{ color: '#94a3b8', fontSize: 11 }}>...共 {task.response_content.length} 条样本</div>
                       )}
                     </div>
                   </details>

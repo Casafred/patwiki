@@ -1,19 +1,26 @@
 import { useState, useEffect, useCallback } from 'react'
-import { sharingApi, databaseApi } from '../../api'
+import { sharingApi, databaseApi, departmentApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { User, DatabaseMember } from '../../types'
+import type { User, DatabaseMember, Department } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 export default function SharingPage() {
   const { currentUser, setCurrentUser, databases, currentDatabaseId } = useAppStore()
   const [users, setUsers] = useState<User[]>([])
   const [members, setMembers] = useState<DatabaseMember[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
   const [selectedDbId, setSelectedDbId] = useState<number | null>(currentDatabaseId)
 
   // 新建用户
   const [showCreateUser, setShowCreateUser] = useState(false)
   const [newUsername, setNewUsername] = useState('')
   const [newDisplayName, setNewDisplayName] = useState('')
+  const [newUserRole, setNewUserRole] = useState<'admin' | 'member'>('member')
+  const [newUserDeptId, setNewUserDeptId] = useState<string>('')
+
+  // 编辑用户角色/部门
+  const [editingUserId, setEditingUserId] = useState<number | null>(null)
+  const [editDeptId, setEditDeptId] = useState<string>('')
 
   // 添加成员
   const [showAddMember, setShowAddMember] = useState(false)
@@ -24,8 +31,17 @@ export default function SharingPage() {
     try {
       const list = await sharingApi.listUsers()
       setUsers(list)
-    } catch (e) {
-      console.error('Failed to load users:', e)
+    } catch (error: unknown) {
+      console.error('Failed to load users:', error)
+    }
+  }, [])
+
+  const loadDepartments = useCallback(async () => {
+    try {
+      const list = await departmentApi.list()
+      setDepartments(list)
+    } catch (error: unknown) {
+      console.error('Failed to load departments:', error)
     }
   }, [])
 
@@ -46,6 +62,10 @@ export default function SharingPage() {
   }, [loadUsers])
 
   useEffect(() => {
+    void loadDepartments()
+  }, [loadDepartments])
+
+  useEffect(() => {
     // The request updates state asynchronously after the effect starts.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadMembers()
@@ -57,13 +77,38 @@ export default function SharingPage() {
       const user = await sharingApi.createUser({
         username: newUsername.trim(),
         display_name: newDisplayName.trim() || undefined,
+        role: newUserRole,
+        department_id: newUserDeptId ? Number(newUserDeptId) : undefined,
       })
       setUsers(prev => [...prev, user])
       setNewUsername('')
       setNewDisplayName('')
+      setNewUserRole('member')
+      setNewUserDeptId('')
       setShowCreateUser(false)
     } catch (error: unknown) {
       alert(getErrorMessage(error, '创建用户失败'))
+    }
+  }
+
+  const handleUpdateUserDept = async (userId: number, deptId: string) => {
+    try {
+      const updated = await sharingApi.updateUser(userId, {
+        department_id: deptId ? Number(deptId) : null,
+      })
+      setUsers(prev => prev.map(u => u.id === updated.id ? updated : u))
+      setEditingUserId(null)
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '更新用户部门失败'))
+    }
+  }
+
+  const handleUpdateUserRole = async (userId: number, role: 'admin' | 'member') => {
+    try {
+      const updated = await sharingApi.updateUser(userId, { role })
+      setUsers(prev => prev.map(u => u.id === updated.id ? updated : u))
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '更新用户角色失败'))
     }
   }
 
@@ -219,7 +264,7 @@ export default function SharingPage() {
                 autoFocus
               />
             </div>
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>显示名称</label>
               <input
                 style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
@@ -227,6 +272,30 @@ export default function SharingPage() {
                 onChange={e => setNewDisplayName(e.target.value)}
                 placeholder="如 张三"
               />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>系统角色</label>
+              <select
+                style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, background: '#fff' }}
+                value={newUserRole}
+                onChange={e => setNewUserRole(e.target.value as 'admin' | 'member')}
+              >
+                <option value="member">成员（member）</option>
+                <option value="admin">管理员（admin）</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>所属部门</label>
+              <select
+                style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, background: '#fff' }}
+                value={newUserDeptId}
+                onChange={e => setNewUserDeptId(e.target.value)}
+              >
+                <option value="">不指定部门</option>
+                {departments.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button
@@ -406,59 +475,117 @@ export default function SharingPage() {
               <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
                 <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>用户</th>
                 <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>用户名</th>
-                <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>角色</th>
+                <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>系统角色</th>
+                <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>部门</th>
                 <th style={{ textAlign: 'left', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>状态</th>
                 <th style={{ textAlign: 'right', padding: '8px 4px', fontWeight: 500, color: '#6b7280' }}>操作</th>
               </tr>
             </thead>
             <tbody>
-              {users.map(u => (
-                <tr key={u.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                  <td style={{ padding: '8px 4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {users.map(u => {
+                const isEditing = editingUserId === u.id
+                return (
+                  <tr key={u.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '8px 4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{
+                          width: 24, height: 24, borderRadius: '50%', background: '#6366f1',
+                          color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, fontWeight: 600,
+                        }}>
+                          {(u.display_name || u.username).charAt(0).toUpperCase()}
+                        </span>
+                        {u.display_name || u.username}
+                      </div>
+                    </td>
+                    <td style={{ padding: '8px 4px', color: '#9ca3af' }}>@{u.username}</td>
+                    <td style={{ padding: '8px 4px' }}>
+                      {isEditing ? (
+                        <select
+                          style={{ fontSize: 11, padding: '2px 6px', border: '1px solid #d1d5db', borderRadius: 4, background: '#fff' }}
+                          value={u.role === 'admin' ? 'admin' : 'member'}
+                          onChange={e => handleUpdateUserRole(u.id, e.target.value as 'admin' | 'member')}
+                        >
+                          <option value="member">成员</option>
+                          <option value="admin">管理员</option>
+                        </select>
+                      ) : (
+                        <span style={{
+                          fontSize: 11, padding: '1px 6px', borderRadius: 4,
+                          background: u.role === 'admin' ? '#ede9fe' : '#f3f4f6',
+                          color: u.role === 'admin' ? '#6d28d9' : '#6b7280',
+                        }}>
+                          {u.role === 'admin' ? '管理员' : '成员'}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 4px' }}>
+                      {isEditing ? (
+                        <select
+                          style={{ fontSize: 11, padding: '2px 6px', border: '1px solid #d1d5db', borderRadius: 4, background: '#fff', maxWidth: 120 }}
+                          value={editDeptId}
+                          onChange={e => setEditDeptId(e.target.value)}
+                        >
+                          <option value="">无部门</option>
+                          {departments.map(d => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span style={{ fontSize: 11, color: u.department_name ? '#374151' : '#9ca3af' }}>
+                          {u.department_name || '—'}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 4px' }}>
                       <span style={{
-                        width: 24, height: 24, borderRadius: '50%', background: '#6366f1',
-                        color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 10, fontWeight: 600,
+                        fontSize: 11, padding: '1px 6px', borderRadius: 4,
+                        background: u.is_active ? '#dcfce7' : '#fee2e2',
+                        color: u.is_active ? '#166534' : '#991b1b',
                       }}>
-                        {(u.display_name || u.username).charAt(0).toUpperCase()}
+                        {u.is_active ? '活跃' : '禁用'}
                       </span>
-                      {u.display_name || u.username}
-                    </div>
-                  </td>
-                  <td style={{ padding: '8px 4px', color: '#9ca3af' }}>@{u.username}</td>
-                  <td style={{ padding: '8px 4px' }}>
-                    <span style={{
-                      fontSize: 11, padding: '1px 6px', borderRadius: 4,
-                      background: u.role === 'admin' ? '#ede9fe' : '#f3f4f6',
-                      color: u.role === 'admin' ? '#6d28d9' : '#6b7280',
-                    }}>
-                      {u.role === 'admin' ? '管理员' : '成员'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '8px 4px' }}>
-                    <span style={{
-                      fontSize: 11, padding: '1px 6px', borderRadius: 4,
-                      background: u.is_active ? '#dcfce7' : '#fee2e2',
-                      color: u.is_active ? '#166534' : '#991b1b',
-                    }}>
-                      {u.is_active ? '活跃' : '禁用'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '8px 4px', textAlign: 'right' }}>
-                    <button
-                      style={{
-                        fontSize: 11, padding: '2px 8px', background: currentUser?.id === u.id ? '#3b82f6' : '#f3f4f6',
-                        color: currentUser?.id === u.id ? '#fff' : '#6b7280',
-                        border: 'none', borderRadius: 4, cursor: 'pointer',
-                      }}
-                      onClick={() => handleSelectUser(u)}
-                    >
-                      {currentUser?.id === u.id ? '当前' : '切换'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td style={{ padding: '8px 4px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {isEditing ? (
+                        <>
+                          <button
+                            style={{ fontSize: 11, padding: '2px 8px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', marginRight: 4 }}
+                            onClick={() => handleUpdateUserDept(u.id, editDeptId)}
+                          >
+                            保存
+                          </button>
+                          <button
+                            style={{ fontSize: 11, padding: '2px 8px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                            onClick={() => setEditingUserId(null)}
+                          >
+                            取消
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            style={{ fontSize: 11, padding: '2px 8px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: 4, cursor: 'pointer', marginRight: 4 }}
+                            onClick={() => { setEditingUserId(u.id); setEditDeptId(u.department_id ? String(u.department_id) : '') }}
+                          >
+                            编辑
+                          </button>
+                          <button
+                            style={{
+                              fontSize: 11, padding: '2px 8px', background: currentUser?.id === u.id ? '#3b82f6' : '#f3f4f6',
+                              color: currentUser?.id === u.id ? '#fff' : '#6b7280',
+                              border: 'none', borderRadius: 4, cursor: 'pointer',
+                            }}
+                            onClick={() => handleSelectUser(u)}
+                          >
+                            {currentUser?.id === u.id ? '当前' : '切换'}
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

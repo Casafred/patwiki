@@ -15,6 +15,7 @@ class Department(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     members = relationship("Person", back_populates="department")
+    users = relationship("User", back_populates="department")
 
 
 class Person(Base):
@@ -24,6 +25,7 @@ class Person(Base):
     name = Column(String(100), nullable=False)
     email = Column(String(255))
     department_id = Column(Integer, ForeignKey("departments.id"))
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     role = Column(String(100))
     is_active = Column(Boolean, default=True)
     notes = Column(Text)
@@ -31,6 +33,7 @@ class Person(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     department = relationship("Department", back_populates="members")
+    user = relationship("User", foreign_keys=[user_id])
     owned_products = relationship("Product", back_populates="owner")
 
 

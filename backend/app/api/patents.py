@@ -5,6 +5,7 @@ from typing import Optional
 from datetime import date, datetime, timezone
 import json
 from typing import Any
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.api.deps import get_pagination_params
@@ -420,6 +421,32 @@ def bulk_delete_patents(
         db.delete(p)
     db.commit()
     return {"success": True, "deleted_count": len(patents)}
+
+
+class BulkTagRequest(BaseModel):
+    patent_ids: list[int]
+    tag_ids: list[int]
+    mode: str = "add"  # add / remove / replace
+
+
+@router.post("/bulk-tag")
+def bulk_tag_patents(
+    payload: BulkTagRequest,
+    db: Session = Depends(get_db),
+):
+    """批量打标签 / 移除标签 / 替换标签。
+
+    mode:
+        - add:     追加标签（保留原有）
+        - remove:  移除指定标签
+        - replace: 用指定标签替换全部标签
+    """
+    if not payload.patent_ids:
+        return {"success": True, "updated_count": 0}
+    count = PatentService.bulk_tag(
+        db, payload.patent_ids, payload.tag_ids, mode=payload.mode
+    )
+    return {"success": True, "updated_count": count}
 
 
 @router.delete("/by-database/{database_id}")

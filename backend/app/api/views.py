@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.orm import Session
 from typing import Optional, Any
 import json
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.api.deps import get_pagination_params
@@ -73,6 +74,7 @@ def create_view(view_in: PatentViewCreate, db: Session = Depends(get_db)):
             form_config=view_in.form_config,
             gantt_config=view_in.gantt_config,
             is_department_master=view_in.is_department_master or False,
+            membership_based=view_in.membership_based or False,
         )
     except ValueError as e:
         raise BadRequestException(str(e))
@@ -283,6 +285,57 @@ def get_grouped_view_patents(
         db, view, page=page, page_size=page_size, extra_filters=ef,
         search=search, sort_by=sort_by, sort_order=sort_order,
     )
+
+
+# P0-14：批量把专利加入/移出视图（成员型视图）
+class ViewPatentMembershipRequest(BaseModel):
+    patent_ids: list[int]
+
+
+@router.post("/{view_id}/patents")
+def add_patents_to_view(
+    view_id: int,
+    payload: ViewPatentMembershipRequest,
+    db: Session = Depends(get_db),
+):
+    """把指定专利加入视图（设置 patent.view_id）。"""
+    from app.models import Patent as PatentModel
+    view = ViewService.get_view(db, view_id)
+    if not view:
+        raise NotFoundException("View not found")
+    if view.is_department_master:
+        raise BadRequestException("不能把专利加入主视图（主视图展示库内全部专利）")
+    patents = db.query(PatentModel).filter(PatentModel.id.in_(payload.patent_ids)).all()
+    count = 0
+    for p in patents:
+        if p.database_id != view.database_id:
+            continue
+        p.view_id = view_id
+        db.add(p)
+        count += 1
+    db.commit()
+    return {"success": True, "updated_count": count}
+
+
+@router.delete("/{view_id}/patents")
+def remove_patents_from_view(
+    view_id: int,
+    payload: ViewPatentMembershipRequest,
+    db: Session = Depends(get_db),
+):
+    """把指定专利从视图中移出（清空 patent.view_id）。"""
+    from app.models import Patent as PatentModel
+    patents = db.query(PatentModel).filter(
+        PatentModel.id.in_(payload.patent_ids),
+        PatentModel.view_id == view_id,
+    ).all()
+    count = 0
+    for p in patents:
+        p.view_id = None
+        db.add(p)
+        count += 1
+    db.commit()
+    return {"success": True, "updated_count": count}
 
 
 @router.get("/{view_id}/kanban")

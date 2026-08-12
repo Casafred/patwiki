@@ -18,10 +18,12 @@ class User(Base):
     display_name = Column(String(200))
     email = Column(String(255))
     role = Column(String(50), default="member")  # admin / member
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
+    department = relationship("Department", back_populates="users")
     database_memberships = relationship("DatabaseMembership", back_populates="user", cascade="all, delete-orphan")
 
 

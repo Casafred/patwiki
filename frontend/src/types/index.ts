@@ -42,6 +42,7 @@ export interface Patent {
   cpc_all?: string
   database_id?: number
   product_id?: number
+  view_id?: number | null  // P0-14：专利归属的视图（导入到指定视图时设置）
   category?: string
   subcategory?: string
   technical_problem?: string
@@ -577,6 +578,7 @@ export interface Person {
   name: string
   email?: string
   department_id?: number
+  user_id?: number | null
   role?: string
   is_active?: boolean
   notes?: string
@@ -603,9 +605,23 @@ export interface AITask {
   success_count: number
   failed_count: number
   errors?: AITaskError[] | null
+  // P0-15：请求/返回内容样本
+  request_content?: AITaskRequestSample[] | null
+  response_content?: AITaskResponseSample[] | null
   started_at?: string
   completed_at?: string
   created_at?: string
+}
+
+export interface AITaskRequestSample {
+  patent_id?: number
+  prompt?: string
+}
+
+export interface AITaskResponseSample {
+  patent_id?: number
+  response?: string
+  model?: string
 }
 
 export interface AIFieldValue {
@@ -752,6 +768,8 @@ export interface User {
   display_name?: string
   email?: string
   role: string  // admin / member
+  department_id?: number | null
+  department_name?: string | null
   is_active: boolean
   created_at?: string
 }

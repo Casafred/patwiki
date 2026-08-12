@@ -24,7 +24,8 @@ SYSTEM_FIELDS = {
     "technical_problem", "technical_effect", "technical_solution",
     "has_risk", "risk_level", "risk_description",
     "module", "application_status", "scope_description", "notes",
-    "created_at", "updated_at", "tags", "projects"
+    "created_at", "updated_at", "tags", "projects",
+    "view_id",
 }
 
 
@@ -387,6 +388,41 @@ class PatentService:
         for patent in patents:
             PatentService.update_patent(db, patent, updates, source="bulk")
             count += 1
+        return count
+
+    @staticmethod
+    def bulk_tag(
+        db: Session,
+        patent_ids: list[int],
+        tag_ids: list[int],
+        mode: str = "add",
+    ) -> int:
+        """批量打标签/移除标签。
+
+        mode:
+            - add:    把指定标签追加到所选专利（保留原有标签）
+            - remove: 从所选专利移除指定标签
+            - replace: 用指定标签替换所选专利的全部标签
+        """
+        from app.models import Tag
+        tags = db.query(Tag).filter(Tag.id.in_(tag_ids)).all() if tag_ids else []
+        tag_set = set(tags)
+        patents = db.query(Patent).filter(Patent.id.in_(patent_ids)).all()
+        count = 0
+        for patent in patents:
+            current = set(patent.tags or [])
+            if mode == "add":
+                new_tags = current | tag_set
+            elif mode == "remove":
+                new_tags = current - tag_set
+            elif mode == "replace":
+                new_tags = tag_set
+            else:
+                continue
+            patent.tags = list(new_tags)
+            db.add(patent)
+            count += 1
+        db.commit()
         return count
 
     @staticmethod

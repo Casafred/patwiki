@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
-import { importApi, databaseApi } from '../../api'
+import { importApi, databaseApi, viewApi } from '../../api'
 import { useAppStore } from '../../store'
-import type { ImportPreview, FieldMapping } from '../../types'
+import type { ImportPreview, FieldMapping, PatentView } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 interface ImportModalProps {
@@ -73,6 +73,12 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   )
   const [selectedProductId, setSelectedProductId] = useState<number | ''>('')
   const [selectedProjectId, setSelectedProjectId] = useState<number | ''>('')
+  // P0-14：导入到指定视图
+  const [views, setViews] = useState<PatentView[]>([])
+  const [selectedViewId, setSelectedViewId] = useState<number | ''>('')
+  const [showCreateView, setShowCreateView] = useState(false)
+  const [newViewName, setNewViewName] = useState('')
+  const [creatingView, setCreatingView] = useState(false)
   const [dedupeField, setDedupeField] = useState<'application_number' | 'publication_number' | 'both'>('both')
   const [importResult, setImportResult] = useState<{
     total: number; created: number; updated: number; skipped: number; errors: number;
@@ -97,6 +103,36 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setStep('upload')
     }
   }, [databases.length, currentDatabaseId, step])
+
+  // P0-14：加载当前库的视图列表（用于导入到指定视图）
+  useEffect(() => {
+    if (!currentDatabaseId) {
+      setViews([])
+      return
+    }
+    viewApi.list(currentDatabaseId).then(setViews).catch(() => setViews([]))
+  }, [currentDatabaseId])
+
+  const handleCreateView = useCallback(async () => {
+    if (!newViewName.trim() || !currentDatabaseId) return
+    setCreatingView(true)
+    try {
+      // 创建成员型视图：只展示导入到本视图的专利
+      const view = await viewApi.create({
+        name: newViewName.trim(),
+        database_id: currentDatabaseId,
+        membership_based: true,
+      })
+      setViews(prev => [...prev, view])
+      setSelectedViewId(view.id)
+      setNewViewName('')
+      setShowCreateView(false)
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, '创建视图失败'))
+    } finally {
+      setCreatingView(false)
+    }
+  }, [newViewName, currentDatabaseId])
 
   const handleCreateDatabase = useCallback(async () => {
     if (!newDbName.trim()) return
@@ -164,6 +200,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
         selectedProductId || undefined,
         selectedProjectId || undefined,
         currentDatabaseId,
+        selectedViewId || undefined,
       )
       // 防御：后端返回空体或异常时 result 可能为 undefined，
       // 若直接进入 complete 步骤会导致渲染条件不满足而白屏。
@@ -180,7 +217,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     } finally {
       setImporting(false)
     }
-  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId])
+  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId])
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose()
@@ -474,6 +511,72 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                       ))}
                   </select>
                 </div>
+              </div>
+
+              {/* P0-14：导入到指定视图 */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>
+                  导入到视图（可选）
+                  <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 6 }}>
+                    不选则导入到库的主视图
+                  </span>
+                </label>
+                {!showCreateView ? (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <select
+                      className="form-input"
+                      style={{ flex: 1 }}
+                      value={selectedViewId}
+                      onChange={(e) => setSelectedViewId(e.target.value ? Number(e.target.value) : '')}
+                    >
+                      <option value="">不指定（导入到主视图）</option>
+                      {views.filter(v => !v.is_department_master).map(v => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ whiteSpace: 'nowrap', fontSize: 12 }}
+                      onClick={() => setShowCreateView(true)}
+                    >
+                      + 新建视图
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 12, background: '#f8fafc' }}>
+                    <div style={{ fontSize: 12, color: '#475569', marginBottom: 6 }}>
+                      新建成员型视图：只展示本次导入的专利
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        className="form-input"
+                        style={{ flex: 1 }}
+                        placeholder="如：2024年Q1竞品分析"
+                        value={newViewName}
+                        onChange={(e) => setNewViewName(e.target.value)}
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                        disabled={!newViewName.trim() || creatingView}
+                        onClick={handleCreateView}
+                      >
+                        {creatingView ? '创建中...' : '创建并选中'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: 12 }}
+                        onClick={() => { setShowCreateView(false); setNewViewName('') }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>

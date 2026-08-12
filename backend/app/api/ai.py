@@ -81,6 +81,9 @@ def list_tasks(
             "success_count": t.success_count,
             "failed_count": t.failed_count,
             "errors": t.errors,
+            # P0-15：返回请求/返回内容样本，便于审计与调试
+            "request_content": t.request_content,
+            "response_content": t.response_content,
             "started_at": t.started_at,
             "completed_at": t.completed_at,
             "created_at": t.created_at,

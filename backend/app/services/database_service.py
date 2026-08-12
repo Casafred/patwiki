@@ -83,6 +83,25 @@ class DatabaseService:
                 )
                 db.add(membership)
                 db.commit()
+
+        # P0-14：建库时自动创建主视图（master view），所有专利默认可见
+        try:
+            from app.services.view_service import ViewService
+            existing_master = ViewService.get_department_master_view(db, database.id)
+            if not existing_master:
+                ViewService.create_view(
+                    db,
+                    name=f"{name} · 主表",
+                    database_id=database.id,
+                    view_type="department_master",
+                    is_department_master=True,
+                    filter_config={},
+                    column_config=[],
+                    sort_config={"sort_by": "filing_date", "sort_order": "desc"},
+                )
+        except Exception:
+            # 主视图创建失败不应阻断建库流程
+            pass
         return database
 
     @staticmethod

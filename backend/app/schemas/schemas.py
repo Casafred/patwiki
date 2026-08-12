@@ -340,6 +340,7 @@ class PersonBase(BaseSchema):
     name: str
     email: Optional[str] = None
     department_id: Optional[int] = None
+    user_id: Optional[int] = None
     role: Optional[str] = None
     is_active: Optional[bool] = True
     notes: Optional[str] = None
@@ -353,6 +354,7 @@ class PersonUpdate(BaseSchema):
     name: Optional[str] = None
     email: Optional[str] = None
     department_id: Optional[int] = None
+    user_id: Optional[int] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
@@ -450,13 +452,19 @@ class AITaskResponse(BaseSchema):
     id: int
     task_type: str
     field_key: Optional[str]
+    model_name: Optional[str] = None
     status: str
     total_items: int
     processed_items: int
     success_count: int
     failed_count: int
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    errors: Optional[list[Any]] = None
+    # P0-15：请求/返回内容样本
+    request_content: Optional[list[Any]] = None
+    response_content: Optional[list[Any]] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
 
 
 class AIValueOverrideRequest(BaseSchema):
@@ -522,6 +530,8 @@ class PatentViewBase(BaseSchema):
 
 class PatentViewCreate(PatentViewBase):
     is_department_master: Optional[bool] = False
+    # P0-14：成员型视图——只展示导入到本视图的专利（自动设置 filter_config.view_id）
+    membership_based: Optional[bool] = False
 
 
 class PatentViewUpdate(BaseSchema):

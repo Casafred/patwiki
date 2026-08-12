@@ -84,6 +84,8 @@ class Patent(Base):
     database_id = Column(Integer, ForeignKey("patent_databases.id"), index=True, nullable=True)
     product_id = Column(Integer, ForeignKey("products.id"))
     family_id = Column(Integer, ForeignKey("patent_families.id"))
+    # 视图归属（P0-14 重构）：专利可被导入到指定视图；为空则属于库的主视图
+    view_id = Column(Integer, ForeignKey("patent_views.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # 业务标注
     category = Column(String(100))
@@ -120,6 +122,7 @@ class Patent(Base):
     database = relationship("PatentDatabase", back_populates="patents")
     product = relationship("Product", back_populates="patents")
     family = relationship("PatentFamily", back_populates="patents")
+    view = relationship("PatentView", foreign_keys=[view_id])
     tags = relationship("Tag", secondary="patent_tags", back_populates="patents")
     projects = relationship("Project", secondary="patent_projects", back_populates="patents")
     citing_patents = relationship(

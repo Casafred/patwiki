@@ -359,6 +359,30 @@ def delete_person(person_id: int, db: Session = Depends(get_db)):
     return {"success": True}
 
 
+@router.post("/people/from-user/{user_id}", response_model=PersonSchema)
+def create_person_from_user(user_id: int, db: Session = Depends(get_db)):
+    """根据已有的 User 自动创建或返回对应的 Person，把“人员”与“用户”打通。"""
+    from app.models import User
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise NotFoundException("User not found")
+    existing = db.query(Person).filter(Person.user_id == user.id).first()
+    if existing:
+        return existing
+    person = Person(
+        name=user.display_name or user.username,
+        email=user.email,
+        department_id=user.department_id,
+        user_id=user.id,
+        role=user.role,
+        is_active=user.is_active,
+    )
+    db.add(person)
+    db.commit()
+    db.refresh(person)
+    return person
+
+
 @router.get("/product-lines", response_model=list[ProductLineSchema])
 def list_product_lines(db: Session = Depends(get_db)):
     return db.query(ProductLine).order_by(ProductLine.name).all()

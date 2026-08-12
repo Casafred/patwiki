@@ -99,6 +99,8 @@ export const viewApi = {
     kanban_config?: PatentView['kanban_config']
     form_config?: PatentView['form_config']
     gantt_config?: PatentView['gantt_config']
+    is_department_master?: boolean
+    membership_based?: boolean
   }): Promise<PatentView> => api.post('/views', data),
 
   update: (id: number, data: Partial<PatentView>): Promise<PatentView> =>
@@ -106,6 +108,13 @@ export const viewApi = {
 
   master: (databaseId: number): Promise<PatentView> =>
     api.get(`/databases/${databaseId}/master-view`),
+
+  // P0-14：把专利加入/移出视图（成员型视图）
+  addPatents: (viewId: number, patentIds: number[]): Promise<{ success: boolean; updated_count: number }> =>
+    api.post(`/views/${viewId}/patents`, { patent_ids: patentIds }),
+
+  removePatents: (viewId: number, patentIds: number[]): Promise<{ success: boolean; updated_count: number }> =>
+    api.delete(`/views/${viewId}/patents`, { data: { patent_ids: patentIds } }),
 
   listPatents: (viewId: number, params: {
     page?: number
@@ -283,6 +292,10 @@ export const patentApi = {
   bulkUpdate: (ids: number[], updates: Partial<Patent>): Promise<{ success: boolean; updated_count: number }> =>
     api.post('/patents/bulk-update', { patent_ids: ids, updates }),
 
+  // 批量打标签 / 移除标签 / 替换标签
+  bulkTag: (patentIds: number[], tagIds: number[], mode: 'add' | 'remove' | 'replace' = 'add'): Promise<{ success: boolean; updated_count: number }> =>
+    api.post('/patents/bulk-tag', { patent_ids: patentIds, tag_ids: tagIds, mode }),
+
   // 批量删除专利（请求体为 [id1, id2, ...] 数组）
   bulkDelete: (ids: number[]): Promise<{ success: boolean; deleted_count: number }> =>
     api.post('/patents/bulk-delete', ids),
@@ -375,6 +388,7 @@ export const importApi = {
     productId?: number,
     projectId?: number,
     databaseId?: number,
+    viewId?: number,
   ): Promise<ImportResult> => {
     return api.post('/import/confirm', {
       import_id: importId,
@@ -384,6 +398,7 @@ export const importApi = {
       product_id: productId,
       project_id: projectId,
       database_id: databaseId,
+      view_id: viewId,
     }, {
       timeout: 600000,
     })
@@ -577,9 +592,18 @@ export const sharingApi = {
     display_name?: string
     email?: string
     role?: string
+    department_id?: number | null
   }): Promise<User> => api.post('/users', data),
 
   getUser: (userId: number): Promise<User> => api.get(`/users/${userId}`),
+
+  updateUser: (userId: number, data: {
+    display_name?: string
+    email?: string
+    role?: string
+    department_id?: number | null
+    is_active?: boolean
+  }): Promise<User> => api.put(`/users/${userId}`, data),
 
   // 库的成员管理
   listMembers: (databaseId: number): Promise<DatabaseMember[]> =>

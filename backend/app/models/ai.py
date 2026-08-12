@@ -20,6 +20,9 @@ class AITask(Base):
     failed_count = Column(Integer, default=0)
     config = Column(JSON)
     errors = Column(JSON)
+    # P0-15：记录实际请求/返回内容样本（最多保留前若干条，便于审计与调试）
+    request_content = Column(JSON)  # [{"patent_id":..,"prompt":..}, ...]
+    response_content = Column(JSON)  # [{"patent_id":..,"response":..,"model":..}, ...]
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())

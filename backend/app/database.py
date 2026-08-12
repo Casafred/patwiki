@@ -89,6 +89,15 @@ def _ensure_column_migration():
          "ALTER TABLE custom_fields ADD COLUMN rollup_config JSON"),
         ("custom_fields", "formula_config",
          "ALTER TABLE custom_fields ADD COLUMN formula_config JSON"),
+        # P0-14：专利归属视图（导入到指定视图）
+        ("patents", "view_id",
+         "ALTER TABLE patents ADD COLUMN view_id INTEGER REFERENCES patent_views(id)"),
+        # P0-14：人员与用户打通
+        ("people", "user_id",
+         "ALTER TABLE people ADD COLUMN user_id INTEGER REFERENCES users(id)"),
+        # 用户与部门打通
+        ("users", "department_id",
+         "ALTER TABLE users ADD COLUMN department_id INTEGER REFERENCES departments(id)"),
     ]
 
     with engine.begin() as conn:
@@ -122,8 +131,57 @@ def _ensure_column_migration():
             except Exception:
                 pass
 
+        # P0-14：patents.view_id 索引
+        if not has_index("patents", "ix_patents_view_id"):
+            try:
+                conn.execute(text("CREATE INDEX ix_patents_view_id ON patents (view_id)"))
+            except Exception:
+                pass
+
+        # P0-14：people.user_id 索引
+        if not has_index("people", "ix_people_user_id"):
+            try:
+                conn.execute(text("CREATE INDEX ix_people_user_id ON people (user_id)"))
+            except Exception:
+                pass
+
+        # 用户与部门打通：users.department_id 索引
+        if not has_index("users", "ix_users_department_id"):
+            try:
+                conn.execute(text("CREATE INDEX ix_users_department_id ON users (department_id)"))
+            except Exception:
+                pass
+
 
 def init_db():
     import app.models
     Base.metadata.create_all(bind=engine)
     _ensure_column_migration()
+    _ensure_master_views()
+
+
+def _ensure_master_views():
+    """P0-14：为已有库补建主视图（建库时自动创建，此函数兼容历史库）。"""
+    try:
+        from app.services.database_service import DatabaseService
+        from app.services.view_service import ViewService
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            for d in DatabaseService.list_databases(db, include_archived=True):
+                if not ViewService.get_department_master_view(db, d.id):
+                    ViewService.create_view(
+                        db,
+                        name=f"{d.name} · 主表",
+                        database_id=d.id,
+                        view_type="department_master",
+                        is_department_master=True,
+                        filter_config={},
+                        column_config=[],
+                        sort_config={"sort_by": "filing_date", "sort_order": "desc"},
+                    )
+        finally:
+            db.close()
+    except Exception:
+        # 启动期不因补建视图失败而中断
+        pass

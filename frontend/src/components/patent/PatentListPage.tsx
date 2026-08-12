@@ -9,11 +9,13 @@ import {
   viewService as viewApi,
   relationService as linkApi,
   searchService as searchApi,
+  tagService as tagApi,
 } from '../../services'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
   ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget, SearchSuggestion,
+  Tag,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import Icon from '../common/Icon'
@@ -299,6 +301,15 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [convertingTags, setConvertingTags] = useState(false)
   const [bulkModule, setBulkModule] = useState('')
   const [bulkRiskLevel, setBulkRiskLevel] = useState('')
+  const [bulkCategory, setBulkCategory] = useState('')
+  const [bulkLegalStatus, setBulkLegalStatus] = useState('')
+  const [bulkCountry, setBulkCountry] = useState('')
+  const [bulkApplicant, setBulkApplicant] = useState('')
+  // 批量打标签
+  const [tagsList, setTagsList] = useState<Tag[]>([])
+  const [bulkTagIds, setBulkTagIds] = useState<number[]>([])
+  const [bulkTagMode, setBulkTagMode] = useState<'add' | 'remove' | 'replace'>('add')
+  const [bulkTagLoading, setBulkTagLoading] = useState(false)
   const [aiFieldKey, setAiFieldKey] = useState('')
   const [aiFields, setAiFields] = useState<CustomField[]>([])
   const [filterValues, setFilterValues] = useState<Record<string, string>>(() => readFilterParam(searchParams))
@@ -547,6 +558,14 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     void loadFields()
     void loadCustomFields()
   }, [loadFields, loadCustomFields])
+
+  // 打开批量打标签弹窗时加载标签列表
+  useEffect(() => {
+    if (!showBulkTag) return
+    if (tagsList.length > 0) return
+    setBulkTagLoading(true)
+    tagApi.list().then(setTagsList).catch(console.error).finally(() => setBulkTagLoading(false))
+  }, [showBulkTag, tagsList.length])
 
   useEffect(() => {
     if (fields.length > 0) {
@@ -1284,6 +1303,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       if (bulkRiskLevel !== 'none') updates.has_risk = true
       else updates.has_risk = false
     }
+    if (bulkCategory) updates.category = bulkCategory
+    if (bulkLegalStatus) updates.legal_status = bulkLegalStatus
+    if (bulkCountry) updates.country = bulkCountry
+    if (bulkApplicant) updates.applicant = bulkApplicant
     if (Object.keys(updates).length === 0) {
       alert('请至少填写一个要修改的字段')
       return
@@ -1294,11 +1317,38 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       setShowBulkEdit(false)
       setBulkModule('')
       setBulkRiskLevel('')
+      setBulkCategory('')
+      setBulkLegalStatus('')
+      setBulkCountry('')
+      setBulkApplicant('')
       clearSelection()
       loadPatents()
     } catch (error: unknown) {
       alert('批量更新失败: ' + getErrorMessage(error))
     }
+  }
+
+  const handleBulkTagSave = async () => {
+    if (bulkTagIds.length === 0) {
+      alert('请至少选择一个标签')
+      return
+    }
+    try {
+      const result = await patentApi.bulkTag(selectedIds, bulkTagIds, bulkTagMode)
+      const actionText = bulkTagMode === 'add' ? '添加' : bulkTagMode === 'remove' ? '移除' : '替换'
+      alert(`已为 ${result.updated_count} 条专利${actionText}标签`)
+      setShowBulkTag(false)
+      setBulkTagIds([])
+      setBulkTagMode('add')
+      clearSelection()
+      loadPatents()
+    } catch (error: unknown) {
+      alert('批量打标签失败: ' + getErrorMessage(error))
+    }
+  }
+
+  const toggleBulkTagId = (tagId: number) => {
+    setBulkTagIds(prev => prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId])
   }
 
   const handleAIBatchProcess = async () => {
@@ -2490,22 +2540,61 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       )}
 
       {showBulkEdit && (
-        <Modal title={`批量编辑 ${selectedIds.length} 条专利`} onClose={() => setShowBulkEdit(false)}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 360 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>关联模块</label>
-              <input className="form-input" value={bulkModule} onChange={e => setBulkModule(e.target.value)} placeholder="如：摄像头模块" />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>风险等级</label>
-              <select className="form-input" value={bulkRiskLevel} onChange={e => setBulkRiskLevel(e.target.value)}>
-                <option value="">不修改</option>
-                <option value="none">无风险</option>
-                <option value="low">低风险</option>
-                <option value="medium">中风险</option>
-                <option value="high">高风险</option>
-                <option value="critical">严重风险</option>
-              </select>
+        <Modal title={`批量编辑 ${selectedIds.length} 条专利`} onClose={() => setShowBulkEdit(false)} width={520}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+              只填写需要修改的字段，留空的字段保持不变。
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>关联模块</label>
+                <input className="form-input" value={bulkModule} onChange={e => setBulkModule(e.target.value)} placeholder="如：摄像头模块" />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>风险等级</label>
+                <select className="form-input" value={bulkRiskLevel} onChange={e => setBulkRiskLevel(e.target.value)}>
+                  <option value="">不修改</option>
+                  <option value="none">无风险</option>
+                  <option value="low">低风险</option>
+                  <option value="medium">中风险</option>
+                  <option value="high">高风险</option>
+                  <option value="critical">严重风险</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>法律状态</label>
+                <select className="form-input" value={bulkLegalStatus} onChange={e => setBulkLegalStatus(e.target.value)}>
+                  <option value="">不修改</option>
+                  <option value="unknown">未知</option>
+                  <option value="pending">审查中</option>
+                  <option value="granted">已授权</option>
+                  <option value="rejected">驳回</option>
+                  <option value="withdrawn">撤回</option>
+                  <option value="expired">失效</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>国家/地区</label>
+                <select className="form-input" value={bulkCountry} onChange={e => setBulkCountry(e.target.value)}>
+                  <option value="">不修改</option>
+                  <option value="CN">中国 (CN)</option>
+                  <option value="US">美国 (US)</option>
+                  <option value="EP">欧洲 (EP)</option>
+                  <option value="JP">日本 (JP)</option>
+                  <option value="KR">韩国 (KR)</option>
+                  <option value="DE">德国 (DE)</option>
+                  <option value="GB">英国 (GB)</option>
+                  <option value="WO">PCT (WO)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>技术分类</label>
+                <input className="form-input" value={bulkCategory} onChange={e => setBulkCategory(e.target.value)} placeholder="如：光学/成像" />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>申请人</label>
+                <input className="form-input" value={bulkApplicant} onChange={e => setBulkApplicant(e.target.value)} placeholder="如：某科技公司" />
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
               <button className="btn btn-secondary" onClick={() => setShowBulkEdit(false)}>取消</button>
@@ -2516,13 +2605,74 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       )}
 
       {showBulkTag && (
-        <Modal title={`批量打标签 ${selectedIds.length} 条专利`} onClose={() => setShowBulkTag(false)}>
-          <div style={{ minWidth: 360 }}>
-            <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>
-              标签管理功能将在后续版本完善。当前可在专利详情页中为单条专利设置标签。
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-              <button className="btn btn-secondary" onClick={() => setShowBulkTag(false)}>关闭</button>
+        <Modal title={`批量打标签 ${selectedIds.length} 条专利`} onClose={() => setShowBulkTag(false)} width={480}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>操作模式</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {(['add', 'replace', 'remove'] as const).map(m => (
+                  <button
+                    key={m}
+                    className={`btn ${bulkTagMode === m ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: 12, padding: '4px 12px' }}
+                    onClick={() => setBulkTagMode(m)}
+                  >
+                    {m === 'add' ? '追加标签' : m === 'replace' ? '替换全部' : '移除标签'}
+                  </button>
+                ))}
+              </div>
+              <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>
+                {bulkTagMode === 'add' && '把选中的标签追加到每条专利（保留原有标签）'}
+                {bulkTagMode === 'replace' && '用选中的标签替换每条专利的全部标签'}
+                {bulkTagMode === 'remove' && '从每条专利中移除选中的标签'}
+              </p>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
+                选择标签 {bulkTagLoading && '（加载中...）'}
+              </label>
+              {tagsList.length === 0 && !bulkTagLoading ? (
+                <p style={{ fontSize: 12, color: '#9ca3af' }}>
+                  暂无标签。请先在「管理」页面创建标签。
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 240, overflowY: 'auto', padding: 4, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                  {tagsList.map(t => {
+                    const selected = bulkTagIds.includes(t.id)
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => toggleBulkTagId(t.id)}
+                        style={{
+                          fontSize: 12, padding: '4px 10px', cursor: 'pointer',
+                          border: selected ? '1px solid #3b82f6' : '1px solid #d1d5db',
+                          borderRadius: 14, background: selected ? '#eff6ff' : '#fff',
+                          color: selected ? '#1d4ed8' : '#374151',
+                        }}
+                      >
+                        {t.color && (
+                          <span style={{
+                            display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                            background: t.color, marginRight: 4, verticalAlign: 'middle',
+                          }} />
+                        )}
+                        {t.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+            {bulkTagIds.length > 0 && (
+              <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
+                已选 {bulkTagIds.length} 个标签
+              </p>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => setShowBulkTag(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleBulkTagSave} disabled={bulkTagIds.length === 0}>
+                确认
+              </button>
             </div>
           </div>
         </Modal>

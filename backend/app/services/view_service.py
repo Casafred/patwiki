@@ -121,6 +121,7 @@ class ViewService:
         form_config: Optional[dict] = None,
         gantt_config: Optional[dict] = None,
         is_department_master: bool = False,
+        membership_based: bool = False,
     ) -> PatentView:
         if layout_type not in ViewService.SUPPORTED_LAYOUT_TYPES:
             raise ValueError(f"不支持的视图展示类型：{layout_type}")
@@ -160,6 +161,15 @@ class ViewService:
         db.add(view)
         db.commit()
         db.refresh(view)
+
+        # P0-14：成员型视图——自动在 filter_config 中注入 view_id 过滤
+        if membership_based and not is_department_master:
+            merged_filter = dict(view.filter_config or {})
+            merged_filter["view_id"] = view.id
+            view.filter_config = merged_filter
+            db.add(view)
+            db.commit()
+            db.refresh(view)
         return view
 
     @staticmethod

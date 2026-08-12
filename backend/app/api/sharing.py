@@ -6,7 +6,7 @@
 - 不强制鉴权（MVP 阶段，所有 API 公开访问）
 """
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_
 from typing import Optional
 from datetime import datetime
@@ -27,6 +27,7 @@ class UserCreate(BaseModel):
     display_name: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = "member"
+    department_id: Optional[int] = None
 
 
 class UserOut(BaseModel):
@@ -40,6 +41,8 @@ class UserOut(BaseModel):
     display_name: Optional[str] = None
     email: Optional[str] = None
     role: str
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
     is_active: bool
     created_at: Optional[datetime] = None
 
@@ -70,7 +73,8 @@ class MemberUpdate(BaseModel):
 # ============================================================
 @router.get("/users", response_model=list[UserOut])
 def list_users(db: Session = Depends(get_db)):
-    return db.query(User).order_by(User.created_at).all()
+    users = db.query(User).options(joinedload(User.department)).order_by(User.created_at).all()
+    return users
 
 
 @router.post("/users", response_model=UserOut)
@@ -82,18 +86,41 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
         display_name=user_in.display_name or user_in.username,
         email=user_in.email,
         role=user_in.role or "member",
+        department_id=user_in.department_id,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+    db.refresh(user, attribute_names=["department"])
     return user
 
 
 @router.get("/users/{user_id}", response_model=UserOut)
 def get_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).options(joinedload(User.department)).filter(User.id == user_id).first()
+    if not user:
+        raise NotFoundException("User not found")
+    return user
+
+
+class UserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    department_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+@router.put("/users/{user_id}", response_model=UserOut)
+def update_user(user_id: int, user_in: UserUpdate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise NotFoundException("User not found")
+    for field, value in user_in.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
+    db.refresh(user, attribute_names=["department"])
     return user
 
 

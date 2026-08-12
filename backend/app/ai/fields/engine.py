@@ -15,6 +15,10 @@ class AIFieldEngine:
         self.db = db
 
     def _get_llm(self):
+        """获取 LLM 客户端。返回 (llm, model_name) —— model_name 为实际使用的模型名。
+
+        优先从 settings.json 读取最新配置（用户可能通过设置页修改过）。
+        """
         # 优先从 settings.json 读取最新配置（用户可能通过设置页修改过）
         try:
             from app.api.settings import get_app_settings, apply_llm_to_settings
@@ -35,7 +39,7 @@ class AIFieldEngine:
             }
             if settings.LLM_BASE_URL:
                 kwargs["base_url"] = settings.LLM_BASE_URL
-            return ChatOpenAI(**kwargs)
+            return ChatOpenAI(**kwargs), settings.LLM_MODEL
         except ImportError:
             # 兜底：直接用 openai SDK
             try:
@@ -51,10 +55,11 @@ class AIFieldEngine:
                             temperature=0.0,
                         )
                         class _R:
-                            def __init__(self, content):
+                            def __init__(self, content, model=None):
                                 self.content = content
-                        return _R(resp.choices[0].message.content or "")
-                return _OpenAICompat()
+                                self.response_model = model or resp.model or self._model
+                        return _R(resp.choices[0].message.content or "", resp.model)
+                return _OpenAICompat(), settings.LLM_MODEL
             except ImportError:
                 raise ImportError(" neither langchain-openai nor openai installed，请安装其中一个")
 
@@ -126,7 +131,11 @@ class AIFieldEngine:
         except (TypeError, ValueError):
             return value
 
-    def process_single(self, patent: Patent, field_def: CustomField, force: bool = False) -> Optional[Any]:
+    def process_single(self, patent: Patent, field_def: CustomField, force: bool = False) -> tuple[Optional[Any], Optional[dict]]:
+        """处理单条专利的 AI 字段。
+
+        返回 (result, call_info)，其中 call_info 包含 prompt/response/model（命中缓存时为 None）。
+        """
         input_hash = self._calculate_input_hash(patent, field_def)
 
         current_value = self.db.query(AIFieldValue).filter(
@@ -136,14 +145,14 @@ class AIFieldEngine:
 
         # 人工值是当前生效值。普通批处理不能覆盖人工判断，只有强制重算才允许刷新。
         if not force and current_value and current_value.is_overridden:
-            return self._decode_override_value(current_value.overridden_value)
+            return self._decode_override_value(current_value.overridden_value), None
 
         if not force:
             cached = self._get_cached_value(patent.id, field_def.key, input_hash)
             if cached:
-                return cached.value
+                return cached.value, None
 
-        llm = self._get_llm()
+        llm, actual_model = self._get_llm()
         prompt = self._build_prompt(patent, field_def)
 
         import time
@@ -152,6 +161,8 @@ class AIFieldEngine:
         try:
             response = llm.invoke(prompt)
             result = response.content.strip()
+            # 优先取 API 返回的 response_model（可能解析别名→具体快照）
+            response_model = getattr(response, "response_model", None) or actual_model
 
             duration = int((time.time() - start) * 1000)
 
@@ -164,10 +175,12 @@ class AIFieldEngine:
                 ai_value = AIFieldValue(
                     patent_id=patent.id,
                     field_key=field_def.key,
-                    model_name=settings.LLM_MODEL,
+                    model_name=response_model,
                     temperature=0.0,
                 )
                 self.db.add(ai_value)
+            else:
+                ai_value.model_name = response_model
 
             ai_value.value = result
             ai_value.input_hash = input_hash
@@ -182,7 +195,13 @@ class AIFieldEngine:
             patent.ai_fields = current
 
             self.db.commit()
-            return result
+            call_info = {
+                "patent_id": patent.id,
+                "prompt": prompt,
+                "response": result,
+                "model": response_model,
+            }
+            return result, call_info
 
         except Exception as e:
             self.db.rollback()
@@ -202,11 +221,16 @@ class AIFieldEngine:
             return
 
         task.status = "processing"
+        task.started_at = datetime.now()
         self.db.commit()
 
         success = 0
         failed = 0
         errors = []
+        request_samples = []  # 最多保留前 5 条 prompt 样本
+        response_samples = []  # 最多保留前 5 条 response 样本
+        recorded_model = None
+        max_samples = 5
 
         for idx, patent_id in enumerate(patent_ids):
             patent = self.db.query(Patent).filter(Patent.id == patent_id).first()
@@ -215,8 +239,21 @@ class AIFieldEngine:
                 continue
 
             try:
-                self.process_single(patent, field_def, force=force)
+                _, call_info = self.process_single(patent, field_def, force=force)
                 success += 1
+                # 记录请求/返回样本（仅前若干条）
+                if call_info and len(request_samples) < max_samples:
+                    request_samples.append({
+                        "patent_id": call_info["patent_id"],
+                        "prompt": call_info["prompt"][:4000],  # 截断避免超大
+                    })
+                    response_samples.append({
+                        "patent_id": call_info["patent_id"],
+                        "response": call_info["response"][:4000],
+                        "model": call_info["model"],
+                    })
+                    if recorded_model is None:
+                        recorded_model = call_info["model"]
             except Exception as e:
                 failed += 1
                 errors.append({"patent_id": patent_id, "error": str(e)})
@@ -229,6 +266,11 @@ class AIFieldEngine:
             if (idx + 1) % 10 == 0:
                 self.db.commit()
 
+        # P0-15：用实际调用时使用的模型名覆盖任务记录（修复记录与实际不一致的问题）
+        if recorded_model:
+            task.model_name = recorded_model
+        task.request_content = request_samples if request_samples else None
+        task.response_content = response_samples if response_samples else None
         task.status = "completed" if failed == 0 else ("completed_with_errors" if success > 0 else "failed")
         task.completed_at = datetime.now()
         self.db.commit()
@@ -300,17 +342,18 @@ class AIFieldEngine:
         return {}
 
     def quick_analyze_single(self, patent: Patent, input_fields: list[str],
-                             user_prompt: str, extraction_targets: list[dict]) -> dict:
-        """对单条专利执行快速分析，返回 {field_key: value} 映射。
+                             user_prompt: str, extraction_targets: list[dict]) -> tuple[dict, Optional[dict]]:
+        """对单条专利执行快速分析，返回 ({field_key: value}, call_info)。
 
         extraction_targets: [{"name": "技术问题", "target_field_key": "cf_xxx", ...}, ...]
         """
         extraction_names = [t["name"] for t in extraction_targets]
         prompt = self._build_quick_prompt(patent, input_fields, user_prompt, extraction_names)
 
-        llm = self._get_llm()
+        llm, actual_model = self._get_llm()
         response = llm.invoke(prompt)
         raw = response.content.strip()
+        response_model = getattr(response, "response_model", None) or actual_model
         parsed = self._parse_llm_json(raw)
 
         results = {}
@@ -336,7 +379,13 @@ class AIFieldEngine:
             results[field_key] = str(value)
 
         self.db.commit()
-        return results
+        call_info = {
+            "patent_id": patent.id,
+            "prompt": prompt,
+            "response": raw,
+            "model": response_model,
+        }
+        return results, call_info
 
     def quick_analyze_batch(self, task_id: int, patent_ids: list[int],
                             input_fields: list[str], user_prompt: str,
@@ -353,6 +402,10 @@ class AIFieldEngine:
         success = 0
         failed = 0
         errors = []
+        request_samples = []
+        response_samples = []
+        recorded_model = None
+        max_samples = 5
 
         for idx, patent_id in enumerate(patent_ids):
             patent = self.db.query(Patent).filter(Patent.id == patent_id).first()
@@ -360,8 +413,20 @@ class AIFieldEngine:
                 failed += 1
                 continue
             try:
-                self.quick_analyze_single(patent, input_fields, user_prompt, extraction_targets)
+                _, call_info = self.quick_analyze_single(patent, input_fields, user_prompt, extraction_targets)
                 success += 1
+                if call_info and len(request_samples) < max_samples:
+                    request_samples.append({
+                        "patent_id": call_info["patent_id"],
+                        "prompt": call_info["prompt"][:4000],
+                    })
+                    response_samples.append({
+                        "patent_id": call_info["patent_id"],
+                        "response": call_info["response"][:4000],
+                        "model": call_info["model"],
+                    })
+                    if recorded_model is None:
+                        recorded_model = call_info["model"]
             except Exception as e:
                 failed += 1
                 errors.append({"patent_id": patent_id, "error": str(e)})
@@ -373,6 +438,11 @@ class AIFieldEngine:
             if (idx + 1) % 5 == 0:
                 self.db.commit()
 
+        # P0-15：用实际调用时使用的模型名覆盖任务记录
+        if recorded_model:
+            task.model_name = recorded_model
+        task.request_content = request_samples if request_samples else None
+        task.response_content = response_samples if response_samples else None
         task.status = "completed" if failed == 0 else ("completed_with_errors" if success > 0 else "failed")
         task.completed_at = datetime.now()
         self.db.commit()

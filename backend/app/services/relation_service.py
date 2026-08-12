@@ -57,6 +57,46 @@ def _normalize_patent_number(num: str) -> Optional[str]:
     return num
 
 
+# 已知国家代码前缀，用于生成号补全（如 115000123 → CN115000123）
+_COUNTRY_CODES = ("CN", "US", "EP", "JP", "KR", "WO", "DE", "GB", "FR", "TW", "AU", "CA", "IN", "RU", "BR", "ES", "IT", "NL", "SE", "CH", "AT", "BE")
+
+# 文献类型后缀（如 CN115000123A 中的 A，CN115000123B 中的 B）
+_KIND_CODES = {"A", "A1", "A2", "A9", "B1", "B2", "B9", "C", "C1", "C9", "U1", "U8", "Y", "Y1", "Y8", "S"}
+
+
+def _generate_lookup_variants(num: str) -> list[str]:
+    """为一个专利号生成多种查询变体，用于模糊匹配。
+
+    例如 "CN115000123A" 会生成：
+      - "CN115000123A"（原值）
+      - "CN115000123"（去掉文献类型后缀）
+    而 "115000123" 会生成：
+      - "115000123"（原值）
+      - "CN115000123"（补国家码）
+    """
+    variants = [num]
+    # 去掉末尾的文献类型后缀（如 A/B/U/Y）
+    for kind in sorted(_KIND_CODES, key=len, reverse=True):
+        if num.endswith(kind) and len(num) > len(kind) + 5:
+            base = num[:-len(kind)]
+            if base not in variants:
+                variants.append(base)
+            # 同时尝试给去掉后缀的基础号补国家码
+            if not base[:2].isalpha():
+                for cc in _COUNTRY_CODES:
+                    candidate = cc + base
+                    if candidate not in variants:
+                        variants.append(candidate)
+            break
+    # 如果号以纯数字开头，尝试补各国国家码
+    if num[0].isdigit():
+        for cc in _COUNTRY_CODES:
+            candidate = cc + num
+            if candidate not in variants:
+                variants.append(candidate)
+    return variants
+
+
 def parse_patent_numbers(raw: str) -> list[str]:
     """把单元格里的多个专利号解析为列表。
 
@@ -83,6 +123,10 @@ def _find_or_create_patent_by_number(
 ) -> Optional[Patent]:
     """根据申请号或公开号找专利；找不到则创建占位专利。
 
+    增强匹配：用 _generate_lookup_variants 生成多种号格式变体
+    （去文献类型后缀、补国家码），尝试按申请号和公开号逐一匹配，
+    解决两条专利号格式不一致（如 CN115000123A vs CN115000123）导致匹配失败的问题。
+
     占位专利只有 application_number/publication_number + title="待补全"，
     后续导入或外部 API 补全时通过 merge_service 字段级合并。
     返回 None 表示号格式不合法，调用方应跳过。
@@ -93,15 +137,19 @@ def _find_or_create_patent_by_number(
         return None
     number = normalized
 
-    # 优先按申请号找
+    # 生成查询变体：原号、去后缀号、补国家码号
+    variants = _generate_lookup_variants(number)
+
     scope = [Patent.database_id == database_id] if database_id is not None else []
-    existing = db.query(Patent).filter(Patent.application_number == number, *scope).first()
-    if existing:
-        return existing
-    # 再按公开号找
-    existing = db.query(Patent).filter(Patent.publication_number == number, *scope).first()
-    if existing:
-        return existing
+
+    # 逐一按变体尝试匹配申请号和公开号
+    for variant in variants:
+        existing = db.query(Patent).filter(Patent.application_number == variant, *scope).first()
+        if existing:
+            return existing
+        existing = db.query(Patent).filter(Patent.publication_number == variant, *scope).first()
+        if existing:
+            return existing
 
     # 创建占位专利
     placeholder = Patent(

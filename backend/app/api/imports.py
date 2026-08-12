@@ -77,6 +77,7 @@ class ConfirmImportRequest(BaseModel):
     product_id: Optional[int] = None
     project_id: Optional[int] = None
     database_id: Optional[int] = None
+    view_id: Optional[int] = None  # P0-14：导入到指定视图（为空则导入到库的主视图）
 
 
 @router.post("/import/preview")
@@ -213,6 +214,9 @@ def confirm_import(
                     row_dict, mapping, db, custom_fields_cache=custom_fields_cache
                 )
                 patent_data["database_id"] = database_id
+                # P0-14：支持导入到指定视图
+                if req.view_id:
+                    patent_data["view_id"] = req.view_id
                 if req.product_id:
                     patent_data["product_id"] = req.product_id
                 country = patent_data.get("country", "CN")
