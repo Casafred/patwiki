@@ -5,8 +5,9 @@ import json
 from datetime import datetime
 
 from app.database import get_db, SessionLocal
-from app.schemas.schemas import AIProcessRequest, AITaskResponse
+from app.schemas.schemas import AIProcessRequest, AITaskResponse, QuickAnalyzeRequest
 from app.models import AITask, Patent, AIFieldValue, CustomField
+from app.models.enums import CustomFieldType
 from app.config import settings
 from app.core.exceptions import BadRequestException, NotFoundException
 
@@ -116,3 +117,91 @@ def list_ai_fields(db: Session = Depends(get_db)):
         }
         for f in fields
     ]
+
+
+@router.post("/quick-analyze", response_model=AITaskResponse)
+async def quick_analyze(
+    req: QuickAnalyzeRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """AI 快速分析：用户自定义输入列、提示词、抽取目标（已有或新建字段）。
+
+    流程：
+    1. 为每个"新建字段"的抽取目标创建 CustomField 记录
+    2. 创建 AITask，后台批量执行
+    3. 每条专利：构建 prompt → 调用 LLM → 解析 JSON → 写入目标字段
+    """
+    if not req.patent_ids:
+        raise BadRequestException("请至少选择一条专利")
+    if not req.prompt.strip():
+        raise BadRequestException("请填写分析提示词")
+    if not req.extractions:
+        raise BadRequestException("请至少配置一个抽取目标")
+
+    # 为"新建字段"目标创建 CustomField
+    extraction_targets = []
+    for ext in req.extractions:
+        if ext.target_field_key:
+            # 写入已有字段
+            field_key = ext.target_field_key
+        elif ext.new_field_name:
+            # 新建字段
+            field_key = "cf_" + datetime.now().strftime("%Y%m%d%H%M%S") + f"_{abs(hash(ext.new_field_name)) % 10000}"
+            field_type_str = ext.new_field_type or "text"
+            try:
+                field_type = CustomFieldType(field_type_str)
+            except ValueError:
+                field_type = CustomFieldType.TEXT
+            new_field = CustomField(
+                key=field_key,
+                name=ext.new_field_name.strip(),
+                field_type=field_type,
+                is_active=True,
+                sort_order=db.query(CustomField).count(),
+            )
+            db.add(new_field)
+            db.flush()
+        else:
+            continue
+
+        extraction_targets.append({
+            "name": ext.name,
+            "target_field_key": field_key,
+            "new_field_name": ext.new_field_name,
+            "new_field_type": ext.new_field_type,
+        })
+
+    db.commit()
+
+    task = AITask(
+        task_type="quick_analyze",
+        field_key=None,
+        model_name=settings.LLM_MODEL,
+        total_items=len(req.patent_ids),
+        status="pending",
+        config={
+            "patent_ids": req.patent_ids,
+            "input_fields": req.input_fields,
+            "prompt": req.prompt,
+            "extractions": extraction_targets,
+        },
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    def run_quick_analyze():
+        db = SessionLocal()
+        try:
+            from app.ai.fields.engine import AIFieldEngine
+            engine = AIFieldEngine(db)
+            engine.quick_analyze_batch(
+                task.id, req.patent_ids, req.input_fields,
+                req.prompt, extraction_targets,
+            )
+        finally:
+            db.close()
+
+    background_tasks.add_task(run_quick_analyze)
+    return task

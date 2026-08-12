@@ -536,6 +536,14 @@ export const aiApi = {
 
   clearOverride: (patentId: number, fieldKey: string): Promise<{ success: boolean; field_key: string; value: JsonValue | null }> =>
     api.delete(`/patents/${patentId}/ai-values`, { params: { field_key: fieldKey } }),
+
+  quickAnalyze: (params: {
+    patent_ids: number[]
+    input_fields: string[]
+    prompt: string
+    extractions: { name: string; target_field_key?: string; new_field_name?: string; new_field_type?: string }[]
+  }): Promise<AITask> =>
+    api.post('/ai/quick-analyze', params),
 }
 
 export const exportApi = {

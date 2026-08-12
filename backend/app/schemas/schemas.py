@@ -464,6 +464,22 @@ class AIValueOverrideRequest(BaseSchema):
     value: Any
 
 
+class QuickAnalyzeExtraction(BaseSchema):
+    """AI 快速分析的单个抽取目标配置。"""
+    name: str                          # 抽取项名称（也作为 LLM JSON 返回的 key）
+    target_field_key: Optional[str] = None   # 写入已有字段的 key
+    new_field_name: Optional[str] = None     # 新建字段的名称
+    new_field_type: Optional[str] = None     # 新建字段类型（text/textarea/number/...）
+
+
+class QuickAnalyzeRequest(BaseSchema):
+    """AI 快速分析请求：用户自定义输入列、提示词、抽取目标。"""
+    patent_ids: list[int]
+    input_fields: list[str]                          # 作为上下文传入的字段 key
+    prompt: str                                      # 用户自定义提示词
+    extractions: list[QuickAnalyzeExtraction] = []   # 抽取目标列表
+
+
 class StatsResponse(BaseSchema):
     total_patents: int
     by_legal_status: dict[str, int]

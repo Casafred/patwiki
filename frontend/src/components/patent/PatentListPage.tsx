@@ -24,6 +24,7 @@ import FormView from '../views/FormView'
 import GanttView from '../views/GanttView'
 import ExportDialog from '../common/ExportDialog'
 import AttachmentField from '../common/AttachmentField'
+import AIQuickAnalyzeModal from '../ai/AIQuickAnalyzeModal'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -278,6 +279,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [showBulkEdit, setShowBulkEdit] = useState(false)
   const [showBulkTag, setShowBulkTag] = useState(false)
   const [showAIBatch, setShowAIBatch] = useState(false)
+  const [showQuickAnalyze, setShowQuickAnalyze] = useState(false)
+  const [quickAnalyzePatentIds, setQuickAnalyzePatentIds] = useState<number[]>([])
   const [showInsertAIColumn, setShowInsertAIColumn] = useState(false)
   const [insertColType, setInsertColType] = useState<'text' | 'longtext' | 'number' | 'date' | 'select' | 'boolean' | 'attachment' | 'ai_field'>('text')
   const [insertColFrozen, setInsertColFrozen] = useState(false)
@@ -996,20 +999,19 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     return () => clearInterval(interval)
   }, [activeAITasks, taskMeta, loadPatents])
 
-  const handleQuickAI = async (patentId: number) => {
-    if (aiFields.length === 0) {
-      alert('未找到AI字段，请先在设置页配置LLM API')
-      return
-    }
-    const firstAiField = aiFields[0]
-    setAiProcessingRow(patentId)
-    try {
-      await startAITask([patentId], firstAiField.key)
-      // 轮询由统一的 useEffect 接管；当任务完成时 loadPatents() 会刷新数据，
-      // 同时清除 aiProcessingRow（通过下方 useEffect 监听）
-    } catch (error: unknown) {
-      alert('AI处理失败: ' + getErrorMessage(error))
-      setAiProcessingRow(null)
+  const handleQuickAI = (patentId: number) => {
+    // 打开 AI 快速分析弹窗，让用户配置输入列、提示词、抽取目标
+    setQuickAnalyzePatentIds([patentId])
+    setShowQuickAnalyze(true)
+  }
+
+  const handleQuickAnalyzeStarted = (task: AITask) => {
+    setShowQuickAnalyze(false)
+    setActiveAITasks(prev => [...prev, task])
+    setAiPanelOpen(true)
+    // 若是单行触发，设置行 loading
+    if (quickAnalyzePatentIds.length === 1) {
+      setAiProcessingRow(quickAnalyzePatentIds[0])
     }
   }
 
@@ -1750,6 +1752,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           <button className="btn btn-sm btn-secondary" onClick={() => openInsertAIDialog(undefined, 'ai_field')} title="创建 AI 分析列">
             <Icon name="sparkles" /> AI 分析列
           </button>
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => { setQuickAnalyzePatentIds(patents.map(p => p.id)); setShowQuickAnalyze(true) }}
+            title="对当前可见专利执行 AI 快速分析"
+          >
+            <Icon name="sparkles" /> AI 快速分析
+          </button>
           <button className="btn btn-sm btn-secondary datagrid-export-action" onClick={handleExport}>
             <Icon name="download" /> 导出
           </button>
@@ -1811,7 +1820,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           <div className="selection-actions">
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)}>批量编辑</button>
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)}>批量打标签</button>
-            <button className="btn btn-xs btn-primary" onClick={() => setShowAIBatch(true)}>AI批量处理</button>
+            <button className="btn btn-xs btn-primary" onClick={() => { setQuickAnalyzePatentIds(selectedIds); setShowQuickAnalyze(true) }}>
+              <Icon name="sparkles" size={13} /> AI 快速分析
+            </button>
+            <button className="btn btn-xs btn-ghost" onClick={() => setShowAIBatch(true)}>AI 字段批量处理</button>
             <button
               className="btn btn-xs btn-danger"
               onClick={handleBulkDelete}
@@ -2514,6 +2526,16 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             </div>
           </div>
         </Modal>
+      )}
+
+      {showQuickAnalyze && (
+        <AIQuickAnalyzeModal
+          patentIds={quickAnalyzePatentIds}
+          fields={fields}
+          customFields={customFields}
+          onClose={() => setShowQuickAnalyze(false)}
+          onStarted={handleQuickAnalyzeStarted}
+        />
       )}
 
       {showAIBatch && (

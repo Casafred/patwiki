@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar'
 import PatentListPage from './components/patent/PatentListPage'
@@ -114,12 +114,19 @@ function WorkspaceApp() {
   const queryDatabaseId = Number(searchParams.get('db'))
   const requestedDatabaseId = routeDatabaseId || (Number.isInteger(queryDatabaseId) && queryDatabaseId > 0 ? queryDatabaseId : null)
 
+  // 用 ref 保存 URL 中的 view 参数，供视图加载 effect 读取，
+  // 避免 effect 依赖 searchParamsString（每次翻页/搜索/排序 URL 变化都会
+  // 重建 searchParamsString，导致视图加载 effect 重跑 → setViews(新数组) →
+  // URL 同步 effect 写 view=X → searchParamsString 变化 → 视图加载 effect 再跑
+  // → 死循环，表现为切库/翻页时界面疯狂闪动）。
+  const viewParamRef = useRef<string | null>(searchParams.get('view'))
+  viewParamRef.current = searchParams.get('view')
+
   useEffect(() => {
     const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
     if (activeDatabaseId === null) return
-    // 防止快速切库/翻页时旧请求覆盖新状态：
-    // searchParamsString 会让本 effect 在每次 URL 变化（含翻页）时重跑，
-    // 若不取消前一次未完成的请求，后到的旧结果会用旧库的视图覆盖当前视图。
+    // 本 effect 仅在库切换时运行（不依赖 searchParamsString）。
+    // 防止快速切库时旧请求覆盖新状态：cancelled 标志丢弃过时响应。
     let cancelled = false
     const loadViews = async () => {
       try {
@@ -130,7 +137,8 @@ function WorkspaceApp() {
         }
         if (cancelled) return
         setViews(views)
-        const requestedViewId = Number(new URLSearchParams(searchParamsString).get('view'))
+        // 从 ref 读取 URL 中的 view 参数（不引入 searchParamsString 依赖）
+        const requestedViewId = Number(viewParamRef.current)
         const preferred = views.find(view => view.id === requestedViewId)
           || views.find(view => view.is_department_master)
           || views[0]
@@ -144,7 +152,7 @@ function WorkspaceApp() {
     }
     void loadViews()
     return () => { cancelled = true }
-  }, [currentDatabaseId, requestedDatabaseId, searchParamsString, setCurrentViewId, setViews])
+  }, [currentDatabaseId, requestedDatabaseId, setCurrentViewId, setViews])
 
   const loadMeta = useCallback(async () => {
     try {

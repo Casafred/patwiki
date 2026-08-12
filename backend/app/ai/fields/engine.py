@@ -232,3 +232,147 @@ class AIFieldEngine:
         task.status = "completed" if failed == 0 else ("completed_with_errors" if success > 0 else "failed")
         task.completed_at = datetime.now()
         self.db.commit()
+
+    # ------------------------------------------------------------------
+    # AI 快速分析（ad-hoc）：用户自定义输入列、提示词、抽取目标
+    # ------------------------------------------------------------------
+
+    def _build_quick_prompt(self, patent: Patent, input_fields: list[str],
+                           user_prompt: str, extraction_names: list[str]) -> str:
+        """构建快速分析的完整 prompt：用户自定义内容 + 输入列上下文 + JSON 输出指令。"""
+        import re
+
+        # 1) 替换用户 prompt 中的 {field_key} 变量
+        def _replace(m):
+            k = m.group(1).strip()
+            v = self._resolve_field_value(patent, k)
+            return v if v else ""
+
+        text = re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_.]*)\}", _replace, user_prompt)
+
+        # 2) 追加输入列上下文（如果用户 prompt 中没有用变量引用某些列，仍把选中的列内容附上）
+        context_parts = []
+        for field_key in input_fields:
+            val = self._resolve_field_value(patent, field_key)
+            if val:
+                context_parts.append(f"【{field_key}】{val}")
+        if context_parts:
+            text += "\n\n" + "\n".join(context_parts)
+
+        # 3) 追加 JSON 输出指令
+        fields_desc = "\n".join(f'- "{name}"' for name in extraction_names)
+        text += f"""
+
+请以 JSON 对象格式返回分析结果，包含以下字段：
+{fields_desc}
+
+只返回 JSON 对象，不要包含其他内容或 markdown 代码块标记。"""
+        return text
+
+    def _parse_llm_json(self, raw: str) -> dict:
+        """从 LLM 响应中解析 JSON 对象，兼容 markdown 代码块包裹。"""
+        text = raw.strip()
+        # 去除 ```json ... ``` 包裹
+        if text.startswith("```"):
+            lines = text.split("\n")
+            # 去掉首行 ```json 和末行 ```
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # 兜底：正则提取第一个 {...} 块
+        import re
+        m = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+        if m:
+            try:
+                obj = json.loads(m.group(0))
+                if isinstance(obj, dict):
+                    return obj
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return {}
+
+    def quick_analyze_single(self, patent: Patent, input_fields: list[str],
+                             user_prompt: str, extraction_targets: list[dict]) -> dict:
+        """对单条专利执行快速分析，返回 {field_key: value} 映射。
+
+        extraction_targets: [{"name": "技术问题", "target_field_key": "cf_xxx", ...}, ...]
+        """
+        extraction_names = [t["name"] for t in extraction_targets]
+        prompt = self._build_quick_prompt(patent, input_fields, user_prompt, extraction_names)
+
+        llm = self._get_llm()
+        response = llm.invoke(prompt)
+        raw = response.content.strip()
+        parsed = self._parse_llm_json(raw)
+
+        results = {}
+        for target in extraction_targets:
+            name = target["name"]
+            value = parsed.get(name, "")
+            if isinstance(value, (list, dict)):
+                value = json.dumps(value, ensure_ascii=False)
+            field_key = target.get("target_field_key")
+            if not field_key:
+                continue
+
+            # 写入：AI 字段 → ai_fields JSON；普通自定义字段 → custom_fields JSON
+            field_def = self.db.query(CustomField).filter(CustomField.key == field_key).first()
+            if field_def and field_def.field_type == "ai_field":
+                current = dict(patent.ai_fields or {})
+                current[field_key] = str(value)
+                patent.ai_fields = current
+            else:
+                current = dict(patent.custom_fields or {})
+                current[field_key] = str(value)
+                patent.custom_fields = current
+            results[field_key] = str(value)
+
+        self.db.commit()
+        return results
+
+    def quick_analyze_batch(self, task_id: int, patent_ids: list[int],
+                            input_fields: list[str], user_prompt: str,
+                            extraction_targets: list[dict]):
+        """批量快速分析：创建新字段 → 逐条处理 → 更新任务进度。"""
+        task = self.db.query(AITask).filter(AITask.id == task_id).first()
+        if not task:
+            return
+
+        task.status = "processing"
+        task.started_at = datetime.now()
+        self.db.commit()
+
+        success = 0
+        failed = 0
+        errors = []
+
+        for idx, patent_id in enumerate(patent_ids):
+            patent = self.db.query(Patent).filter(Patent.id == patent_id).first()
+            if not patent:
+                failed += 1
+                continue
+            try:
+                self.quick_analyze_single(patent, input_fields, user_prompt, extraction_targets)
+                success += 1
+            except Exception as e:
+                failed += 1
+                errors.append({"patent_id": patent_id, "error": str(e)})
+
+            task.processed_items = idx + 1
+            task.success_count = success
+            task.failed_count = failed
+            task.errors = errors if errors else None
+            if (idx + 1) % 5 == 0:
+                self.db.commit()
+
+        task.status = "completed" if failed == 0 else ("completed_with_errors" if success > 0 else "failed")
+        task.completed_at = datetime.now()
+        self.db.commit()
