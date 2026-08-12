@@ -234,28 +234,46 @@ def confirm_import(
         all_app_nums: dict[tuple[str, str], Patent] = {}
         all_pub_nums: dict[tuple[str, str], Patent] = {}
 
-        app_nums_to_check = list({(rd["app_num"], rd["country"]) for rd in rows_data if rd["app_num"]})
-        pub_nums_to_check = list({(rd["pub_num"], rd["country"]) for rd in rows_data if rd["pub_num"]})
+        # SQLite 单条 SQL 的表达式树深度上限约为 1000；当导入数千行时，
+        # 直接拼接 `or_(num==x AND country==y, ...)` 会触发
+        # "Expression tree is too large (maximum depth 1000)"。
+        # 改为：先用 IN 子句分批捞候选记录（每批 ≤ 500 个参数，远低于 SQLite
+        # SQLITE_MAX_VARIABLE_NUMBER 默认 999 上限），再在内存里按 (num, country)
+        # 精确匹配，避免 SQL 表达式爆炸。
+        app_pairs = {(rd["app_num"], rd["country"]) for rd in rows_data if rd["app_num"]}
+        pub_pairs = {(rd["pub_num"], rd["country"]) for rd in rows_data if rd["pub_num"]}
 
-        if app_nums_to_check:
-            app_conditions = [
-                (Patent.application_number == num) & (Patent.country == ctry)
-                for num, ctry in app_nums_to_check
-            ]
-            existing_patents = db.query(Patent).filter(Patent.database_id == database_id, or_(*app_conditions)).all()
-            for p in existing_patents:
-                if p.application_number:
-                    all_app_nums[(p.application_number.strip(), p.country or "CN")] = p
+        DEDUP_CHUNK = 500
 
-        if pub_nums_to_check:
-            pub_conditions = [
-                (Patent.publication_number == num) & (Patent.country == ctry)
-                for num, ctry in pub_nums_to_check
-            ]
-            existing_patents_pub = db.query(Patent).filter(Patent.database_id == database_id, or_(*pub_conditions)).all()
-            for p in existing_patents_pub:
-                if p.publication_number:
-                    all_pub_nums[(p.publication_number.strip(), p.country or "CN")] = p
+        if app_pairs:
+            app_nums_set = {num for num, _ in app_pairs}
+            app_nums_list = list(app_nums_set)
+            for i in range(0, len(app_nums_list), DEDUP_CHUNK):
+                chunk = app_nums_list[i:i + DEDUP_CHUNK]
+                existing_patents = db.query(Patent).filter(
+                    Patent.database_id == database_id,
+                    Patent.application_number.in_(chunk),
+                ).all()
+                for p in existing_patents:
+                    if p.application_number:
+                        key = (p.application_number.strip(), p.country or "CN")
+                        if key in app_pairs:
+                            all_app_nums[key] = p
+
+        if pub_pairs:
+            pub_nums_set = {num for num, _ in pub_pairs}
+            pub_nums_list = list(pub_nums_set)
+            for i in range(0, len(pub_nums_list), DEDUP_CHUNK):
+                chunk = pub_nums_list[i:i + DEDUP_CHUNK]
+                existing_patents_pub = db.query(Patent).filter(
+                    Patent.database_id == database_id,
+                    Patent.publication_number.in_(chunk),
+                ).all()
+                for p in existing_patents_pub:
+                    if p.publication_number:
+                        key = (p.publication_number.strip(), p.country or "CN")
+                        if key in pub_pairs:
+                            all_pub_nums[key] = p
 
         print(f"[PatWiki] 预查重完成: 库中已有申请号记录 {len(all_app_nums)} 条, 公开号记录 {len(all_pub_nums)} 条", flush=True)
 

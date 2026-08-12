@@ -116,12 +116,18 @@ function WorkspaceApp() {
   useEffect(() => {
     const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
     if (activeDatabaseId === null) return
+    // 防止快速切库/翻页时旧请求覆盖新状态：
+    // searchParamsString 会让本 effect 在每次 URL 变化（含翻页）时重跑，
+    // 若不取消前一次未完成的请求，后到的旧结果会用旧库的视图覆盖当前视图。
+    let cancelled = false
     const loadViews = async () => {
       try {
         let views = await viewApi.list(activeDatabaseId)
+        if (cancelled) return
         if (views.length === 0) {
           views = [await viewApi.master(activeDatabaseId)]
         }
+        if (cancelled) return
         setViews(views)
         const requestedViewId = Number(new URLSearchParams(searchParamsString).get('view'))
         const preferred = views.find(view => view.id === requestedViewId)
@@ -129,12 +135,14 @@ function WorkspaceApp() {
           || views[0]
         setCurrentViewId(preferred?.id ?? null)
       } catch (e) {
+        if (cancelled) return
         console.error('Failed to load views:', e)
         setViews([])
         setCurrentViewId(null)
       }
     }
     void loadViews()
+    return () => { cancelled = true }
   }, [currentDatabaseId, requestedDatabaseId, searchParamsString, setCurrentViewId, setViews])
 
   const loadMeta = useCallback(async () => {

@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback } from 'react'
+import { Fragment, useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import {
   patentService as patentApi,
@@ -325,6 +325,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
 
+  // 用于丢弃快速翻页/切库时旧请求的响应：每次发起 loadPatents 自增，
+  // 返回时若 ID 不等于最新值，说明已有更新请求在路上，直接丢弃结果。
+  const loadPatentsRequestId = useRef(0)
+
   const loadRelationData = useCallback(async () => {
     const relationFields = fields.filter(field => ['link', 'lookup', 'rollup'].includes(field.field_type))
     const recordIds = patents.map(patent => patent.id)
@@ -398,6 +402,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   }, [])
 
   const loadPatents = useCallback(async () => {
+    const myRequestId = ++loadPatentsRequestId.current
     setLoading(true)
     try {
       const viewFilters: JsonObject = {}
@@ -405,21 +410,38 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         if (value) viewFilters[key] = { contains: value }
       })
 
+      // 视图查询路径：仅当 viewId 与当前库匹配时才走视图接口。
+      // 若视图尚未加载完成（views 为旧库数据）或 viewId 与当前库不一致，
+      // 不再清空表格——而是降级走大表直查，避免“切库/翻页后数据消失”。
+      // 这样在 loadViews 异步加载新视图的间隙，用户仍能看到目标库的数据。
       if (viewId !== null) {
         const activeViewForLoad = views.find(view => view.id === viewId)
-        if (!activeViewForLoad || activeViewForLoad.database_id !== activeDatabaseId) {
+        const viewMatchesDb = !!activeViewForLoad && activeViewForLoad.database_id === activeDatabaseId
+        if (viewMatchesDb) {
+          if (activeViewForLoad?.layout_type === 'kanban') {
+            setGroupedGroups([])
+            setPatents([], 0)
+            return
+          }
+          const groupFields = getViewGroupFields(activeViewForLoad!)
+          if (groupFields.length > 0) {
+            const result = await viewApi.grouped(viewId, {
+              page,
+              page_size: pageSize,
+              search: searchText || undefined,
+              sort_by: sortField,
+              sort_order: sortOrder,
+              extra_filters: viewFilters,
+            })
+            if (myRequestId !== loadPatentsRequestId.current) return
+            setGroupedGroups(result.groups)
+            setCollapsedGroupKeys(new Set(getDefaultCollapsedKeys(result.groups)))
+            setPatents(flattenGroups(result.groups), result.total)
+            return
+          }
           setGroupedGroups([])
-          setPatents([], 0)
-          return
-        }
-        if (activeViewForLoad?.layout_type === 'kanban') {
-          setGroupedGroups([])
-          setPatents([], 0)
-          return
-        }
-        const groupFields = getViewGroupFields(activeViewForLoad)
-        if (groupFields.length > 0) {
-          const result = await viewApi.grouped(viewId, {
+          setCollapsedGroupKeys(new Set())
+          const result = await viewApi.listPatents(viewId, {
             page,
             page_size: pageSize,
             search: searchText || undefined,
@@ -427,23 +449,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             sort_order: sortOrder,
             extra_filters: viewFilters,
           })
-          setGroupedGroups(result.groups)
-          setCollapsedGroupKeys(new Set(getDefaultCollapsedKeys(result.groups)))
-          setPatents(flattenGroups(result.groups), result.total)
+          if (myRequestId !== loadPatentsRequestId.current) return
+          setPatents(result.items as Patent[], result.total)
           return
         }
-        setGroupedGroups([])
-        setCollapsedGroupKeys(new Set())
-        const result = await viewApi.listPatents(viewId, {
-          page,
-          page_size: pageSize,
-          search: searchText || undefined,
-          sort_by: sortField,
-          sort_order: sortOrder,
-          extra_filters: viewFilters,
-        })
-        setPatents(result.items as Patent[], result.total)
-        return
+        // 视图不匹配：降级到大表直查，避免数据消失
       }
 
       const params: JsonObject = {
@@ -473,11 +483,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       }
 
       const result = await patentApi.list(params)
+      if (myRequestId !== loadPatentsRequestId.current) return
       setPatents(result.items, result.total)
     } catch (e) {
+      if (myRequestId !== loadPatentsRequestId.current) return
       console.error('Failed to load patents:', e)
     } finally {
-      setLoading(false)
+      if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
   }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, views, setPatents, setLoading])
 

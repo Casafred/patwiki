@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import Optional
-from pydantic import BaseModel
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict
 
 from app.database import get_db
 from app.models import User, DatabaseMembership, PatentDatabase
@@ -29,16 +30,18 @@ class UserCreate(BaseModel):
 
 
 class UserOut(BaseModel):
+    # model_config 启用 from_attributes，便于直接从 ORM User 序列化；
+    # created_at 在 ORM 中是 datetime，必须用 datetime 类型，否则 Pydantic v2
+    # 在 lax 模式下会拒绝把 datetime 强转为 str，导致 ResponseValidationError。
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
-    display_name: Optional[str]
-    email: Optional[str]
+    display_name: Optional[str] = None
+    email: Optional[str] = None
     role: str
     is_active: bool
-    created_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    created_at: Optional[datetime] = None
 
 
 class MemberAdd(BaseModel):
@@ -48,15 +51,14 @@ class MemberAdd(BaseModel):
 
 
 class MemberOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     username: str
-    display_name: Optional[str]
+    display_name: Optional[str] = None
     role: str
-    created_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    created_at: Optional[datetime] = None
 
 
 class MemberUpdate(BaseModel):
