@@ -519,6 +519,23 @@ input, select, textarea {
   background: #f9fafb;
 }
 
+/* 列拖拽排序视觉反馈 */
+.data-grid th.col-dragging {
+  opacity: 0.5;
+  background: #fef3c7 !important;
+}
+
+.data-grid th.col-drag-over {
+  background: #dbeafe !important;
+  box-shadow: inset -2px 0 0 #2563eb, inset 2px 0 0 #2563eb;
+}
+
+.data-grid th.col-rownum,
+.data-grid td.col-rownum {
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
 .data-grid td.cell-editable:hover {
   background: #f0f7ff;
   cursor: text;

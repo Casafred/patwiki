@@ -357,6 +357,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [placeholderLoading, setPlaceholderLoading] = useState(false)
   const [placeholderFilter, setPlaceholderFilter] = useState<'all' | 'placeholder' | 'normal'>('all')
   const [rebuildFamilyLoading, setRebuildFamilyLoading] = useState(false)
+  // 列拖拽排序
+  const [draggedFieldKey, setDraggedFieldKey] = useState<string | null>(null)
+  const [dragOverFieldKey, setDragOverFieldKey] = useState<string | null>(null)
+  // ref 同步标记：是否正在调整列宽（避免 dragstart 与 resize 冲突）
+  const isResizingRef = useRef(false)
 
   // 用于丢弃快速翻页/切库时旧请求的响应：每次发起 loadPatents 自增，
   // 返回时若 ID 不等于最新值，说明已有更新请求在路上，直接丢弃结果。
@@ -420,6 +425,22 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       fieldsData.forEach(field => {
         if (forcedVisible.has(field.key)) field.visible = true
       })
+      // 应用本地持久化的字段顺序（仅大表模式生效；视图模式由 column_config.order 排序）
+      try {
+        const orderRaw = localStorage.getItem('patwiki_field_order')
+        if (orderRaw) {
+          const savedOrder = JSON.parse(orderRaw) as unknown
+          if (Array.isArray(savedOrder)) {
+            const orderMap = new Map<string, number>()
+            savedOrder.map(String).forEach((k, i) => orderMap.set(k, i))
+            fieldsData.sort((a, b) => {
+              const ai = orderMap.has(a.key) ? orderMap.get(a.key)! : Number.MAX_SAFE_INTEGER
+              const bi = orderMap.has(b.key) ? orderMap.get(b.key)! : Number.MAX_SAFE_INTEGER
+              return ai - bi
+            })
+          }
+        }
+      } catch (error) { console.error('Failed to read field order:', error) }
       setFields(fieldsData)
       try {
         const savedFrozen = JSON.parse(localStorage.getItem('patwiki_frozen_fields') || 'null') as unknown
@@ -676,6 +697,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         })
       }
       setResizing(null)
+      isResizingRef.current = false
     }
     if (resizing) {
       document.addEventListener('pointermove', handlePointerMove)
@@ -918,6 +940,65 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     } catch (error: unknown) {
       alert('保存失败: ' + getErrorMessage(error))
     }
+  }
+
+  // 列拖拽：把 draggedKey 移动到 targetKey 之前（before=true）或之后（before=false）
+  const handleColumnReorder = async (draggedKey: string, targetKey: string, before: boolean) => {
+    if (draggedKey === targetKey) return
+    // 当前可见字段顺序
+    const currentOrder = visibleFields.map(f => f.key)
+    const draggedIdx = currentOrder.indexOf(draggedKey)
+    const targetIdx = currentOrder.indexOf(targetKey)
+    if (draggedIdx === -1 || targetIdx === -1) return
+    // 重组 visibleFields
+    const reordered = currentOrder.filter(k => k !== draggedKey)
+    let insertAt = reordered.indexOf(targetKey)
+    if (!before) insertAt += 1
+    if (insertAt < 0) insertAt = 0
+    reordered.splice(insertAt, 0, draggedKey)
+
+    // 视图模式：用 column_config.order 持久化
+    if (activeView) {
+      try {
+        const existing = activeView.column_config || []
+        const configByKey = new Map(existing.map(c => [c.key, c]))
+        const newConfig = reordered.map((key, i) => ({
+          key,
+          visible: configByKey.get(key)?.visible ?? true,
+          width: configByKey.get(key)?.width,
+          order: i,
+        }))
+        // 把不在 reordered 中的旧列也保留（隐藏列），追加在末尾
+        existing.forEach(c => {
+          if (!reordered.includes(c.key)) {
+            newConfig.push({ ...c, order: newConfig.length })
+          }
+        })
+        const updated = await viewApi.update(activeView.id, { column_config: newConfig })
+        setViews(views.map(v => v.id === activeView.id ? updated : v))
+      } catch (error: unknown) {
+        alert('保存列顺序失败: ' + getErrorMessage(error))
+      }
+      return
+    }
+
+    // 大表模式：本地持久化全字段顺序
+    // 把 reordered 中没出现但 fields 中有的字段，按原顺序追加在末尾
+    const allKeys = fields.map(f => f.key)
+    const fullOrder = [...reordered, ...allKeys.filter(k => !reordered.includes(k))]
+    try {
+      localStorage.setItem('patwiki_field_order', JSON.stringify(fullOrder))
+    } catch (error) { console.error('Failed to save field order:', error) }
+    // 重新排列本地 fields state（不影响 visible）
+    setFields(prev => {
+      const orderMap = new Map<string, number>()
+      fullOrder.forEach((k, i) => orderMap.set(k, i))
+      return [...prev].sort((a, b) => {
+        const ai = orderMap.has(a.key) ? orderMap.get(a.key)! : Number.MAX_SAFE_INTEGER
+        const bi = orderMap.has(b.key) ? orderMap.get(b.key)! : Number.MAX_SAFE_INTEGER
+        return ai - bi
+      })
+    })
   }
 
   const handleToggleFieldVisible = (fieldKey: string) => {
@@ -2054,8 +2135,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   const hasFilter = !!filterValues[field.key]
                   const isFilterable = field.filterable !== false
                   const isFrozen = frozenFields.has(field.key)
-                  // 计算冻结列的 left 偏移：checkbox(40) + 操作(70) + 前面所有冻结列宽度
-                  let leftOffset = 40 + 70
+                  // 计算冻结列的 left 偏移：序号(50) + checkbox(40) + 操作(70) + 前面所有冻结列宽度
+                  let leftOffset = 50 + 40 + 70
                   if (isFrozen) {
                     for (const f of visibleFields) {
                       if (f.key === field.key) break
@@ -2067,15 +2148,48 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   return (
                     <th
                       key={field.key}
-                      className={`${isFrozen ? 'col-frozen' : ''} ${sortField === field.key ? 'col-sorted' : ''} ${hasFilter ? 'col-filtered' : ''}`}
+                      className={`${isFrozen ? 'col-frozen' : ''} ${sortField === field.key ? 'col-sorted' : ''} ${hasFilter ? 'col-filtered' : ''} ${dragOverFieldKey === field.key ? 'col-drag-over' : ''} ${draggedFieldKey === field.key ? 'col-dragging' : ''}`}
                       style={{
                         width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
                         minWidth: 80,
                         ...(isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 15, background: '#f9fafb' } : {}),
                       }}
+                      onDragOver={(e) => {
+                        if (!draggedFieldKey) return
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        if (dragOverFieldKey !== field.key) setDragOverFieldKey(field.key)
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverFieldKey === field.key) setDragOverFieldKey(null)
+                      }}
+                      onDrop={(e) => {
+                        if (!draggedFieldKey) return
+                        e.preventDefault()
+                        const dragged = draggedFieldKey
+                        setDragOverFieldKey(null)
+                        setDraggedFieldKey(null)
+                        if (!dragged || dragged === field.key) return
+                        // 根据鼠标位置决定插入到目标列的左侧还是右侧
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        const before = (e.clientX - rect.left) < rect.width / 2
+                        void handleColumnReorder(dragged, field.key, before)
+                      }}
                       onContextMenu={(e) => handleContextMenu(e, 'header', { fieldKey: field.key })}
                     >
                       <div
+                        draggable
+                        onDragStart={(e) => {
+                          // 在 col-resize-handle 上 pointerdown 时不启动拖拽
+                          if (isResizingRef.current) { e.preventDefault(); return }
+                          setDraggedFieldKey(field.key)
+                          e.dataTransfer.effectAllowed = 'move'
+                          try { e.dataTransfer.setData('text/plain', field.key) } catch { /* ignore */ }
+                        }}
+                        onDragEnd={() => {
+                          setDraggedFieldKey(null)
+                          setDragOverFieldKey(null)
+                        }}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -2144,6 +2258,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                         onPointerDown={(e) => {
                           e.preventDefault()
                           e.stopPropagation()
+                          isResizingRef.current = true
                           setResizing({
                             fieldKey: field.key,
                             startX: e.clientX,
@@ -2299,7 +2414,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       return next
                     })}
                   >
-                    <td colSpan={visibleFields.length + 2} style={{ padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                    <td colSpan={visibleFields.length + 3} style={{ padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
                       <span style={{ display: 'inline-block', width: 18, color: '#64748b' }}>{collapsedGroupKeys.has(groupHeader.id) ? '›' : '⌄'}</span>
                       {groupHeader.label}
                       <span style={{ marginLeft: 8, color: '#94a3b8', fontWeight: 400 }}>{groupHeader.count} 条</span>
@@ -2321,7 +2436,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id })}
                   style={{ cursor: 'pointer', background: rowBg }}
                 >
-                  <td className="col-checkbox">
+                  <td className="col-rownum" style={{ width: 50, minWidth: 50, maxWidth: 50, position: 'sticky', left: 0, zIndex: 6, background: rowBg || '#fff', padding: '0 6px', textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
+                    {(page - 1) * pageSize + rowIdx + 1}
+                  </td>
+                  <td className="col-checkbox" style={{ width: 40, minWidth: 40, maxWidth: 40, position: 'sticky', left: 50, zIndex: 6, background: rowBg || '#fff' }}>
                     <input
                       type="checkbox"
                       checked={selectedIds.includes(p.id)}
@@ -2330,7 +2448,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                     />
                     {familyBadge}
                   </td>
-                  <td className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
+                  <td className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 90, zIndex: 6, background: rowBg || '#fff', padding: '4px 6px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
                       <button
                         className="cell-action-btn"
@@ -2361,7 +2479,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   </td>
                   {visibleFields.map(field => {
                     const isFrozen = frozenFields.has(field.key)
-                    let leftOffset = 40 + 70
+                    let leftOffset = 50 + 40 + 70
                     if (isFrozen) {
                       for (const f of visibleFields) {
                         if (f.key === field.key) break
@@ -3459,7 +3577,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           >
             <div className="modal-header">
               <h3>占位专利统计筛查</h3>
-              <button className="modal-close-btn" onClick={() => setShowPlaceholderStats(false)}>×</button>
+              <button className="modal-close" onClick={() => setShowPlaceholderStats(false)}>×</button>
             </div>
             <div className="modal-body" style={{ overflowY: 'auto' }}>
               <p className="modal-warning-subtext" style={{ marginBottom: 8 }}>
