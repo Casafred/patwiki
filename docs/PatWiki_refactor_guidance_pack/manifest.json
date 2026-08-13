@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-08-13",
+  "purpose": "PatWiki IP business data model refactor guidance",
+  "files": [
+    "README.md",
+    "15-domain-model-v2.md",
+    "16-field-governance-registry.md",
+    "17-risk-search-protection-workflows.md",
+    "18-security-audit-snapshot.md",
+    "19-ai-automation-mcp.md",
+    "20-migration-roadmap.md",
+    "schema-v2-draft.sql"
+  ],
+  "status": "design-review-draft",
+  "note": "schema-v2-draft.sql is conceptual and should be translated into SQLAlchemy/Alembic migrations after review."
+}
