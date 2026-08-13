@@ -127,6 +127,11 @@ def _find_or_create_patent_by_number(
     （去文献类型后缀、补国家码），尝试按申请号和公开号逐一匹配，
     解决两条专利号格式不一致（如 CN115000123A vs CN115000123）导致匹配失败的问题。
 
+    注意：patents 表的 UNIQUE 约束是 (application_number, country) 和
+    (publication_number, country)，不包含 database_id。因此查找时必须
+    跨所有库查询，否则会因找不到其他库的同号专利而尝试创建重复记录，
+    触发 IntegrityError。
+
     占位专利只有 application_number/publication_number + title="待补全"，
     后续导入或外部 API 补全时通过 merge_service 字段级合并。
     返回 None 表示号格式不合法，调用方应跳过。
@@ -140,14 +145,28 @@ def _find_or_create_patent_by_number(
     # 生成查询变体：原号、去后缀号、补国家码号
     variants = _generate_lookup_variants(number)
 
-    scope = [Patent.database_id == database_id] if database_id is not None else []
-
-    # 逐一按变体尝试匹配申请号和公开号
+    # UNIQUE 约束是全局的（不含 database_id），查找也必须全局查找。
+    # 先在当前库内找（优先复用同库专利），找不到再跨库找。
     for variant in variants:
-        existing = db.query(Patent).filter(Patent.application_number == variant, *scope).first()
+        # 优先在当前库内匹配
+        if database_id is not None:
+            existing = db.query(Patent).filter(
+                Patent.database_id == database_id,
+                Patent.application_number == variant,
+            ).first()
+            if existing:
+                return existing
+            existing = db.query(Patent).filter(
+                Patent.database_id == database_id,
+                Patent.publication_number == variant,
+            ).first()
+            if existing:
+                return existing
+        # 跨库匹配（避免 UNIQUE 约束冲突）
+        existing = db.query(Patent).filter(Patent.application_number == variant).first()
         if existing:
             return existing
-        existing = db.query(Patent).filter(Patent.publication_number == variant, *scope).first()
+        existing = db.query(Patent).filter(Patent.publication_number == variant).first()
         if existing:
             return existing
 

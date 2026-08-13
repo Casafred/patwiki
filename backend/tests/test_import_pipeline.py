@@ -88,6 +88,40 @@ class ImportPipelineTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
+    def test_find_or_create_patent_finds_cross_database_match(self):
+        # 回归：UNIQUE 约束 (publication_number, country) 不含 database_id，
+        # 但 _find_or_create_patent_by_number 之前按 database_id 过滤查找，
+        # 导致同号专利在其他库存在时尝试创建重复记录，触发 IntegrityError。
+        from app.services.relation_service import _find_or_create_patent_by_number
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        try:
+            db1 = PatentDatabase(name="库1")
+            db2 = PatentDatabase(name="库2")
+            existing = Patent(
+                title="已有专利",
+                publication_number="DE102023212809A1",
+                country="DE",
+                database=db1,
+            )
+            db.add_all([db1, db2, existing])
+            db.commit()
+
+            # 在 db2 中查找同号专利——应找到 db1 中的已有记录，不创建占位
+            found = _find_or_create_patent_by_number(db, "DE102023212809A1", database_id=db2.id)
+            self.assertIsNotNone(found)
+            self.assertEqual(found.id, existing.id)
+            # 不应创建新专利
+            self.assertEqual(db.query(Patent).count(), 1)
+        finally:
+            db.close()
+            engine.dispose()
+
     def test_mapping_validation_allows_skipped_columns_and_proposed_keys(self):
         engine = create_engine(
             "sqlite://",

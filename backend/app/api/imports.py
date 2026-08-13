@@ -412,7 +412,10 @@ def confirm_import(
                             family_links += relation_result["family_links"]
                             citation_links += relation_result["citation_links"]
                         except Exception as rel_err:
+                            # 关系处理失败后 session 处于 rollback-pending 状态，
+                            # 必须回滚才能继续后续操作，否则会级联抛出 PendingRollbackError。
                             print(f"[PatWiki] 关系处理警告(patent_id={cp.id}): {rel_err}", flush=True)
+                            db.rollback()
                     db.commit()
                     pending_relations.clear()
                     progress = i + 1
@@ -435,6 +438,7 @@ def confirm_import(
                 citation_links += relation_result["citation_links"]
             except Exception as rel_err:
                 print(f"[PatWiki] 关系处理警告(patent_id={cp.id}): {rel_err}", flush=True)
+                db.rollback()
         db.commit()
 
         print(f"[PatWiki] 导入完成: 新增:{inserted} 更新:{updated} 跳过:{skipped} 错误:{error_count}", flush=True)
@@ -467,6 +471,10 @@ def confirm_import(
             db.add(batch)
             db.commit()
     except Exception as exc:
+        # session 可能因前面的 IntegrityError 处于 rollback-pending 状态，
+        # 必须先 rollback 才能写入批次失败状态，否则访问 batch 属性会再次
+        # 抛出 PendingRollbackError，导致批次永远停留在 PROCESSING。
+        db.rollback()
         if batch is not None:
             batch.status = ImportBatchStatus.FAILED
             batch.processed_rows = min(batch.total_rows or 0, inserted + updated + skipped + error_count)
