@@ -88,6 +88,64 @@ class ImportPipelineTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
+    def test_family_hash_consistent_across_rows_with_different_current_number(self):
+        # 回归：同一组专利无论从哪一行的同族列触发，都应得到相同的 family_id。
+        # 旧算法用号字符串做哈希，current_num 取 application_number or publication_number，
+        # 导致 CN115319697B 行和 US12643214B2 行产生不同的 family hash，
+        # 同族成员被拆到不同的 PatentFamily，图谱看不到连接。
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        try:
+            database = PatentDatabase(name="测试库")
+            # CN115319697B 有 application_number（不同于 publication_number）
+            patent_a = Patent(
+                title="专利A",
+                application_number="CN202210123456",
+                publication_number="CN115319697B",
+                country="CN",
+                database=database,
+            )
+            # US12643214B2 有 application_number（不同于 publication_number）
+            patent_b = Patent(
+                title="专利B",
+                application_number="US18123456",
+                publication_number="US12643214B2",
+                country="US",
+                database=database,
+            )
+            db.add_all([database, patent_a, patent_b])
+            db.commit()
+
+            # 从 A 的行触发：同族列列出 B 的公开号
+            family_numbers_a = ["US12643214B2", "CN115319696A"]
+            result_a = process_family_members(
+                db, patent_a, family_numbers_a, database_id=database.id,
+            )
+            db.commit()
+            family_id_a = patent_a.family_id
+
+            # 从 B 的行触发：同族列列出 A 的公开号
+            family_numbers_b = ["CN115319697B", "CN115319696A"]
+            result_b = process_family_members(
+                db, patent_b, family_numbers_b, database_id=database.id,
+            )
+            db.commit()
+            family_id_b = patent_b.family_id
+
+            # 关键断言：两次处理应得到相同的 family_id
+            self.assertEqual(family_id_a, family_id_b,
+                "同一组专利从不同行触发时应得到相同的 family_id")
+            # A 和 B 应在同一个族中
+            self.assertEqual(patent_a.family_id, patent_b.family_id)
+        finally:
+            db.close()
+            engine.dispose()
+
     def test_find_or_create_patent_finds_cross_database_match(self):
         # 回归：UNIQUE 约束 (publication_number, country) 不含 database_id，
         # 但 _find_or_create_patent_by_number 之前按 database_id 过滤查找，

@@ -184,11 +184,44 @@ def _find_or_create_patent_by_number(
     return placeholder
 
 
+def _get_or_create_family_by_ids(
+    db: Session,
+    member_ids: list[int],
+    description_numbers: Optional[list[str]] = None,
+) -> PatentFamily:
+    """根据成员专利 ID 列表的哈希找/创建 PatentFamily。
+
+    用 patent ID 而非号字符串做哈希，确保同一组专利无论从哪一行触发
+    都能得到相同的 family_id，避免因 application_number / publication_number
+    不同导致同一族被拆成多个 PatentFamily。
+    """
+    sorted_ids = sorted(set(member_ids))
+    family_id_str = "FAM_" + hashlib.md5("|".join(str(i) for i in sorted_ids).encode("utf-8")).hexdigest()[:12]
+    existing = db.query(PatentFamily).filter(PatentFamily.family_id == family_id_str).first()
+    if existing:
+        return existing
+    desc_nums = description_numbers or []
+    label = ', '.join(desc_nums[:5]) + ('...' if len(desc_nums) > 5 else '')
+    family = PatentFamily(
+        family_id=family_id_str,
+        family_type="simple",
+        description=f"由同族号列表自动识别：{label}" if label else f"由 {len(sorted_ids)} 个成员组成的同族",
+    )
+    db.add(family)
+    db.flush()
+    return family
+
+
 def _get_or_create_family(
     db: Session,
     member_numbers: list[str],
 ) -> PatentFamily:
-    """根据成员号列表的哈希找/创建 PatentFamily。"""
+    """[已弃用] 根据成员号列表的哈希找/创建 PatentFamily。
+
+    保留是为了向后兼容；新代码应使用 _get_or_create_family_by_ids。
+    号字符串做哈希不稳定：同一组专利从不同行触发时，current_num 可能
+    取到 application_number 或 publication_number，导致哈希不一致。
+    """
     sorted_numbers = sorted(set(member_numbers))
     family_id_str = "FAM_" + hashlib.md5("|".join(sorted_numbers).encode("utf-8")).hexdigest()[:12]
     existing = db.query(PatentFamily).filter(PatentFamily.family_id == family_id_str).first()
@@ -210,42 +243,55 @@ def process_family_members(
     family_numbers: list[str],
     database_id: Optional[int] = None,
 ) -> dict:
-    """处理同族号列表：找/建 PatentFamily，把所有成员专利的 family_id 指向同一族。
+    """处理同族号列表：找/建成员专利，再用成员 ID 哈希建 PatentFamily，
+    把所有成员的 family_id 指向同一族。
+
+    关键改进：family hash 基于 patent ID（稳定的数据库主键），而非号字符串。
+    这样无论从哪一行的同族列触发，同一组专利始终得到相同的 family_id。
 
     返回: {"family_id": int|None, "members_created": int, "members_linked": int}
     """
     if not family_numbers:
         return {"family_id": None, "members_created": 0, "members_linked": 0}
 
-    # 包含当前专利号（若有）
-    current_num = current_patent.application_number or current_patent.publication_number
-    all_numbers = list(family_numbers)
-    if current_num and current_num not in all_numbers:
-        all_numbers.append(current_num)
-
-    family = _get_or_create_family(db, all_numbers)
-
+    # 第一步：找/建所有成员专利，收集它们的 ID
+    members: list[Patent] = [current_patent]
+    all_numbers_for_desc: list[str] = []
     members_created = 0
-    members_linked = 0
 
     for num in family_numbers:
         num = num.strip()
         if not num:
             continue
-        # 找/建成员专利（号格式不合法时返回 None，跳过）
+        all_numbers_for_desc.append(num)
         member = _find_or_create_patent_by_number(db, num, database_id)
         if member is None:
             continue
         if member.id is None:
             members_created += 1
+        if member not in members:
+            members.append(member)
+
+    # 确保当前专利也 flushed（新增的占位专利需要拿到 ID）
+    db.flush()
+
+    # 收集所有成员 ID（过滤掉没有 ID 的，理论上 flush 后都有）
+    member_ids = [m.id for m in members if m.id is not None]
+    if len(member_ids) < 2:
+        # 只有当前专利自己，没有有效成员，不值得建族
+        return {"family_id": None, "members_created": members_created, "members_linked": 0}
+
+    # 第二步：用成员 ID 哈希建/找 PatentFamily
+    family = _get_or_create_family_by_ids(db, member_ids, all_numbers_for_desc)
+
+    # 第三步：把所有成员的 family_id 指向该族
+    members_linked = 0
+    for member in members:
+        if member.id is None:
+            continue
         if member.family_id != family.id:
             member.family_id = family.id
             members_linked += 1
-
-    # 当前专利也归入该族
-    if current_patent.family_id != family.id:
-        current_patent.family_id = family.id
-        members_linked += 1
 
     db.flush()
     return {"family_id": family.id, "members_created": members_created, "members_linked": members_linked}

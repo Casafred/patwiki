@@ -531,6 +531,92 @@ def cleanup_invalid_placeholders(
     return {"deleted_count": len(items), "deleted_items": items, "dry_run": dry_run}
 
 
+@router.post("/maintenance/rebuild-family-relations")
+def rebuild_family_relations(
+    database_id: Optional[int] = Query(None, description="仅重建指定库，不传则全库重建"),
+    db: Session = Depends(get_db),
+):
+    """重建同族关系。
+
+    修复 relation_service 的 family hash 算法后（从号字符串改为 patent ID），
+    历史导入产生的旧 family_id 可能不一致。本端点：
+
+    1. 遍历所有已有 PatentFamily，用新算法（成员 ID 哈希）重新计算 family_id
+    2. 同一组专利始终得到相同的 family_id_str，合并重复族
+    3. 清理无成员的空族
+
+    注意：本端点只能合并已有同族关系的专利。如果两篇专利本应同族但导入时
+    从未建立关系（如导入失败导致），需要重新导入才能修复。
+    """
+    from app.services.relation_service import _get_or_create_family_by_ids
+    from app.models.patent import PatentFamily
+
+    query = db.query(PatentFamily)
+    families = query.all()
+
+    merged = 0
+    consolidated = 0
+    removed_empty = 0
+    errors = []
+
+    for family in families:
+        try:
+            members = db.query(PatentModel).filter(
+                PatentModel.family_id == family.id
+            ).all()
+            if not members:
+                db.delete(family)
+                removed_empty += 1
+                continue
+
+            member_ids = [m.id for m in members if m.id is not None]
+            if len(member_ids) < 2:
+                # 单成员族，保留但用新算法重算
+                new_family = _get_or_create_family_by_ids(
+                    db, member_ids,
+                    [m.publication_number or m.application_number or "" for m in members],
+                )
+                for m in members:
+                    m.family_id = new_family.id
+                if new_family.id != family.id:
+                    # 旧族已无成员，删除
+                    remaining = db.query(PatentModel).filter(
+                        PatentModel.family_id == family.id
+                    ).count()
+                    if remaining == 0:
+                        db.delete(family)
+                consolidated += 1
+                continue
+
+            new_family = _get_or_create_family_by_ids(
+                db, member_ids,
+                [m.publication_number or m.application_number or "" for m in members],
+            )
+            if new_family.id != family.id:
+                # 新族与旧族不同，迁移成员
+                for m in members:
+                    m.family_id = new_family.id
+                # 删除空族
+                db.delete(family)
+                merged += 1
+            else:
+                consolidated += 1
+        except Exception as exc:
+            errors.append({"family_id": family.id, "error": str(exc)})
+            db.rollback()
+
+    db.commit()
+
+    return {
+        "total_families_scanned": len(families),
+        "consolidated": consolidated,
+        "merged": merged,
+        "removed_empty": removed_empty,
+        "errors": errors[:20],
+        "error_count": len(errors),
+    }
+
+
 @router.get("/{patent_id}/history")
 def get_patent_history(
     patent_id: int,
