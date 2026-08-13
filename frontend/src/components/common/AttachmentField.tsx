@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { attachmentApi } from '../../api'
+import { BACKEND_URL } from '../../lib/api'
 import type { AttachmentMeta, JsonValue } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
@@ -21,23 +22,38 @@ function formatSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Build a fully-qualified URL from the relative path returned by the backend.
+ *  In dev mode the Vite proxy handles /api; in Tauri we need the absolute
+ *  http://127.0.0.1:8765 origin so the webview can navigate to it. */
+function resolveUrl(relativeUrl: string): string {
+  const isTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window
+  return isTauri ? `${BACKEND_URL}${relativeUrl}` : relativeUrl
+}
+
 export default function AttachmentField({ patentId, databaseId, fieldKey, value }: AttachmentFieldProps) {
   const [attachments, setAttachments] = useState<AttachmentMeta[]>(normalize(value))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const openFile = async (attachment: AttachmentMeta, preview: boolean) => {
-    const popup = window.open('', '_blank')
-    try {
-      const blob = await attachmentApi.download(attachment.attachment_id, preview)
-      const url = URL.createObjectURL(blob)
-      if (popup) popup.location.href = url
-      else window.open(url, '_blank')
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (requestError: unknown) {
-      popup?.close()
-      setError(getErrorMessage(requestError, '文件打开失败'))
+  const openFile = (attachment: AttachmentMeta, preview: boolean) => {
+    // Use direct URL navigation instead of fetching a blob. The backend already
+    // sets Content-Disposition: inline (preview) / attachment (download), so the
+    // browser/webview handles display or save natively. This avoids the fragile
+    // pattern of pre-opening a blank popup and navigating it to a blob: URL
+    // after an async gap, which fails in Tauri's webview and triggers popup
+    // blockers in browsers.
+    const url = resolveUrl(preview ? attachment.preview_url : attachment.download_url)
+    const a = document.createElement('a')
+    a.href = url
+    if (preview) {
+      a.target = '_blank'
+      a.rel = 'noopener'
+    } else {
+      a.download = attachment.filename
     }
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
   }
 
   const upload = async (file: File) => {
