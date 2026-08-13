@@ -1,5 +1,7 @@
 # 19 — AI / Automation / MCP：智能化与集成边界
 
+> 实施约束：参见 `21-implementation-contract.md`。当前仓库已有 AI 任务/字段值和自动化规则日志，但没有 MCP server、连接器游标或服务端授权；本文件不把规划能力表述为已上线能力。
+
 ## 1. 总原则
 
 AI 的作用是：
@@ -48,6 +50,8 @@ AI 不负责：
 - reviewed_at
 - superseded_by
 
+额外要求：执行记录必须含 `database_id`、发起身份、授权范围、输入 Artifact/实体版本引用与输出落点。`input_hash` 必须基于稳定序列化的输入内容和引用版本，而不是只基于实体 ID；否则实体原文更新后无法可靠判定过期。
+
 ## 3. Outdated 机制
 
 满足任何条件时，AI 输出可标记 outdated：
@@ -87,6 +91,8 @@ apply(normalized, idempotency_key) -> SyncResult
 - records_updated
 - errors
 - source_version
+
+还必须保存 `idempotency_key`、`cursor_before`、`cursor_after`、每条记录的处理结果与可重试错误分类。Connector 的 `apply` 在事务内写外部事实、同步日志、AuditEvent 和 WatchEvent；同一外部变化重放不得重复生成状态事件或 WatchEvent。
 
 ## 5. 自动化规则
 
@@ -147,6 +153,8 @@ Action：
 - generate ReportSnapshot draft
 - validate required fields
 - assign reviewer
+
+自动化的写入边界：在认证、授权与审计完善前，自动化只能创建草稿、待办、WatchEvent 或兼容缓存重算；不得确认专业结论、创建正式决策、改变申请策略、删除文件或对外发布。
 
 ## 6. MCP / Tool Registry
 
@@ -244,6 +252,8 @@ Action：
 
 Tool 输出优先返回实体 ID + 摘要，而不是整表 dump。
 
+工具注册还必须声明：输入 JSON Schema、输出 JSON Schema、版本、超时、分页/最大行数、幂等键、审计等级和数据新鲜度要求。任何工具都不能接受原始 SQL、任意表名或任意字段列表；工具查询必须经领域服务和 scope 过滤。
+
 ## 9. AI 报告生成
 
 正确路径：
@@ -270,3 +280,11 @@ Tool 输出优先返回实体 ID + 摘要，而不是整表 dump。
 - 专利挖掘候选提示。
 
 这些能力的前提不是“大模型更强”，而是统一 ID、版本、关系、来源和权限已经完成。
+
+## 11. 上线顺序
+
+1. 先把现有 `AITask/AIFieldValue` 的兼容读取接入通用 `AIExecution`，但不迁移或覆盖旧 AI 结果；
+2. 仅开放内部只读上下文工具，并对返回数量、敏感字段和调用日志做测试；
+3. 写工具只创建 draft，且必须能显示将写入的实体、字段、来源和审批路径；
+4. 完成真实身份、后端授权、审计和恢复演练后，才评审自动化写入或对外 MCP 集成；
+5. 所有 AI/自动化能力均可关闭、可重放、可按版本追溯。

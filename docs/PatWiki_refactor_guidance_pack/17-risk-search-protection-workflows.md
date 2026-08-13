@@ -1,5 +1,7 @@
 # 17 — Risk / Search / Protection 工作流设计
 
+> 实施约束：参见 `21-implementation-contract.md`。状态机由服务层强制，不能只依赖前端按钮或自由文本状态；所有 Case 在当前兼容期都必须归属一个 `database_id`。
+
 ## 1. 总体原则
 
 三个组不是三套数据库，而是围绕 ProjectSolutionVersion 和 Patent/Technology 共享上下文的三类 Case。
@@ -27,6 +29,8 @@
 建议：
 
 `draft -> scope_confirming -> searching -> reviewing -> completed -> reopened`
+
+允许的主要回退只有 `reopened -> searching`；`completed` 不是删除或覆盖历史结果的理由。状态迁移必须记录 `actor`、`at`、`reason` 和触发来源（manual / import / automation）。
 
 reopened 触发条件：
 
@@ -84,6 +88,8 @@ reopened 触发条件：
 - elapsed_time
 - operator
 
+`SearchQueryRun` 必须保存查询原文版本、输入范围/过滤条件、执行人和稳定的 `result_hash`。只记录结果数量不能复现一次搜索；来源平台不能重放时，也要保留导出的结果 Artifact 与哈希。
+
 ### SearchHit
 
 保存：
@@ -128,6 +134,8 @@ reopened 触发条件：
 
 `closed/monitoring -> reassessment_required`
 
+`reassessment_required` 只表示需要创建或补齐评估草稿，不可自动修改已确认结论。重新确认后，新 Assessment 取代 current rollup，旧版本保持只读。
+
 ## 3.2 RiskCase 与 Assessment 分层
 
 RiskCase 是长期风险事项。
@@ -148,6 +156,8 @@ RiskAssessmentVersion 是在某个时间点、某个输入条件下的分析。
 - conflict_status
 - conclusion
 - status: draft/confirmed/outdated/superseded
+
+确认门槛：`solution_version_id`、法域代码、专利/权利要求版本、`input_hash`、分析人、确认人、确认时间及至少一个证据引用缺一不可。历史数据无法补齐时只能标记 `legacy_inferred` / `needs_confirmation`，不得伪造 confirmed。
 
 ## 3.3 Claim Analysis
 
@@ -205,6 +215,8 @@ RiskAssessmentVersion 是在某个时间点、某个输入条件下的分析。
 - created_by
 
 不得直接修改旧 Decision。
+
+RiskDecision 采用 append-only。需要撤回或调整时，新增一条 Decision 并以 `supersedes_decision_id` 指向原记录；API 不提供通用更新/删除。决策参与人应通过关系表记录，而不是 JSON 或备注文本。
 
 ## 3.6 RiskWatch
 
@@ -361,3 +373,10 @@ ProjectSolutionVersion 新增/删除技术特征：
 - 决策待办。
 
 所有卡片可钻取到原始 evidence、assessment 和 history。
+
+## 7. 工作流的事务与权限边界
+
+- 每次状态迁移、确认、决策、自动化触发和外部同步都在一个服务层事务内完成：业务记录、AuditEvent、必要的 WatchEvent/待办要么同时成功，要么同时回滚。
+- 当前仓库尚未有认证和服务端强制授权。L2/L3 的确认、决策和 L4/L5 的导出/发布在生产开放前必须接入真实请求身份与服务端 scope 校验；现阶段只能用于受控本机验证。
+- 自动化只允许创建草稿、WatchEvent 或待复核任务。自动化和 AI 不得确认 Assessment、关闭 RiskCase、创建 RiskDecision 或改变 FilingStrategy。
+- 旧风险、检索、申请表在写路径切换前只读兼容；每个新读模型必须有按业务键的差异报告和未映射项隔离清单。

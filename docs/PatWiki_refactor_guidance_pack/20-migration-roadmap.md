@@ -1,5 +1,7 @@
 # 20 — Migration Roadmap：从现有 PatWiki / Excel 逐步迁移到 V2
 
+> 实施约束：本路线图受 `21-implementation-contract.md` 约束。先建设迁移平台，再进入任何业务域；当前 `_ensure_column_migration()` 的容错加列不能继续作为 V2 复杂迁移机制。
+
 ## 0. 原则
 
 - 不推倒重来；
@@ -12,7 +14,28 @@
 
 ---
 
-## Phase 0 — Field Registry / Baseline
+## Phase 0A — Migration Platform / Safety Gate
+
+目标：让每一次模式和数据迁移可识别、可停止、可恢复。
+
+工作：
+
+1. 建立受版本控制的迁移账本与迁移执行记录；
+2. 每次迁移前创建 SQLite 备份，执行完整性检查、升级、关键行数核对和恢复演练；
+3. 运行时显式启用 SQLite foreign keys，失败时停止启动；
+4. 建立来源行、隔离问题和映射版本的可追踪记录；
+5. 用真实历史库副本验证重复执行、失败恢复和旧 API 回归。
+
+验收：
+
+- 任意迁移可识别当前版本、校验和和执行结果；
+- 失败迁移不污染原库，恢复演练可通过；
+- 未解决数据问题可定位到来源文件、工作表、行号和业务键；
+- 新增 V2 表不再通过吞异常的 `ALTER TABLE` 进入生产数据。
+
+---
+
+## Phase 0B — Field Registry / Baseline
 
 目标：冻结语义，不再继续制造同义字段。
 
@@ -24,10 +47,11 @@
 4. 统一项目号、产品号、专利号 normalization。
 5. 统一基础枚举。
 6. 标记每个字段的数据责任等级。
+7. 对每个 canonical field 记录存储位置、迁移状态和业务负责人。
 
 验收：
 
-- 31 类原表每一列可映射到 canonical field；
+- 31 类原表每一列处于 mapped、deprecated 或 quarantined 状态；
 - 不再允许未注册的责任性字段直接上线。
 
 ---
@@ -54,6 +78,7 @@
 验收：
 
 - 关键统计不依赖名称文本 join。
+- 所有新关系两端有同一 `database_id`，且创建/失效/去重规则有服务层测试。
 
 ---
 
@@ -77,7 +102,7 @@
 
 验收：
 
-- 新 SearchCase/RiskAssessment/ProtectionCase 必须有 solution context。
+- 新 SearchCase/RiskAssessment/ProtectionCase 草稿必须有单一 primary solution context；确认态 RiskAssessment 还必须有法域、输入哈希、责任人和证据引用。
 
 ---
 
@@ -113,6 +138,7 @@
 
 - 所有旧风险统计表可由 V2 查询生成；
 - 新评估不会覆盖历史。
+- `Patent.risk_*` 与最新 confirmed Assessment rollup 的差异可监控，切换前差异为零或有已批准例外。
 
 ---
 
@@ -140,6 +166,7 @@
 
 - 能复现某次历史搜索；
 - 能比较同一 query 两次运行的结果差异。
+- 无法重放的历史搜索保留导出结果 Artifact、查询版本和结果哈希。
 
 ---
 
@@ -193,6 +220,7 @@
 
 - 从 RiskCase / Patent / Project / Filing 任一页一键追溯材料；
 - 高敏导出有日志。
+- 在完成认证与服务端授权前，L4/L5 只允许受控本机测试；不得向真实外部对象开放分享或 MCP 写入。
 
 ---
 
@@ -280,6 +308,8 @@
 - 责任人映射；
 - 时间字段；
 - 新查询生成旧表的差异。
+- 迁移版本、备份 ID、恢复验证结果；
+- 新旧读模型切换状态与业务负责人签收。
 
 建议保留迁移报告：
 
@@ -312,13 +342,14 @@
 
 推荐：
 
-1. schema + migration；
-2. repository/service；
-3. API；
-4. read-only UI；
-5. write workflow；
-6. compatibility adapter；
-7. tests；
-8. automation/AI。
+1. migration platform + backup/restore tests；
+2. schema + versioned migration；
+3. repository/service；
+4. API；
+5. read-only UI；
+6. compatibility adapter + reconciliation report；
+7. write workflow；
+8. tests + rollback evidence；
+9. automation/AI。
 
-每个 Phase 先实现 read model，再切 write path。
+每个 Phase 先实现 read model，再切 write path；写路径切换前必须完成双读核对、迁移回滚演练和现有 `/patents`、导入、附件、视图、AI 字段、历史接口回归。

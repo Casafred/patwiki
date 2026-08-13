@@ -1,6 +1,13 @@
 -- PatWiki Schema V2 — conceptual draft for technical review
 -- IMPORTANT: This is NOT a production migration.
--- Adapt types/FKs/naming to the repository's SQLAlchemy + Alembic conventions.
+-- Read 21-implementation-contract.md before implementation.
+-- Adapt types/FKs/naming to this repository's SQLAlchemy + versioned migration
+-- conventions. The current physical `patents` table remains the compatible
+-- PatentDocument target; do not rename or execute this file against production.
+-- Every workspace-scoped V2 Case, Artifact, AI execution, and report snapshot
+-- should carry database_id. `database_id` supports query/workspace ownership
+-- and is NOT an authentication boundary in the current app. Shared taxonomy
+-- and child/event rows inherit scope from their aggregate root.
 
 PRAGMA foreign_keys = ON;
 
@@ -20,6 +27,17 @@ CREATE TABLE IF NOT EXISTS product_categories (
     FOREIGN KEY(parent_id) REFERENCES product_categories(id)
 );
 
+CREATE TABLE IF NOT EXISTS product_category_links (
+    id INTEGER PRIMARY KEY,
+    product_id INTEGER NOT NULL,
+    product_category_id INTEGER NOT NULL,
+    role TEXT NOT NULL DEFAULT 'primary', -- primary/secondary
+    created_at DATETIME NOT NULL,
+    UNIQUE(product_id, product_category_id, role),
+    FOREIGN KEY(product_id) REFERENCES products(id),
+    FOREIGN KEY(product_category_id) REFERENCES product_categories(id)
+);
+
 CREATE TABLE IF NOT EXISTS department_product_line_links (
     id INTEGER PRIMARY KEY,
     department_id INTEGER NOT NULL,
@@ -29,7 +47,9 @@ CREATE TABLE IF NOT EXISTS department_product_line_links (
     valid_from DATETIME,
     valid_to DATETIME,
     created_at DATETIME NOT NULL,
-    UNIQUE(department_id, product_line_id, role)
+    UNIQUE(department_id, product_line_id, role),
+    FOREIGN KEY(department_id) REFERENCES departments(id),
+    FOREIGN KEY(product_line_id) REFERENCES product_lines(id)
 );
 
 CREATE TABLE IF NOT EXISTS product_line_category_links (
@@ -39,6 +59,7 @@ CREATE TABLE IF NOT EXISTS product_line_category_links (
     emphasis_level TEXT,
     created_at DATETIME NOT NULL,
     UNIQUE(product_line_id, product_category_id),
+    FOREIGN KEY(product_line_id) REFERENCES product_lines(id),
     FOREIGN KEY(product_category_id) REFERENCES product_categories(id)
 );
 
@@ -46,14 +67,25 @@ CREATE TABLE IF NOT EXISTS technical_features (
     id INTEGER PRIMARY KEY,
     code TEXT UNIQUE,
     name TEXT NOT NULL,
-    parent_id INTEGER,
     feature_type TEXT,
     description TEXT,
     taxonomy_version TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL,
-    FOREIGN KEY(parent_id) REFERENCES technical_features(id)
+    updated_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS taxonomy_edges (
+    id INTEGER PRIMARY KEY,
+    parent_feature_id INTEGER NOT NULL,
+    child_feature_id INTEGER NOT NULL,
+    relation_type TEXT NOT NULL DEFAULT 'broader', -- broader/related/equivalent
+    valid_from DATETIME,
+    valid_to DATETIME,
+    created_at DATETIME NOT NULL,
+    UNIQUE(parent_feature_id, child_feature_id, relation_type),
+    FOREIGN KEY(parent_feature_id) REFERENCES technical_features(id),
+    FOREIGN KEY(child_feature_id) REFERENCES technical_features(id)
 );
 
 -- =========================================================
@@ -62,6 +94,7 @@ CREATE TABLE IF NOT EXISTS technical_features (
 
 CREATE TABLE IF NOT EXISTS project_solution_versions (
     id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
     project_id INTEGER NOT NULL,
     version_no INTEGER NOT NULL,
     name TEXT,
@@ -80,7 +113,41 @@ CREATE TABLE IF NOT EXISTS project_solution_versions (
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     UNIQUE(project_id, version_no),
-    FOREIGN KEY(source_solution_version_id) REFERENCES project_solution_versions(id)
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(project_id) REFERENCES projects(id),
+    FOREIGN KEY(source_solution_version_id) REFERENCES project_solution_versions(id),
+    FOREIGN KEY(inherited_product_id) REFERENCES products(id),
+    FOREIGN KEY(confirmed_by) REFERENCES people(id)
+);
+
+CREATE TABLE IF NOT EXISTS project_region_links (
+    id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    jurisdiction_code TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'target', -- target/current/sales/manufacturing
+    source TEXT,
+    confirmed_by INTEGER,
+    confirmed_at DATETIME,
+    created_at DATETIME NOT NULL,
+    UNIQUE(project_id, jurisdiction_code, role),
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(project_id) REFERENCES projects(id),
+    FOREIGN KEY(confirmed_by) REFERENCES people(id)
+);
+
+CREATE TABLE IF NOT EXISTS solution_version_region_links (
+    id INTEGER PRIMARY KEY,
+    solution_version_id INTEGER NOT NULL,
+    jurisdiction_code TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'target', -- target/sales/manufacturing/review
+    source TEXT,
+    confirmed_by INTEGER,
+    confirmed_at DATETIME,
+    created_at DATETIME NOT NULL,
+    UNIQUE(solution_version_id, jurisdiction_code, role),
+    FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id),
+    FOREIGN KEY(confirmed_by) REFERENCES people(id)
 );
 
 CREATE TABLE IF NOT EXISTS solution_feature_links (
@@ -96,7 +163,8 @@ CREATE TABLE IF NOT EXISTS solution_feature_links (
     created_at DATETIME NOT NULL,
     UNIQUE(solution_version_id, technical_feature_id, change_type),
     FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id),
-    FOREIGN KEY(technical_feature_id) REFERENCES technical_features(id)
+    FOREIGN KEY(technical_feature_id) REFERENCES technical_features(id),
+    FOREIGN KEY(confirmed_by) REFERENCES people(id)
 );
 
 -- =========================================================
@@ -117,7 +185,8 @@ CREATE TABLE IF NOT EXISTS legal_status_events (
     source_reference TEXT,
     payload_hash TEXT,
     created_at DATETIME NOT NULL,
-    UNIQUE(patent_id, event_code, effective_date, payload_hash)
+    UNIQUE(patent_id, event_code, effective_date, payload_hash),
+    FOREIGN KEY(patent_id) REFERENCES patents(id)
 );
 
 CREATE TABLE IF NOT EXISTS family_relations (
@@ -128,7 +197,9 @@ CREATE TABLE IF NOT EXISTS family_relations (
     source_system TEXT,
     source_timestamp DATETIME,
     created_at DATETIME NOT NULL,
-    UNIQUE(parent_patent_id, child_patent_id, relation_type)
+    UNIQUE(parent_patent_id, child_patent_id, relation_type),
+    FOREIGN KEY(parent_patent_id) REFERENCES patents(id),
+    FOREIGN KEY(child_patent_id) REFERENCES patents(id)
 );
 
 -- =========================================================
@@ -137,19 +208,22 @@ CREATE TABLE IF NOT EXISTS family_relations (
 
 CREATE TABLE IF NOT EXISTS search_cases (
     id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
     tc_no TEXT UNIQUE,
     purpose TEXT NOT NULL,
     project_id INTEGER,
     solution_version_id INTEGER,
     owner_id INTEGER,
     status TEXT NOT NULL DEFAULT 'draft',
-    scope_json JSON,
-    region_scope_json JSON,
+    scope_note TEXT,
     background TEXT,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     completed_at DATETIME,
-    FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id)
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(project_id) REFERENCES projects(id),
+    FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id),
+    FOREIGN KEY(owner_id) REFERENCES people(id)
 );
 
 CREATE TABLE IF NOT EXISTS search_queries (
@@ -162,20 +236,40 @@ CREATE TABLE IF NOT EXISTS search_queries (
     filter_strategy TEXT,
     created_by INTEGER,
     created_at DATETIME NOT NULL,
-    FOREIGN KEY(search_case_id) REFERENCES search_cases(id)
+    FOREIGN KEY(search_case_id) REFERENCES search_cases(id),
+    FOREIGN KEY(created_by) REFERENCES people(id)
+);
+
+CREATE TABLE IF NOT EXISTS search_concepts (
+    id INTEGER PRIMARY KEY,
+    search_case_id INTEGER NOT NULL,
+    technical_feature_id INTEGER,
+    concept_text TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'required', -- required/optional/excluded/synonym
+    source TEXT,
+    created_by INTEGER,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY(search_case_id) REFERENCES search_cases(id),
+    FOREIGN KEY(technical_feature_id) REFERENCES technical_features(id),
+    FOREIGN KEY(created_by) REFERENCES people(id)
 );
 
 CREATE TABLE IF NOT EXISTS search_query_runs (
     id INTEGER PRIMARY KEY,
     search_query_id INTEGER NOT NULL,
+    operator_id INTEGER,
     run_at DATETIME NOT NULL,
+    input_scope_json JSON, -- query parameters, never arrays of relational IDs
     source_version TEXT,
     result_count INTEGER,
     result_hash TEXT,
     elapsed_ms INTEGER,
     status TEXT,
     error_message TEXT,
-    FOREIGN KEY(search_query_id) REFERENCES search_queries(id)
+    result_artifact_id INTEGER,
+    FOREIGN KEY(search_query_id) REFERENCES search_queries(id),
+    FOREIGN KEY(operator_id) REFERENCES people(id),
+    FOREIGN KEY(result_artifact_id) REFERENCES artifacts(id)
 );
 
 CREATE TABLE IF NOT EXISTS search_hits (
@@ -184,11 +278,11 @@ CREATE TABLE IF NOT EXISTS search_hits (
     query_run_id INTEGER,
     patent_id INTEGER NOT NULL,
     rank_no INTEGER,
-    matched_concepts_json JSON,
     created_at DATETIME NOT NULL,
     UNIQUE(search_case_id, patent_id, query_run_id),
     FOREIGN KEY(search_case_id) REFERENCES search_cases(id),
-    FOREIGN KEY(query_run_id) REFERENCES search_query_runs(id)
+    FOREIGN KEY(query_run_id) REFERENCES search_query_runs(id),
+    FOREIGN KEY(patent_id) REFERENCES patents(id)
 );
 
 CREATE TABLE IF NOT EXISTS relevance_reviews (
@@ -205,7 +299,20 @@ CREATE TABLE IF NOT EXISTS relevance_reviews (
     status TEXT DEFAULT 'confirmed',
     created_at DATETIME NOT NULL,
     FOREIGN KEY(search_case_id) REFERENCES search_cases(id),
-    FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id)
+    FOREIGN KEY(patent_id) REFERENCES patents(id),
+    FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id),
+    FOREIGN KEY(reviewer_id) REFERENCES people(id)
+);
+
+CREATE TABLE IF NOT EXISTS search_hit_concept_links (
+    id INTEGER PRIMARY KEY,
+    search_hit_id INTEGER NOT NULL,
+    search_concept_id INTEGER NOT NULL,
+    match_kind TEXT,
+    created_at DATETIME NOT NULL,
+    UNIQUE(search_hit_id, search_concept_id),
+    FOREIGN KEY(search_hit_id) REFERENCES search_hits(id),
+    FOREIGN KEY(search_concept_id) REFERENCES search_concepts(id)
 );
 
 -- =========================================================
@@ -214,6 +321,7 @@ CREATE TABLE IF NOT EXISTS relevance_reviews (
 
 CREATE TABLE IF NOT EXISTS risk_cases (
     id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
     risk_no TEXT UNIQUE,
     title TEXT NOT NULL,
     risk_subject TEXT,
@@ -221,12 +329,18 @@ CREATE TABLE IF NOT EXISTS risk_cases (
     discovered_at DATETIME,
     discovered_by INTEGER,
     owner_id INTEGER,
+    source_system TEXT,
+    source_reference TEXT,
     current_status TEXT NOT NULL DEFAULT 'identified',
     current_risk_level TEXT,
     current_assessment_id INTEGER,
     closed_at DATETIME,
     created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL
+    updated_at DATETIME NOT NULL,
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(discovered_by) REFERENCES people(id),
+    FOREIGN KEY(owner_id) REFERENCES people(id),
+    FOREIGN KEY(current_assessment_id) REFERENCES risk_assessment_versions(id)
 );
 
 CREATE TABLE IF NOT EXISTS risk_patent_links (
@@ -239,7 +353,8 @@ CREATE TABLE IF NOT EXISTS risk_patent_links (
     source TEXT,
     created_at DATETIME NOT NULL,
     UNIQUE(risk_case_id, patent_id, role),
-    FOREIGN KEY(risk_case_id) REFERENCES risk_cases(id)
+    FOREIGN KEY(risk_case_id) REFERENCES risk_cases(id),
+    FOREIGN KEY(patent_id) REFERENCES patents(id)
 );
 
 CREATE TABLE IF NOT EXISTS risk_solution_links (
@@ -272,11 +387,15 @@ CREATE TABLE IF NOT EXISTS risk_assessment_versions (
     assessed_at DATETIME,
     confirmed_by INTEGER,
     confirmed_at DATETIME,
+    primary_evidence_artifact_id INTEGER,
     supersedes_id INTEGER,
     created_at DATETIME NOT NULL,
     UNIQUE(risk_case_id, version_no),
     FOREIGN KEY(risk_case_id) REFERENCES risk_cases(id),
     FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id),
+    FOREIGN KEY(assessed_by) REFERENCES people(id),
+    FOREIGN KEY(confirmed_by) REFERENCES people(id),
+    FOREIGN KEY(primary_evidence_artifact_id) REFERENCES artifacts(id),
     FOREIGN KEY(supersedes_id) REFERENCES risk_assessment_versions(id)
 );
 
@@ -296,7 +415,10 @@ CREATE TABLE IF NOT EXISTS claim_element_analyses (
     prior_art_patent_id INTEGER,
     created_at DATETIME NOT NULL,
     FOREIGN KEY(assessment_id) REFERENCES risk_assessment_versions(id),
-    FOREIGN KEY(solution_feature_id) REFERENCES technical_features(id)
+    FOREIGN KEY(patent_id) REFERENCES patents(id),
+    FOREIGN KEY(solution_feature_id) REFERENCES technical_features(id),
+    FOREIGN KEY(evidence_artifact_id) REFERENCES artifacts(id),
+    FOREIGN KEY(prior_art_patent_id) REFERENCES patents(id)
 );
 
 CREATE TABLE IF NOT EXISTS mitigation_plans (
@@ -313,7 +435,10 @@ CREATE TABLE IF NOT EXISTS mitigation_plans (
     verified_at DATETIME,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
-    FOREIGN KEY(risk_case_id) REFERENCES risk_cases(id)
+    FOREIGN KEY(risk_case_id) REFERENCES risk_cases(id),
+    FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id),
+    FOREIGN KEY(owner_id) REFERENCES people(id),
+    FOREIGN KEY(verified_by) REFERENCES people(id)
 );
 
 CREATE TABLE IF NOT EXISTS risk_decisions (
@@ -324,14 +449,29 @@ CREATE TABLE IF NOT EXISTS risk_decisions (
     decision_maker_id INTEGER NOT NULL,
     conclusion TEXT NOT NULL,
     accepted_risk_level TEXT,
-    required_actions_json JSON,
     conditions TEXT,
     review_at DATETIME,
     supersedes_decision_id INTEGER,
     created_by INTEGER NOT NULL,
     created_at DATETIME NOT NULL,
     FOREIGN KEY(risk_case_id) REFERENCES risk_cases(id),
+    FOREIGN KEY(decision_maker_id) REFERENCES people(id),
+    FOREIGN KEY(created_by) REFERENCES people(id),
     FOREIGN KEY(supersedes_decision_id) REFERENCES risk_decisions(id)
+);
+
+CREATE TABLE IF NOT EXISTS risk_decision_actions (
+    id INTEGER PRIMARY KEY,
+    risk_decision_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    owner_id INTEGER,
+    due_at DATETIME,
+    status TEXT NOT NULL DEFAULT 'open',
+    completed_at DATETIME,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY(risk_decision_id) REFERENCES risk_decisions(id),
+    FOREIGN KEY(owner_id) REFERENCES people(id)
 );
 
 CREATE TABLE IF NOT EXISTS risk_watch_events (
@@ -345,7 +485,9 @@ CREATE TABLE IF NOT EXISTS risk_watch_events (
     requires_reassessment INTEGER NOT NULL DEFAULT 0,
     processed_at DATETIME,
     created_at DATETIME NOT NULL,
-    FOREIGN KEY(risk_case_id) REFERENCES risk_cases(id)
+    FOREIGN KEY(risk_case_id) REFERENCES risk_cases(id),
+    FOREIGN KEY(patent_id) REFERENCES patents(id),
+    FOREIGN KEY(solution_version_id) REFERENCES project_solution_versions(id)
 );
 
 -- =========================================================
@@ -354,6 +496,7 @@ CREATE TABLE IF NOT EXISTS risk_watch_events (
 
 CREATE TABLE IF NOT EXISTS protection_cases (
     id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
     protection_no TEXT UNIQUE,
     title TEXT NOT NULL,
     invention_theme TEXT,
@@ -364,7 +507,10 @@ CREATE TABLE IF NOT EXISTS protection_cases (
     approved_by INTEGER,
     approved_at DATETIME,
     created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL
+    updated_at DATETIME NOT NULL,
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(owner_id) REFERENCES people(id),
+    FOREIGN KEY(approved_by) REFERENCES people(id)
 );
 
 CREATE TABLE IF NOT EXISTS protection_solution_links (
@@ -395,7 +541,10 @@ CREATE TABLE IF NOT EXISTS filing_cases (
     target_filing_date DATE,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
-    FOREIGN KEY(protection_case_id) REFERENCES protection_cases(id)
+    FOREIGN KEY(protection_case_id) REFERENCES protection_cases(id),
+    FOREIGN KEY(patent_id) REFERENCES patents(id),
+    FOREIGN KEY(agency_id) REFERENCES people(id),
+    FOREIGN KEY(internal_owner_id) REFERENCES people(id)
 );
 
 -- =========================================================
@@ -404,6 +553,7 @@ CREATE TABLE IF NOT EXISTS filing_cases (
 
 CREATE TABLE IF NOT EXISTS artifacts (
     id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
     artifact_type TEXT NOT NULL,
     title TEXT,
     description TEXT,
@@ -417,7 +567,9 @@ CREATE TABLE IF NOT EXISTS artifacts (
     source TEXT,
     captured_at DATETIME,
     created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL
+    updated_at DATETIME NOT NULL,
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(owner_id) REFERENCES people(id)
 );
 
 CREATE TABLE IF NOT EXISTS artifact_links (
@@ -429,7 +581,8 @@ CREATE TABLE IF NOT EXISTS artifact_links (
     created_by INTEGER,
     created_at DATETIME NOT NULL,
     UNIQUE(artifact_id, entity_type, entity_id, role),
-    FOREIGN KEY(artifact_id) REFERENCES artifacts(id)
+    FOREIGN KEY(artifact_id) REFERENCES artifacts(id),
+    FOREIGN KEY(created_by) REFERENCES people(id)
 );
 
 -- =========================================================
@@ -438,6 +591,7 @@ CREATE TABLE IF NOT EXISTS artifact_links (
 
 CREATE TABLE IF NOT EXISTS audit_events (
     id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
     entity_type TEXT NOT NULL,
     entity_id INTEGER NOT NULL,
     event_type TEXT NOT NULL,
@@ -450,7 +604,10 @@ CREATE TABLE IF NOT EXISTS audit_events (
     source_view_id INTEGER,
     reason TEXT,
     request_id TEXT,
-    created_at DATETIME NOT NULL
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(actor_id) REFERENCES people(id),
+    FOREIGN KEY(source_view_id) REFERENCES patent_views(id)
 );
 
 CREATE INDEX IF NOT EXISTS ix_audit_entity
@@ -458,6 +615,7 @@ ON audit_events(entity_type, entity_id, created_at);
 
 CREATE TABLE IF NOT EXISTS ai_executions (
     id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
     entity_type TEXT NOT NULL,
     entity_id INTEGER NOT NULL,
     task_type TEXT NOT NULL,
@@ -480,11 +638,14 @@ CREATE TABLE IF NOT EXISTS ai_executions (
     reviewed_at DATETIME,
     superseded_by INTEGER,
     created_at DATETIME NOT NULL,
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(reviewer_id) REFERENCES people(id),
     FOREIGN KEY(superseded_by) REFERENCES ai_executions(id)
 );
 
 CREATE TABLE IF NOT EXISTS report_snapshots (
     id INTEGER PRIMARY KEY,
+    database_id INTEGER NOT NULL,
     report_type TEXT NOT NULL,
     reporting_period TEXT,
     source_dataset TEXT,
@@ -496,7 +657,10 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
     generated_at DATETIME NOT NULL,
     reviewed_by INTEGER,
     reviewed_at DATETIME,
-    published_at DATETIME
+    published_at DATETIME,
+    FOREIGN KEY(database_id) REFERENCES patent_databases(id),
+    FOREIGN KEY(generated_by) REFERENCES people(id),
+    FOREIGN KEY(reviewed_by) REFERENCES people(id)
 );
 
 CREATE TABLE IF NOT EXISTS report_snapshot_items (
@@ -509,12 +673,35 @@ CREATE TABLE IF NOT EXISTS report_snapshot_items (
     FOREIGN KEY(snapshot_id) REFERENCES report_snapshots(id)
 );
 
+CREATE TABLE IF NOT EXISTS artifact_versions (
+    id INTEGER PRIMARY KEY,
+    artifact_id INTEGER NOT NULL,
+    version_no INTEGER NOT NULL,
+    storage_uri TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    mime_type TEXT,
+    file_size INTEGER,
+    captured_at DATETIME,
+    created_by INTEGER,
+    created_at DATETIME NOT NULL,
+    UNIQUE(artifact_id, version_no),
+    UNIQUE(artifact_id, content_hash),
+    FOREIGN KEY(artifact_id) REFERENCES artifacts(id),
+    FOREIGN KEY(created_by) REFERENCES people(id)
+);
+
 -- =========================================================
 -- Suggested indexes (review against actual queries)
 -- =========================================================
 
 CREATE INDEX IF NOT EXISTS ix_solution_project
 ON project_solution_versions(project_id, version_no);
+
+CREATE INDEX IF NOT EXISTS ix_solution_database_project
+ON project_solution_versions(database_id, project_id, status);
+
+CREATE INDEX IF NOT EXISTS ix_search_case_database_status
+ON search_cases(database_id, status, updated_at);
 
 CREATE INDEX IF NOT EXISTS ix_risk_status_level
 ON risk_cases(current_status, current_risk_level);
@@ -530,3 +717,13 @@ ON search_hits(patent_id, search_case_id);
 
 CREATE INDEX IF NOT EXISTS ix_artifact_link_entity
 ON artifact_links(entity_type, entity_id);
+
+-- Constraint implementation notes:
+-- 1. SQLite cannot express all state-machine rules here. Services enforce valid
+--    transitions, confirmed assessment completeness, append-only decisions,
+--    aggregate-level database_id consistency, and ArtifactLink's entity whitelist.
+-- 2. Foreign keys to artifacts/risk assessments appear before those tables in
+--    this conceptual file. The production migration order must create referenced
+--    tables first (or add foreign keys during a later SQLite table rebuild).
+-- 3. Every external identifier needs an idempotency/business-key constraint
+--    defined from the actual source system before its import path is enabled.

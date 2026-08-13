@@ -1,5 +1,7 @@
 # 16 — Field Governance Registry：字段治理与注册规范
 
+> 实施约束：参见 `21-implementation-contract.md`。Field Registry 是语义目录与变更门禁，不是把所有字段搬进同一张表。
+
 ## 1. 为什么需要 Field Registry
 
 当前大量表格存在：
@@ -12,6 +14,8 @@
 - 多值关系以文本存储。
 
 Field Registry 的作用是让新增字段先回答“它是什么”，再决定“放在哪张视图”。
+
+字段注册必须与**存储决策**分离。每个 canonical field 必须声明一个且仅一个主存储位置：系统列、关系实体属性、事件/版本记录、`CustomField`、`ViewLocalField`、Artifact 元数据或 Snapshot 派生值。视图只投影字段，不能重新定义事实。
 
 ## 2. 每个字段的 12 维元数据
 
@@ -41,6 +45,15 @@ Field Registry 的作用是让新增字段先回答“它是什么”，再决�
 - retention_policy
 - index_policy
 - promote_threshold
+
+并新增实施必填元数据：
+
+- `canonical_key`：稳定、不可复用的机器键；
+- `storage_kind` / `storage_locator`：字段实际落点；
+- `business_key_scope`：唯一性边界，如 `database`、`jurisdiction`、`project`；
+- `migration_status`：planned / mapped / migrated / verified / deprecated；
+- `legacy_aliases`：来源列名、来源文件/表与映射版本；
+- `change_owner` / `change_ticket`：谁批准本次语义或治理规则变更。
 
 ## 3. 字段分类规则
 
@@ -231,6 +244,14 @@ Field Registry 的作用是让新增字段先回答“它是什么”，再决�
 - 有多值；
 - 有责任人。
 
+提升流程：
+
+1. 在 Field Registry 提交候选字段，明确 owner entity、语义、主存储、现有别名和数据样本；
+2. 评审关系/生命周期是否应直接升级为独立实体，而非新增列；
+3. 通过迁移建立新存储位置，并回填可映射的 ViewLocalField/CustomField 值；
+4. 双读比对、更新视图投影、标记旧字段 deprecated；
+5. 兼容期结束后，只读保留历史值或按保留策略清理。不得把“promote”当作无审计的数据复制按钮。
+
 ## 8. Alias Registry
 
 建议维护：
@@ -254,6 +275,8 @@ aliases:
 
 所有 Excel 导入先走 alias normalization，再进入领域实体。
 
+导入时不能静默猜测：未匹配 alias、格式冲突、候选实体不唯一和多值拆分失败必须进入隔离清单，并带来源文件、工作表、行号、原始值和映射版本。只有业务负责人确认后才可重跑该行。
+
 ## 9. 数据质量等级
 
 建议每个可疑字段可选记录：
@@ -263,3 +286,10 @@ aliases:
 - `review_status`: pending / confirmed / rejected / outdated
 
 这样能明确“随手记”和“承担责任的信息”不是同一级数据。
+
+## 10. 变更门禁与最小验收
+
+- 新责任性字段必须已注册、已确定存储位置和验证规则，才能出现在 API/UI/导入映射中。
+- 字段别名变更必须保留旧别名与生效日期，避免历史导入模板失效。
+- 所有 canonical field 都能反查到至少一个来源定义或业务负责人；外部事实必须有 `source_system` 和 `source_timestamp`。
+- 31 类来源表中的每列必须处于 mapped、deprecated 或 quarantined 状态之一；“待以后处理”不能作为迁移完成状态。

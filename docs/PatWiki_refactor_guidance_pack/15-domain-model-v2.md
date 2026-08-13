@@ -1,8 +1,10 @@
 # 15 — Domain Model V2：PatWiki 统一领域模型
 
+> 实施约束：先阅读 `21-implementation-contract.md`。本文描述目标领域模型；当前物理 `Patent` 表在兼容期承担 `PatentDocument` 角色，不在本阶段重命名。
+
 ## 1. 建模目标
 
-PatWiki 不应继续以“所有业务都给 Patent 增加字段”为演化方式。Patent 仍是专利知识的锚点，但 IP 业务至少存在以下一级聚合根：
+PatWiki 不应继续以“所有业务都给 Patent 增加字段”为演化方式。Patent（目标术语为 PatentDocument）仍是专利知识的锚点，但 IP 业务至少存在以下一级聚合根：
 
 - `Project`
 - `ProjectSolutionVersion`
@@ -16,6 +18,8 @@ PatWiki 不应继续以“所有业务都给 Patent 增加字段”为演化方�
 - `ReportSnapshot`
 
 聚合根之间通过带属性的关系实体连接。
+
+所有可独立查询、导入、审计或访问控制的业务聚合根还必须有 `database_id` 作为工作台归属；`database_id` 用于数据集合与查询范围，当前并不构成认证隔离。每个聚合根同时至少保存 `created_at`、`updated_at`、来源和责任人/创建人。
 
 ## 2. 领域边界
 
@@ -97,6 +101,8 @@ Project 只保存当前快照字段，如 `current_stage`；历史阶段保存�
 
 任何风险评估必须明确基于哪个 `solution_version_id`。
 
+P0 约束：一个 SearchCase、RiskAssessmentVersion 或 ProtectionCase 草稿只允许一个 `primary_solution_version_id`。多方案比较是后续显式 scope link 的能力，不能先用 JSON 数组、逗号文本或多选 CustomField 代替。
+
 ### 2.5 Technology Taxonomy
 
 核心对象：
@@ -114,6 +120,8 @@ Project 只保存当前快照字段，如 `current_stage`；历史阶段保存�
 - 同义词/旧名称；
 - 生效版本；
 - 人工/AI/IPC 等分类来源。
+
+`TechnicalFeature` 是可被方案、权利要求和专利关系引用的稳定概念；分类树的父子或多父关系应由 `TaxonomyEdge` 表示，不应把 `parent_id` 同时承担树和多父图两种语义。
 
 ### 2.6 Patent Common Data
 
@@ -134,6 +142,8 @@ Project 只保存当前快照字段，如 `current_stage`；历史阶段保存�
 - 分案、续案、继续申请等通过 `FamilyRelation` 表达。
 - `current_legal_status` 可以作为缓存，但完整事实来自 `LegalStatusEvent`。
 - 原始申请人/权利人值和标准化 Party 必须并存。
+
+兼容策略：在当前仓库中用 `Patent.id` 作为 V2 `patent_document_id` 的外键目标；`PatentFamily` 保持现有物理表。表重命名、全量拆分 PatentDocument 和真正的 Party 正规化均放在迁移稳定后的独立决策中。
 
 ### 2.7 Search
 
@@ -242,6 +252,8 @@ Project 只保存当前快照字段，如 `current_stage`；历史阶段保存�
 | ProtectionCase | FilingCase | 1:N | 多国/多件申请 |
 | Any Entity | Artifact | N:M | ArtifactLink |
 
+`ArtifactLink` 是受控的多态关联：实体类型必须在服务端白名单内，写入时验证目标存在、`database_id` 一致、调用者权限和审计；不能依赖数据库外键自动保证完整性。
+
 ## 4. 当前快照 vs 历史事实
 
 以下属性可以有 current 缓存，但正式历史必须由事件/版本支持：
@@ -285,3 +297,10 @@ Project 只保存当前快照字段，如 `current_stage`；历史阶段保存�
 - PatentProjectLink 的“关系带业务属性”模式推广到其他核心关系；
 - PatentHistory → 通用 AuditEvent；
 - Patent.ai_fields → 通用 AIProvenance。
+
+补充约束：
+
+- `Patent.has_risk/risk_level/risk_description` 在 V2 切换后只保留为由已确认评估生成的兼容聚合缓存，禁止详情页直接编辑。
+- `PatentHistory` 在兼容期继续保留，新 V2 聚合根统一写 `AuditEvent`；不要删除既有历史。
+- `PatentDatabase` 是所有 V2 Case 的工作台归属；每个关联两端必须属于同一 `database_id`，除非明确实现受审计的跨库引用。
+- 任何新增物理表、外键和索引均通过受版本控制的迁移引入，不能直接执行 `schema-v2-draft.sql`。

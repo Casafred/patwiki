@@ -9,8 +9,9 @@
     "18-security-audit-snapshot.md",
     "19-ai-automation-mcp.md",
     "20-migration-roadmap.md",
+    "21-implementation-contract.md",
     "schema-v2-draft.sql"
   ],
-  "status": "design-review-draft",
-  "note": "schema-v2-draft.sql is conceptual and should be translated into SQLAlchemy/Alembic migrations after review."
+  "status": "implementation-guided",
+  "note": "schema-v2-draft.sql is conceptual. Apply 21-implementation-contract.md before translating it into SQLAlchemy models and versioned migrations."
 }

@@ -1,0 +1,107 @@
+[
+  {
+    "index": 0,
+    "sheet": "00_使用说明",
+    "source_range": "A1:E24",
+    "file": "00-00_使用说明.csv",
+    "rows": 24,
+    "columns": 5
+  },
+  {
+    "index": 1,
+    "sheet": "01_表格目录",
+    "source_range": "A1:G32",
+    "file": "01-01_表格目录.csv",
+    "rows": 32,
+    "columns": 7
+  },
+  {
+    "index": 2,
+    "sheet": "02_字段逐项盘点",
+    "source_range": "A1:P358",
+    "file": "02-02_字段逐项盘点.csv",
+    "rows": 358,
+    "columns": 16
+  },
+  {
+    "index": 3,
+    "sheet": "03_归一化字段字典",
+    "source_range": "A1:P141",
+    "file": "03-03_归一化字段字典.csv",
+    "rows": 141,
+    "columns": 16
+  },
+  {
+    "index": 4,
+    "sheet": "04_目标领域实体",
+    "source_range": "A1:G28",
+    "file": "04-04_目标领域实体.csv",
+    "rows": 28,
+    "columns": 7
+  },
+  {
+    "index": 5,
+    "sheet": "05_关键关系模型",
+    "source_range": "A1:F26",
+    "file": "05-05_关键关系模型.csv",
+    "rows": 26,
+    "columns": 6
+  },
+  {
+    "index": 6,
+    "sheet": "06_数据治理矩阵",
+    "source_range": "A1:I10",
+    "file": "06-06_数据治理矩阵.csv",
+    "rows": 10,
+    "columns": 9
+  },
+  {
+    "index": 7,
+    "sheet": "07_表格重构映射",
+    "source_range": "A1:F32",
+    "file": "07-07_表格重构映射.csv",
+    "rows": 32,
+    "columns": 6
+  },
+  {
+    "index": 8,
+    "sheet": "08_PatWiki仓库差距",
+    "source_range": "A1:E11",
+    "file": "08-08_PatWiki仓库差距.csv",
+    "rows": 13,
+    "columns": 5
+  },
+  {
+    "index": 9,
+    "sheet": "09_迭代路线图",
+    "source_range": "A1:F11",
+    "file": "09-09_迭代路线图.csv",
+    "rows": 12,
+    "columns": 6
+  },
+  {
+    "index": 10,
+    "sheet": "10_字段元数据扩展",
+    "source_range": "A1:E20",
+    "file": "10-10_字段元数据扩展.csv",
+    "rows": 20,
+    "columns": 5
+  },
+  {
+    "index": 11,
+    "sheet": "11_自动化与MCP",
+    "source_range": "A1:F12",
+    "file": "11-11_自动化与MCP.csv",
+    "rows": 12,
+    "columns": 6
+  },
+  {
+    "index": 12,
+    "sheet": "实施基线与迁移门禁",
+    "source_range": null,
+    "file": "12-实施基线与迁移门禁.csv",
+    "rows": 12,
+    "columns": 7,
+    "origin": "architecture review 2026-08-13"
+  }
+]
