@@ -216,11 +216,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setStep('chooseDatabase')
       return
     }
-    const unmappedColumns = preview.detected_columns.filter(column => !mapping[column])
-    if (unmappedColumns.length > 0) {
-      setError(`以下 Excel 列尚未映射，已阻止导入以保证数据完整：${unmappedColumns.join('、')}`)
-      return
-    }
+    // 用户可主动选择"不导入此列"（target_field 为空），后端会跳过这些列，不再阻断导入。
     setImporting(true)
     setStep('processing')
     try {
@@ -284,6 +280,10 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     ? Object.entries(preview.suggested_mapping || {}).filter(
         ([, key]) => key && key.startsWith('cf_')
       ).length
+    : 0
+  // 用户主动选择"不导入此列"的列数（target_field 为空）
+  const skippedCount = preview
+    ? preview.detected_columns.filter(column => !mapping[column]).length
     : 0
 
   const stepTitle = {
@@ -491,10 +491,15 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
             <div>
               <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 13 }}>
                 已识别 <strong>{preview.detected_columns.length}</strong> 列，共 <strong>{preview.total_rows}</strong> 行数据。
-                请确认Excel列与系统字段的对应关系。
+                请确认Excel列与系统字段的对应关系；选择"不导入此列"可跳过该列。
                 {newFieldCount > 0 && (
                   <span style={{ color: '#ea580c', marginLeft: 8, fontWeight: 600 }}>
                     将自动创建 {newFieldCount} 个新字段
+                  </span>
+                )}
+                {skippedCount > 0 && (
+                  <span style={{ color: '#64748b', marginLeft: 8, fontWeight: 600 }}>
+                    将跳过 {skippedCount} 列
                   </span>
                 )}
               </div>
@@ -513,8 +518,9 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                       const mappedKey = mapping[col] || ''
                       const isNewField = mappedKey.startsWith('cf_')
                       const isVirtual = ['family_members', 'cited_patents', 'citing_patents'].includes(mappedKey)
+                      const isSkipped = !mappedKey
                       return (
-                        <tr key={col} style={{ borderTop: '1px solid #f1f5f9' }}>
+                        <tr key={col} style={{ borderTop: '1px solid #f1f5f9', opacity: isSkipped ? 0.6 : 1 }}>
                           <td style={{ padding: '8px 12px', fontWeight: 500 }}>{col}</td>
                           <td style={{ padding: '6px 12px' }}>
                             <select
@@ -523,7 +529,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                               value={mappedKey}
                               onChange={(e) => setMapping(prev => ({ ...prev, [col]: e.target.value }))}
                             >
-                              <option value="">-- 必须映射 --</option>
+                              <option value="">-- 不导入此列 --</option>
                               <optgroup label="系统字段">
                                 {Object.entries(SYSTEM_FIELD_LABELS).map(([f, l]) => (
                                   <option key={f} value={f}>{l} ({f})</option>
@@ -550,6 +556,11 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                             {isVirtual && (
                               <span style={{ display: 'inline-block', marginLeft: 6, padding: '1px 6px', fontSize: 10, background: '#e0e7ff', color: '#3730a3', borderRadius: 3 }}>
                                 关系入库
+                              </span>
+                            )}
+                            {isSkipped && (
+                              <span style={{ display: 'inline-block', marginLeft: 6, padding: '1px 6px', fontSize: 10, background: '#e2e8f0', color: '#475569', borderRadius: 3 }}>
+                                不导入
                               </span>
                             )}
                           </td>

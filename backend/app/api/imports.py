@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from app.database import get_db, SessionLocal, engine
 from app.schemas.schemas import ImportBatchResponse, StatsResponse
-from app.services.import_service import ImportService
+from app.services.import_service import ImportService, materialize_custom_field, CUSTOM_FIELD_KEY_PREFIX
 from app.services.patent_service import PatentService
 from app.services.field_registry import get_all_fields_meta
 from app.services.merge_service import merge_patent_data, _is_empty
@@ -220,6 +220,18 @@ def confirm_import(
         total_rows = len(df)
         batch.total_rows = total_rows
         print(f"[PatWiki] 开始导入 {total_rows} 条数据...", flush=True)
+
+        # 预览阶段只生成了提议的 cf_ key（未写库），此处按用户最终选择的映射
+        # 把仍被引用的提议字段真正落地；被用户改成"不导入此列"的提议不会创建，
+        # 从而避免残留孤立的自定义字段。
+        existing_cf_keys = {cf.key for cf in db.query(CustomField).all()}
+        for source_col, target_key in mapping.items():
+            if not target_key or not target_key.startswith(CUSTOM_FIELD_KEY_PREFIX):
+                continue
+            if target_key in existing_cf_keys:
+                continue
+            materialize_custom_field(db, target_key, source_col)
+        db.commit()
 
         custom_fields_cache = {cf.key: cf for cf in db.query(CustomField).all()}
 

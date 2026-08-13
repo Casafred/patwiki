@@ -184,6 +184,40 @@ def auto_create_custom_field(db: Session, column_name: str) -> str:
     return key
 
 
+def _propose_custom_field_key(column_name: str) -> str:
+    """为未知列生成一个确定性的 CustomField key（不写入数据库）。
+
+    实际创建推迟到 confirm_import 阶段，避免预览后被用户放弃导入时
+    残留孤立的自定义字段。同名列生成的 key 一致，重复导入会复用。
+    """
+    column_name = column_name.strip()
+    slug = _slugify(column_name)[:20]
+    return f"{CUSTOM_FIELD_KEY_PREFIX}{slug}_{_short_hash(column_name)}"
+
+
+def materialize_custom_field(db: Session, key: str, column_name: str) -> CustomField:
+    """按 key 落地一个 CustomField；已存在则直接返回。"""
+    column_name = column_name.strip()
+    existing = db.query(CustomField).filter(CustomField.key == key).first()
+    if existing:
+        return existing
+    # 同名复用（与 auto_create_custom_field 行为一致）
+    by_name = db.query(CustomField).filter(CustomField.name == column_name).first()
+    if by_name:
+        return by_name
+    cf = CustomField(
+        key=key,
+        name=column_name,
+        field_type=CustomFieldType.TEXT,
+        group_name="导入字段",
+        description=f"导入时自动创建，源列名：{column_name}",
+        is_active=True,
+    )
+    db.add(cf)
+    db.commit()
+    return cf
+
+
 class ImportService:
     @staticmethod
     def list_sheets(file_content: bytes, filename: str) -> list[str]:
@@ -231,9 +265,10 @@ class ImportService:
 
         返回结构：
             {
-                "列名": "field_key"  # 系统字段或 cf_xxx 自定义字段
+                "列名": "field_key"  # 系统字段、虚拟字段或 cf_xxx 自定义字段
             }
-        未匹配列自动创建 CustomField，按设计文档 3.3。
+        未匹配列提议创建 CustomField（仅生成 key，不立即写库）；
+        实际创建在 confirm_import 时发生，避免预览后放弃导入残留孤立字段。
         """
         mapping: dict[str, str] = {}
         mapping_issues: list[dict[str, str]] = []
@@ -246,7 +281,7 @@ class ImportService:
             if not col_clean:
                 continue
 
-            # 1. 完全命中标准字段映射
+            # 1. 完全命中标准字段映射（含虚拟字段：同族/引用）
             if col_clean in STANDARD_FIELD_MAPPINGS:
                 mapping[col_clean] = STANDARD_FIELD_MAPPINGS[col_clean]
                 continue
@@ -257,38 +292,45 @@ class ImportService:
                 continue
 
             # 3. 模糊匹配标准字段（"包含"关系）
+            #    - 虚拟字段（family_members/cited_patents/citing_patents）必须精确命中
+            #    - 含"同族/引用/被引用/family"等关系关键词的列，若未精确命中虚拟字段，
+            #      一律作为自定义字段呈现，避免"同族备注"被误配到 notes、
+            #      "同族申请日"被误配到 filing_date 等情况。
+            RELATION_KEYWORDS = ("同族", "引用", "被引用", "family")
+            is_relation_like = any(kw in col_clean.lower() for kw in RELATION_KEYWORDS)
             matched = False
-            for std_name, field_key in STANDARD_FIELD_MAPPINGS.items():
-                if std_name in col_clean or col_clean in std_name:
-                    mapping[col_clean] = field_key
-                    matched = True
-                    break
+            if not is_relation_like:
+                for std_name, field_key in STANDARD_FIELD_MAPPINGS.items():
+                    if field_key in VIRTUAL_FIELDS:
+                        continue
+                    if std_name in col_clean or col_clean in std_name:
+                        mapping[col_clean] = field_key
+                        matched = True
+                        break
             if matched:
                 continue
 
-            # 4. 未知列：自动创建 CustomField
-            try:
-                new_key = auto_create_custom_field(db, col_clean)
-                mapping[col_clean] = new_key
-                # 刷新缓存，避免同一次导入重复创建
-                custom_field_by_name[col_clean] = new_key
-            except Exception as exc:
-                mapping_issues.append({
-                    "column": col_clean,
-                    "reason": f"无法创建自定义字段：{exc}",
-                })
+            # 4. 未知列：提议创建 CustomField（仅生成 key，confirm 时落地）
+            proposed_key = _propose_custom_field_key(col_clean)
+            mapping[col_clean] = proposed_key
+            # 刷新缓存，避免同一次预览重复提议
+            custom_field_by_name[col_clean] = proposed_key
 
         return mapping, mapping_issues
 
     @staticmethod
     def validate_mapping(columns: list[str], mapping: dict[str, str], db: Session) -> list[dict[str, str]]:
-        """Return every mapping problem before any row can be written."""
+        """Return every *blocking* mapping problem before any row can be written.
+
+        空目标（用户主动选择"不导入此列"）不再视为问题——列可被显式跳过。
+        提议的 cf_ key（尚未落库）也视为合法，confirm 阶段会创建。
+        """
         custom_fields = {field.key: field for field in db.query(CustomField).all()}
         issues: list[dict[str, str]] = []
         for column in columns:
             target = (mapping.get(column) or "").strip()
             if not target:
-                issues.append({"column": column, "reason": "未映射目标字段"})
+                # 用户主动选择不导入此列，跳过校验
                 continue
             if target in IMPORT_BLOCKED_FIELDS:
                 issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入"})
@@ -297,6 +339,9 @@ class ImportService:
                 continue
             custom_field = custom_fields.get(target)
             if not custom_field:
+                # 提议的 cf_ key（尚未创建），confirm 时会落地
+                if target.startswith(CUSTOM_FIELD_KEY_PREFIX):
+                    continue
                 issues.append({"column": column, "target_field": target, "reason": "目标字段不存在"})
             elif custom_field.field_type == CustomFieldType.FORMULA:
                 issues.append({"column": column, "target_field": target, "reason": "公式字段由系统计算，不能导入"})
