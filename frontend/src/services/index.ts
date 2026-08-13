@@ -46,6 +46,8 @@ export const patentService = {
   bulkTag: (...args: Parameters<typeof patentApi.bulkTag>) => patentApi.bulkTag(...args),
   bulkDelete: (ids: number[]) => patentApi.bulkDelete(ids),
   cleanupInvalidPlaceholders: (dryRun = true) => patentApi.cleanupInvalidPlaceholders(dryRun),
+  placeholderStats: (databaseId?: number | null) => patentApi.placeholderStats(databaseId),
+  rebuildFamilyRelations: (databaseId?: number | null) => patentApi.rebuildFamilyRelations(databaseId),
   updateCell: (...args: Parameters<typeof patentApi.updateCell>) => patentApi.updateCell(...args),
   getHistory: (...args: Parameters<typeof patentApi.getHistory>) => patentApi.getHistory(...args),
 }

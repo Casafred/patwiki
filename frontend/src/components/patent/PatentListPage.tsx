@@ -15,7 +15,7 @@ import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
   ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget, SearchSuggestion,
-  Tag,
+  Tag, PlaceholderStats,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import Icon from '../common/Icon'
@@ -351,6 +351,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [showGroupConfig, setShowGroupConfig] = useState(false)
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
+  // 占位专利统计模态框
+  const [showPlaceholderStats, setShowPlaceholderStats] = useState(false)
+  const [placeholderStats, setPlaceholderStats] = useState<PlaceholderStats | null>(null)
+  const [placeholderLoading, setPlaceholderLoading] = useState(false)
+  const [placeholderFilter, setPlaceholderFilter] = useState<'all' | 'placeholder' | 'normal'>('all')
+  const [rebuildFamilyLoading, setRebuildFamilyLoading] = useState(false)
 
   // 用于丢弃快速翻页/切库时旧请求的响应：每次发起 loadPatents 自增，
   // 返回时若 ID 不等于最新值，说明已有更新请求在路上，直接丢弃结果。
@@ -517,6 +523,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       if (groupByFamily && !currentProductId) {
         params.group_by_family = true
       }
+      // 占位专利筛选：placeholder=仅占位（待补全），normal=仅完整专利
+      if (placeholderFilter === 'placeholder') params.is_placeholder = true
+      else if (placeholderFilter === 'normal') params.is_placeholder = false
 
       const allFilters: JsonObject = {}
       Object.entries(filterValues).forEach(([key, value]) => {
@@ -537,7 +546,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, dataVersion, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, dataVersion, placeholderFilter, setPatents, setLoading])
 
   // Browser back/forward rehydrates list state from the URL.
   useEffect(() => {
@@ -804,6 +813,58 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       loadPatents()
     } catch (error: unknown) {
       alert(getErrorMessage(error, '清理失败'))
+    }
+  }
+
+  // 占位专利统计筛查：打开模态框并拉取统计
+  const handleShowPlaceholderStats = async () => {
+    setShowPlaceholderStats(true)
+    setPlaceholderLoading(true)
+    try {
+      const data = await patentApi.placeholderStats(activeDatabaseId || null)
+      setPlaceholderStats(data)
+    } catch (error: unknown) {
+      alert('获取占位专利统计失败: ' + getErrorMessage(error))
+      setPlaceholderStats(null)
+    } finally {
+      setPlaceholderLoading(false)
+    }
+  }
+
+  // 切换占位专利筛选模式（影响主表格查询）
+  const handleApplyPlaceholderFilter = (mode: 'all' | 'placeholder' | 'normal') => {
+    setPlaceholderFilter(mode)
+    setPage(1)
+    setShowPlaceholderStats(false)
+  }
+
+  // 同族关系增量刷新
+  const handleRebuildFamilyRelations = async () => {
+    const ok = confirm(
+      '将增量重建同族关系链接（基于已保存的原始同族数据重新解析合并）。\n\n' +
+      (activeDatabaseId ? `作用范围：当前库（id=${activeDatabaseId}）\n` : '作用范围：全库\n') +
+      '\n点击"确定"开始执行。'
+    )
+    if (!ok) return
+    setRebuildFamilyLoading(true)
+    try {
+      const res = await patentApi.rebuildFamilyRelations(activeDatabaseId || null)
+      alert(
+        `同族关系重建完成。\n\n` +
+        `重新解析专利: ${res.reprocessed}\n` +
+        `跳过(无原始数据): ${res.skipped_no_raw}\n` +
+        `合并重复族: ${res.merged}\n` +
+        `已合并族: ${res.consolidated}\n` +
+        `清理空族: ${res.removed_empty}\n` +
+        `错误数: ${res.error_count}`
+      )
+      // 刷新统计 + 表格
+      void handleShowPlaceholderStats()
+      await loadPatents()
+    } catch (error: unknown) {
+      alert('同族关系重建失败: ' + getErrorMessage(error))
+    } finally {
+      setRebuildFamilyLoading(false)
     }
   }
 
@@ -1857,6 +1918,21 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           >
             清理无效占位
           </button>
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={handleRebuildFamilyRelations}
+            disabled={rebuildFamilyLoading}
+            title="基于已保存的同族原始数据增量重建链接，合并因算法升级或导入顺序导致的拆分族"
+          >
+            {rebuildFamilyLoading ? '重建中…' : '同族关系刷新'}
+          </button>
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={handleShowPlaceholderStats}
+            title="查看同族中出现但库中无完整数据的专利号清单，便于后续补齐"
+          >
+            占位专利筛查
+          </button>
         </div>
       </div>
 
@@ -1958,16 +2034,20 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         ) : (
           <table className="data-grid" style={{ width: 'max-content', minWidth: '100%' }}>
             <colgroup>
+              <col style={{ width: 50 }} />
               <col style={{ width: 40 }} />
               <col style={{ width: 70 }} />
               {visibleFields.map(field => <col key={field.key} style={{ width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH }} />)}
             </colgroup>
             <thead>
               <tr>
-                <th className="col-checkbox" style={{ width: 40, minWidth: 40, maxWidth: 40 }}>
+                <th className="col-rownum" style={{ width: 50, minWidth: 50, maxWidth: 50, position: 'sticky', left: 0, zIndex: 17, background: '#f9fafb' }}>
+                  <span style={{ fontSize: 12, color: '#6b7280', padding: '0 6px', display: 'block', textAlign: 'center' }}>#</span>
+                </th>
+                <th className="col-checkbox" style={{ width: 40, minWidth: 40, maxWidth: 40, position: 'sticky', left: 50, zIndex: 16, background: '#f9fafb' }}>
                   <input type="checkbox" checked={allSelected} onChange={handleSelectAll} />
                 </th>
-                <th className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 16, background: '#f9fafb' }}>
+                <th className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 90, zIndex: 16, background: '#f9fafb' }}>
                   <span style={{ fontSize: 12, color: '#6b7280', padding: '0 10px' }}>操作</span>
                 </th>
                 {visibleFields.map(field => {
@@ -3369,6 +3449,115 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           filters={filterValues}
           onClose={() => setShowExportDialog(false)}
         />
+      )}
+      {showPlaceholderStats && (
+        <div className="modal-overlay" onClick={() => setShowPlaceholderStats(false)}>
+          <div
+            className="modal-dialog"
+            style={{ maxWidth: 760 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3>占位专利统计筛查</h3>
+              <button className="modal-close-btn" onClick={() => setShowPlaceholderStats(false)}>×</button>
+            </div>
+            <div className="modal-body" style={{ overflowY: 'auto' }}>
+              <p className="modal-warning-subtext" style={{ marginBottom: 8 }}>
+                占位专利：同族/引用关系解析时出现号码但库中无完整数据，自动创建为 title="待补全" 的占位记录。下面是当前
+                {activeDatabaseId ? `库(id=${activeDatabaseId})` : '全库'}范围内的占位专利清单，可补齐数据或筛选查看。
+              </p>
+              {placeholderLoading ? (
+                <div style={{ textAlign: 'center', padding: 24, color: '#6b7280' }}>加载中…</div>
+              ) : placeholderStats ? (
+                <>
+                  <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 140px', padding: 10, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>占位专利总数</div>
+                      <div style={{ fontSize: 22, fontWeight: 600, color: '#dc2626' }}>{placeholderStats.total}</div>
+                    </div>
+                    <div style={{ flex: '1 1 140px', padding: 10, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>有申请号</div>
+                      <div style={{ fontSize: 22, fontWeight: 600 }}>{placeholderStats.with_application_number}</div>
+                    </div>
+                    <div style={{ flex: '1 1 140px', padding: 10, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>有公开号</div>
+                      <div style={{ fontSize: 22, fontWeight: 600 }}>{placeholderStats.with_publication_number}</div>
+                    </div>
+                  </div>
+                  {Object.keys(placeholderStats.by_country).length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>按国别分布</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {Object.entries(placeholderStats.by_country)
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([country, count]) => (
+                            <span key={country} style={{ padding: '2px 8px', background: '#f3f4f6', borderRadius: 12, fontSize: 12 }}>
+                              {country}: <strong>{count}</strong>
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead style={{ position: 'sticky', top: 0, background: '#f9fafb', zIndex: 1 }}>
+                        <tr>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>#</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>公开号</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>申请号</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>国别</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>同族ID</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>创建时间</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {placeholderStats.items.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>
+                              无占位专利。所有同族/引用号码都已有完整数据。
+                            </td>
+                          </tr>
+                        ) : placeholderStats.items.map((item, idx) => (
+                          <tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '6px 8px', color: '#9ca3af' }}>{idx + 1}</td>
+                            <td style={{ padding: '6px 8px' }}>
+                              <button
+                                className="cell-link"
+                                style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', padding: 0, fontSize: 12 }}
+                                onClick={() => { setShowPlaceholderStats(false); onPatentClick(item.id) }}
+                              >
+                                {item.publication_number || '-'}
+                              </button>
+                            </td>
+                            <td style={{ padding: '6px 8px' }}>{item.application_number || '-'}</td>
+                            <td style={{ padding: '6px 8px' }}>{item.country || '-'}</td>
+                            <td style={{ padding: '6px 8px', color: '#9ca3af' }}>{item.family_id ?? '-'}</td>
+                            <td style={{ padding: '6px 8px', color: '#9ca3af' }}>
+                              {item.created_at ? new Date(item.created_at).toLocaleDateString('zh-CN') : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div style={{ textAlign: 'center', padding: 24, color: '#6b7280' }}>暂无数据</div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowPlaceholderStats(false)}>关闭</button>
+              <button
+                className="btn btn-primary"
+                onClick={() => handleApplyPlaceholderFilter('placeholder')}
+                disabled={!placeholderStats || placeholderStats.total === 0}
+                title="在主表格中只显示占位专利，便于逐条补齐"
+              >
+                在表格中只看占位专利
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

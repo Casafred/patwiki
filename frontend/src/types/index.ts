@@ -394,6 +394,29 @@ export interface PatentListResponse {
   page_size: number
 }
 
+// 占位专利（同族中出现号码但库中无完整数据）统计
+export interface PlaceholderStatsItem {
+  id: number
+  application_number: string | null
+  publication_number: string | null
+  country: string | null
+  applicant: string | null
+  filing_date: string | null
+  database_id: number | null
+  family_id: number | null
+  notes: string | null
+  created_at: string | null
+}
+
+export interface PlaceholderStats {
+  total: number
+  by_country: Record<string, number>
+  with_application_number: number
+  with_publication_number: number
+  database_id: number | null
+  items: PlaceholderStatsItem[]
+}
+
 export interface Product {
   id: number
   name: string

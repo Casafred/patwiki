@@ -110,11 +110,18 @@ class PatentService:
         custom_filters: Optional[dict[str, Any]] = None,
         filters: Optional[dict[str, Any]] = None,
         group_by_family: bool = False,
+        is_placeholder: Optional[bool] = None,
     ) -> tuple[list[Patent], int]:
         query = db.query(Patent).options(
             joinedload(Patent.tags),
             joinedload(Patent.projects),
         )
+
+        # 占位专利筛选：True=仅占位（title="待补全"），False=仅完整专利
+        if is_placeholder is True:
+            query = query.filter(Patent.title == "待补全")
+        elif is_placeholder is False:
+            query = query.filter(Patent.title != "待补全")
 
         if search:
             search_term = f"%{search}%"

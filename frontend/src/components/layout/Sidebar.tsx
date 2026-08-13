@@ -23,6 +23,9 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   const [showAddDatabase, setShowAddDatabase] = useState(false)
   const [newDbName, setNewDbName] = useState('')
   const [newDbDesc, setNewDbDesc] = useState('')
+  const [deleteConfirm, setDeleteConfirm] = useState<{ db: typeof databases[0]; count: number } | null>(null)
+  const [deleteInput, setDeleteInput] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   // 打通关联：监听当前库切换，重新加载产品列表，patent_count 按当前库过滤
   const reloadProducts = useCallback(async () => {
@@ -92,8 +95,8 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
     }
   }
 
-  // 整库删除：级联删除库内所有专利后删库（默认库不可删）
-  const handleDeleteDatabase = async () => {
+  // 整库删除：打开确认弹窗（需输入库名确认），级联删除库内所有专利后删库
+  const handleDeleteDatabase = () => {
     if (currentDatabaseId === null || currentDatabaseId === undefined) {
       alert('请先选择要删除的库')
       return
@@ -107,27 +110,35 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
       alert('默认数据库不可删除')
       return
     }
-    const count = db.patent_count ?? 0
-    const msg = count > 0
-      ? `确定要删除库「${db.name}」吗？\n\n该库包含 ${count} 条专利，将一并删除，此操作不可恢复！`
-      : `确定要删除空库「${db.name}」吗？此操作不可恢复。`
-    if (!confirm(msg)) return
+    setDeleteInput('')
+    setDeleteConfirm({ db, count: db.patent_count ?? 0 })
+  }
+
+  const confirmDeleteDatabase = async () => {
+    if (!deleteConfirm) return
+    if (deleteInput.trim() !== deleteConfirm.db.name.trim()) {
+      alert('输入的库名不匹配，请重新输入')
+      return
+    }
+    setDeleting(true)
     try {
-      await databaseApi.delete(db.id, true)
+      await databaseApi.delete(deleteConfirm.db.id, true)
       const refreshed = await databaseApi.list()
       setDatabases(refreshed)
-      // 切到第一个可用库
       if (refreshed.length > 0) {
         setCurrentDatabaseId(refreshed[0].id)
       } else {
         setCurrentDatabaseId(null)
       }
       onNavigate('patents', refreshed.length > 0 ? refreshed[0].id : null)
+      setDeleteConfirm(null)
     } catch (e: unknown) {
       const detail = e && typeof e === 'object' && 'response' in e
         ? (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail
         : undefined
       alert(detail || '删除库失败')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -245,6 +256,43 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         </div>
         <span className="account-arrow">›</span>
       </button>
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={() => !deleting && setDeleteConfirm(null)}>
+          <div className="modal-dialog modal-danger" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>确认删除库</h3>
+            </div>
+            <div className="modal-body">
+              <p className="modal-warning-text">
+                即将删除库「<strong>{deleteConfirm.db.name}</strong>」
+                {deleteConfirm.count > 0 && (
+                  <>，该库包含 <strong style={{ color: '#dc2626' }}>{deleteConfirm.count}</strong> 条专利，将一并删除。</>
+                )}
+              </p>
+              <p className="modal-warning-subtext">此操作不可恢复。为防止误操作，请在下方输入完整的库名称以确认：</p>
+              <input
+                className="modal-input"
+                placeholder={deleteConfirm.db.name}
+                value={deleteInput}
+                onChange={(e) => setDeleteInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && deleteInput.trim() === deleteConfirm.db.name.trim() && !deleting && confirmDeleteDatabase()}
+                autoFocus
+                disabled={deleting}
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDeleteConfirm(null)} disabled={deleting}>取消</button>
+              <button
+                className="btn btn-danger"
+                onClick={confirmDeleteDatabase}
+                disabled={deleting || deleteInput.trim() !== deleteConfirm.db.name.trim()}
+              >
+                {deleting ? '删除中…' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }

@@ -778,7 +778,7 @@ function CustomTab({ patent, editing, updateField }: {
   updateField: (key: keyof PatentEditData, value: unknown) => void
 }) {
   const customData = patent.custom_fields || {}
-  const keys = Object.keys(customData)
+  const keys = Object.keys(customData).filter(k => !k.startsWith('__'))
 
   return (
     <div>

@@ -42,6 +42,7 @@ def list_patents(
     custom_filters: Optional[str] = Query(None, description="JSON string of custom field filters"),
     filters: Optional[str] = Query(None, description="JSON string of unified field filters, supports {field: {contains: 'xxx'}, field2: {eq: 'yyy'}}"),
     group_by_family: bool = Query(False, description="同族聚拢模式：同族专利排在一起，附加 family_size"),
+    is_placeholder: Optional[bool] = Query(None, description="占位专利筛选：true=仅占位专利，false=仅完整专利，不传=全部"),
     db: Session = Depends(get_db),
 ):
     tag_ids = [tag_id] if tag_id else None
@@ -79,6 +80,7 @@ def list_patents(
         custom_filters=cf,
         filters=uf,
         group_by_family=group_by_family,
+        is_placeholder=is_placeholder,
     )
     return {
         "total": total,
@@ -467,6 +469,61 @@ def delete_all_patents_in_database(
     return {"success": True, "deleted_count": count}
 
 
+@router.get("/placeholders/stats")
+def get_placeholder_stats(
+    database_id: Optional[int] = Query(None, description="按库筛选，不传为全库"),
+    db: Session = Depends(get_db),
+):
+    """占位专利统计：返回占位专利数量、按国别/类型分布，以及详细列表（仅基础字段）。
+
+    用于"同族中出现号码但库中无完整数据"的统计筛查，方便后续补齐。
+    占位专利标识：title="待补全"。
+    """
+    from sqlalchemy import func as _func
+    base_q = db.query(PatentModel).filter(PatentModel.title == "待补全")
+    if database_id is not None:
+        base_q = base_q.filter(PatentModel.database_id == database_id)
+
+    total = base_q.count()
+
+    # 按国别分布
+    by_country_rows = base_q.with_entities(
+        PatentModel.country, _func.count(PatentModel.id)
+    ).group_by(PatentModel.country).all()
+    by_country = {str(c or "未知"): n for c, n in by_country_rows}
+
+    # 按申请号/公开号是否有值
+    with_app = base_q.filter(PatentModel.application_number.isnot(None)).count()
+    with_pub = base_q.filter(PatentModel.publication_number.isnot(None)).count()
+
+    # 列表（仅必要字段，避免拉取大字段）
+    items_q = base_q.order_by(PatentModel.created_at.desc())
+    items = [
+        {
+            "id": p.id,
+            "application_number": p.application_number,
+            "publication_number": p.publication_number,
+            "country": p.country,
+            "applicant": p.applicant,
+            "filing_date": p.filing_date.isoformat() if p.filing_date else None,
+            "database_id": p.database_id,
+            "family_id": p.family_id,
+            "notes": p.notes,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in items_q.all()
+    ]
+
+    return {
+        "total": total,
+        "by_country": by_country,
+        "with_application_number": with_app,
+        "with_publication_number": with_pub,
+        "database_id": database_id,
+        "items": items,
+    }
+
+
 @router.post("/cleanup/invalid-placeholders")
 def cleanup_invalid_placeholders(
     dry_run: bool = Query(True, description="dry_run=True 仅返回将被删除的列表，不真正删除"),
@@ -536,28 +593,76 @@ def rebuild_family_relations(
     database_id: Optional[int] = Query(None, description="仅重建指定库，不传则全库重建"),
     db: Session = Depends(get_db),
 ):
-    """重建同族关系。
+    """增量重建同族关系。
 
-    修复 relation_service 的 family hash 算法后（从号字符串改为 patent ID），
-    历史导入产生的旧 family_id 可能不一致。本端点：
+    两阶段重建：
+    阶段1（增量重处理）：遍历所有 custom_fields 中存有 __family_members_raw 的专利，
+    用新算法重新解析同族号、找/建成员专利、计算 family hash。
+    这样即使两篇专利之前因旧算法被拆到不同族，也能被正确合并。
 
-    1. 遍历所有已有 PatentFamily，用新算法（成员 ID 哈希）重新计算 family_id
-    2. 同一组专利始终得到相同的 family_id_str，合并重复族
-    3. 清理无成员的空族
+    阶段2（清理）：删除无成员的空族，合并因阶段1产生的重复族。
 
-    注意：本端点只能合并已有同族关系的专利。如果两篇专利本应同族但导入时
-    从未建立关系（如导入失败导致），需要重新导入才能修复。
+    对于没有 __family_members_raw 的旧数据（修复前导入的），阶段1无法重处理，
+    只能依赖阶段2合并已有族。建议重新导入以彻底修复。
     """
-    from app.services.relation_service import _get_or_create_family_by_ids
+    from app.services.relation_service import (
+        process_family_members, parse_patent_numbers,
+    )
     from app.models.patent import PatentFamily
+    import json
 
-    query = db.query(PatentFamily)
-    families = query.all()
+    # ---- 阶段1：增量重处理有 __family_members_raw 的专利 ----
+    query = db.query(PatentModel).filter(
+        PatentModel.custom_fields.isnot(None),
+    )
+    if database_id is not None:
+        query = query.filter(PatentModel.database_id == database_id)
 
+    patents_with_raw = query.all()
+    reprocessed = 0
+    skipped_no_raw = 0
+    errors = []
+
+    for patent in patents_with_raw:
+        try:
+            custom = patent.custom_fields
+            if isinstance(custom, str):
+                custom = json.loads(custom)
+            if not isinstance(custom, dict):
+                skipped_no_raw += 1
+                continue
+            family_raw = custom.get("__family_members_raw")
+            if not family_raw:
+                skipped_no_raw += 1
+                continue
+            family_numbers = parse_patent_numbers(family_raw)
+            if not family_numbers:
+                skipped_no_raw += 1
+                continue
+            process_family_members(
+                db, patent, family_numbers, database_id=patent.database_id,
+            )
+            reprocessed += 1
+        except Exception as exc:
+            errors.append({"patent_id": patent.id, "error": str(exc)})
+            db.rollback()
+
+    # ---- 阶段2：清理空族 + 合并重复族 ----
+    families = db.query(PatentFamily).all()
+    if database_id is not None:
+        # 只处理与指定库相关的族（成员中有该库的专利）
+        related_family_ids = {
+            row.family_id for row in db.query(PatentModel.family_id).filter(
+                PatentModel.database_id == database_id,
+                PatentModel.family_id.isnot(None),
+            ).distinct().all()
+        }
+        families = [f for f in families if f.id in related_family_ids]
+
+    from app.services.relation_service import _get_or_create_family_by_ids
     merged = 0
     consolidated = 0
     removed_empty = 0
-    errors = []
 
     for family in families:
         try:
@@ -571,20 +676,6 @@ def rebuild_family_relations(
 
             member_ids = [m.id for m in members if m.id is not None]
             if len(member_ids) < 2:
-                # 单成员族，保留但用新算法重算
-                new_family = _get_or_create_family_by_ids(
-                    db, member_ids,
-                    [m.publication_number or m.application_number or "" for m in members],
-                )
-                for m in members:
-                    m.family_id = new_family.id
-                if new_family.id != family.id:
-                    # 旧族已无成员，删除
-                    remaining = db.query(PatentModel).filter(
-                        PatentModel.family_id == family.id
-                    ).count()
-                    if remaining == 0:
-                        db.delete(family)
                 consolidated += 1
                 continue
 
@@ -593,10 +684,8 @@ def rebuild_family_relations(
                 [m.publication_number or m.application_number or "" for m in members],
             )
             if new_family.id != family.id:
-                # 新族与旧族不同，迁移成员
                 for m in members:
                     m.family_id = new_family.id
-                # 删除空族
                 db.delete(family)
                 merged += 1
             else:
@@ -608,7 +697,8 @@ def rebuild_family_relations(
     db.commit()
 
     return {
-        "total_families_scanned": len(families),
+        "reprocessed": reprocessed,
+        "skipped_no_raw": skipped_no_raw,
         "consolidated": consolidated,
         "merged": merged,
         "removed_empty": removed_empty,

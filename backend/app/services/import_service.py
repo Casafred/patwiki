@@ -437,14 +437,18 @@ class ImportService:
                 continue
 
             # 虚拟字段：解析专利号列表，不写入 Patent 主表
+            # 但将原始值存入 custom_fields 的保留键，供增量关系刷新使用
             if field_key == "family_members":
                 virtual["family_numbers"] = parse_patent_numbers(value)
+                custom["__family_members_raw"] = value
                 continue
             if field_key == "cited_patents":
                 virtual["cited_numbers"] = parse_patent_numbers(value)
+                custom["__cited_patents_raw"] = value
                 continue
             if field_key == "citing_patents":
                 virtual["citing_numbers"] = parse_patent_numbers(value)
+                custom["__citing_patents_raw"] = value
                 continue
 
             # 自定义字段

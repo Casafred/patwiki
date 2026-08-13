@@ -8,6 +8,7 @@ import type {
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
   PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
+  PlaceholderStats,
 } from '../types'
 
 export const fieldApi = {
@@ -306,6 +307,21 @@ export const patentApi = {
     deleted_items: Array<{ id: number; application_number: string | null; publication_number: string | null; notes: string | null; created_at: string | null }>
     dry_run: boolean
   }> => api.post('/patents/cleanup/invalid-placeholders', null, { params: { dry_run: dryRun } }),
+
+  // 占位专利统计筛查（同族中出现号码但库中无完整数据的专利）
+  placeholderStats: (databaseId?: number | null): Promise<PlaceholderStats> =>
+    api.get('/patents/placeholders/stats', { params: { database_id: databaseId ?? undefined } }),
+
+  // 同族关系增量重建
+  rebuildFamilyRelations: (databaseId?: number | null): Promise<{
+    reprocessed: number
+    skipped_no_raw: number
+    consolidated: number
+    merged: number
+    removed_empty: number
+    error_count: number
+    errors: Array<{ patent_id?: number; family_id?: number; error: string }>
+  }> => api.post('/patents/maintenance/rebuild-family-relations', null, { params: { database_id: databaseId ?? undefined } }),
 
   updateCell: (patentId: number, fieldKey: string, value: JsonValue): Promise<Patent> =>
     api.patch(`/patents/${patentId}/field/${fieldKey}`, { value } as CellUpdateRequest),
