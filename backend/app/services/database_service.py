@@ -160,7 +160,8 @@ class DatabaseService:
         """删除库。
 
         - force=False（默认）：库中有专利时拒绝删除，需先迁移或清空。
-        - force=True：级联删除库内所有专利，然后删库。默认库仍不可删。
+        - force=True：级联删除库内所有数据（专利/视图/仪表盘/自动化规则/附件），
+          然后删库。默认库仍不可删。
         """
         # 不允许删除默认库
         if database.is_default:
@@ -173,6 +174,63 @@ class DatabaseService:
             db.query(Patent).filter(Patent.database_id == database.id).delete(
                 synchronize_session=False
             )
+
+        # SQLite 不强制外键级联（PRAGMA foreign_keys=OFF），且 PatentView 的
+        # backref="views" 无 cascade 配置，db.delete(database) 时 ORM 会尝试将
+        # patent_views.database_id 置 NULL，触发 NOT NULL 约束错误。
+        # 因此必须显式删除所有依赖 database_id 的子表记录。
+        from app.models.view import PatentView, ViewLocalField
+        from app.models.dashboard import Dashboard
+        from app.models.automation import AutomationRule
+        from app.models.attachment import Attachment
+
+        # 删除视图及其本地字段（ViewLocalField 通过 ORM cascade 关联到视图）
+        view_ids = [v.id for v in db.query(PatentView.id).filter(
+            PatentView.database_id == database.id
+        ).all()]
+        if view_ids:
+            db.query(ViewLocalField).filter(
+                ViewLocalField.view_id.in_(view_ids)
+            ).delete(synchronize_session=False)
+            db.query(PatentView).filter(
+                PatentView.database_id == database.id
+            ).delete(synchronize_session=False)
+
+        # 删除仪表盘
+        db.query(Dashboard).filter(
+            Dashboard.database_id == database.id
+        ).delete(synchronize_session=False)
+
+        # 删除自动化规则及其日志（bulk delete 绕过 ORM cascade，需手动删日志）
+        rule_ids = [r.id for r in db.query(AutomationRule.id).filter(
+            AutomationRule.database_id == database.id
+        ).all()]
+        if rule_ids:
+            from app.models.automation import AutomationLog
+            db.query(AutomationLog).filter(
+                AutomationLog.rule_id.in_(rule_ids)
+            ).delete(synchronize_session=False)
+            db.query(AutomationRule).filter(
+                AutomationRule.id.in_(rule_ids)
+            ).delete(synchronize_session=False)
+
+        # 删除附件文件记录及磁盘文件
+        attachments = db.query(Attachment).filter(
+            Attachment.database_id == database.id
+        ).all()
+        if attachments:
+            from app.config import settings
+            for att in attachments:
+                try:
+                    file_path = settings.FILES_DIR / att.file_path
+                    if file_path.exists():
+                        file_path.unlink()
+                except Exception:
+                    pass  # 文件删除失败不阻断库删除
+            db.query(Attachment).filter(
+                Attachment.database_id == database.id
+            ).delete(synchronize_session=False)
+
         db.delete(database)
         db.commit()
         return True

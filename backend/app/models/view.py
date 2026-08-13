@@ -11,7 +11,7 @@ from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON,
     UniqueConstraint, Index,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -61,7 +61,7 @@ class PatentView(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    database = relationship("PatentDatabase", backref="views")
+    database = relationship("PatentDatabase", backref=backref("views", cascade="all, delete-orphan"))
     owner = relationship("User", foreign_keys=[owner_id])
     local_fields = relationship(
         "ViewLocalField", back_populates="view",
