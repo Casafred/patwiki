@@ -31,6 +31,8 @@ SearchCase、RiskCase、ProtectionCase、ProjectSolutionVersion 等仍是合理�
 
 重复导入采用“来源观察、候选规范值、当前采用值”三层模型。非冲突新信息可以增量补充；格式差异和内容冲突交用户确认；身份冲突阻断整行；每次导入都记录工作簿、表格标题、工作表、行号、时间和逐字段处理结果。详细规格见 [`24-patent-information-hub-functional-spec.md`](PatWiki_refactor_guidance_pack/24-patent-information-hub-functional-spec.md)。
 
+导入中出现系统尚未认识的属性时，不应把它当作导入失败，也不应未经确认直接变成正式字段。只要原始文件可读取、行可以解析且专利身份没有冲突，就必须保留原始文件、工作表、列名、列序号、行号、单元格值、批次和导入时间，登记为 `unmapped_retained`。该属性可以在来源扩展视图中查询、筛选和导出，也可以提交为已有字段映射或新字段候选；只有完成语义确认和 Field Registry 更新后，才允许回填正式字段、关系或统计。身份冲突、文件损坏、行解析失败和完整性错误才进入 `quarantined`。未知属性的保留不是临时丢弃区，而是应对现有盘点不完备和未来字段演化的正式治理能力。
+
 PatWiki IP业务数据体系
 重构、治理与前瞻设计指导报告
 
@@ -178,7 +180,7 @@ ArtifactLink 通过 entity_type + entity_id + role 关联Patent、RiskCase、Ass
 
 ### Phase 0B：字段与业务键冻结
 
-为 31 类来源表的每一列明确 canonical field、别名、主存储位置、业务键范围、迁移状态和业务负责人。每列只能是 `mapped`、`deprecated` 或 `quarantined`；不允许“以后再处理”的隐性状态。
+为 31 类来源表的每一列明确 canonical field、别名、主存储位置、业务键范围、迁移状态和业务负责人。每列必须处于 `candidate`、`unmapped_retained`、`mapped`、`deprecated` 或 `quarantined` 之一；其中 `unmapped_retained` 是有意保留、可查询、可导出的治理状态，不等于导入失败或数据丢失。只有身份冲突、文件损坏、行解析失败和完整性错误才进入 `quarantined`，不允许用隔离代替字段治理。
 
 ### Phase 0C-0E：先交付专利信息中心
 
@@ -247,7 +249,8 @@ SavedView/ReportSnapshot、外部 Connector 和 MCP/AI 都是后续阶段。自�
 
 ### 迁移质量
 
-- 每个来源表记录行数、业务键、null rate、多值拆分数、未识别 alias、隔离项、附件链接、责任人和时间字段；
+- 每个来源表记录行数、业务键、null rate、多值拆分数、未匹配 alias、已保留未知属性数量及样例、真正隔离项、附件链接、责任人和时间字段；
+- 每个 `unmapped_retained` 属性都能反查原始文件、工作表、列名、行号、原始值、导入批次和映射版本；后续映射或回填必须形成新的治理批次，不能覆盖原始观察；
 - 每次迁移有版本、校验和、备份 ID、运行结果和恢复验证；
 - 新旧读模型按业务键生成差异报告，差异要么为零，要么有业务负责人接受的例外。
 
@@ -514,7 +517,7 @@ SavedView/ReportSnapshot、外部 Connector 和 MCP/AI 都是后续阶段。自�
 | 阶段 | 主题 | 核心动作 | 验收 |
 | --- | --- | --- | --- |
 | 0A | 迁移平台与基线冻结 | 迁移账本、SQLite 备份/恢复、外键运行时配置、字段与业务键冻结 | 空库/历史库升级可重复执行，失败可恢复 |
-| 0B | 字段注册与导入隔离 | Field Registry、Alias Registry、来源字段映射、未识别字段隔离 | 31类来源表每列均有映射、弃用或隔离结论 |
+| 0B | 字段注册与导入保留 | Field Registry、Alias Registry、来源字段映射、未知属性保留、真正异常隔离和后续映射 | 31类来源表每列均有 candidate、unmapped_retained、mapped、deprecated 或 quarantined 结论；未知属性可查询、导出和回填，真正异常才隔离 |
 | 1 | 主数据/分类 | 组织、产品线-品类、产品、项目、技术taxonomy | 核心对象不再自由文本 |
 | 2 | 方案版本 | SolutionVersion、Feature、Inheritance | 检索/风险绑定具体版本 |
 | 3 | 风险域 | RiskCase/Assessment/Decision/Mitigation/Watch | 旧风险表可自动生成 |
@@ -584,6 +587,8 @@ SavedView/ReportSnapshot、外部 Connector 和 MCP/AI 都是后续阶段。自�
 | 22-target-product-architecture.md | 以专利为中心的完整产品形态和长期能力地图 |
 | 23-2026-product-scope-and-business-rules.md | 已确认业务规则、当年范围和产品验收标准 |
 | 24-patent-information-hub-functional-spec.md | 专利详情、号码身份、增量导入、Wiki 历史和高频视图规格 |
+| 25-agent-development-protocol.md | Agent 强制阅读、任务循环、禁止行为、完成定义和交付格式 |
+| 26-human-data-entry-interaction-spec.md | 快速录入、详情编辑、Excel 双通道、批量维护和低门槛录入验收 |
 | schema-v2-draft.sql | 核心新实体DDL草案，仅供技术评审 |
 
 ### 表 26

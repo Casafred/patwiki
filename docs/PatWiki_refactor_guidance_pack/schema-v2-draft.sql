@@ -202,14 +202,32 @@ CREATE TABLE IF NOT EXISTS import_batch_sources (
     mapping_version TEXT NOT NULL,
     source_exported_at DATETIME,
     file_hash TEXT NOT NULL,
+    source_artifact_id INTEGER,
     imported_at DATETIME NOT NULL,
-    FOREIGN KEY(import_batch_id) REFERENCES import_batches(id)
+    FOREIGN KEY(import_batch_id) REFERENCES import_batches(id),
+    FOREIGN KEY(source_artifact_id) REFERENCES artifacts(id)
+);
+
+CREATE TABLE IF NOT EXISTS import_source_rows (
+    id INTEGER PRIMARY KEY,
+    import_batch_id INTEGER NOT NULL,
+    source_row INTEGER NOT NULL,
+    source_record_key TEXT,
+    raw_row_json JSON NOT NULL,
+    row_hash TEXT,
+    resolution_status TEXT NOT NULL DEFAULT 'unmapped_retained', -- resolved/unmapped_retained/quarantined
+    resolved_patent_id INTEGER,
+    created_at DATETIME NOT NULL,
+    UNIQUE(import_batch_id, source_row),
+    FOREIGN KEY(import_batch_id) REFERENCES import_batches(id),
+    FOREIGN KEY(resolved_patent_id) REFERENCES patents(id)
 );
 
 CREATE TABLE IF NOT EXISTS patent_import_events (
     id INTEGER PRIMARY KEY,
     patent_id INTEGER NOT NULL,
     import_batch_id INTEGER NOT NULL,
+    source_row_id INTEGER NOT NULL,
     source_row INTEGER NOT NULL,
     source_record_key TEXT,
     matched_identifier_id INTEGER,
@@ -225,27 +243,33 @@ CREATE TABLE IF NOT EXISTS patent_import_events (
     UNIQUE(import_batch_id, source_row, patent_id),
     FOREIGN KEY(patent_id) REFERENCES patents(id),
     FOREIGN KEY(import_batch_id) REFERENCES import_batches(id),
+    FOREIGN KEY(source_row_id) REFERENCES import_source_rows(id),
     FOREIGN KEY(matched_identifier_id) REFERENCES patent_identifiers(id)
 );
 
 CREATE TABLE IF NOT EXISTS field_observations (
     id INTEGER PRIMARY KEY,
-    patent_import_event_id INTEGER NOT NULL,
-    canonical_field_key TEXT NOT NULL,
+    patent_import_event_id INTEGER,
+    import_source_row_id INTEGER NOT NULL,
+    source_field_name TEXT NOT NULL,
+    source_column_index INTEGER,
+    canonical_field_key TEXT,
+    field_resolution TEXT NOT NULL DEFAULT 'unmapped_retained', -- mapped/candidate/unmapped_retained/quarantined
     value_index INTEGER NOT NULL DEFAULT 0,
     raw_value TEXT,
     normalized_value TEXT,
     adopted_value_before TEXT,
     candidate_value TEXT,
     adopted_value_after TEXT,
-    difference_type TEXT NOT NULL, -- new/same/format/content/identity/protected
-    proposed_action TEXT NOT NULL, -- fill/append/keep/version/block
+    difference_type TEXT NOT NULL, -- new/same/format/content/identity/protected/unknown
+    proposed_action TEXT NOT NULL, -- fill/append/keep/version/retain/map/block
     final_decision TEXT,
     decided_by INTEGER,
     decided_at DATETIME,
     created_at DATETIME NOT NULL,
-    UNIQUE(patent_import_event_id, canonical_field_key, value_index),
+    UNIQUE(import_source_row_id, source_field_name, value_index),
     FOREIGN KEY(patent_import_event_id) REFERENCES patent_import_events(id),
+    FOREIGN KEY(import_source_row_id) REFERENCES import_source_rows(id),
     FOREIGN KEY(decided_by) REFERENCES people(id)
 );
 
@@ -779,6 +803,9 @@ ON patent_identifiers(patent_id, identifier_type, is_primary);
 
 CREATE INDEX IF NOT EXISTS ix_patent_import_history
 ON patent_import_events(patent_id, created_at);
+
+CREATE INDEX IF NOT EXISTS ix_import_source_row_resolution
+ON import_source_rows(resolution_status, created_at);
 
 CREATE INDEX IF NOT EXISTS ix_field_observation_review
 ON field_observations(difference_type, final_decision, created_at);

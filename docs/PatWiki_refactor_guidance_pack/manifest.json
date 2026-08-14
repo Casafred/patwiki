@@ -13,8 +13,10 @@
     "22-target-product-architecture.md",
     "23-2026-product-scope-and-business-rules.md",
     "24-patent-information-hub-functional-spec.md",
+    "25-agent-development-protocol.md",
+    "26-human-data-entry-interaction-spec.md",
     "schema-v2-draft.sql"
   ],
-  "status": "implementation-guided",
-  "note": "Apply 23 for 2026 scope, 24 for Patent Information Hub behavior, and 21 for implementation gates. schema-v2-draft.sql is conceptual."
+  "status": "agent-executable",
+  "note": "Agents must read 25 first, then apply 23 for 2026 scope, 21 for implementation gates, 24 for Patent Information Hub behavior, and 26 for human data-entry interaction. schema-v2-draft.sql is conceptual."
 }

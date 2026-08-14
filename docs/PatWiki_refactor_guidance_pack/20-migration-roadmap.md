@@ -48,11 +48,13 @@
 5. 统一基础枚举。
 6. 标记每个字段的数据责任等级。
 7. 对每个 canonical field 记录存储位置、迁移状态和业务负责人。
+8. 对暂时无法识别的来源列建立 `unmapped_retained` 记录；对真正无法解析或身份冲突的行建立 `quarantined` 记录。
 
 验收：
 
-- 31 类原表每一列处于 mapped、deprecated 或 quarantined 状态；
-- 不再允许未注册的责任性字段直接上线。
+- 31 类原表每一列处于 candidate、unmapped_retained、mapped、deprecated 或 quarantined 状态；
+- 未注册属性仍可查询、导出和后续映射，但不会未经确认进入默认统计或责任性结论；
+- 不再允许未知属性静默丢弃，也不允许未注册属性直接作为正式字段上线。
 
 ---
 
@@ -372,7 +374,9 @@
 - 核心字段 null rate；
 - 多值关系拆分数量；
 - 未识别 alias；
-- 无法映射字段；
+- 待治理/尚未映射字段（包括已保留的未知属性）；
+- 已保留的未知列数量、来源和样例值；
+- 未知列后续映射/回填批次；
 - 附件链接完整性；
 - 责任人映射；
 - 时间字段；
@@ -389,6 +393,9 @@
   "rows_seen": 1000,
   "rows_migrated": 995,
   "rows_quarantined": 5,
+  "rows_unmapped_retained": 12,
+  "unknown_fields": ["原始表.新字段"],
+  "unknown_field_samples": {"原始表.新字段": ["样例值1", "样例值2"]},
   "links_created": 2200,
   "aliases_unresolved": [],
   "started_at": "...",

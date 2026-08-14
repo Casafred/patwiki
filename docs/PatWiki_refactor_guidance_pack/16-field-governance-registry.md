@@ -15,6 +15,8 @@
 
 Field Registry 的作用是让新增字段先回答“它是什么”，再决定“放在哪张视图”。
 
+但“还不知道它是什么”不等于“导入失败”或“可以丢弃”。未知来源属性必须先以原始列名、原始值、来源文件、工作表、行号和导入批次保留下来；只有在语义确认后，才升级为 canonical field、关系属性或受治理的 CustomField。字段治理负责控制正式使用，不负责阻止信息进入 PatWiki。
+
 字段注册必须与**存储决策**分离。每个 canonical field 必须声明一个且仅一个主存储位置：系统列、关系实体属性、事件/版本记录、`CustomField`、`ViewLocalField`、Artifact 元数据或 Snapshot 派生值。视图只投影字段，不能重新定义事实。
 
 ## 2. 每个字段的 12 维元数据
@@ -51,7 +53,7 @@ Field Registry 的作用是让新增字段先回答“它是什么”，再决�
 - `canonical_key`：稳定、不可复用的机器键；
 - `storage_kind` / `storage_locator`：字段实际落点；
 - `business_key_scope`：唯一性边界，如 `database`、`jurisdiction`、`project`；
-- `migration_status`：planned / mapped / migrated / verified / deprecated；
+- `migration_status`：planned / candidate / unmapped_retained / mapped / migrated / verified / deprecated / quarantined；
 - `legacy_aliases`：来源列名、来源文件/表与映射版本；
 - `change_owner` / `change_ticket`：谁批准本次语义或治理规则变更。
 
@@ -273,9 +275,9 @@ aliases:
   出货地区: ProjectRegionLink
 ```
 
-所有 Excel 导入先走 alias normalization，再进入领域实体。
+所有 Excel 导入先走 alias normalization，再进入领域实体或来源观察层。
 
-导入时不能静默猜测：未匹配 alias、格式冲突、候选实体不唯一和多值拆分失败必须进入隔离清单，并带来源文件、工作表、行号、原始值和映射版本。只有业务负责人确认后才可重跑该行。
+未匹配 alias 不应默认进入错误隔离：如果行身份可识别、原始文件可读取，则列值进入 `unmapped_retained`，可在来源字段视图中查询和导出，并进入待治理清单。只有身份冲突、文件损坏、行无法解析或存在安全/完整性问题时才进入 `quarantined`。两者都必须带来源文件、工作表、行号、原始值和映射版本。
 
 ### 8.1 专利号码 Alias 与身份规则
 
@@ -296,7 +298,15 @@ Field Registry 对每个可导入字段还必须声明：
 - `protected_from_external`：是否禁止外部导入修改；
 - `observation_retention`：来源观察保存期限，外部专利事实默认永久。
 
-任何导入字段都先形成 `FieldObservation`。当前为空或集合出现明确新成员时可做增量补充；格式差异不作为内容覆盖；内容冲突保留候选并等待用户确认；人工分类、分析、风险、保护和内部关系默认为 `protected_from_external=true`。
+任何导入字段都先形成 `FieldObservation`。已知字段按字段策略写入；未知字段以 `canonical_field_key=NULL`、`field_resolution=unmapped_retained` 保留，不得静默丢弃或自动塞入正式 `CustomField`。当前为空或集合出现明确新成员时可做增量补充；格式差异不作为内容覆盖；内容冲突保留候选并等待用户确认；人工分类、分析、风险、保护和内部关系默认为 `protected_from_external=true`。
+
+### 8.3 未知属性的升级流程
+
+1. 导入时保留原始工作簿/表格/列名/值，并生成稳定的来源列键；
+2. 在“未注册属性”视图中按来源表、出现次数、样例值、数据类型候选和关联专利浏览；
+3. 用户可以将它标记为忽略展示、暂时作为来源字段、映射到已有 canonical field，或提交为新字段候选；
+4. 经过语义确认后建立 FieldDefinition/关系实体，并从历史 `FieldObservation` 回填；
+5. 回填必须保留原始观察、映射版本、批准人和回填批次，不能把历史来源改写成仿佛一开始就已知。
 
 ## 9. 数据质量等级
 
@@ -310,7 +320,7 @@ Field Registry 对每个可导入字段还必须声明：
 
 ## 10. 变更门禁与最小验收
 
-- 新责任性字段必须已注册、已确定存储位置和验证规则，才能出现在 API/UI/导入映射中。
+- 新责任性字段必须已注册、已确定存储位置和验证规则，才能进入正式统计、责任性 API/UI 或默认导出；未知属性仍可通过来源观察 API/UI 查询和导出。
 - 字段别名变更必须保留旧别名与生效日期，避免历史导入模板失效。
 - 所有 canonical field 都能反查到至少一个来源定义或业务负责人；外部事实必须有 `source_system` 和 `source_timestamp`。
-- 31 类来源表中的每列必须处于 mapped、deprecated 或 quarantined 状态之一；“待以后处理”不能作为迁移完成状态。
+- 31 类来源表中的每列必须处于 candidate、unmapped_retained、mapped、deprecated 或 quarantined 状态之一；其中 `unmapped_retained` 是有意保留的治理状态，不等于丢弃，也不等于已进入正式统计。
