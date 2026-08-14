@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-13",
+  "generated_at": "2026-08-15",
   "purpose": "PatWiki IP business data model refactor guidance",
   "files": [
     "README.md",
@@ -10,8 +10,11 @@
     "19-ai-automation-mcp.md",
     "20-migration-roadmap.md",
     "21-implementation-contract.md",
+    "22-target-product-architecture.md",
+    "23-2026-product-scope-and-business-rules.md",
+    "24-patent-information-hub-functional-spec.md",
     "schema-v2-draft.sql"
   ],
   "status": "implementation-guided",
-  "note": "schema-v2-draft.sql is conceptual. Apply 21-implementation-contract.md before translating it into SQLAlchemy models and versioned migrations."
+  "note": "Apply 23 for 2026 scope, 24 for Patent Information Hub behavior, and 21 for implementation gates. schema-v2-draft.sql is conceptual."
 }

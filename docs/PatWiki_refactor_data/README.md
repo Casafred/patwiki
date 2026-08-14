@@ -7,7 +7,7 @@
 - `index.json` 是工作表与 CSV 文件的机器可读索引。
 - `00-00_使用说明.csv` 至 `11-11_自动化与MCP.csv` 是从原工作簿逐表无损导出的事实台账。
 - `12-实施基线与迁移门禁.csv` 是以当前代码架构复核后新增的开发门禁。它优先于旧工作簿中的“已具备能力”表述。
-- 决策解释和开发顺序以 `../PatWiki_refactor_guidance_pack/21-implementation-contract.md` 为准；业务报告以 `../PatWiki_IP业务数据体系重构指导报告.md` 为准。
+- 2026 范围以 `../PatWiki_refactor_guidance_pack/23-2026-product-scope-and-business-rules.md` 为准，专利详情和导入行为以 `../PatWiki_refactor_guidance_pack/24-patent-information-hub-functional-spec.md` 为准，开发门禁以 `../PatWiki_refactor_guidance_pack/21-implementation-contract.md` 为准；业务报告以 `../PatWiki_IP业务数据体系重构指导报告.md` 为准。
 
 ## 维护规则
 

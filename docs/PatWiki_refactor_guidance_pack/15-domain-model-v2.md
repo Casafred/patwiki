@@ -1,10 +1,12 @@
 # 15 — Domain Model V2：PatWiki 统一领域模型
 
-> 实施约束：先阅读 `21-implementation-contract.md`。本文描述目标领域模型；当前物理 `Patent` 表在兼容期承担 `PatentDocument` 角色，不在本阶段重命名。
+> 实施约束：先阅读 `23-2026-product-scope-and-business-rules.md` 与 `21-implementation-contract.md`。本文描述目标领域模型；当前物理 `Patent` 表在兼容期承担 `PatentDocument` 角色，不在本阶段重命名。
 
 ## 1. 建模目标
 
-PatWiki 不应继续以“所有业务都给 Patent 增加字段”为演化方式。Patent（目标术语为 PatentDocument）仍是专利知识的锚点，但 IP 业务至少存在以下一级聚合根：
+2026 年的**产品体验以 PatentDocument 为唯一中心**：列表、详情、检索、关联查看和工作文件输出都从专利进入。用户不应为了拼出一篇专利的全景信息，在多个工作台和台账之间来回寻找。
+
+“产品以专利为中心”不等于“把所有信息塞进 `patents` 一张表”。PatWiki 不应继续以“所有业务都给 Patent 增加字段”为演化方式。风险判断、项目上下文、检索命中、保护记录、附件和历史仍需按各自生命周期分层存储，再聚合到专利详情页。目标领域模型因此仍包含以下一级聚合根：
 
 - `Project`
 - `ProjectSolutionVersion`
@@ -18,6 +20,8 @@ PatWiki 不应继续以“所有业务都给 Patent 增加字段”为演化方�
 - `ReportSnapshot`
 
 聚合根之间通过带属性的关系实体连接。
+
+这份聚合根清单描述长期数据边界，不等于当前开发顺序。2026 P0 只要求先把 `PatentDocument` 的身份、事实、来源、关系、交互查询和导出做好；完整 `SearchCase`、`RiskCase`、`ProtectionCase` 和 `ProjectSolutionVersion` 工作流不得反向阻塞专利信息中心。
 
 所有可独立查询、导入、审计或访问控制的业务聚合根还必须有 `database_id` 作为工作台归属；`database_id` 用于数据集合与查询范围，当前并不构成认证隔离。每个聚合根同时至少保存 `created_at`、`updated_at`、来源和责任人/创建人。
 
@@ -70,7 +74,7 @@ Project 只保存当前快照字段，如 `current_stage`；历史阶段保存�
 
 ### 2.4 ProjectSolutionVersion
 
-这是 V2 的 P0 实体。
+这是长期目标模型中的重要上下文实体；按 2026 范围，它是风险场景需要时建设的轻量 P1 能力，不是专利信息中心 P0 的前置条件。
 
 建议字段：
 
@@ -99,9 +103,9 @@ Project 只保存当前快照字段，如 `current_stage`；历史阶段保存�
 - SolutionVersion ↔ SearchCase
 - SolutionVersion ↔ ProtectionCase
 
-任何风险评估必须明确基于哪个 `solution_version_id`。
+任何确实针对具体项目方案签发的正式风险评估必须明确基于哪个 `solution_version_id`。普通专利导入、分类、相关性记录和保护状态不强制创建方案版本。
 
-P0 约束：一个 SearchCase、RiskAssessmentVersion 或 ProtectionCase 草稿只允许一个 `primary_solution_version_id`。多方案比较是后续显式 scope link 的能力，不能先用 JSON 数组、逗号文本或多选 CustomField 代替。
+建模约束：需要方案上下文时，一个 RiskAssessmentVersion 只有一个 primary solution version；SearchCase 或 ProtectionCase 可按实际需要引用。多方案比较使用显式 scope link，不能用 JSON 数组、逗号文本或多选 CustomField 代替。
 
 ### 2.5 Technology Taxonomy
 
@@ -129,6 +133,7 @@ P0 约束：一个 SearchCase、RiskAssessmentVersion 或 ProtectionCase 草稿�
 
 - PatentFamily
 - PatentDocument
+- PatentIdentifier
 - PriorityClaim
 - FamilyRelation
 - LegalStatusEvent
@@ -137,13 +142,15 @@ P0 约束：一个 SearchCase、RiskAssessmentVersion 或 ProtectionCase 草稿�
 
 原则：
 
-- 一个国家/地区的申请/公开号/授权号对应具体 `PatentDocument`。
+- 一个国家/地区的同一申请链对应一个 `PatentDocument`；申请号、申请公开号和授权公告号是该记录的多个 `PatentIdentifier`，不是三篇专利。
+- 完整规范公开号/授权号用于精确匹配；申请号用于连接公开和授权阶段。号码根、外部 ID 和同族关系只能生成候选，不能单独触发自动合并。
 - 同族对应 `PatentFamily`。
-- 分案、续案、继续申请等通过 `FamilyRelation` 表达。
+- 不同国家/地区同族成员保持独立 `PatentDocument`；分案、续案、继续申请等通过 `FamilyRelation` 表达。
 - `current_legal_status` 可以作为缓存，但完整事实来自 `LegalStatusEvent`。
 - 原始申请人/权利人值和标准化 Party 必须并存。
+- 每次外部导入的字段观察必须保留，即使规范值与当前采用值相同；导入血缘使用 `PatentImportEvent + FieldObservation`，不能只依赖修改历史。
 
-兼容策略：在当前仓库中用 `Patent.id` 作为 V2 `patent_document_id` 的外键目标；`PatentFamily` 保持现有物理表。表重命名、全量拆分 PatentDocument 和真正的 Party 正规化均放在迁移稳定后的独立决策中。
+兼容策略：在当前仓库中用 `Patent.id` 作为 V2 `patent_document_id` 的外键目标；`Patent.application_number/publication_number/grant_number` 继续作为主标识投影，完整标识和原始写法进入 `PatentIdentifier`；`PatentFamily` 保持现有物理表。表重命名、全量拆分 PatentDocument 和真正的 Party 正规化均放在迁移稳定后的独立决策中。
 
 ### 2.7 Search
 

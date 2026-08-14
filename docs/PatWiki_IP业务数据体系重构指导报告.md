@@ -4,11 +4,12 @@
 
 - 历史来源：2026-08-13 前的 Office 版本（可由 Git 历史追溯）
 - 文本化日期：2026-08-13
+- 业务范围校正：2026-08-15
 - 当前状态：`implementation-guided`
 
 ## 本文的维护边界
 
-本文负责解释业务决策、领域边界和开发优先级；字段和来源表的逐项事实以 [`PatWiki_refactor_data/`](PatWiki_refactor_data/README.md) 中的 CSV 为准；模型、迁移和上线门禁以 [`PatWiki_refactor_guidance_pack/21-implementation-contract.md`](PatWiki_refactor_guidance_pack/21-implementation-contract.md) 为准。
+本文负责解释业务决策和长期领域边界；字段和来源表的逐项事实以 [`PatWiki_refactor_data/`](PatWiki_refactor_data/README.md) 中的 CSV 为准；2026 产品范围以 [`23-2026-product-scope-and-business-rules.md`](PatWiki_refactor_guidance_pack/23-2026-product-scope-and-business-rules.md) 为准，迁移和上线门禁以 [`21-implementation-contract.md`](PatWiki_refactor_guidance_pack/21-implementation-contract.md) 为准。
 
 原始 Office 文件自 2026-08-13 起不再保留在工作树中，内容由本报告 Markdown 和 `PatWiki_refactor_data/` 内的 CSV 接管；需要追溯转换前表达时使用 Git 历史。后续修改不得只保留在 Office 副本中。
 
@@ -18,7 +19,17 @@
 
 这为 V2 提供了可复用基础，但以下能力尚未实现：版本化数据库迁移、通用 Field Registry、ProjectSolutionVersion、RiskCase/SearchCase/ProtectionCase、通用 AuditEvent、认证与服务端授权、通用 Artifact、Connector 和 MCP server。因此本文的 V2 设计是目标状态，不能被误解为当前功能清单。
 
-开发的第一条校正原则是：**先完成迁移平台、备份恢复和字段治理，再创建新的业务聚合根。** 当前以 `create_all + 容错 ADD COLUMN` 演进 SQLite 的方式只能兼容简单加列，不能承担多表回填、外键、数据拆分、回滚和审计要求。
+开发的第一条校正原则是：**先完成迁移平台、备份恢复和字段治理，再建设专利身份、事实、导入、详情、交互查询和输出。** 当前以 `create_all + 容错 ADD COLUMN` 演进 SQLite 的方式只能兼容简单加列，不能承担多表回填、外键、数据拆分、回滚和审计要求。
+
+## 2026 产品范围校正
+
+今年不是建设全面 IP 工作流平台，而是把 PatWiki 做成以每篇专利为锚点的全维度优秀本地交互数据库。所有架构设计优先服务四件事：可靠存储专利相关信息、方便组织和查询、从一个专利入口查看全部上下文、为 Excel 台账和 Word 工作文件提供可复用数据。
+
+SearchCase、RiskCase、ProtectionCase、ProjectSolutionVersion 等仍是合理的长期数据边界，但完整工作流、跨部门协同、云端、多用户、Docket、外部系统集成和管理驾驶舱不得占用当前 P0 排期。页面以 PatentDocument 为中心，物理存储仍按事实、关系、事件和版本分层，这两件事不能混淆。
+
+当前详情页骨架保留，但后续按专利阅读任务组织为著录与附图、加工信息、权利要求、说明书、同族与法律状态、分类与知识关联、项目与风险、我司保护与申请、附件与证据、Wiki 历史。公开号体系是首要身份依据，同一申请的公开与授权号码归入同一专利，不同法域同族只关联不合并。
+
+重复导入采用“来源观察、候选规范值、当前采用值”三层模型。非冲突新信息可以增量补充；格式差异和内容冲突交用户确认；身份冲突阻断整行；每次导入都记录工作簿、表格标题、工作表、行号、时间和逐字段处理结果。详细规格见 [`24-patent-information-hub-functional-spec.md`](PatWiki_refactor_guidance_pack/24-patent-information-hub-functional-spec.md)。
 
 PatWiki IP业务数据体系
 重构、治理与前瞻设计指导报告
@@ -36,10 +47,10 @@ PatWiki IP业务数据体系
 - 法律状态、风险等级、风险结论、项目阶段、规避状态等会变化的信息必须保留事件/版本历史。
 - 月报、季报、年度统计、对外分享由保存视图生成并冻结为快照，不再维护独立副本。
 - AI输出和人工责任结论必须分层，AI只能辅助风险分析和决策，不能代替责任人确认。
-- ProjectSolutionVersion（项目方案版本）是把项目、检索、风险、保护、技术模块打通的关键中间层。
+- ProjectSolutionVersion（项目方案快照）是风险判断需要时的重要上下文，但不是普通专利导入、分类、查询和导出的前置条件。
 ## 二、宏观业务模型：IP部门是三个互相耦合的控制回路
 
-PatWiki 因此不应只有 Patent 一个业务中心。专利是关键锚点，但 SearchCase、RiskCase、ProtectionCase、ProjectSolutionVersion 也必须是一级聚合根。
+PatWiki 的**产品体验只有一个中心：PatentDocument**。SearchCase、RiskCase、ProtectionCase、ProjectSolutionVersion 可以在数据模型中作为独立聚合根，以避免生命周期互相覆盖，但它们在界面和排期上都是围绕专利信息中心展开的增强能力。
 
 ## 三、31类表格应归入五类用途体系
 
@@ -68,9 +79,11 @@ PatWiki 因此不应只有 Patent 一个业务中心。专利是关键锚点，�
 - Product/Variant引用主品类并可额外挂多个分类；Patent ↔ Product/ProductCategory 也应N:M。
 - “产品类型/产品品类/产品分类”统一引用分类ID，不再自由文本。
 - 每条产品/专利关系可带 role、relevance、source、confirmed_by，表达“覆盖、重点、参考、风险”等不同语义。
-## 七、ProjectSolutionVersion：建议作为本轮P0新增实体
+## 七、ProjectSolutionVersion：按风险需要建设的轻量 P1 上下文
 
-一旦方案版本存在，系统就能实现：新增模块/特征→自动匹配历史风险、竞对专利、既有我司申请→提示检索师/分析师/保护师复核。
+当前先保存由检索师人工录入的项目方案快照和变更记录：项目、TR 阶段、变化特征、适用地区、来源描述、来源附件、录入人和时间。其直接用途是让专利风险结论能够说明“针对哪个方案、哪个地区、哪个时点”。完整研发版本管理、BOM/图纸同步和 PLM 集成暂不建设。
+
+未来方案版本成熟后，系统可以实现：新增模块/特征→匹配历史风险、竞对专利和既有我司申请→提示复核。但这一自动联动不得阻塞今年的专利信息中心。
 
 ## 八、风险域：风险不是Patent属性，而是上下文关系
 
@@ -167,13 +180,17 @@ ArtifactLink 通过 entity_type + entity_id + role 关联Patent、RiskCase、Ass
 
 为 31 类来源表的每一列明确 canonical field、别名、主存储位置、业务键范围、迁移状态和业务负责人。每列只能是 `mapped`、`deprecated` 或 `quarantined`；不允许“以后再处理”的隐性状态。
 
-### Phase 1-2：先建立可引用的主数据和方案上下文
+### Phase 0C-0E：先交付专利信息中心
 
-依次完成产品/品类交叉关系、技术分类、项目成员/地区/阶段事件和 `ProjectSolutionVersion`。所有新的检索、风险、保护草稿只能选择一个 primary solution version；多方案对比必须显式建关系，不能使用多选文本。
+先完成专利统一身份与去重、外部事实来源和字段级覆盖策略，再交付专利全景详情、交互视图、批量操作、Excel 导出模板和 Word 工作文件数据装配。31 类台账通过统一数据、保存视图和输出模板逐类覆盖，不复制 31 套独立页面。
 
-### Phase 3-6：以只读模型和双读核对切换核心域
+### Phase 1-2：按专利关系需要补主数据和方案上下文
 
-风险、检索、保护、附件审计各自先完成 schema、服务、只读工作台和旧台账差异报告，再切写路径。每次写入切换都必须通过迁移回滚演练、导入幂等、旧 API 回归和业务键级差异核对。
+按高频筛选和关联需要补充产品/品类、技术分类、项目关系和轻量 `ProjectSolutionVersion`。只有确实依赖具体项目方案的正式风险判断必须选择方案快照；普通专利导入、分类、检索结果和保护状态不强制绑定。
+
+### Phase 3-6：围绕专利逐步补充业务上下文
+
+风险先支持线索、初判、分析确认、决定和持续复核；检索先保存来源、相关性、报告和必要上下文；保护先保存挖掘、撰写、申请和保护状态。完整 SearchCase 重放、Docket/期限/费用/OfficeAction 和复杂审批后续再做。
 
 ### Phase 7-9：在可靠数据基础上做报表、同步和 AI
 
@@ -185,9 +202,9 @@ SavedView/ReportSnapshot、外部 Connector 和 MCP/AI 都是后续阶段。自�
 
 1. 给旧表每行增加稳定source_row_id，保留原始来源。
 1. 建立Field Alias Registry，把同义字段映射统一概念。
-1. 优先迁移Department/Person/ProductCategory/Product/Project/PatentDocument。
+1. 优先治理 PatentDocument 身份、外部事实、来源、同族和高频分类关系，再按实际筛选需要补 Department/Person/ProductCategory/Product/Project。
 1. 把“相关项目、风险专利号（含同族）、布局国家、技术模块”等多值文本拆关系。
-1. 引入ProjectSolutionVersion；历史无法完全还原时标记provenance=legacy_inferred。
+1. 对确实影响风险判断的项目变化引入轻量 ProjectSolutionVersion；历史无法完全还原时标记provenance=legacy_inferred。
 1. 按风险主题+项目/方案+专利族聚合RiskCase；历史会议/报告迁Decision/Artifact。
 1. 按TC号迁移SearchCase；命中文献拆SearchHit；检索式拆Query/Run。
 1. 按保护主题迁ProtectionCase；国家布局拆FilingCase。
@@ -258,6 +275,9 @@ SavedView/ReportSnapshot、外部 Connector 和 MCP/AI 都是后续阶段。自�
 - `PatWiki_refactor_guidance_pack/19-ai-automation-mcp.md`：AI、Connector 和工具边界；
 - `PatWiki_refactor_guidance_pack/20-migration-roadmap.md`：分阶段迁移与验收；
 - `PatWiki_refactor_guidance_pack/21-implementation-contract.md`：当前架构基线、术语映射和首批 PR 完成定义；
+- `PatWiki_refactor_guidance_pack/22-target-product-architecture.md`：以专利为产品中心的完整目标形态和长期能力地图；
+- `PatWiki_refactor_guidance_pack/23-2026-product-scope-and-business-rules.md`：已确认业务事实、2026 P0/P1、暂缓范围和产品验收标准；
+- `PatWiki_refactor_guidance_pack/24-patent-information-hub-functional-spec.md`：详情页、专利身份、增量导入、Wiki 历史和高频视图规格；
 - `PatWiki_refactor_data/`：CSV 治理数据集和实施基线。
 
 ## 二十八、最终设计原则
@@ -560,6 +580,10 @@ SavedView/ReportSnapshot、外部 Connector 和 MCP/AI 都是后续阶段。自�
 | 18-security-audit-snapshot.md | 权限、锁定、审批、审计、发布快照 |
 | 19-ai-automation-mcp.md | AI provenance、Connector、MCP/tools边界 |
 | 20-migration-roadmap.md | 旧表迁移、兼容视图、阶段验收和回滚 |
+| 21-implementation-contract.md | 当前架构基线、2026 首批 PR 和实施门禁 |
+| 22-target-product-architecture.md | 以专利为中心的完整产品形态和长期能力地图 |
+| 23-2026-product-scope-and-business-rules.md | 已确认业务规则、当年范围和产品验收标准 |
+| 24-patent-information-hub-functional-spec.md | 专利详情、号码身份、增量导入、Wiki 历史和高频视图规格 |
 | schema-v2-draft.sql | 核心新实体DDL草案，仅供技术评审 |
 
 ### 表 26

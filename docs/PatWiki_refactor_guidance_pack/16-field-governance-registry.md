@@ -1,6 +1,6 @@
 # 16 — Field Governance Registry：字段治理与注册规范
 
-> 实施约束：参见 `21-implementation-contract.md`。Field Registry 是语义目录与变更门禁，不是把所有字段搬进同一张表。
+> 实施约束：参见 `21-implementation-contract.md` 与 `24-patent-information-hub-functional-spec.md`。Field Registry 是语义目录与变更门禁，不是把所有字段搬进同一张表。
 
 ## 1. 为什么需要 Field Registry
 
@@ -276,6 +276,27 @@ aliases:
 所有 Excel 导入先走 alias normalization，再进入领域实体。
 
 导入时不能静默猜测：未匹配 alias、格式冲突、候选实体不唯一和多值拆分失败必须进入隔离清单，并带来源文件、工作表、行号、原始值和映射版本。只有业务负责人确认后才可重跑该行。
+
+### 8.1 专利号码 Alias 与身份规则
+
+- 公开号、公开（公告）号、文献号映射到 `PatentIdentifier(type=publication)`；
+- 授权号、授权公告号映射到 `PatentIdentifier(type=grant)`；
+- 申请号映射到 `PatentIdentifier(type=application)`；
+- 风险专利号、申请专利号、同族专利号先按号码格式识别 identifier type，再建立 Risk/Filing/Family 关系，不能把业务列名当成号码类型；
+- 原始号码、规范号码、国家/地区、kind code 和来源同时保留；
+- 完整规范标识精确匹配优先，申请号 + 法域次之，号码根/外部 ID/同族只生成待确认候选。
+
+### 8.2 字段差异策略
+
+Field Registry 对每个可导入字段还必须声明：
+
+- `comparison_normalizer`：用于区分相同值、格式差异和内容差异；
+- `import_write_policy`：fill_empty / append_set / create_version / propose_only / forbidden；
+- `conflict_policy`：auto_accept / require_review / reject_row；
+- `protected_from_external`：是否禁止外部导入修改；
+- `observation_retention`：来源观察保存期限，外部专利事实默认永久。
+
+任何导入字段都先形成 `FieldObservation`。当前为空或集合出现明确新成员时可做增量补充；格式差异不作为内容覆盖；内容冲突保留候选并等待用户确认；人工分类、分析、风险、保护和内部关系默认为 `protected_from_external=true`。
 
 ## 9. 数据质量等级
 

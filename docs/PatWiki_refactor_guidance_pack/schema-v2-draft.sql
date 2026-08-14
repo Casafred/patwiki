@@ -1,6 +1,7 @@
 -- PatWiki Schema V2 — conceptual draft for technical review
 -- IMPORTANT: This is NOT a production migration.
--- Read 21-implementation-contract.md before implementation.
+-- Read 21-implementation-contract.md and
+-- 24-patent-information-hub-functional-spec.md before implementation.
 -- Adapt types/FKs/naming to this repository's SQLAlchemy + versioned migration
 -- conventions. The current physical `patents` table remains the compatible
 -- PatentDocument target; do not rename or execute this file against production.
@@ -171,6 +172,82 @@ CREATE TABLE IF NOT EXISTS solution_feature_links (
 -- Patent family / legal status extensions
 -- Assumes existing patents table is PatentDocument-like.
 -- =========================================================
+
+CREATE TABLE IF NOT EXISTS patent_identifiers (
+    id INTEGER PRIMARY KEY,
+    patent_id INTEGER NOT NULL,
+    identifier_namespace TEXT NOT NULL DEFAULT 'official', -- official/source system
+    identifier_type TEXT NOT NULL, -- application/publication/grant/external
+    raw_value TEXT NOT NULL,
+    normalized_value TEXT NOT NULL,
+    jurisdiction_code TEXT,
+    kind_code TEXT,
+    source_system TEXT,
+    source_timestamp DATETIME,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    valid_from DATETIME,
+    valid_to DATETIME,
+    created_at DATETIME NOT NULL,
+    UNIQUE(identifier_namespace, identifier_type, normalized_value),
+    FOREIGN KEY(patent_id) REFERENCES patents(id)
+);
+
+CREATE TABLE IF NOT EXISTS import_batch_sources (
+    id INTEGER PRIMARY KEY,
+    import_batch_id INTEGER NOT NULL UNIQUE,
+    workbook_filename TEXT NOT NULL,
+    source_table_title TEXT NOT NULL,
+    worksheet_name TEXT,
+    source_system TEXT,
+    mapping_version TEXT NOT NULL,
+    source_exported_at DATETIME,
+    file_hash TEXT NOT NULL,
+    imported_at DATETIME NOT NULL,
+    FOREIGN KEY(import_batch_id) REFERENCES import_batches(id)
+);
+
+CREATE TABLE IF NOT EXISTS patent_import_events (
+    id INTEGER PRIMARY KEY,
+    patent_id INTEGER NOT NULL,
+    import_batch_id INTEGER NOT NULL,
+    source_row INTEGER NOT NULL,
+    source_record_key TEXT,
+    matched_identifier_id INTEGER,
+    match_method TEXT NOT NULL, -- exact/candidate/created/manual
+    result TEXT NOT NULL, -- created/matched/partial/conflict/quarantined
+    observed_field_count INTEGER NOT NULL DEFAULT 0,
+    added_count INTEGER NOT NULL DEFAULT 0,
+    same_count INTEGER NOT NULL DEFAULT 0,
+    format_diff_count INTEGER NOT NULL DEFAULT 0,
+    conflict_count INTEGER NOT NULL DEFAULT 0,
+    review_status TEXT NOT NULL DEFAULT 'pending',
+    created_at DATETIME NOT NULL,
+    UNIQUE(import_batch_id, source_row, patent_id),
+    FOREIGN KEY(patent_id) REFERENCES patents(id),
+    FOREIGN KEY(import_batch_id) REFERENCES import_batches(id),
+    FOREIGN KEY(matched_identifier_id) REFERENCES patent_identifiers(id)
+);
+
+CREATE TABLE IF NOT EXISTS field_observations (
+    id INTEGER PRIMARY KEY,
+    patent_import_event_id INTEGER NOT NULL,
+    canonical_field_key TEXT NOT NULL,
+    value_index INTEGER NOT NULL DEFAULT 0,
+    raw_value TEXT,
+    normalized_value TEXT,
+    adopted_value_before TEXT,
+    candidate_value TEXT,
+    adopted_value_after TEXT,
+    difference_type TEXT NOT NULL, -- new/same/format/content/identity/protected
+    proposed_action TEXT NOT NULL, -- fill/append/keep/version/block
+    final_decision TEXT,
+    decided_by INTEGER,
+    decided_at DATETIME,
+    created_at DATETIME NOT NULL,
+    UNIQUE(patent_import_event_id, canonical_field_key, value_index),
+    FOREIGN KEY(patent_import_event_id) REFERENCES patent_import_events(id),
+    FOREIGN KEY(decided_by) REFERENCES people(id)
+);
 
 CREATE TABLE IF NOT EXISTS legal_status_events (
     id INTEGER PRIMARY KEY,
@@ -696,6 +773,15 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
 
 CREATE INDEX IF NOT EXISTS ix_solution_project
 ON project_solution_versions(project_id, version_no);
+
+CREATE INDEX IF NOT EXISTS ix_patent_identifier_patent
+ON patent_identifiers(patent_id, identifier_type, is_primary);
+
+CREATE INDEX IF NOT EXISTS ix_patent_import_history
+ON patent_import_events(patent_id, created_at);
+
+CREATE INDEX IF NOT EXISTS ix_field_observation_review
+ON field_observations(difference_type, final_decision, created_at);
 
 CREATE INDEX IF NOT EXISTS ix_solution_database_project
 ON project_solution_versions(database_id, project_id, status);

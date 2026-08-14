@@ -1,8 +1,18 @@
 # 21 - V2 实施契约：从设计目标到可交付开发
 
 > 状态：`approved-for-phase-0-planning`
-> 更新：2026-08-13
-> 本文是 V2 设计包的实现锚点。若其他文档与本文的现状、术语或阶段门禁冲突，以本文为准；业务目标仍以 15-20 号文档为准。
+> 更新：2026-08-15
+> 本文是 V2 设计包的实现锚点。2026 年业务范围以 `23-2026-product-scope-and-business-rules.md` 为最高优先级；若长期目标模型与当年范围冲突，不得用长期能力阻塞专利信息中心。
+
+## 0. 2026 范围硬约束
+
+1. 当前产品先服务单人本地使用，保持 Tauri + FastAPI + SQLite 主路径；暂不设计云端、跨设备和复杂多人协作。
+2. 产品入口和交付结果以每篇专利为中心，P0 是专利身份、事实、来源、关系、详情、查询、导入和导出。
+3. 31 类真实台账都要被覆盖，但优先通过统一数据、保存视图和输出模板支持，不为每类台账复制一套独立业务系统。
+4. Search、Risk、Protection 只先建设与专利锚定的高频信息和必要历史；完整 Case、Docket、期限、费用、审批和工作流引擎属于后续增强。
+5. ProjectSolutionVersion 当前只做轻量方案快照和变更上下文，不作为普通专利数据录入、导入、分类、查询和导出的前置条件。
+6. 外部 Excel 导入只能按字段策略更新著录等外部事实；人工分类、分析、风险、保护和内部关系不得被静默覆盖。
+7. 同一申请链的申请号、申请公开号和授权公告号归入同一专利；不同国家/地区同族只关联不合并。每次导入都必须进入 Wiki 来源历史，即使没有修改当前值。
 
 ## 1. 当前仓库的事实基线
 
@@ -22,9 +32,10 @@
 | V2 术语 | 当前物理实现/兼容方式 | 规则 |
 |---|---|---|
 | PatentDocument | 现有 `Patent` / `patents` | V2 新表外键在兼容期使用 `patent_id -> patents.id`；API 文案可以逐步改为“专利文献”，禁止在 Phase 0 重命名主表。 |
+| PatentIdentifier | 新实体 | 保存 application/publication/grant/external 标识及原始写法；主值投影到现有三个号码列。精确规范标识唯一，号码根和同族只能用于候选匹配。 |
 | PatentFamily | 现有 `PatentFamily` / `patent_families` | 保留现有同族 ID；分案、续案、PCT/国家阶段关系新增 `FamilyRelation`。 |
 | PatentDatabase | 现有 `PatentDatabase` | 是数据集合与工作台归属，不是当前应用的认证隔离边界。新 Case 必须带 `database_id` 作为拥有工作台。 |
-| ProjectSolutionVersion | 新实体 | 每个 SearchCase 的 P0 范围只能有一个 `primary_solution_version_id`；需要多方案对比时再引入明确的 scope link，不使用 JSON 数组。 |
+| ProjectSolutionVersion | 新实体，当前降为轻量 P1 | 仅在判断确实依赖具体项目方案时引用；普通专利导入、分类和检索结果不强制绑定。需要多方案对比时使用明确关系，不使用 JSON 数组。 |
 | RiskAssessmentVersion | 新实体 | 一条评估必须指向一个 RiskCase、一个具体方案版本和一个法域；缺失上下文只能作为 legacy draft，不能确认。 |
 | FieldDefinition | 新实体 | 不是直接替换 `CustomField`。先登记所有 canonical field，再按存储策略映射到系统列、关系表、事件/版本、CustomField 或 ViewLocalField。 |
 | Artifact | 新实体 | 与旧 `Attachment` 并行。`ArtifactLink` 使用受控实体类型白名单，并由服务层校验目标实体存在。 |
@@ -38,6 +49,7 @@
 5. 多值关系只允许关系表或独立子记录。专利号、项目号、国家、人员、技术特征不得以逗号文本、JSON ID 数组或 ViewLocalField 代替关系。
 6. `Patent.has_risk`、`risk_level`、`risk_description` 在 V2 后只作为兼容聚合缓存。任何写入只能由已确认的 RiskAssessment 聚合任务产生，不能由详情页直接修改。
 7. `ArtifactLink(entity_type, entity_id)` 是多态关系，数据库无法以普通外键保护所有目标；必须限制 `entity_type` 枚举，并在单一服务入口校验目标存在、权限和审计。
+8. 导入必须分离来源观察值、候选规范值和当前采用值。相同值也写 `FieldObservation`；格式差异不覆盖，内容冲突待确认，身份冲突阻断整行。
 
 ## 4. 迁移与发布门禁
 
@@ -65,25 +77,27 @@
 |---|---|---|---|
 | 0A | 迁移平台与备份 | 迁移账本、备份/恢复命令、连接 FK 配置 | 空库与含历史数据的升级均可重复执行；失败不污染原库。 |
 | 0B | Field Registry / Alias Registry | canonical field、alias、导入映射审计、未识别字段隔离 | 31 类来源表的每列都有 canonical mapping、明确弃用或隔离结论。 |
-| 1 | 主数据与技术分类 | ProductCategory、交叉关系、项目成员/地区/阶段事件、taxonomy edge/alias | 关键统计不再用名称文本 join；关系创建、去重和失效规则有测试。 |
-| 2 | 方案版本 | ProjectSolutionVersion、Feature link、版本差异、证据链接 | 新建或确认的 Search/Risk/Protection 草稿必须选择版本；变更能生成待复核清单。 |
-| 3 | Risk V2 只读后写入 | RiskCase、Assessment、Decision、Watch、旧风险 rollup | 可从 RiskCase 回溯方案、专利、证据、评估、决策；确认评估不覆盖历史。 |
-| 4 | Search V2 | SearchCase、Concept、Query、Run、Hit、Review | 同一检索式可重跑并比较结果；命中不再以长文本保存。 |
-| 5 | Protection V2 | ProtectionCase、FilingStrategy、FilingCase、Docket | 一个保护主题可展示多法域、多案件和期限来源。 |
-| 6 | Artifact / Audit / Snapshot | ArtifactVersion、ArtifactLink、AuditEvent、ReportSnapshot | 跨实体追溯可用；在认证未完成前，L4/L5 只允许本机受控测试，不对外发布。 |
+| 0C | 专利身份与事实核心 | PatentIdentifier、号码规范化、ImportBatch 来源扩展、PatentImportEvent、FieldObservation、差异确认 | 公开/授权号码正确归并；同族不误合并；重复导入不重复建专利；每次来源观察进入 Wiki 历史。 |
+| 0D | 专利详情与交互视图 | 24 号规格的十页详情、组合筛选、排序、分组、列配置、批量操作、六个首批保存视图 | 任一专利可从一个入口查看全部已录入信息；六类高频列表不需人工拼表。 |
+| 0E | 工作文件输出 | Excel 导出模板、Word 报告数据装配、来源引用 | 选中专利或保存视图可稳定生成可复用工作文件，导出字段可追溯。 |
+| 1 | 专利关联与分类 | Product/Project/TechnicalFeature/Competitor/Topic 关系、来源和确认状态 | 多值信息不再依赖逗号文本；关系可筛选、钻取和批量维护。 |
+| 2 | 轻量风险跟踪 | 风险线索、初判、分析版本、决定、复核触发、专利/项目/地区关联 | 初判、分析确认和正式决定不互相覆盖；接受风险继续推进可长期跟踪。 |
+| 3 | 检索与保护关联信息 | 检索来源/相关性/报告附件；挖掘/撰写/申请/保护状态 | 专利详情可调用高频过程信息；不要求先建完整 SearchCase 或 Docket 工作流。 |
+| 4 | 轻量方案快照与通用证据 | ProjectSolutionVersion、ArtifactVersion、ArtifactLink、必要 AuditEvent | 依赖具体方案的风险可复原上下文；普通专利操作不被方案快照阻塞。 |
 
 ## 6. 测试与性能最低标准
 
 - 迁移：空库、现有 `data/patwiki.db` 副本、重复执行、失败恢复四种场景。
-- 约束：业务键、外键、状态机非法跳转、决策不可覆盖、AI 不可确认、导入幂等。
-- 血缘：任取一条 RiskAssessment，能查到方案版本、专利/权利要求版本、证据、操作者、来源、前序版本和触发事件。
+- 约束：号码规范化、公开/授权归并、同族不合并、业务键、外键、状态机非法跳转、决策不可覆盖、AI 不可确认、导入幂等和受保护字段不可覆盖。
+- 血缘：任取一篇专利，能查到外部事实来源、最近导入批次、人工关系、关键判断、附件和修改历史；任取一条正式风险评估还能查到方案快照、法域、证据和前序版本。
 - 兼容：现有 `/patents`、导入、附件、视图、AI 字段、`PatentHistory` 回归通过；新增 V2 不破坏既有客户数据。
-- 性能：以目标规模的脱敏样本验证常用列表、按风险/项目/法域筛选、同族展开、报告快照和导入；阈值由 Phase 0 采样后写入基准，而非凭空承诺。
+- 性能：以可获得的真实本地数据验证常用专利列表、快速搜索、组合筛选、同族展开、详情聚合、批量导入和导出；暂无样本规模时先记录基线，不凭空承诺阈值。
 
 ## 7. 明确延后事项
 
 - 企业 SSO、真实多用户认证、服务端 RBAC/ABAC、字段级加密、外部公开分享和生产 MCP 写入。
 - 大规模全文/向量检索、跨设备实时协作、复杂工作流引擎和可配置审批编排。
+- 完整 SearchCase 重放平台、全量 Docket/期限/费用/OfficeAction、ERP/PLM/代理系统集成和独立管理驾驶舱。
 - 全量重命名 `Patent` 为 `PatentDocument`、一次性重建 UI、把所有旧 Excel 同时迁移。
 
 这些不是放弃，而是为了保证第一轮数据治理先获得可靠的身份、版本、关系和来源基础。
