@@ -31,6 +31,11 @@ class PatentHistory(Base):
     changed_by = Column(String(100))
     # P0-13：来源小表视图（在哪个视图中改的，可空表示直接在大表上修改）
     source_view_id = Column(Integer, ForeignKey("patent_views.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Import provenance shown in the patent Wiki timeline.
+    import_batch_id = Column(Integer, ForeignKey("import_batches.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_table_title = Column(String(500), nullable=True)
+    source_row = Column(Integer, nullable=True)
+    source_field_name = Column(String(500), nullable=True)
     source_view_name = Column(String(200), nullable=True)  # 冗余存储视图名，视图删除后仍可读
     # 修改时间
     created_at = Column(DateTime, server_default=func.now(), index=True)

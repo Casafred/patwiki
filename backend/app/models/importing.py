@@ -39,6 +39,14 @@ class ImportBatch(Base):
     mapping_id = Column(Integer, ForeignKey("field_mappings.id"))
     mapping_config = Column(JSON)
     errors = Column(JSON)
+    # Source lineage is retained with the batch so an import can be replayed
+    # and its provenance can be shown without relying on the temporary upload.
+    source_table_title = Column(String(500))
+    worksheet_name = Column(String(200))
+    source_system = Column(String(200))
+    mapping_version = Column(String(100))
+    file_hash = Column(String(128), index=True)
+    artifact_path = Column(String(1000))
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())

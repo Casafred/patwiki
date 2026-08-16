@@ -1,5 +1,7 @@
 import threading
 import uuid
+import hashlib
+import csv
 import tempfile
 import os
 import time
@@ -12,21 +14,23 @@ from sqlalchemy import func, text, or_
 from typing import Optional
 import json
 import pandas as pd
-from io import BytesIO
+from io import BytesIO, StringIO
 from pydantic import BaseModel
 
 from app.database import get_db, SessionLocal, engine
 from app.schemas.schemas import ImportBatchResponse, StatsResponse
-from app.services.import_service import ImportService, materialize_custom_field, CUSTOM_FIELD_KEY_PREFIX
+from app.services.import_service import IMPORT_SKIP_FIELD, ImportService
 from app.services.patent_service import PatentService
 from app.services.field_registry import get_all_fields_meta
 from app.services.merge_service import merge_patent_data, _is_empty
 from app.config import settings
-from app.models import CustomField, ImportBatch, ImportBatchStatus, Patent
+from app.models import CustomField, ImportBatch, ImportBatchStatus, Patent, ImportSourceRow, FieldObservation, PatentHistory
 from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(tags=["import"])
 
+SOURCE_DIR = settings.FILES_DIR / "imports"
+SOURCE_DIR.mkdir(parents=True, exist_ok=True)
 # 持久化到磁盘，避免后端重启或内存清理导致会话过期
 TEMP_DIR = Path(tempfile.gettempdir()) / "patwiki_imports"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -78,6 +82,8 @@ class ConfirmImportRequest(BaseModel):
     product_id: Optional[int] = None
     project_id: Optional[int] = None
     database_id: Optional[int] = None
+    source_table_title: Optional[str] = None
+    source_system: Optional[str] = None
     sheet_name: Optional[str] = None
     view_id: Optional[int] = None  # P0-14：导入到指定视图（为空则导入到库的主视图）
 
@@ -106,10 +112,16 @@ async def preview_import(
     temp_path = TEMP_DIR / f"{import_id}.bin"
     with open(temp_path, "wb") as f:
         f.write(content)
+    safe_filename = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in Path(filename).name)
+    artifact_path = SOURCE_DIR / f"{import_id}_{safe_filename or 'upload.xlsx'}"
+    artifact_path.write_bytes(content)
+    file_hash = hashlib.sha256(content).hexdigest()
     TEMP_FILES[import_id] = {
         "path": str(temp_path),
         "filename": file.filename or "upload.xlsx",
         "created_at": time.time(),
+        "artifact_path": str(artifact_path),
+        "file_hash": file_hash,
     }
 
     from app.services.database_service import DatabaseService
@@ -123,6 +135,10 @@ async def preview_import(
         "total_rows": len(df),
         "suggested_mapping": suggested_mapping,
         "mapping_issues": mapping_issues,
+        "unmapped_columns": [column for column in columns if not suggested_mapping.get(column)],
+        "unmapped_count": sum(
+            1 for column in columns if not suggested_mapping.get(column)
+        ),
         "available_fields": get_all_fields_meta(db),
         "databases": [DatabaseService.to_dict(d) for d in databases],
         "default_database_id": default_db.id if default_db else None,
@@ -144,6 +160,167 @@ def _apply_patent_update(patent: Patent, data: dict):
         patent.custom_fields = current
 
 
+def _text_value(value):
+    if value is None:
+        return None
+    if hasattr(value, "value"):
+        value = value.value
+    if isinstance(value, (datetime,)):
+        return value.isoformat()
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    return str(value)
+
+
+def _raw_row_dict(row_dict: dict) -> dict:
+    return {
+        str(key): _text_value(value) if _text_value(value) is not None else ""
+        for key, value in row_dict.items()
+    }
+
+
+def _row_hash(raw_row: dict) -> str:
+    payload = json.dumps(raw_row, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _candidate_value(field_key: str, patent_data: dict | None, virtual: dict) -> str | None:
+    if not patent_data:
+        return None
+    if field_key == "family_members":
+        return ", ".join(virtual.get("family_numbers") or [])
+    if field_key == "cited_patents":
+        return ", ".join(virtual.get("cited_numbers") or [])
+    if field_key == "citing_patents":
+        return ", ".join(virtual.get("citing_numbers") or [])
+    custom = patent_data.get("custom_fields") or {}
+    if field_key in custom:
+        return _text_value(custom.get(field_key))
+    return _text_value(patent_data.get(field_key))
+
+
+def _current_value(patent: Patent | None, field_key: str) -> str | None:
+    if patent is None or field_key in {"family_members", "cited_patents", "citing_patents"}:
+        return None
+    custom = patent.custom_fields or {}
+    if field_key in custom:
+        return _text_value(custom.get(field_key))
+    return _text_value(getattr(patent, field_key, None))
+
+
+def _snapshot_values(patent: Patent | None, mapping: dict[str, str]) -> dict[str, str | None]:
+    if patent is None:
+        return {}
+    return {
+        target: _current_value(patent, target)
+        for target in set(mapping.values())
+        if target and target != IMPORT_SKIP_FIELD
+    }
+
+
+def _difference_type(current: str | None, candidate: str | None) -> str:
+    if candidate is None or candidate == "":
+        return "unknown"
+    if current is None or current == "":
+        return "new"
+    if current == candidate:
+        return "same"
+    if current.strip() == candidate.strip():
+        return "format"
+    return "content"
+
+
+def _record_field_observations(
+    db: Session,
+    batch: ImportBatch,
+    source_row: ImportSourceRow,
+    row_dict: dict,
+    columns: list[str],
+    mapping: dict[str, str],
+    patent: Patent | None,
+    patent_data: dict | None,
+    virtual: dict | None,
+    before_values: dict[str, str | None],
+    resolution_status: str,
+    final_decision: str | None = None,
+) -> int:
+    virtual = virtual or {}
+    unknown_count = 0
+    raw_row = _raw_row_dict(row_dict)
+    for column_index, column in enumerate(columns):
+        raw_value = raw_row.get(column, "")
+        if raw_value == "":
+            continue
+        target = (mapping.get(column) or "").strip()
+        if target == IMPORT_SKIP_FIELD:
+            continue
+        if not target:
+            unknown_count += 1
+            db.add(FieldObservation(
+                import_batch_id=batch.id,
+                source_row_id=source_row.id,
+                patent_id=patent.id if patent else None,
+                source_field_name=column,
+                source_column_index=column_index,
+                raw_value=raw_value,
+                normalized_value=raw_value,
+                candidate_value=raw_value,
+                difference_type="unknown",
+                field_resolution="unmapped_retained",
+                proposed_action="retain",
+            ))
+            continue
+
+        candidate = _candidate_value(target, patent_data, virtual)
+        current_before = before_values.get(target)
+        current_after = _current_value(patent, target)
+        difference = "quarantined" if resolution_status == "quarantined" else _difference_type(current_before, candidate)
+        action = "quarantine" if resolution_status == "quarantined" else {
+            "new": "fill",
+            "same": "keep",
+            "format": "keep",
+            "content": "update",
+            "unknown": "retain",
+        }.get(difference, "retain")
+        decision = final_decision
+        if decision is None and resolution_status == "resolved":
+            decision = "adopted" if difference in {"new", "content"} else "kept"
+        db.add(FieldObservation(
+            import_batch_id=batch.id,
+            source_row_id=source_row.id,
+            patent_id=patent.id if patent else None,
+            source_field_name=column,
+            source_column_index=column_index,
+            canonical_field_key=target,
+            raw_value=raw_value,
+            normalized_value=candidate or raw_value,
+            current_value=current_after,
+            candidate_value=candidate or raw_value,
+            difference_type=difference,
+            field_resolution="quarantined" if resolution_status == "quarantined" else "mapped",
+            proposed_action=action,
+            final_decision=decision,
+        ))
+        if patent:
+            db.add(PatentHistory(
+                patent_id=patent.id,
+                field_key=target,
+                field_display_name=column,
+                old_value=current_before,
+                new_value=candidate or raw_value,
+                source="import",
+                changed_by="import",
+                import_batch_id=batch.id,
+                source_table_title=batch.source_table_title,
+                source_row=source_row.source_row,
+                source_field_name=column,
+            ))
+    return unknown_count
 @router.post("/import/confirm")
 def confirm_import(
     req: ConfirmImportRequest,
@@ -186,8 +363,14 @@ def confirm_import(
     with open(info["path"], "rb") as f:
         content = f.read()
     filename = info["filename"]
+    artifact_path = info.get("artifact_path")
+    if not artifact_path or not Path(artifact_path).exists():
+        safe_filename = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in Path(filename).name)
+        artifact_path = str(SOURCE_DIR / f"{req.import_id}_{safe_filename or 'upload.xlsx'}")
+        Path(artifact_path).write_bytes(content)
+    file_hash = hashlib.sha256(content).hexdigest()
 
-    mapping = {m.source_column: m.target_field for m in req.field_mappings if m.target_field}
+    mapping = {m.source_column: (m.target_field or "").strip() for m in req.field_mappings}
 
     errors = []
     inserted = 0
@@ -205,6 +388,12 @@ def confirm_import(
 
         batch = ImportBatch(
             filename=filename,
+            source_table_title=(req.source_table_title or Path(filename).stem),
+            worksheet_name=req.sheet_name,
+            source_system=req.source_system,
+            mapping_version="v1",
+            file_hash=file_hash,
+            artifact_path=str(artifact_path),
             status=ImportBatchStatus.PROCESSING,
             started_at=datetime.utcnow(),
         )
@@ -221,25 +410,29 @@ def confirm_import(
         batch.total_rows = total_rows
         print(f"[PatWiki] 开始导入 {total_rows} 条数据...", flush=True)
 
-        # 预览阶段只生成了提议的 cf_ key（未写库），此处按用户最终选择的映射
-        # 把仍被引用的提议字段真正落地；被用户改成"不导入此列"的提议不会创建，
-        # 从而避免残留孤立的自定义字段。
-        existing_cf_keys = {cf.key for cf in db.query(CustomField).all()}
-        for source_col, target_key in mapping.items():
-            if not target_key or not target_key.startswith(CUSTOM_FIELD_KEY_PREFIX):
-                continue
-            if target_key in existing_cf_keys:
-                continue
-            materialize_custom_field(db, target_key, source_col)
+        # Field mappings may only point to registered fields. Empty targets retain
+        # source evidence for governance; the explicit skip marker bypasses only
+        # the observation queue and never alters the raw source row.
         db.commit()
 
         custom_fields_cache = {cf.key: cf for cf in db.query(CustomField).all()}
 
         rows_data = []
         row_reports: list[dict] = []
+        source_rows: dict[int, ImportSourceRow] = {}
+        unmapped_retained = 0
         for idx, (_, row) in enumerate(df.iterrows()):
+            row_dict = _raw_row_dict(row.to_dict())
+            source_row = ImportSourceRow(
+                import_batch_id=batch.id,
+                source_row=idx + 2,
+                raw_row=row_dict,
+                row_hash=_row_hash(row_dict),
+            )
+            db.add(source_row)
+            db.flush()
+            source_rows[idx] = source_row
             try:
-                row_dict = row.to_dict()
                 patent_data, virtual = ImportService._row_to_patent_data(
                     row_dict, mapping, db, custom_fields_cache=custom_fields_cache
                 )
@@ -262,6 +455,12 @@ def confirm_import(
                     "row_num": idx + 2,
                 })
             except Exception as e:
+                source_row.resolution_status = "quarantined"
+                source_row.resolution_reason = str(e)
+                unmapped_retained += _record_field_observations(
+                    db, batch, source_row, row_dict, columns, mapping,
+                    None, None, None, {}, "quarantined", "quarantined",
+                )
                 report = {"row": idx + 2, "status": "error_mapping", "reason": str(e)}
                 errors.append(report)
                 row_reports.append(report)
@@ -322,6 +521,10 @@ def confirm_import(
             try:
                 with db.begin_nested():
                     patent_data = rd["patent_data"]
+                    source_row = source_rows[rd["idx"]]
+                    before_values: dict[str, str | None] = {}
+                    adoption_decision: str | None = None
+                    current_patent = None
                     virtual = rd["virtual"]
                     country = rd["country"]
                     app_num = rd["app_num"]
@@ -341,6 +544,7 @@ def confirm_import(
 
                         current_patent = None
                         if existing:
+                            before_values = _snapshot_values(existing, mapping)
                             duplicates_count += 1
                             if req.update_on_duplicate:
                                 merged = merge_patent_data(existing, patent_data)
@@ -350,7 +554,9 @@ def confirm_import(
                                 row_reports.append({"row": rd["row_num"], "status": "updated_duplicate", "reason": "与已有专利重复，已按字段合并更新", "patent_id": existing.id})
                             else:
                                 skipped += 1
+                                current_patent = existing
                                 row_reports.append({"row": rd["row_num"], "status": "skipped_duplicate", "reason": "与已有专利重复，已按设置跳过", "patent_id": existing.id})
+                                adoption_decision = "kept"
                         else:
                             is_batch_dup = False
                             if app_num and (app_num, country) in seen_app_nums:
@@ -368,13 +574,16 @@ def confirm_import(
                                     duplicates_count += 1
                                     if req.update_on_duplicate:
                                         merged = merge_patent_data(existing_in_batch, patent_data)
+                                        before_values = _snapshot_values(existing_in_batch, mapping)
                                         _apply_patent_update(existing_in_batch, merged)
                                         updated += 1
                                         current_patent = existing_in_batch
                                         row_reports.append({"row": rd["row_num"], "status": "updated_duplicate", "reason": "与本次导入的前一行重复，已合并更新", "patent_id": existing_in_batch.id})
                                     else:
                                         skipped += 1
+                                        current_patent = existing_in_batch
                                         row_reports.append({"row": rd["row_num"], "status": "skipped_duplicate", "reason": "与本次导入的前一行重复，已按设置跳过", "patent_id": existing_in_batch.id})
+                                        adoption_decision = "kept"
                                 else:
                                     skipped += 1
                                     row_reports.append({"row": rd["row_num"], "status": "skipped_duplicate", "reason": "与本次导入的前一行重复，但未能定位到目标记录"})
@@ -390,6 +599,7 @@ def confirm_import(
                                 patent.custom_fields = custom_fields
                                 db.add(patent)
                                 db.flush()
+                                patent_data["custom_fields"] = custom_fields
                                 inserted += 1
                                 current_patent = patent
                                 row_reports.append({"row": rd["row_num"], "status": "created", "reason": "已创建", "patent_id": patent.id})
@@ -399,10 +609,30 @@ def confirm_import(
                                     all_pub_nums[(pub_num, country)] = patent
 
                         if current_patent is not None:
+                            source_row.patent_id = current_patent.id
+                            source_row.resolution_status = "resolved"
+                            unknown_in_row = _record_field_observations(
+                                db, batch, source_row, source_row.raw_row, columns, mapping,
+                                current_patent, patent_data, virtual, before_values,
+                                "resolved", adoption_decision,
+                            )
+                            unmapped_retained += unknown_in_row
+                            source_row.resolution_reason = (
+                                "mapped; unknown properties retained"
+                                if unknown_in_row else "mapped"
+                            )
                             imported_patent_ids.add(current_patent.id)
                             has_rel = virtual["family_numbers"] or virtual["cited_numbers"] or virtual["citing_numbers"]
                             if has_rel:
                                 pending_relations.append((current_patent, virtual))
+                        else:
+                            source_row.resolution_status = "unmapped_retained"
+                            source_row.resolution_reason = "no patent identity was resolved; raw row retained"
+                            unmapped_retained += _record_field_observations(
+                                db, batch, source_row, source_row.raw_row, columns, mapping,
+                                None, patent_data, virtual, before_values,
+                                "unmapped_retained", "retained",
+                            )
 
                 if (i + 1) % BATCH_SIZE == 0:
                     db.commit()
@@ -423,6 +653,13 @@ def confirm_import(
                     print(f"[PatWiki] 已处理 {progress}/{total_rows} ({pct}%) 新增:{inserted} 更新:{updated} 跳过:{skipped} 错误:{error_count}", flush=True)
 
             except Exception as e:
+                source_row = source_rows[rd["idx"]]
+                source_row.resolution_status = "quarantined"
+                source_row.resolution_reason = str(e)
+                unmapped_retained += _record_field_observations(
+                    db, batch, source_row, source_row.raw_row, columns, mapping,
+                    None, rd["patent_data"], rd["virtual"], {}, "quarantined", "quarantined",
+                )
                 report = {"row": rd["row_num"], "status": "error_database", "reason": str(e)}
                 errors.append(report)
                 row_reports.append(report)
@@ -466,6 +703,7 @@ def confirm_import(
             batch.duplicate_count = duplicates_count
             batch.error_count = error_count
             batch.errors = [report for report in row_reports if report["status"] != "created"] or None
+            batch.mapping_config = mapping
             batch.status = ImportBatchStatus.COMPLETED
             batch.completed_at = datetime.utcnow()
             db.add(batch)
@@ -503,6 +741,11 @@ def confirm_import(
         "database_id": database_id,
         "family_links": family_links,
         "citation_links": citation_links,
+        "unmapped_retained": unmapped_retained,
+        "unknown_columns": [
+            column for column in columns
+            if not mapping.get(column) and mapping.get(column) != IMPORT_SKIP_FIELD
+        ],
         "batch_id": batch.id if batch is not None else None,
     }
 
@@ -530,6 +773,119 @@ def get_import_batch(batch_id: int, db: Session = Depends(get_db)):
     return batch
 
 
+def _unmapped_observation_query(
+    db: Session,
+    batch_id: Optional[int] = None,
+    source_field: Optional[str] = None,
+    patent_id: Optional[int] = None,
+    status: Optional[str] = "unmapped_retained",
+):
+    query = (
+        db.query(FieldObservation, ImportSourceRow, ImportBatch)
+        .join(ImportSourceRow, FieldObservation.source_row_id == ImportSourceRow.id)
+        .join(ImportBatch, FieldObservation.import_batch_id == ImportBatch.id)
+    )
+    if batch_id is not None:
+        query = query.filter(FieldObservation.import_batch_id == batch_id)
+    if source_field:
+        query = query.filter(FieldObservation.source_field_name == source_field)
+    if patent_id is not None:
+        query = query.filter(FieldObservation.patent_id == patent_id)
+    if status and status != "all":
+        query = query.filter(FieldObservation.field_resolution == status)
+    return query
+
+
+def _observation_to_dict(observation: FieldObservation, source_row: ImportSourceRow, batch: ImportBatch) -> dict:
+    return {
+        "id": observation.id,
+        "batch_id": batch.id,
+        "filename": batch.filename,
+        "source_table_title": batch.source_table_title,
+        "worksheet_name": batch.worksheet_name,
+        "source_row_id": source_row.id,
+        "source_row": source_row.source_row,
+        "patent_id": observation.patent_id,
+        "source_field_name": observation.source_field_name,
+        "source_column_index": observation.source_column_index,
+        "canonical_field_key": observation.canonical_field_key,
+        "raw_value": observation.raw_value,
+        "normalized_value": observation.normalized_value,
+        "current_value": observation.current_value,
+        "candidate_value": observation.candidate_value,
+        "difference_type": observation.difference_type,
+        "field_resolution": observation.field_resolution,
+        "proposed_action": observation.proposed_action,
+        "final_decision": observation.final_decision,
+        "created_at": observation.created_at.isoformat() if observation.created_at else None,
+    }
+
+
+@router.get("/import/unmapped")
+def list_unmapped_observations(
+    batch_id: Optional[int] = None,
+    source_field: Optional[str] = None,
+    patent_id: Optional[int] = None,
+    status: Optional[str] = Query("unmapped_retained"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db),
+):
+    query = _unmapped_observation_query(db, batch_id, source_field, patent_id, status)
+    total = query.count()
+    rows = query.order_by(FieldObservation.id.desc()).offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "items": [_observation_to_dict(observation, source_row, batch) for observation, source_row, batch in rows],
+    }
+
+
+@router.get("/import/unmapped/export")
+def export_unmapped_observations(
+    batch_id: Optional[int] = None,
+    source_field: Optional[str] = None,
+    patent_id: Optional[int] = None,
+    status: Optional[str] = Query("unmapped_retained"),
+    db: Session = Depends(get_db),
+):
+    rows = _unmapped_observation_query(db, batch_id, source_field, patent_id, status).order_by(FieldObservation.id.asc()).all()
+    output = StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow([
+        "batch_id", "filename", "source_table_title", "worksheet_name",
+        "source_row", "patent_id", "source_field_name", "canonical_field_key",
+        "raw_value", "normalized_value", "current_value", "candidate_value",
+        "difference_type", "field_resolution", "proposed_action",
+        "final_decision", "created_at",
+    ])
+    for observation, source_row, batch in rows:
+        item = _observation_to_dict(observation, source_row, batch)
+        writer.writerow([
+            item["batch_id"], item["filename"], item["source_table_title"],
+            item["worksheet_name"], item["source_row"], item["patent_id"],
+            item["source_field_name"], item["canonical_field_key"],
+            item["raw_value"], item["normalized_value"], item["current_value"],
+            item["candidate_value"], item["difference_type"],
+            item["field_resolution"], item["proposed_action"],
+            item["final_decision"], item["created_at"],
+        ])
+    return StreamingResponse(
+        BytesIO(output.getvalue().encode("utf-8-sig")),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="patwiki_unmapped_observations.csv"'},
+    )
+
+
+@router.get("/import/batches/{batch_id}/artifact")
+def download_import_artifact(batch_id: int, db: Session = Depends(get_db)):
+    batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
+    if not batch:
+        raise NotFoundException("???????")
+    if not batch.artifact_path or not Path(batch.artifact_path).is_file():
+        raise NotFoundException("???????????")
+    return FileResponse(batch.artifact_path, filename=batch.filename)
 def _process_relations(db: Session, patent: Patent, virtual: dict, database_id: Optional[int] = None):
     from app.services.relation_service import (
         process_family_members,

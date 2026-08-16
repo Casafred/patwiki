@@ -1,14 +1,22 @@
 import unittest
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pandas as pd
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.database import Base
+from app.api import imports as import_routes
+from app.database import Base, get_db
 from app.core.exceptions import BadRequestException
-from app.models import CustomField, CustomFieldType, Patent, PatentDatabase
+from app.models import (
+    CustomField, CustomFieldType, FieldObservation, ImportBatch,
+    ImportSourceRow, Patent, PatentDatabase, PatentHistory,
+)
 from app.services.field_registry import get_all_fields_meta
 from app.services.import_service import ImportService
 from app.services.relation_service import parse_patent_numbers, process_family_members
@@ -180,7 +188,7 @@ class ImportPipelineTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
-    def test_mapping_validation_allows_skipped_columns_and_proposed_keys(self):
+    def test_mapping_validation_keeps_unknown_columns_out_of_formal_fields(self):
         engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -208,8 +216,11 @@ class ImportPipelineTest(unittest.TestCase):
                 },
                 db,
             )
-            # 跳过列（空目标）和提议的 cf_ key 都不应阻断导入
-            self.assertEqual({issue["column"] for issue in issues}, {"公式列", "附件列"})
+            # 空目标允许保留原始值，但未注册的字段不可绕过字段治理。
+            self.assertEqual(
+                {issue["column"] for issue in issues},
+                {"公式列", "附件列", "提议列"},
+            )
             self.assertIn("attachments", {field["key"] for field in get_all_fields_meta(db)})
         finally:
             db.close()
@@ -246,7 +257,7 @@ class ImportPipelineTest(unittest.TestCase):
 
     def test_suggest_mapping_does_not_fuzzy_match_family_columns(self):
         # "同族备注" 不能因为名字里带"同族"就被塞进同族关系映射，
-        # 应当作为普通自定义字段（cf_ 提议）呈现。
+        # 也不能自动创建正式字段；它应保留为待治理属性。
         engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -261,15 +272,102 @@ class ImportPipelineTest(unittest.TestCase):
             )
             self.assertEqual(mapping["同族专利号"], "family_members")
             self.assertEqual(mapping["标题"], "title")
-            # 同族备注 / 同族申请日 应是 cf_ 提议，而非 family_members
-            self.assertTrue(mapping["同族备注"].startswith("cf_"))
-            self.assertTrue(mapping["同族申请日"].startswith("cf_"))
+            # 同族备注 / 同族申请日 应为未映射属性，而非 family_members。
+            self.assertEqual(mapping["同族备注"], "")
+            self.assertEqual(mapping["同族申请日"], "")
             self.assertNotEqual(mapping["同族备注"], "family_members")
             self.assertNotEqual(mapping["同族申请日"], "family_members")
             # 预览阶段不应实际写库
             self.assertEqual(db.query(CustomField).count(), 0)
             self.assertEqual(issues, [])
         finally:
+            db.close()
+            engine.dispose()
+
+    def test_unknown_columns_are_retained_with_row_and_wiki_provenance(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        original_temp_dir = import_routes.TEMP_DIR
+        original_source_dir = import_routes.SOURCE_DIR
+        try:
+            database = PatentDatabase(name="治理测试库")
+            db.add(database)
+            db.commit()
+
+            with TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                import_routes.TEMP_DIR = root / "sessions"
+                import_routes.SOURCE_DIR = root / "artifacts"
+                import_routes.TEMP_DIR.mkdir()
+                import_routes.SOURCE_DIR.mkdir()
+                import_routes.TEMP_FILES.clear()
+
+                app = FastAPI()
+                app.include_router(import_routes.router)
+                app.dependency_overrides[get_db] = lambda: db
+                client = TestClient(app)
+                content = "标题,公开号,检索师临时标注,无效过程列\n示例专利,CN123456789A,需要二次判断,草稿\n".encode("utf-8-sig")
+                preview = client.post(
+                    "/import/preview",
+                    files={"file": ("月度跟踪.csv", content, "text/csv")},
+                )
+                self.assertEqual(preview.status_code, 200)
+                self.assertEqual(preview.json()["suggested_mapping"]["检索师临时标注"], "")
+
+                result = client.post("/import/confirm", json={
+                    "import_id": preview.json()["import_id"],
+                    "field_mappings": [
+                        {"source_column": "标题", "target_field": "title"},
+                        {"source_column": "公开号", "target_field": "publication_number"},
+                        {"source_column": "检索师临时标注", "target_field": ""},
+                        {"source_column": "无效过程列", "target_field": "__skip__"},
+                    ],
+                    "database_id": database.id,
+                    "source_table_title": "检索师月度跟踪",
+                    "source_system": "商业专利数据库",
+                })
+                self.assertEqual(result.status_code, 200, result.text)
+                body = result.json()
+                self.assertEqual(body["created"], 1)
+                self.assertEqual(body["unmapped_retained"], 1)
+
+                self.assertEqual(db.query(CustomField).count(), 0)
+                batch = db.query(ImportBatch).filter(ImportBatch.id == body["batch_id"]).one()
+                self.assertEqual(batch.source_table_title, "检索师月度跟踪")
+                self.assertEqual(batch.source_system, "商业专利数据库")
+                self.assertTrue(Path(batch.artifact_path).exists())
+
+                source_row = db.query(ImportSourceRow).filter(ImportSourceRow.import_batch_id == batch.id).one()
+                self.assertEqual(source_row.resolution_status, "resolved")
+                self.assertEqual(source_row.raw_row["检索师临时标注"], "需要二次判断")
+                self.assertEqual(source_row.raw_row["无效过程列"], "草稿")
+                observation = db.query(FieldObservation).filter(
+                    FieldObservation.import_batch_id == batch.id,
+                    FieldObservation.source_field_name == "检索师临时标注",
+                ).one()
+                self.assertEqual(observation.field_resolution, "unmapped_retained")
+                self.assertEqual(observation.raw_value, "需要二次判断")
+                self.assertIsNone(observation.canonical_field_key)
+                self.assertEqual(
+                    db.query(FieldObservation).filter(
+                        FieldObservation.import_batch_id == batch.id,
+                        FieldObservation.source_field_name == "无效过程列",
+                    ).count(),
+                    0,
+                )
+
+                histories = db.query(PatentHistory).filter(PatentHistory.import_batch_id == batch.id).all()
+                self.assertEqual({history.field_key for history in histories}, {"title", "publication_number"})
+                self.assertTrue(all(history.source_table_title == "检索师月度跟踪" for history in histories))
+        finally:
+            import_routes.TEMP_DIR = original_temp_dir
+            import_routes.SOURCE_DIR = original_source_dir
+            import_routes.TEMP_FILES.clear()
             db.close()
             engine.dispose()
 

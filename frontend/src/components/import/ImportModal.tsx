@@ -52,6 +52,8 @@ const SYSTEM_FIELD_LABELS: Record<string, string> = {
   citing_patents: '被引用专利',
 }
 
+const SKIP_COLUMN = '__skip__'
+
 export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const {
     currentDatabaseId,
@@ -87,6 +89,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     family_links?: number; citation_links?: number;
     error_details?: { row: number; status?: string; reason?: string; error?: string; patent_id?: number }[]
     row_reports?: { row: number; status: string; reason: string; patent_id?: number }[]
+    unmapped_retained?: number; unknown_columns?: string[];
+    batch_id?: number | null;
   } | null>(null)
   const [uploading, setUploading] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -183,7 +187,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
         setStep('upload')
         return
       }
-      // P0-10：使用后端 suggested_mapping（已自动为未知列创建 CustomField）
+      // Unknown columns intentionally remain unmapped. Their raw values are retained
+      // for later governance, rather than automatically becoming formal fields.
       setMapping(result.suggested_mapping || {})
       setStep('mapping')
     } catch (error: unknown) {
@@ -216,7 +221,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setStep('chooseDatabase')
       return
     }
-    // 用户可主动选择"不导入此列"（target_field 为空），后端会跳过这些列，不再阻断导入。
+    // An empty unknown mapping retains its source evidence; SKIP_COLUMN is an
+    // explicit choice to omit a column from this import's governance queue.
     setImporting(true)
     setStep('processing')
     try {
@@ -246,10 +252,11 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setImportResult(result)
       setStep('complete')
       fieldService.invalidate()
-      // Imported mappings can create custom fields. Clear stale local column hiding
-      // so newly available claim and metadata columns are visible immediately.
+      // Clear stale local column hiding so fields mapped by this import are visible.
       try {
-        const importedKeys = fieldMappings.map(item => item.target_field).filter(Boolean)
+        const importedKeys = fieldMappings
+          .map(item => item.target_field)
+          .filter(key => key && key !== SKIP_COLUMN)
         const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
         if (hiddenRaw) {
           const hidden = JSON.parse(hiddenRaw) as unknown
@@ -274,17 +281,28 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose()
   }
+  const unmappedColumns = new Set(preview?.unmapped_columns || [])
+  const unmappedCount = preview?.unmapped_count ?? unmappedColumns.size
 
-  // P0-10：统计未匹配列（将被自动创建为 CustomField）数量
-  const newFieldCount = preview
-    ? Object.entries(preview.suggested_mapping || {}).filter(
-        ([, key]) => key && key.startsWith('cf_')
-      ).length
-    : 0
-  // 用户主动选择"不导入此列"的列数（target_field 为空）
+  // Unknown columns stay in the governance queue; users may explicitly skip a column.
   const skippedCount = preview
-    ? preview.detected_columns.filter(column => !mapping[column]).length
+    ? preview.detected_columns.filter(column => mapping[column] === SKIP_COLUMN).length
     : 0
+
+  const downloadUnmapped = useCallback(async () => {
+    if (!importResult?.batch_id) return
+    try {
+      const blob = await importApi.exportUnmapped({ batch_id: importResult.batch_id })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `patwiki-import-${importResult.batch_id}-unmapped.csv`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (downloadError: unknown) {
+      setError(getErrorMessage(downloadError, '下载待治理字段失败'))
+    }
+  }, [importResult])
 
   const stepTitle = {
     chooseDatabase: '选择专利库',
@@ -491,10 +509,10 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
             <div>
               <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 13 }}>
                 已识别 <strong>{preview.detected_columns.length}</strong> 列，共 <strong>{preview.total_rows}</strong> 行数据。
-                请确认Excel列与系统字段的对应关系；选择"不导入此列"可跳过该列。
-                {newFieldCount > 0 && (
-                  <span style={{ color: '#ea580c', marginLeft: 8, fontWeight: 600 }}>
-                    将自动创建 {newFieldCount} 个新字段
+                请确认 Excel 列与系统字段的对应关系。系统暂不认识的列会保留原始值，进入待治理清单，不会自动创建正式字段或参与统计。
+                {unmappedCount > 0 && (
+                  <span style={{ color: '#b45309', marginLeft: 8, fontWeight: 600 }}>
+                    {unmappedCount} 列保留待治理
                   </span>
                 )}
                 {skippedCount > 0 && (
@@ -516,9 +534,9 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   <tbody>
                     {preview.detected_columns.map((col) => {
                       const mappedKey = mapping[col] || ''
-                      const isNewField = mappedKey.startsWith('cf_')
                       const isVirtual = ['family_members', 'cited_patents', 'citing_patents'].includes(mappedKey)
-                      const isSkipped = !mappedKey
+                      const isGovernancePending = unmappedColumns.has(col) && !mappedKey
+                      const isSkipped = mappedKey === SKIP_COLUMN || (!mappedKey && !unmappedColumns.has(col))
                       return (
                         <tr key={col} style={{ borderTop: '1px solid #f1f5f9', opacity: isSkipped ? 0.6 : 1 }}>
                           <td style={{ padding: '8px 12px', fontWeight: 500 }}>{col}</td>
@@ -529,7 +547,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                               value={mappedKey}
                               onChange={(e) => setMapping(prev => ({ ...prev, [col]: e.target.value }))}
                             >
-                              <option value="">-- 不导入此列 --</option>
+                              <option value="">{unmappedColumns.has(col) ? '-- 保留待治理（默认）--' : '-- 不导入此列 --'}</option>
+                              <option value={SKIP_COLUMN}>-- 跳过本列 --</option>
                               <optgroup label="系统字段">
                                 {Object.entries(SYSTEM_FIELD_LABELS).map(([f, l]) => (
                                   <option key={f} value={f}>{l} ({f})</option>
@@ -542,15 +561,10 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                                   ))}
                                 </optgroup>
                               )}
-                              {isNewField && (
-                                <optgroup label="新建自定义字段">
-                                  <option value={mappedKey}>新建：{col}</option>
-                                </optgroup>
-                              )}
                             </select>
-                            {isNewField && (
-                              <span style={{ display: 'inline-block', marginLeft: 6, padding: '1px 6px', fontSize: 10, background: '#fed7aa', color: '#9a3412', borderRadius: 3 }}>
-                                新建字段
+                            {isGovernancePending && (
+                              <span style={{ display: 'inline-block', marginLeft: 6, padding: '1px 6px', fontSize: 10, background: '#fef3c7', color: '#92400e', borderRadius: 3 }}>
+                                保留待治理
                               </span>
                             )}
                             {isVirtual && (
@@ -560,7 +574,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                             )}
                             {isSkipped && (
                               <span style={{ display: 'inline-block', marginLeft: 6, padding: '1px 6px', fontSize: 10, background: '#e2e8f0', color: '#475569', borderRadius: 3 }}>
-                                不导入
+                                已跳过
                               </span>
                             )}
                           </td>
@@ -727,6 +741,12 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                     <div style={{ fontSize: 12, color: '#64748b' }}>错误</div>
                   </div>
                 )}
+                {(importResult.unmapped_retained || 0) > 0 && (
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: '#b45309' }}>{importResult.unmapped_retained}</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>待治理字段值</div>
+                  </div>
+                )}
               </div>
               {(importResult.row_reports || importResult.error_details || []).filter(report => report.status !== 'created').length > 0 && (
                 <div style={{ textAlign: 'left', maxHeight: 220, overflowY: 'auto', marginBottom: 20, border: '1px solid #e2e8f0', borderRadius: 6 }}>
@@ -740,7 +760,12 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   </table>
                 </div>
               )}
-              <button className="btn btn-primary" onClick={onSuccess}>完成</button>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+                {(importResult.unmapped_retained || 0) > 0 && importResult.batch_id && (
+                  <button className="btn btn-secondary" onClick={downloadUnmapped}>下载本批待治理字段 CSV</button>
+                )}
+                <button className="btn btn-primary" onClick={onSuccess}>完成</button>
+              </div>
             </div>
           )}
         </div>

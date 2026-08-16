@@ -525,6 +525,12 @@ export interface ImportBatch {
   skipped_count: number
   error_count: number
   errors?: JsonObject[]
+  source_table_title?: string
+  worksheet_name?: string
+  source_system?: string
+  mapping_version?: string
+  file_hash?: string
+  artifact_path?: string
   started_at?: string
   completed_at?: string
   created_at: string
@@ -536,6 +542,8 @@ export interface ImportPreview {
   preview_rows: Record<string, string>[]
   total_rows: number
   suggested_mapping: Record<string, string>
+  unmapped_columns?: string[]
+  unmapped_count?: number
   mapping_issues?: { column: string; target_field?: string; reason: string }[]
   available_fields?: FieldMeta[]
   sheets?: string[]
@@ -563,6 +571,8 @@ export interface ImportResult {
   family_links?: number
   citation_links?: number
   batch_id?: number | null
+  unmapped_retained?: number
+  unknown_columns?: string[]
 }
 
 export interface Stats {

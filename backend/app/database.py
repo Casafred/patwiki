@@ -106,6 +106,18 @@ def _ensure_column_migration():
         ("departments", "department_type", "ALTER TABLE departments ADD COLUMN department_type VARCHAR(30) DEFAULT 'other'"),
         ("departments", "parent_id", "ALTER TABLE departments ADD COLUMN parent_id INTEGER REFERENCES departments(id)"),
         ("product_lines", "department_id", "ALTER TABLE product_lines ADD COLUMN department_id INTEGER REFERENCES departments(id)"),
+        # Import lineage and Wiki provenance. New tables are created by
+        # create_all; these columns also need to be added to existing files.
+        ("import_batches", "source_table_title", "ALTER TABLE import_batches ADD COLUMN source_table_title VARCHAR(500)"),
+        ("import_batches", "worksheet_name", "ALTER TABLE import_batches ADD COLUMN worksheet_name VARCHAR(200)"),
+        ("import_batches", "source_system", "ALTER TABLE import_batches ADD COLUMN source_system VARCHAR(200)"),
+        ("import_batches", "mapping_version", "ALTER TABLE import_batches ADD COLUMN mapping_version VARCHAR(100)"),
+        ("import_batches", "file_hash", "ALTER TABLE import_batches ADD COLUMN file_hash VARCHAR(128)"),
+        ("import_batches", "artifact_path", "ALTER TABLE import_batches ADD COLUMN artifact_path VARCHAR(1000)"),
+        ("patent_histories", "import_batch_id", "ALTER TABLE patent_histories ADD COLUMN import_batch_id INTEGER REFERENCES import_batches(id)"),
+        ("patent_histories", "source_table_title", "ALTER TABLE patent_histories ADD COLUMN source_table_title VARCHAR(500)"),
+        ("patent_histories", "source_row", "ALTER TABLE patent_histories ADD COLUMN source_row INTEGER"),
+        ("patent_histories", "source_field_name", "ALTER TABLE patent_histories ADD COLUMN source_field_name VARCHAR(500)"),
     ]
 
     with engine.begin() as conn:
@@ -165,6 +177,8 @@ def _ensure_column_migration():
             ("users", "ix_users_product_line_id", "product_line_id"),
             ("departments", "ix_departments_parent_id", "parent_id"),
             ("product_lines", "ix_product_lines_department_id", "department_id"),
+            ("import_batches", "ix_import_batches_file_hash", "file_hash"),
+            ("patent_histories", "ix_patent_histories_import_batch_id", "import_batch_id"),
         ]:
             if not has_index(table, index_name):
                 try:

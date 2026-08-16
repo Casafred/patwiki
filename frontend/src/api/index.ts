@@ -411,6 +411,9 @@ export const importApi = {
     api.get('/import/batches', { params }),
 
   getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
+  exportUnmapped: (params: JsonObject = {}): Promise<Blob> =>
+    api.get('/import/unmapped/export', { params, responseType: 'blob' }),
+
 }
 
 export const statsApi = {

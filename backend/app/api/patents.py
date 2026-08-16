@@ -647,6 +647,10 @@ def get_patent_history(
             "changed_by": h.changed_by,
             "source_view_id": h.source_view_id,
             "source_view_name": h.source_view_name,
+            "import_batch_id": h.import_batch_id,
+            "source_table_title": h.source_table_title,
+            "source_row": h.source_row,
+            "source_field_name": h.source_field_name,
             "created_at": h.created_at.isoformat() if h.created_at else None,
         }
         for h in records

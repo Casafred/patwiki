@@ -440,6 +440,12 @@ class ImportBatchResponse(BaseSchema):
     skipped_count: int
     error_count: int
     errors: Optional[list[dict[str, Any]]] = None
+    source_table_title: Optional[str] = None
+    worksheet_name: Optional[str] = None
+    source_system: Optional[str] = None
+    mapping_version: Optional[str] = None
+    file_hash: Optional[str] = None
+    artifact_path: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime

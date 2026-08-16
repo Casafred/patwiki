@@ -1,5 +1,3 @@
-import hashlib
-import re
 from datetime import datetime
 from typing import Optional, Any
 from io import BytesIO
@@ -18,10 +16,7 @@ from app.services.relation_service import parse_patent_numbers
 # 虚拟字段：不直接写入 Patent 主表，由 relation_service 处理
 VIRTUAL_FIELDS = {"family_members", "cited_patents", "citing_patents"}
 IMPORT_BLOCKED_FIELDS = {"attachments"}
-
-# CustomField 的 key 前缀（与 field_registry 的 system_field 区分）
-CUSTOM_FIELD_KEY_PREFIX = "cf_"
-
+IMPORT_SKIP_FIELD = "__skip__"
 
 STANDARD_FIELD_MAPPINGS = {
     "申请号": "application_number",
@@ -132,92 +127,6 @@ RISK_LEVEL_MAP = {
 }
 
 
-def _slugify(name: str) -> str:
-    """把中文/特殊字符列名转换为 snake_case ascii slug。
-
-    中文按字面保留（去除空白即可），英文转小写下划线。
-    """
-    name = name.strip().lower()
-    # 英文部分转 snake_case
-    name = re.sub(r"[\s\-]+", "_", name)
-    name = re.sub(r"[^a-z0-9_\u4e00-\u9fa5]", "", name)
-    return name or "field"
-
-
-def _short_hash(text: str, length: int = 6) -> str:
-    return hashlib.md5(text.encode("utf-8")).hexdigest()[:length]
-
-
-def auto_create_custom_field(db: Session, column_name: str) -> str:
-    """未知列自动创建 CustomField，返回 key。
-
-    规则：
-    - key = "cf_" + slug(列名)[:20] + "_" + 短哈希（避免冲突）
-    - 字段类型默认 text，group_name="导入字段"
-    - 已存在同名 CustomField 时直接返回其 key
-    """
-    column_name = column_name.strip()
-    # 优先按 name 找现有 CustomField
-    existing = db.query(CustomField).filter(CustomField.name == column_name).first()
-    if existing:
-        return existing.key
-
-    slug = _slugify(column_name)[:20]
-    key = f"{CUSTOM_FIELD_KEY_PREFIX}{slug}_{_short_hash(column_name)}"
-
-    # 极端情况：key 冲突，加后缀
-    suffix = 1
-    while db.query(CustomField).filter(CustomField.key == key).first():
-        key = f"{CUSTOM_FIELD_KEY_PREFIX}{slug}_{_short_hash(column_name + str(suffix))}"
-        suffix += 1
-
-    cf = CustomField(
-        key=key,
-        name=column_name,
-        field_type=CustomFieldType.TEXT,
-        group_name="导入字段",
-        description=f"导入时自动创建，源列名：{column_name}",
-        is_active=True,
-    )
-    db.add(cf)
-    db.commit()
-    return key
-
-
-def _propose_custom_field_key(column_name: str) -> str:
-    """为未知列生成一个确定性的 CustomField key（不写入数据库）。
-
-    实际创建推迟到 confirm_import 阶段，避免预览后被用户放弃导入时
-    残留孤立的自定义字段。同名列生成的 key 一致，重复导入会复用。
-    """
-    column_name = column_name.strip()
-    slug = _slugify(column_name)[:20]
-    return f"{CUSTOM_FIELD_KEY_PREFIX}{slug}_{_short_hash(column_name)}"
-
-
-def materialize_custom_field(db: Session, key: str, column_name: str) -> CustomField:
-    """按 key 落地一个 CustomField；已存在则直接返回。"""
-    column_name = column_name.strip()
-    existing = db.query(CustomField).filter(CustomField.key == key).first()
-    if existing:
-        return existing
-    # 同名复用（与 auto_create_custom_field 行为一致）
-    by_name = db.query(CustomField).filter(CustomField.name == column_name).first()
-    if by_name:
-        return by_name
-    cf = CustomField(
-        key=key,
-        name=column_name,
-        field_type=CustomFieldType.TEXT,
-        group_name="导入字段",
-        description=f"导入时自动创建，源列名：{column_name}",
-        is_active=True,
-    )
-    db.add(cf)
-    db.commit()
-    return cf
-
-
 class ImportService:
     @staticmethod
     def list_sheets(file_content: bytes, filename: str) -> list[str]:
@@ -265,10 +174,10 @@ class ImportService:
 
         返回结构：
             {
-                "列名": "field_key"  # 系统字段、虚拟字段或 cf_xxx 自定义字段
+                "列名": "field_key"  # 已注册的系统、虚拟或自定义字段
             }
-        未匹配列提议创建 CustomField（仅生成 key，不立即写库）；
-        实际创建在 confirm_import 时发生，避免预览后放弃导入残留孤立字段。
+        未匹配列返回空目标。导入时原始值会作为待治理观察记录保留，
+        只有用户在字段治理中显式创建并映射正式字段后才会写入 Patent。
         """
         mapping: dict[str, str] = {}
         mapping_issues: list[dict[str, str]] = []
@@ -310,11 +219,8 @@ class ImportService:
             if matched:
                 continue
 
-            # 4. 未知列：提议创建 CustomField（仅生成 key，confirm 时落地）
-            proposed_key = _propose_custom_field_key(col_clean)
-            mapping[col_clean] = proposed_key
-            # 刷新缓存，避免同一次预览重复提议
-            custom_field_by_name[col_clean] = proposed_key
+            # 4. 未知列：保留为未映射属性，等待用户后续治理。
+            mapping[col_clean] = ""
 
         return mapping, mapping_issues
 
@@ -322,15 +228,20 @@ class ImportService:
     def validate_mapping(columns: list[str], mapping: dict[str, str], db: Session) -> list[dict[str, str]]:
         """Return every *blocking* mapping problem before any row can be written.
 
-        空目标（用户主动选择"不导入此列"）不再视为问题——列可被显式跳过。
-        提议的 cf_ key（尚未落库）也视为合法，confirm 阶段会创建。
+        空目标允许导入继续进行；其原始单元格值仍会留存在导入证据中。
+        ``__skip__`` 是用户明确的跳过标记：原始整行保留，但该列不进入
+        待治理观察清单。
+        任何未注册的字段都必须被阻止，避免未经治理进入正式数据模型。
         """
         custom_fields = {field.key: field for field in db.query(CustomField).all()}
         issues: list[dict[str, str]] = []
         for column in columns:
             target = (mapping.get(column) or "").strip()
             if not target:
-                # 用户主动选择不导入此列，跳过校验
+                # 未知字段保留为导入证据。
+                continue
+            if target == IMPORT_SKIP_FIELD:
+                # 用户明确跳过本列。
                 continue
             if target in IMPORT_BLOCKED_FIELDS:
                 issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入"})
@@ -339,9 +250,6 @@ class ImportService:
                 continue
             custom_field = custom_fields.get(target)
             if not custom_field:
-                # 提议的 cf_ key（尚未创建），confirm 时会落地
-                if target.startswith(CUSTOM_FIELD_KEY_PREFIX):
-                    continue
                 issues.append({"column": column, "target_field": target, "reason": "目标字段不存在"})
             elif custom_field.field_type == CustomFieldType.FORMULA:
                 issues.append({"column": column, "target_field": target, "reason": "公式字段由系统计算，不能导入"})
@@ -429,6 +337,8 @@ class ImportService:
             all_custom_fields = custom_fields_cache
 
         for excel_col, field_key in mapping.items():
+            if not field_key or field_key == IMPORT_SKIP_FIELD:
+                continue
             value = row.get(excel_col, "")
             if value is None:
                 value = ""
