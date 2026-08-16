@@ -232,6 +232,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management', currentDatabaseId)} title="管理台"><Icon name="settings" /><span className="nav-label">管理台</span></button>
         <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing', currentDatabaseId)} title="协作与权限"><Icon name="users" /><span className="nav-label">协作与权限</span></button>
         <button className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`} onClick={() => onNavigate('import-history', currentDatabaseId)} title="导入历史"><Icon name="history" /><span className="nav-label">导入历史</span></button>
+        <button className={`nav-item ${currentPage === 'governance' ? 'active' : ''}`} onClick={() => onNavigate('governance', currentDatabaseId)} title="数据治理"><Icon name="history" /><span className="nav-label">数据治理</span></button>
         <button className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings', currentDatabaseId)} title="设置"><Icon name="sliders" /><span className="nav-label">设置</span></button>
       </nav>
 

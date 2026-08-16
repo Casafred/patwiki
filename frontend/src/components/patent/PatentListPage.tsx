@@ -252,7 +252,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   // loadPatents effect 重跑 → 又触发 URL 同步 → 又导致 searchParamsString 变化
   // → 死循环。改用 ref 后 loadPatents 不再依赖 views，循环被打破。
   const viewsRef = useRef(views)
-  viewsRef.current = views
+  useEffect(() => {
+    viewsRef.current = views
+  }, [views])
 
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -537,7 +539,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, dataVersion, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, setPatents, setLoading])
 
   // Browser back/forward rehydrates list state from the URL.
   useEffect(() => {
@@ -586,6 +588,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     // Imports and field-management changes alter the column registry. Reload it
     // before the refreshed records render so mapped fields appear in the grid.
     if (dataVersion > 0) {
+      // The registry refresh is an external synchronization triggered by import/field changes.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadFields([], true)
       void loadCustomFields()
     }
@@ -595,6 +599,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   useEffect(() => {
     if (!showBulkTag) return
     if (tagsList.length > 0) return
+    // Loading state begins an asynchronous request and is intentionally local to this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBulkTagLoading(true)
     tagApi.list().then(setTagsList).catch(console.error).finally(() => setBulkTagLoading(false))
   }, [showBulkTag, tagsList.length])

@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-11（完成 UI-2 关键交互回归修复，P0/P1/P2/M1/M3/M4/M5/M6 全部完成）
+最近更新：2026-08-16（完成待治理属性确认闭环首版；保留撤销恢复和统一专利身份为下一阶段）
 
 ---
 
@@ -29,7 +29,7 @@
 |----|------|-------|------|---------|---------|---------|------|
 | P0-8 | 拆分 models 目录 + 新增 PatentDatabase 模型 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 后端 | 按 03-项目结构与代码规范.md 拆分为 base/enums/association/organization/project/tag/field/database/patent/ai/importing 11 个子模块；新增 PatentDatabase 表，Patent 增加 database_id 外键 |
 | P0-9 | 扩展 patent_project 关联表为多维属性 | 中 | 已完成 | 2026-07-19 | 2026-07-19 | 后端 | PatentProjectLink 替代 Table：relation_type/risk_level/document_role/relevance_score/importance/assigned_to_id |
-| P0-10 | 改造 import_service 为 Wiki 式增量合并 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 后端 | 新增 merge_service/relation_service；未知列自动创建 CustomField（auto_create_custom_field）；同族/引用号解析入库；标注类字段非空才覆盖；_row_to_patent_data 拆出虚拟字段；confirm_import 接入 database_id 与关系入库统计 |
+| P0-10 | 改造 import_service 为 Wiki 式增量合并 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 后端 | 新增 merge_service/relation_service；已知字段按覆盖策略增量合并；未知列保留为来源观察，不自动创建 CustomField；同族/引用号解析入库；confirm_import 接入 database_id 与关系入库统计 |
 | P0-11 | 新增 database_service + /databases API | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 后端 | 库 CRUD + 归档 + refresh-count；init_data 创建"默认数据库"；schemas/schemas.py 新增 PatentDatabase 系列 schema；patwiki_backend.spec 补全 hiddenimports |
 | P0-12 | 前端 ImportModal + 库切换器改造 | 高 | 已完成 | 2026-07-19 | 2026-07-19 | 前端 | 导入首步 chooseDatabase（选/建库）；未匹配列显示"新建字段"徽章+顶栏提示；Sidebar 顶部库切换器+新建库；PatentListPage 查询带 database_id；store 新增 databases/currentDatabaseId；types 新增 PatentDatabase 与 ImportPreview/ImportResult 字段扩展 |
 
@@ -40,7 +40,7 @@
 | P0-13 | 部门总表 + 小表视图后端基础 | 高 | 已完成 | 2026-07-20 | 后端 | 主表/视图模型、视图本地字段、字段来源追溯 |
 | P0-14 | 视图工作区基础闭环 | 高 | 已完成 | 2026-08-07 | 全栈 | 视图 API/状态/切换器；layout_type 与多维视图配置契约；列表按视图加载 |
 | P0-15 | 看板视图基础闭环 | 高 | 已完成 | 2026-08-08 | 全栈 | 看板分组数据 API、卡片投影、跨列拖拽更新共享/自定义字段、视图内卡片字段配置 |
-| P0-16 | 前端 ESLint 历史债务清理 | 高 | 已完成 | 2026-08-08 | 前端 | 清理显式 any、Hook 规则、空 catch、旧列表页和 render 副作用；npm run lint 达到 0 errors/0 warnings |
+| P0-16 | 前端 ESLint 历史债务清理 | 高 | 已完成 | 2026-08-08 | 前端 | 原阶段已完成；2026-08-16 导入治理变更后重新出现 10 errors/2 warnings，见 G0-4 |
 
 ## 二、下一迭代（P1 - 管理功能）
 
@@ -109,10 +109,29 @@
 
 ---
 
-## 五、变更记录
+## 五、当前数据治理重构（G0 - 专利信息中心基础闭环）
+
+> 本节是当前真实状态的优先依据。既有 P0/P1/M 任务记录的是历史阶段交付，不等于新数据治理目标已经完成。
+
+| ID | 任务 | 优先级 | 状态 | 实际完成 | 负责模块 | 备注 |
+|----|------|-------|------|---------|---------|------|
+| G0-1 | 导入原始文件、来源行和未知属性保留 | 高 | 已完成 | 2026-08-16 | 后端/导入 | `ImportSourceRow`、`FieldObservation`、文件哈希、来源表/Sheet/行/列、原始文件下载 |
+| G0-2 | 已知字段增量合并与 Wiki 来源历史 | 高 | 已完成 | 2026-08-16 | 后端/导入 | 相同值、格式差异、内容差异均保留观察；未知属性不进入正式字段和默认统计 |
+| G0-3 | 待治理属性查询与导出 | 高 | 已完成 | 2026-08-16 | 后端/导入 | `/import/unmapped` 默认只给待处理队列；`/import/unmapped/export` 默认导出完整观察证据，支持 `status` 筛选 |
+| G0-4 | 前端 lint 回归修复 | 中 | 已完成 | 2026-08-16 | 前端 | `npm run lint` 通过，0 errors / 0 warnings；同时修复异步字段元数据加载相关 Hook 规则问题 |
+| G0-5 | 待治理属性人工确认、映射与可审计回填 | 高 | 已完成 | 2026-08-16 | 全栈 | 支持单条/同批次同来源列批量处理、映射已有字段、可选采用来源值、PatentHistory 和 GovernanceDecision |
+| G0-6 | 待治理属性工作台 | 高 | 已完成 | 2026-08-16 | 前端 | 已接入 `/governance`；支持批次/来源列筛选、原始/当前/候选值对照、四类治理动作和影响数量提示 |
+| G0-7 | 专利统一身份与高频业务视图模板 | 高 | 未开始 | - | 全栈 | `PatentIdentifier`、六类高频 SavedView 和 Excel/Word 模板仍待建设 |
+| G0-8 | 治理撤销恢复、历史面板与统一身份前置 | 高 | 未开始 | - | 全栈 | 为批量治理增加可恢复决策批次、前端决策历史查看、分页和统一公开号身份规则；完成前不得宣称 G0 全部完成 |
+
+---
+
+## 六、变更记录
 
 | 日期 | 任务ID | 变更内容 |
 |------|--------|---------|
+| 2026-08-16 | G0-3~G0-6 | 完成待治理属性确认首版：新增 `GovernanceDecision` 追加式决策记录、四类服务层治理动作、已有字段映射与可选来源值回填、`PatentHistory(source=governance)`、同批次同来源列范围控制、稳定的决策历史 JSON 接口和 `/governance` 工作台；完整证据 CSV 默认包含已保留/已忽略观察。通过全量 41 项后端测试、compileall、ESLint、TypeScript、Vite build 和 diff check。撤销恢复、历史面板和统一身份仍列入 G0-8。 |
+| 2026-08-16 | G0-1~G0-3 | 完成未知导入属性的原始文件、来源行、来源列和值保留；新增 FieldObservation 和来源 Wiki 历史；提供待治理查询与 CSV 导出。更新 P0-10 过期描述，明确未知列不自动创建 CustomField。后端 `backend/tests` 39 项通过；当前前端 lint 仍需修复。 |
 | 2026-08-11 | UI-2 | 完成工作台关键交互回归收尾：列表页以 URL 数据库 ID 作为最终作用域，避免切库瞬间读写旧库；表格宽度改为可滚动的 max-content，列拖拽继续持久化；移动端折叠侧栏打开时自动恢复完整抽屉；工具、统计、智能分析页面移除 Emoji 并统一使用内联 SVG 图标；导入确认真实汇总同族/引用关系数量；新增 XLSX/无效上传和 SQLite 同族成员入库回归测试。通过 npm run lint、TypeScript、Vite build、compileall、32 项后端测试和 git diff --check。 |
 | 2026-08-11 | UI-2 | 修复工作台关键交互回归：数据库切换改为显式携带目标库路由并按 URL 库加载视图；Excel/CSV 导入修复 multipart boundary、大小写扩展名、编码和 400 错误响应；同族解析支持逗号、分号、竖线、斜杠、反斜杠、换行和去重，并按数据库隔离关系记录；新增真实单元格撤回/重做命令栈与快捷键、列宽拖拽持久化、桌面侧栏折叠；工具区改用内联 SVG 图标；AI 字段创建与执行拆分。新增导入/同族回归测试，lint、TypeScript、Vite build、compileall 和 7 项后端测试通过。 |
 | 2026-08-11 | UI-1 | 重构前端工作台界面：统一侧栏、顶部上下文、专利列表工具区、视图工具区、筛选/批量操作区、专利详情页与管理台的层级和响应式布局；保留原有导入、视图、编辑、导出、AI 与管理功能。通过 ESLint、TypeScript、Vite build 与 diff check。 |

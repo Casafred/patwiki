@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
 import { aiApi } from '../../api'
-import type { FieldMeta } from '../../types'
+import type { AITask, CustomField, FieldMeta } from '../../types'
 import Icon from '../common/Icon'
+import { getErrorMessage } from '../../lib/errors'
 
 interface ExtractionTarget {
   id: string
@@ -15,9 +16,9 @@ interface ExtractionTarget {
 interface AIQuickAnalyzeModalProps {
   patentIds: number[]
   fields: FieldMeta[]
-  customFields: any[]
+  customFields: CustomField[]
   onClose: () => void
-  onStarted: (task: any) => void
+  onStarted: (task: AITask) => void
 }
 
 const FIELD_TYPE_OPTIONS = [
@@ -137,9 +138,8 @@ export default function AIQuickAnalyzeModal({
         })),
       })
       onStarted(task)
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail || err?.message || '启动 AI 分析失败'
-      setError(typeof detail === 'string' ? detail : JSON.stringify(detail))
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, '启动 AI 分析失败'))
     } finally {
       setRunning(false)
     }

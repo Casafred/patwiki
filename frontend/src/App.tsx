@@ -12,6 +12,7 @@ import DashboardPage from './components/analytics/DashboardPage'
 import AutomationPage from './components/settings/AutomationPage'
 import ImportModal from './components/import/ImportModal'
 import ImportHistoryPage from './components/import/ImportHistoryPage'
+import ImportGovernancePage from './components/import/ImportGovernancePage'
 import AITaskMonitor from './components/ai/AITaskMonitor'
 import ManagementPage from './components/management/ManagementPage'
 import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
@@ -21,7 +22,7 @@ import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } 
 import { useAppStore } from './store'
 import './index.css'
 
-export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history'
+export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history' | 'governance'
 
 const pageSegments: Record<Page, string> = {
   patents: 'patents',
@@ -35,6 +36,7 @@ const pageSegments: Record<Page, string> = {
   'agent-analysis': 'agent-analysis',
   sharing: 'sharing',
   'import-history': 'import-history',
+  governance: 'governance',
 }
 
 function getPageFromPath(pathname: string): Page {
@@ -123,7 +125,9 @@ function WorkspaceApp() {
   // URL 同步 effect 写 view=X → searchParamsString 变化 → 视图加载 effect 再跑
   // → 死循环，表现为切库/翻页时界面疯狂闪动）。
   const viewParamRef = useRef<string | null>(searchParams.get('view'))
-  viewParamRef.current = searchParams.get('view')
+  useEffect(() => {
+    viewParamRef.current = searchParams.get('view')
+  }, [searchParams])
 
   useEffect(() => {
     if (activeDatabaseId === null) return
@@ -185,7 +189,7 @@ function WorkspaceApp() {
     } catch (e) {
       console.error('Failed to load meta data:', e)
     }
-  }, [requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProducts, setProjects, setTags])
+  }, [currentDatabaseId, requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProducts, setProjects, setTags])
 
   useEffect(() => {
     void loadMeta()
@@ -239,6 +243,7 @@ function WorkspaceApp() {
     'agent-analysis': '智能分析',
     sharing: '协作与权限',
     'import-history': '导入历史',
+    governance: '数据治理',
   }
   const currentDatabase = databases.find(database => database.id === activeDatabaseId)
 
@@ -289,6 +294,7 @@ function WorkspaceApp() {
             <Route path="db/:databaseId/management" element={<DatabaseRouteScope><ManagementPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/sharing" element={<DatabaseRouteScope><SharingPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/import-history" element={<DatabaseRouteScope><ImportHistoryPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/governance" element={<DatabaseRouteScope><ImportGovernancePage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/ai-tasks" element={<DatabaseRouteScope><AITaskMonitor /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/agent-analysis" element={<DatabaseRouteScope><AgentAnalysisPage /></DatabaseRouteScope>} />
             <Route path="patents" element={<PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} />} />
@@ -301,6 +307,7 @@ function WorkspaceApp() {
             <Route path="management" element={<ManagementPage />} />
             <Route path="sharing" element={<SharingPage />} />
             <Route path="import-history" element={<ImportHistoryPage />} />
+            <Route path="governance" element={<ImportGovernancePage />} />
             <Route path="ai-tasks" element={<AITaskMonitor />} />
             <Route path="agent-analysis" element={<AgentAnalysisPage />} />
             <Route path="*" element={<Navigate to="/patents" replace />} />

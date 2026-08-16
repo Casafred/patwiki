@@ -79,10 +79,14 @@ export default function SharingPage() {
   }, [loadUsers])
 
   useEffect(() => {
+    // Department data is synchronized from the management API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadDepartments()
   }, [loadDepartments])
 
   useEffect(() => {
+    // Product-line data is synchronized from the management API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadProductLines()
   }, [loadProductLines])
 

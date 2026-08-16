@@ -63,6 +63,27 @@ PatWiki 当前不是全面 IP 工作流平台。Agent 的首要目标是交付�
 8. **复核范围**：检查是否误覆盖人工数据、是否把草稿当正式结论、是否增加了不必要的复杂工作流。
 9. **交付报告**：说明改动文件、文档依据、测试命令与结果、未完成项和需要用户确认的问题。
 
+### 3.1 当前 G0 任务执行要求
+
+涉及未知属性、导入治理或来源追溯时，Agent 必须先检查 `DEVELOPMENT_PROGRESS.md` 的 G0 状态和 `21-implementation-contract.md` 的 4.0 节。实现顺序固定为：
+
+1. 先完成服务层决策和事务边界；
+2. 再补 API schema、回归测试和导出；
+3. 最后实现工作台，不允许只做页面状态而绕过服务层；
+4. 每次将未知属性升级为正式字段前，必须明确字段名称、类型、责任人、来源范围和统计口径；缺一项只能保留为来源专用字段或候选字段。
+
+Agent 不得以“用户已经看到 CSV”为理由跳过确认、回填、历史和失败重试。当前 G0 首版已经提供四类治理动作和稳定决策历史 API，但撤销最近治理批次、可视化历史面板和分页尚未完成，必须按 `DEVELOPMENT_PROGRESS.md` 的 G0-8 继续实现，不得在交付报告中声称这些能力已存在。
+
+### 3.2 当前治理接口执行清单
+
+当任务涉及待治理属性时，Agent 必须按以下顺序实现和验证：
+
+1. 队列读取使用 `GET /import/unmapped`，默认状态是 `unmapped_retained`；完整来源审计使用 `GET /import/unmapped/export`，默认状态是 `all`，不得把完整导出误当成待处理队列。
+2. 决策只能通过 `PATCH /import/observations/{observation_id}`；前端不得直接写 `Patent`、`Patent.custom_fields`、`FieldObservation` 或自行伪造历史。
+3. 批量动作必须将影响范围固化为 `ImportBatch + source_field_name`，响应返回 `updated_count` 和 `adopted_value_count`，前端明确展示这两个数字。
+4. 对 `map_existing` 同时验证 Field Registry、采用来源值开关、空值不覆盖和 `PatentHistory(source=governance)`；对 `retain_source`/`ignore` 验证观察记录仍存在并能在 `status=all` 导出中出现。
+5. 每次新动作至少增加：单条路径、批量边界路径、原始证据保留路径、决策历史路径和失败重试路径测试；没有这些测试不能标记完成。
+
 ## 4. 不可违反的开发规则
 
 - 未知列、未知属性或暂时无法归类的信息不能静默丢弃，不能未经治理写入正式字段、默认统计或 `Patent.custom_fields`。
@@ -123,4 +144,3 @@ Agent 完成任务时必须输出：
 3. 文件改动：模型、服务、API、UI、测试、文档分别列出；
 4. 验证：实际执行的命令和结果；
 5. 未完成与风险：明确未实现、未验证和需要确认的事项。
-

@@ -575,6 +575,47 @@ export interface ImportResult {
   unknown_columns?: string[]
 }
 
+export type GovernanceAction = 'retain_source' | 'ignore' | 'map_existing' | 'propose_field'
+
+export interface GovernanceObservation {
+  id: number
+  batch_id: number
+  filename: string
+  source_table_title?: string | null
+  worksheet_name?: string | null
+  source_row_id: number
+  source_row: number
+  patent_id?: number | null
+  source_field_name: string
+  source_column_index?: number | null
+  canonical_field_key?: string | null
+  raw_value?: string | null
+  normalized_value?: string | null
+  current_value?: string | null
+  candidate_value?: string | null
+  difference_type: string
+  field_resolution: string
+  proposed_action?: string | null
+  final_decision?: string | null
+  decided_by?: string | null
+  decided_at?: string | null
+  source_row_values?: JsonObject
+  created_at?: string | null
+}
+
+export interface GovernanceDecision {
+  id: number
+  observation_id: number
+  action: GovernanceAction
+  scope: string
+  canonical_field_key?: string | null
+  mapping_version?: string | null
+  adopted_value: boolean
+  decided_by: string
+  reason?: string | null
+  created_at?: string | null
+}
+
 export interface Stats {
   total_patents: number
   by_legal_status: Record<string, number>

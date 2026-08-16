@@ -121,6 +121,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   // P0-14：加载当前库的视图列表（用于导入到指定视图）
   useEffect(() => {
     if (!currentDatabaseId) {
+      // The view list mirrors the selected database, which is external state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setViews([])
       return
     }

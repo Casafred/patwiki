@@ -14,8 +14,8 @@ from app.api import imports as import_routes
 from app.database import Base, get_db
 from app.core.exceptions import BadRequestException
 from app.models import (
-    CustomField, CustomFieldType, FieldObservation, ImportBatch,
-    ImportSourceRow, Patent, PatentDatabase, PatentHistory,
+    CustomField, CustomFieldType, FieldObservation, GovernanceDecision,
+    ImportBatch, ImportSourceRow, Patent, PatentDatabase, PatentHistory,
 )
 from app.services.field_registry import get_all_fields_meta
 from app.services.import_service import ImportService
@@ -371,6 +371,199 @@ class ImportPipelineTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
+    def test_governance_decision_maps_and_adopts_value_with_append_only_history(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        try:
+            database = PatentDatabase(name="治理决策测试库")
+            patent = Patent(
+                title="待治理专利",
+                publication_number="CN123456789A",
+                country="CN",
+                database=database,
+            )
+            batch = ImportBatch(
+                filename="治理测试.csv",
+                source_table_title="检索师临时表",
+                worksheet_name="Sheet1",
+                mapping_version="v-governance-1",
+            )
+            db.add_all([database, patent, batch])
+            db.flush()
+            source_row = ImportSourceRow(
+                import_batch_id=batch.id,
+                source_row=2,
+                raw_row={"公开号": "CN123456789A", "技术标签": "通信"},
+                patent_id=patent.id,
+            )
+            db.add(source_row)
+            db.flush()
+            observation = FieldObservation(
+                import_batch_id=batch.id,
+                source_row_id=source_row.id,
+                patent_id=patent.id,
+                source_field_name="技术标签",
+                raw_value="通信",
+                normalized_value="通信",
+                candidate_value="通信",
+                difference_type="unknown",
+                field_resolution="unmapped_retained",
+                proposed_action="retain",
+            )
+            db.add(observation)
+            db.commit()
+
+            app = FastAPI()
+            app.include_router(import_routes.router)
+            app.dependency_overrides[get_db] = lambda: db
+            client = TestClient(app)
+            response = client.patch(
+                f"/import/observations/{observation.id}",
+                json={
+                    "action": "map_existing",
+                    "canonical_field_key": "category",
+                    "adopted_value": True,
+                    "decided_by": "检索师",
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["updated_count"], 1)
+            db.refresh(patent)
+            db.refresh(observation)
+            self.assertEqual(patent.category, "通信")
+            self.assertEqual(observation.field_resolution, "mapped")
+            self.assertEqual(observation.final_decision, "mapped")
+            self.assertEqual(
+                db.query(GovernanceDecision).filter(GovernanceDecision.observation_id == observation.id).count(),
+                1,
+            )
+            history = db.query(PatentHistory).filter(
+                PatentHistory.patent_id == patent.id,
+                PatentHistory.source == "governance",
+            ).one()
+            self.assertEqual(history.field_key, "category")
+            self.assertEqual(history.changed_by, "检索师")
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_governance_scope_keeps_evidence_and_returns_decision_history(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        try:
+            database = PatentDatabase(name="治理范围测试库")
+            patent_a = Patent(title="专利A", publication_number="CN100000001A", database=database)
+            patent_b = Patent(title="专利B", publication_number="CN100000002A", database=database)
+            batch_a = ImportBatch(
+                filename="批次A.csv",
+                source_table_title="月度跟踪A",
+                worksheet_name="Sheet1",
+                mapping_version="v-governance-1",
+            )
+            batch_b = ImportBatch(
+                filename="批次B.csv",
+                source_table_title="月度跟踪B",
+                worksheet_name="Sheet1",
+            )
+            db.add_all([database, patent_a, patent_b, batch_a, batch_b])
+            db.flush()
+
+            def add_observation(batch, patent, field_name, value, row_number):
+                source_row = ImportSourceRow(
+                    import_batch_id=batch.id,
+                    source_row=row_number,
+                    raw_row={field_name: value},
+                    patent_id=patent.id,
+                )
+                db.add(source_row)
+                db.flush()
+                observation = FieldObservation(
+                    import_batch_id=batch.id,
+                    source_row_id=source_row.id,
+                    patent_id=patent.id,
+                    source_field_name=field_name,
+                    raw_value=value,
+                    normalized_value=value,
+                    candidate_value=value,
+                    difference_type="unknown",
+                    field_resolution="unmapped_retained",
+                    proposed_action="retain",
+                )
+                db.add(observation)
+                db.flush()
+                return observation
+
+            same_field_a1 = add_observation(batch_a, patent_a, "临时字段", "A1", 2)
+            same_field_a2 = add_observation(batch_a, patent_b, "临时字段", "A2", 3)
+            other_field = add_observation(batch_a, patent_a, "其他字段", "B1", 4)
+            same_field_b = add_observation(batch_b, patent_a, "临时字段", "C1", 2)
+            db.commit()
+
+            app = FastAPI()
+            app.include_router(import_routes.router)
+            app.dependency_overrides[get_db] = lambda: db
+            client = TestClient(app)
+
+            response = client.patch(
+                f"/import/observations/{same_field_a1.id}",
+                json={
+                    "action": "retain_source",
+                    "apply_to_batch": True,
+                    "decided_by": "检索师",
+                    "reason": "先保留来源语义",
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["updated_count"], 2)
+            db.refresh(same_field_a1)
+            db.refresh(same_field_a2)
+            db.refresh(other_field)
+            db.refresh(same_field_b)
+            self.assertEqual(same_field_a1.field_resolution, "source_only")
+            self.assertEqual(same_field_a2.field_resolution, "source_only")
+            self.assertEqual(other_field.field_resolution, "unmapped_retained")
+            self.assertEqual(same_field_b.field_resolution, "unmapped_retained")
+
+            decisions = client.get(f"/import/observations/{same_field_a2.id}/decisions")
+            self.assertEqual(decisions.status_code, 200, decisions.text)
+            self.assertEqual(decisions.json()[0]["action"], "retain_source")
+            self.assertEqual(decisions.json()[0]["scope"], "batch_source_field")
+            self.assertEqual(decisions.json()[0]["mapping_version"], "v-governance-1")
+
+            response = client.patch(
+                f"/import/observations/{other_field.id}",
+                json={"action": "ignore", "decided_by": "检索师"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            db.refresh(other_field)
+            self.assertEqual(other_field.field_resolution, "ignored")
+            self.assertEqual(
+                db.query(FieldObservation).filter(FieldObservation.id == other_field.id).count(),
+                1,
+            )
+
+            default_queue = client.get("/import/unmapped")
+            self.assertEqual(default_queue.status_code, 200, default_queue.text)
+            self.assertEqual(default_queue.json()["total"], 1)
+            complete_export = client.get("/import/unmapped/export")
+            self.assertEqual(complete_export.status_code, 200, complete_export.text)
+            self.assertIn("A1", complete_export.text)
+            self.assertIn("B1", complete_export.text)
+            self.assertIn("C1", complete_export.text)
+        finally:
+            db.close()
+            engine.dispose()
+
     def test_invalid_dates_are_reported_instead_of_silently_dropped(self):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         Base.metadata.create_all(engine)
@@ -385,6 +578,10 @@ class ImportPipelineTest(unittest.TestCase):
         finally:
             db.close()
             engine.dispose()
+
+    def test_governance_date_validation_is_actionable(self):
+        with self.assertRaisesRegex(BadRequestException, "无法写入日期字段"):
+            import_routes._coerce_governance_value("filing_date", "not-a-date")
 
 
 if __name__ == "__main__":

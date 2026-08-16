@@ -8,6 +8,7 @@ import type {
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
   PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
+  GovernanceAction, GovernanceDecision, GovernanceObservation,
 } from '../types'
 
 export const fieldApi = {
@@ -411,6 +412,22 @@ export const importApi = {
     api.get('/import/batches', { params }),
 
   getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
+  listUnmapped: (params: JsonObject = {}): Promise<{ total: number; offset: number; limit: number; items: GovernanceObservation[] }> =>
+    api.get('/import/unmapped', { params }),
+  decideObservation: (
+    observationId: number,
+    request: {
+      action: GovernanceAction
+      canonical_field_key?: string
+      apply_to_batch?: boolean
+      adopted_value?: boolean
+      decided_by?: string
+      reason?: string
+    },
+  ): Promise<{ action: GovernanceAction; scope: string; updated_count: number; adopted_value_count: number; items: GovernanceObservation[] }> =>
+    api.patch(`/import/observations/${observationId}`, request),
+  listObservationDecisions: (observationId: number): Promise<GovernanceDecision[]> =>
+    api.get(`/import/observations/${observationId}/decisions`),
   exportUnmapped: (params: JsonObject = {}): Promise<Blob> =>
     api.get('/import/unmapped/export', { params, responseType: 'blob' }),
 

@@ -4,7 +4,7 @@ These records deliberately sit outside Patent.custom_fields. An input
 column that is not yet registered is still valuable evidence, but it is not a
 canonical field until a user explicitly maps and confirms it.
 """
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -44,4 +44,26 @@ class FieldObservation(Base):
     final_decision = Column(String(30))
     decided_by = Column(String(100))
     decided_at = Column(DateTime)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+class GovernanceDecision(Base):
+    """Append-only record of a user's decision about a field observation."""
+
+    __tablename__ = "governance_decisions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    observation_id = Column(
+        Integer,
+        ForeignKey("field_observations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    action = Column(String(40), nullable=False, index=True)
+    scope = Column(String(30), nullable=False, default="single")
+    canonical_field_key = Column(String(200), nullable=True, index=True)
+    mapping_version = Column(String(100), nullable=True)
+    adopted_value = Column(Boolean, nullable=False, default=False)
+    decided_by = Column(String(100), nullable=False, default="local-user")
+    reason = Column(Text)
     created_at = Column(DateTime, server_default=func.now(), index=True)

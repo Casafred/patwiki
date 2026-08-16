@@ -75,6 +75,24 @@
 
 ## 4. 迁移与发布门禁
 
+## 4.0 当前 G0 实施切片：待治理属性确认闭环
+
+当前代码已经完成来源证据保留，但 Agent 不得把“可以查询/导出”误判为“治理已完成”。下一批实现必须遵守以下固定数据路径：
+
+1. `GET /import/unmapped` 读取 `FieldObservation`，默认只展示 `field_resolution=unmapped_retained`；传入 `status=all` 才读取完整观察集合。原始 `ImportSourceRow.raw_row` 和导入附件永不删除。`GET /import/unmapped/export` 默认使用 `status=all`，用于完整证据留档；治理队列需要导出时必须显式传 `status=unmapped_retained`。
+2. 人工决策必须经过服务层接口，不能由前端直接修改 `Patent.custom_fields`。允许的动作是：`retain_source`、`ignore`、`map_existing`、`propose_field`。
+3. `map_existing` 必须校验目标字段已在当前字段注册范围内；用户确认后才可回填专利当前值，并写入 `PatentHistory`，同时记录观察原始列、候选值、决定人、决定时间和映射版本。
+4. 按来源列批量映射只能影响同一 `ImportBatch + source_field_name` 的观察；不能把一个来源列无提示地应用到其他批次或其他同名列。
+5. `retain_source` 和 `ignore` 都不得删除观察记录；`ignore` 只改变默认治理展示，不得从原始证据和导出结果中消失。
+6. 尚未识别专利身份的观察可以先治理字段语义，但不得伪造 `patent_id` 或写入正式专利记录。
+7. 前端工作台至少要显示：来源文件、来源表、Sheet、行号、列名、原始值、当前值、候选值、差异类型、当前状态、最近决策；批量操作必须显示影响数量。请求失败时原观察必须仍在待处理队列并可重试；批量治理的可恢复撤销、决策历史面板和分页属于 G0-8，在完成前不得伪装成当前能力。
+
+8. 当前已实现接口的固定语义：`PATCH /import/observations/{id}` 的 `action` 只能是 `retain_source`、`ignore`、`map_existing`、`propose_field`；`apply_to_batch=true` 的范围严格为当前观察的 `import_batch_id + source_field_name`，不跨批次、不跨来源列。`map_existing` 必须提供已注册且可编辑的 `canonical_field_key`；`adopted_value=true` 才允许来源候选覆盖已有非空值，空当前值可以按确认结果补入。
+
+9. 每个决策都追加 `GovernanceDecision`，不得更新或删除旧决策；查询 `/import/observations/{id}/decisions` 必须返回稳定 JSON。采用来源值造成实际变化时追加 `PatentHistory`，但任何正式字段回填都不能删除对应 `FieldObservation` 或原始附件。
+
+本切片的完成定义：单条确认、同来源列批量确认、已有字段映射回填、来源专用字段保留、决策历史查询、完整证据导出和回归测试全部可重复验证。撤销恢复不属于本切片完成条件，转入 G0-8；Agent 不得因此扩大本轮范围，也不得把 G0 整体标成完成。
+
 ### 4.1 Phase 0A：迁移平台先行
 
 在创建任一 V2 业务表之前完成：

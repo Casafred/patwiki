@@ -5,13 +5,13 @@ import csv
 import tempfile
 import os
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text, or_
-from typing import Optional
+from typing import Literal, Optional
 import json
 import pandas as pd
 from io import BytesIO, StringIO
@@ -21,10 +21,19 @@ from app.database import get_db, SessionLocal, engine
 from app.schemas.schemas import ImportBatchResponse, StatsResponse
 from app.services.import_service import IMPORT_SKIP_FIELD, ImportService
 from app.services.patent_service import PatentService
-from app.services.field_registry import get_all_fields_meta
+from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
 from app.services.merge_service import merge_patent_data, _is_empty
 from app.config import settings
-from app.models import CustomField, ImportBatch, ImportBatchStatus, Patent, ImportSourceRow, FieldObservation, PatentHistory
+from app.models import (
+    CustomField,
+    GovernanceDecision,
+    ImportBatch,
+    ImportBatchStatus,
+    ImportSourceRow,
+    FieldObservation,
+    Patent,
+    PatentHistory,
+)
 from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(tags=["import"])
@@ -86,6 +95,15 @@ class ConfirmImportRequest(BaseModel):
     source_system: Optional[str] = None
     sheet_name: Optional[str] = None
     view_id: Optional[int] = None  # P0-14：导入到指定视图（为空则导入到库的主视图）
+
+
+class GovernanceDecisionRequest(BaseModel):
+    action: Literal["retain_source", "ignore", "map_existing", "propose_field"]
+    canonical_field_key: Optional[str] = None
+    apply_to_batch: bool = False
+    adopted_value: bool = False
+    decided_by: str = "local-user"
+    reason: Optional[str] = None
 
 
 @router.post("/import/preview")
@@ -817,8 +835,192 @@ def _observation_to_dict(observation: FieldObservation, source_row: ImportSource
         "field_resolution": observation.field_resolution,
         "proposed_action": observation.proposed_action,
         "final_decision": observation.final_decision,
+        "decided_by": observation.decided_by,
+        "decided_at": observation.decided_at.isoformat() if observation.decided_at else None,
+        "source_row_values": source_row.raw_row,
         "created_at": observation.created_at.isoformat() if observation.created_at else None,
     }
+
+
+def _governance_field_meta(db: Session, field_key: str) -> dict:
+    field = next((item for item in get_all_fields_meta(db) if item.get("key") == field_key), None)
+    if not field:
+        raise BadRequestException(f"目标字段不存在：{field_key}")
+    if not field.get("editable", True) or field_key in {"id", "created_at", "updated_at"}:
+        raise BadRequestException(f"目标字段不可编辑：{field_key}")
+    return field
+
+
+def _coerce_governance_value(field_key: str, value: str):
+    if field_key in {"filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date"}:
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError as exc:
+            raise BadRequestException(
+                f"来源值无法写入日期字段 {field_key}：{value}"
+            ) from exc
+    if field_key == "has_risk":
+        return value.strip().lower() in {"1", "true", "yes", "y", "是", "有"}
+    return value
+
+
+def _write_governance_value(patent: Patent, field_key: str, value: str) -> tuple[str | None, str]:
+    """Write an explicitly adopted observation value and return old/new text."""
+    old_value = _current_value(patent, field_key)
+    coerced = _coerce_governance_value(field_key, value)
+    if field_key in SYSTEM_FIELD_KEYS:
+        setattr(patent, field_key, coerced)
+    else:
+        current = dict(patent.custom_fields or {})
+        current[field_key] = coerced
+        patent.custom_fields = current
+    return old_value, _text_value(coerced) or ""
+
+
+@router.patch("/import/observations/{observation_id}")
+def decide_import_observation(
+    observation_id: int,
+    req: GovernanceDecisionRequest,
+    db: Session = Depends(get_db),
+):
+    observation = db.query(FieldObservation).filter(FieldObservation.id == observation_id).first()
+    if not observation:
+        raise NotFoundException("待治理字段观察不存在")
+
+    target_field = req.canonical_field_key.strip() if req.canonical_field_key else None
+    if req.action == "map_existing":
+        if not target_field:
+            raise BadRequestException("映射已有字段时必须指定 canonical_field_key")
+        target_field_meta = _governance_field_meta(db, target_field)
+    elif target_field:
+        raise BadRequestException("当前动作不接受 canonical_field_key")
+
+    query = db.query(FieldObservation).filter(FieldObservation.id == observation_id)
+    if req.apply_to_batch:
+        query = db.query(FieldObservation).filter(
+            FieldObservation.import_batch_id == observation.import_batch_id,
+            FieldObservation.source_field_name == observation.source_field_name,
+            FieldObservation.field_resolution.in_(["unmapped_retained", "candidate"]),
+        )
+    targets = query.order_by(FieldObservation.id.asc()).all()
+    batch = db.query(ImportBatch).filter(ImportBatch.id == observation.import_batch_id).first()
+    if not batch:
+        raise NotFoundException("导入批次不存在")
+
+    source_rows = {
+        row.id: row
+        for row in db.query(ImportSourceRow).filter(
+            ImportSourceRow.id.in_({target.source_row_id for target in targets})
+        ).all()
+    }
+    patents = {
+        patent.id: patent
+        for patent in db.query(Patent).filter(
+            Patent.id.in_({target.patent_id for target in targets if target.patent_id})
+        ).all()
+    }
+    if req.action == "map_existing":
+        # Validate every candidate before mutating observations or patents so a
+        # malformed batch remains entirely retryable.
+        for target in targets:
+            if target.normalized_value:
+                _coerce_governance_value(target_field, target.normalized_value)
+
+    resolution_by_action = {
+        "retain_source": ("source_only", "retained"),
+        "ignore": ("ignored", "ignored"),
+        "map_existing": ("mapped", "mapped"),
+        "propose_field": ("candidate", "proposed"),
+    }
+    field_resolution, final_decision = resolution_by_action[req.action]
+    changed_values = 0
+    updated_items = []
+
+    for target in targets:
+        target_field_for_observation = target_field if req.action == "map_existing" else target.canonical_field_key
+        target.canonical_field_key = target_field_for_observation
+        target.field_resolution = field_resolution
+        target.final_decision = final_decision
+        target.proposed_action = req.action
+        target.decided_by = req.decided_by.strip() or "local-user"
+        target.decided_at = datetime.utcnow()
+
+        if req.action == "map_existing" and target.patent_id and target.normalized_value:
+            patent = patents.get(target.patent_id)
+            if patent:
+                current = _current_value(patent, target_field)
+                candidate = target.normalized_value
+                should_adopt = req.adopted_value and candidate != ""
+                should_fill = not current and candidate != ""
+                if should_adopt or should_fill:
+                    old_value, new_value = _write_governance_value(patent, target_field, candidate)
+                    if old_value != new_value:
+                        source_row = source_rows.get(target.source_row_id)
+                        db.add(PatentHistory(
+                            patent_id=patent.id,
+                            field_key=target_field,
+                            field_display_name=target_field_meta.get("name") or target_field,
+                            old_value=old_value,
+                            new_value=new_value,
+                            source="governance",
+                            changed_by=target.decided_by,
+                            import_batch_id=batch.id,
+                            source_table_title=batch.source_table_title,
+                            source_row=source_row.source_row if source_row else None,
+                            source_field_name=target.source_field_name,
+                        ))
+                        changed_values += 1
+
+        db.add(GovernanceDecision(
+            observation_id=target.id,
+            action=req.action,
+            scope="batch_source_field" if req.apply_to_batch else "single",
+            canonical_field_key=target_field,
+            mapping_version=batch.mapping_version,
+            adopted_value=req.adopted_value,
+            decided_by=target.decided_by,
+            reason=req.reason,
+        ))
+        source_row = source_rows.get(target.source_row_id)
+        if source_row:
+            updated_items.append(_observation_to_dict(target, source_row, batch))
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "action": req.action,
+        "scope": "batch_source_field" if req.apply_to_batch else "single",
+        "updated_count": len(targets),
+        "adopted_value_count": changed_values,
+        "items": updated_items,
+    }
+
+
+@router.get("/import/observations/{observation_id}/decisions")
+def list_import_observation_decisions(observation_id: int, db: Session = Depends(get_db)):
+    if not db.query(FieldObservation).filter(FieldObservation.id == observation_id).first():
+        raise NotFoundException("待治理字段观察不存在")
+    decisions = db.query(GovernanceDecision).filter(
+        GovernanceDecision.observation_id == observation_id,
+    ).order_by(GovernanceDecision.id.desc()).all()
+    return [
+        {
+            "id": decision.id,
+            "observation_id": decision.observation_id,
+            "action": decision.action,
+            "scope": decision.scope,
+            "canonical_field_key": decision.canonical_field_key,
+            "mapping_version": decision.mapping_version,
+            "adopted_value": decision.adopted_value,
+            "decided_by": decision.decided_by,
+            "reason": decision.reason,
+            "created_at": decision.created_at.isoformat() if decision.created_at else None,
+        }
+        for decision in decisions
+    ]
 
 
 @router.get("/import/unmapped")
@@ -847,7 +1049,7 @@ def export_unmapped_observations(
     batch_id: Optional[int] = None,
     source_field: Optional[str] = None,
     patent_id: Optional[int] = None,
-    status: Optional[str] = Query("unmapped_retained"),
+    status: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     rows = _unmapped_observation_query(db, batch_id, source_field, patent_id, status).order_by(FieldObservation.id.asc()).all()

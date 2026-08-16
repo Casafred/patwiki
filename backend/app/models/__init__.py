@@ -62,7 +62,7 @@ from app.models.ai import AITask, AIFieldValue
 
 # 导入
 from app.models.importing import FieldMapping, ImportBatch
-from app.models.governance import ImportSourceRow, FieldObservation
+from app.models.governance import ImportSourceRow, FieldObservation, GovernanceDecision
 
 # 用户与协作（权限管理 MVP）
 from app.models.user import User, DatabaseMembership
@@ -108,7 +108,7 @@ __all__ = [
     # ai
     "AITask", "AIFieldValue",
     # importing
-    "FieldMapping", "ImportBatch", "ImportSourceRow", "FieldObservation",
+    "FieldMapping", "ImportBatch", "ImportSourceRow", "FieldObservation", "GovernanceDecision",
     # user / membership
     "User", "DatabaseMembership",
     # view (P0-13)
