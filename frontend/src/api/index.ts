@@ -8,7 +8,7 @@ import type {
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
   PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
-  GovernanceAction, GovernanceDecision, GovernanceObservation,
+  GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
 } from '../types'
 
 export const fieldApi = {
@@ -424,10 +424,14 @@ export const importApi = {
       decided_by?: string
       reason?: string
     },
-  ): Promise<{ action: GovernanceAction; scope: string; updated_count: number; adopted_value_count: number; items: GovernanceObservation[] }> =>
+  ): Promise<{ action: GovernanceAction; scope: string; decision_batch_id: string; updated_count: number; adopted_value_count: number; items: GovernanceObservation[] }> =>
     api.patch(`/import/observations/${observationId}`, request),
   listObservationDecisions: (observationId: number): Promise<GovernanceDecision[]> =>
     api.get(`/import/observations/${observationId}/decisions`),
+  listGovernanceBatches: (params: JsonObject = {}): Promise<{ total: number; offset: number; limit: number; items: GovernanceBatch[] }> =>
+    api.get('/import/governance/batches', { params }),
+  revertGovernanceBatch: (decisionBatchId: string, request: { reversed_by?: string; reason?: string } = {}): Promise<{ decision_batch_id: string; restored_observation_count: number; restored_value_count: number }> =>
+    api.post(`/import/governance/batches/${decisionBatchId}/revert`, request),
   exportUnmapped: (params: JsonObject = {}): Promise<Blob> =>
     api.get('/import/unmapped/export', { params, responseType: 'blob' }),
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fieldApi, importApi } from '../../api'
-import type { FieldMeta, GovernanceAction, GovernanceObservation } from '../../types'
+import type { FieldMeta, GovernanceAction, GovernanceDecision, GovernanceObservation } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 const ACTION_LABELS: Record<GovernanceAction, string> = {
@@ -32,6 +32,9 @@ function formatDate(value?: string | null) {
 
 export default function ImportGovernancePage() {
   const [items, setItems] = useState<GovernanceObservation[]>([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const pageSize = 50
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [sourceField, setSourceField] = useState('')
   const [batchId, setBatchId] = useState('')
@@ -40,6 +43,10 @@ export default function ImportGovernancePage() {
   const [adoptedValue, setAdoptedValue] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [historyItem, setHistoryItem] = useState<GovernanceObservation | null>(null)
+  const [history, setHistory] = useState<GovernanceDecision[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyBusyKey, setHistoryBusyKey] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -50,15 +57,19 @@ export default function ImportGovernancePage() {
       const result = await importApi.listUnmapped({
         source_field: sourceField.trim() || undefined,
         batch_id: batchId.trim() ? Number(batchId) : undefined,
-        limit: 200,
+        offset,
+        limit: pageSize,
       })
       setItems(result.items)
+      setTotal(result.total)
+      return result
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, '待治理属性加载失败'))
     } finally {
       setLoading(false)
     }
-  }, [batchId, sourceField])
+    return null
+  }, [batchId, offset, pageSize, sourceField])
 
   useEffect(() => {
     // Synchronize the table with the current filters.
@@ -96,13 +107,47 @@ export default function ImportGovernancePage() {
         decided_by: 'local-user',
       })
       setNotice(`${ACTION_LABELS[action]}完成：处理 ${result.updated_count} 条观察，采用来源值 ${result.adopted_value_count} 条`)
-      await loadItems()
+      const refreshed = await loadItems()
+      if (refreshed && refreshed.items.length === 0 && offset > 0) setOffset(Math.max(0, offset - pageSize))
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, '治理操作失败，原始数据未删除'))
     } finally {
       setBusyKey(null)
     }
-  }, [batchScope, loadItems, mappingBySource])
+  }, [batchScope, loadItems, mappingBySource, offset, pageSize])
+
+  const showHistory = useCallback(async (item: GovernanceObservation) => {
+    setHistoryItem(item)
+    setHistory([])
+    setHistoryLoading(true)
+    try {
+      setHistory(await importApi.listObservationDecisions(item.id))
+    } catch (requestError: unknown) {
+      setError(getErrorMessage(requestError, '治理历史加载失败'))
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [])
+
+  const revertBatch = useCallback(async (decisionBatchId: string) => {
+    if (!window.confirm('确认恢复这一治理批次？系统会保留决策记录，并恢复观察和专利字段的变更前状态。')) return
+    setHistoryBusyKey(decisionBatchId)
+    setError('')
+    try {
+      const result = await importApi.revertGovernanceBatch(decisionBatchId, { reversed_by: 'local-user' })
+      setNotice(`治理批次已恢复：观察 ${result.restored_observation_count} 条，专利字段 ${result.restored_value_count} 项`)
+      await loadItems()
+      if (historyItem) await showHistory(historyItem)
+    } catch (requestError: unknown) {
+      setError(getErrorMessage(requestError, '治理批次恢复失败，系统未覆盖后续修改'))
+    } finally {
+      setHistoryBusyKey(null)
+    }
+  }, [historyItem, loadItems, showHistory])
+
+  const pageNumber = Math.floor(offset / pageSize) + 1
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const revertibleBatchId = history.find(decision => decision.decision_batch_id && !decision.reversed)?.decision_batch_id
 
   return (
     <div className="management-page">
@@ -118,11 +163,11 @@ export default function ImportGovernancePage() {
       {notice && <div style={{ margin: '0 28px 12px', padding: '9px 12px', border: '1px solid #bfe6de', borderRadius: 6, background: '#eefaf7', color: '#226d65', fontSize: 12 }}>{notice}</div>}
 
       <div className="management-split" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        <input className="form-input" value={sourceField} onChange={event => setSourceField(event.target.value)} placeholder="按来源列筛选" style={{ width: 190 }} list="governance-source-fields" />
+        <input className="form-input" value={sourceField} onChange={event => { setSourceField(event.target.value); setOffset(0) }} placeholder="按来源列筛选" style={{ width: 190 }} list="governance-source-fields" />
         <datalist id="governance-source-fields">
           {sourceFields.map(field => <option key={field} value={field} />)}
         </datalist>
-        <input className="form-input" value={batchId} onChange={event => setBatchId(event.target.value.replace(/\D/g, ''))} placeholder="导入批次 ID" inputMode="numeric" style={{ width: 130 }} />
+        <input className="form-input" value={batchId} onChange={event => { setBatchId(event.target.value.replace(/\D/g, '')); setOffset(0) }} placeholder="导入批次 ID" inputMode="numeric" style={{ width: 130 }} />
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#475569' }}>
           <input type="checkbox" checked={batchScope} onChange={event => setBatchScope(event.target.checked)} />
           按同批次同来源列处理
@@ -131,7 +176,7 @@ export default function ImportGovernancePage() {
           <input type="checkbox" checked={adoptedValue} onChange={event => setAdoptedValue(event.target.checked)} />
           映射时采用来源值覆盖已有值
         </label>
-        <span style={{ marginLeft: 'auto', color: '#64748b', fontSize: 12 }}>待处理 {items.length} 条</span>
+        <span style={{ marginLeft: 'auto', color: '#64748b', fontSize: 12 }}>待处理 {total} 条，本页 {items.length} 条</span>
       </div>
 
       <div className="management-table" style={{ overflowX: 'auto' }}>
@@ -187,6 +232,7 @@ export default function ImportGovernancePage() {
                         <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'ignore')}>忽略</button>
                         <button className="btn btn-secondary" disabled={busy || !selectedField} onClick={() => void decide(item, 'map_existing', adoptedValue)}>映射</button>
                         <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'propose_field')}>提交候选</button>
+                        <button className="btn btn-secondary" disabled={busy} onClick={() => void showHistory(item)}>查看历史</button>
                       </div>
                       <small style={{ display: 'block', marginTop: 4 }}>最近决策：{item.final_decision || '-'} / {formatDate(item.decided_at)}</small>
                     </td>
@@ -197,6 +243,57 @@ export default function ImportGovernancePage() {
           </table>
         )}
       </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 12 }}>
+        <button className="btn btn-secondary" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - pageSize))}>上一页</button>
+        <span style={{ color: '#64748b', fontSize: 12 }}>第 {pageNumber} / {pageCount} 页</span>
+        <button className="btn btn-secondary" disabled={offset + pageSize >= total || loading} onClick={() => setOffset(offset + pageSize)}>下一页</button>
+      </div>
+
+      {historyItem && (
+        <section style={{ marginTop: 18, borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 15, color: '#1e293b' }}>治理历史</h3>
+              <div style={{ marginTop: 4, color: '#64748b', fontSize: 12 }}>
+                {historyItem.source_field_name} / 第 {historyItem.source_row} 行 / {compact(historyItem.raw_value)}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {revertibleBatchId && (
+                <button className="btn btn-secondary" disabled={historyBusyKey !== null} onClick={() => void revertBatch(revertibleBatchId)}>
+                  恢复最近治理批次
+                </button>
+              )}
+              <button className="btn btn-secondary" onClick={() => { setHistoryItem(null); setHistory([]) }}>关闭</button>
+            </div>
+          </div>
+          {historyLoading ? (
+            <div className="loading-state" style={{ minHeight: 80 }}>加载中...</div>
+          ) : history.length === 0 ? (
+            <div className="empty-state" style={{ minHeight: 80 }}>暂无治理历史</div>
+          ) : (
+            <div className="management-table" style={{ overflowX: 'auto', marginTop: 10 }}>
+              <table className="data-grid" style={{ minWidth: 900 }}>
+                <thead><tr><th>时间</th><th>动作</th><th>批次</th><th>映射版本</th><th>操作者</th><th>原因</th><th>状态</th></tr></thead>
+                <tbody>
+                  {history.map(decision => (
+                    <tr key={decision.id}>
+                      <td>{formatDate(decision.created_at)}</td>
+                      <td>{ACTION_LABELS[decision.action]}</td>
+                      <td title={decision.decision_batch_id || ''}>{compact(decision.decision_batch_id)}</td>
+                      <td>{decision.mapping_version || '-'}</td>
+                      <td>{decision.decided_by}</td>
+                      <td>{compact(decision.reason)}</td>
+                      <td>{decision.reversed ? '已恢复' : '已执行'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }

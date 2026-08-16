@@ -120,6 +120,18 @@ def _ensure_column_migration():
         ("patent_histories", "source_field_name", "ALTER TABLE patent_histories ADD COLUMN source_field_name VARCHAR(500)"),
         # G0：治理决策固定记录当时使用的导入映射版本。
         ("governance_decisions", "mapping_version", "ALTER TABLE governance_decisions ADD COLUMN mapping_version VARCHAR(100)"),
+        ("governance_decisions", "decision_batch_id", "ALTER TABLE governance_decisions ADD COLUMN decision_batch_id VARCHAR(64)"),
+        ("governance_decisions", "before_field_resolution", "ALTER TABLE governance_decisions ADD COLUMN before_field_resolution VARCHAR(30)"),
+        ("governance_decisions", "before_final_decision", "ALTER TABLE governance_decisions ADD COLUMN before_final_decision VARCHAR(30)"),
+        ("governance_decisions", "before_proposed_action", "ALTER TABLE governance_decisions ADD COLUMN before_proposed_action VARCHAR(30)"),
+        ("governance_decisions", "before_canonical_field_key", "ALTER TABLE governance_decisions ADD COLUMN before_canonical_field_key VARCHAR(200)"),
+        ("governance_decisions", "before_decided_by", "ALTER TABLE governance_decisions ADD COLUMN before_decided_by VARCHAR(100)"),
+        ("governance_decisions", "before_decided_at", "ALTER TABLE governance_decisions ADD COLUMN before_decided_at DATETIME"),
+        ("governance_decisions", "patent_id", "ALTER TABLE governance_decisions ADD COLUMN patent_id INTEGER"),
+        ("governance_decisions", "patent_field_key", "ALTER TABLE governance_decisions ADD COLUMN patent_field_key VARCHAR(200)"),
+        ("governance_decisions", "patent_value_before", "ALTER TABLE governance_decisions ADD COLUMN patent_value_before TEXT"),
+        ("governance_decisions", "patent_value_after", "ALTER TABLE governance_decisions ADD COLUMN patent_value_after TEXT"),
+        ("governance_decisions", "patent_value_changed", "ALTER TABLE governance_decisions ADD COLUMN patent_value_changed BOOLEAN DEFAULT 0"),
     ]
 
     with engine.begin() as conn:
@@ -181,6 +193,9 @@ def _ensure_column_migration():
             ("product_lines", "ix_product_lines_department_id", "department_id"),
             ("import_batches", "ix_import_batches_file_hash", "file_hash"),
             ("patent_histories", "ix_patent_histories_import_batch_id", "import_batch_id"),
+            ("governance_decisions", "ix_governance_decisions_decision_batch_id", "decision_batch_id"),
+            ("governance_decisions", "ix_governance_decisions_patent_id", "patent_id"),
+            ("governance_reversals", "ix_governance_reversals_decision_batch_id", "decision_batch_id"),
         ]:
             if not has_index(table, index_name):
                 try:

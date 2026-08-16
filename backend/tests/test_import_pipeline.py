@@ -433,6 +433,7 @@ class ImportPipelineTest(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["updated_count"], 1)
+            decision_batch_id = response.json()["decision_batch_id"]
             db.refresh(patent)
             db.refresh(observation)
             self.assertEqual(patent.category, "通信")
@@ -448,6 +449,50 @@ class ImportPipelineTest(unittest.TestCase):
             ).one()
             self.assertEqual(history.field_key, "category")
             self.assertEqual(history.changed_by, "检索师")
+
+            patent.category = "人工确认值"
+            db.commit()
+            conflict = client.post(
+                f"/import/governance/batches/{decision_batch_id}/revert",
+                json={"reversed_by": "检索师"},
+            )
+            self.assertEqual(conflict.status_code, 400, conflict.text)
+            db.refresh(patent)
+            self.assertEqual(patent.category, "人工确认值")
+            patent.category = "通信"
+            db.commit()
+
+            reverted = client.post(
+                f"/import/governance/batches/{decision_batch_id}/revert",
+                json={"reversed_by": "检索师", "reason": "重新确认来源语义"},
+            )
+            self.assertEqual(reverted.status_code, 200, reverted.text)
+            self.assertEqual(reverted.json()["restored_observation_count"], 1)
+            db.refresh(patent)
+            db.refresh(observation)
+            self.assertIsNone(patent.category)
+            self.assertEqual(observation.field_resolution, "unmapped_retained")
+            decisions_after_revert = client.get(f"/import/observations/{observation.id}/decisions")
+            self.assertEqual(decisions_after_revert.status_code, 200, decisions_after_revert.text)
+            self.assertTrue(decisions_after_revert.json()[0]["reversed"])
+            self.assertEqual(
+                db.query(GovernanceDecision).filter(
+                    GovernanceDecision.observation_id == observation.id,
+                ).count(),
+                1,
+            )
+            self.assertEqual(
+                db.query(PatentHistory).filter(
+                    PatentHistory.patent_id == patent.id,
+                    PatentHistory.source == "governance_revert",
+                ).count(),
+                1,
+            )
+            repeated = client.post(
+                f"/import/governance/batches/{decision_batch_id}/revert",
+                json={"reversed_by": "检索师"},
+            )
+            self.assertEqual(repeated.status_code, 400, repeated.text)
         finally:
             db.close()
             engine.dispose()
@@ -525,6 +570,7 @@ class ImportPipelineTest(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["updated_count"], 2)
+            decision_batch_id = response.json()["decision_batch_id"]
             db.refresh(same_field_a1)
             db.refresh(same_field_a2)
             db.refresh(other_field)
@@ -539,6 +585,11 @@ class ImportPipelineTest(unittest.TestCase):
             self.assertEqual(decisions.json()[0]["action"], "retain_source")
             self.assertEqual(decisions.json()[0]["scope"], "batch_source_field")
             self.assertEqual(decisions.json()[0]["mapping_version"], "v-governance-1")
+
+            batch_history = client.get("/import/governance/batches?limit=10")
+            self.assertEqual(batch_history.status_code, 200, batch_history.text)
+            self.assertEqual(batch_history.json()["total"], 1)
+            self.assertEqual(batch_history.json()["items"][0]["decision_batch_id"], decision_batch_id)
 
             response = client.patch(
                 f"/import/observations/{other_field.id}",
@@ -555,6 +606,10 @@ class ImportPipelineTest(unittest.TestCase):
             default_queue = client.get("/import/unmapped")
             self.assertEqual(default_queue.status_code, 200, default_queue.text)
             self.assertEqual(default_queue.json()["total"], 1)
+            paged_evidence = client.get("/import/unmapped?status=all&offset=1&limit=1")
+            self.assertEqual(paged_evidence.status_code, 200, paged_evidence.text)
+            self.assertEqual(paged_evidence.json()["total"], 4)
+            self.assertEqual(len(paged_evidence.json()["items"]), 1)
             complete_export = client.get("/import/unmapped/export")
             self.assertEqual(complete_export.status_code, 200, complete_export.text)
             self.assertIn("A1", complete_export.text)

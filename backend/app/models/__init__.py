@@ -62,7 +62,7 @@ from app.models.ai import AITask, AIFieldValue
 
 # 导入
 from app.models.importing import FieldMapping, ImportBatch
-from app.models.governance import ImportSourceRow, FieldObservation, GovernanceDecision
+from app.models.governance import ImportSourceRow, FieldObservation, GovernanceDecision, GovernanceReversal
 
 # 用户与协作（权限管理 MVP）
 from app.models.user import User, DatabaseMembership

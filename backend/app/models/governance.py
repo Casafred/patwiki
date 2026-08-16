@@ -59,11 +59,35 @@ class GovernanceDecision(Base):
         nullable=False,
         index=True,
     )
+    decision_batch_id = Column(String(64), nullable=True, index=True)
     action = Column(String(40), nullable=False, index=True)
     scope = Column(String(30), nullable=False, default="single")
     canonical_field_key = Column(String(200), nullable=True, index=True)
     mapping_version = Column(String(100), nullable=True)
+    before_field_resolution = Column(String(30), nullable=True)
+    before_final_decision = Column(String(30), nullable=True)
+    before_proposed_action = Column(String(30), nullable=True)
+    before_canonical_field_key = Column(String(200), nullable=True)
+    before_decided_by = Column(String(100), nullable=True)
+    before_decided_at = Column(DateTime, nullable=True)
+    patent_id = Column(Integer, nullable=True, index=True)
+    patent_field_key = Column(String(200), nullable=True)
+    patent_value_before = Column(Text, nullable=True)
+    patent_value_after = Column(Text, nullable=True)
+    patent_value_changed = Column(Boolean, nullable=False, default=False)
     adopted_value = Column(Boolean, nullable=False, default=False)
     decided_by = Column(String(100), nullable=False, default="local-user")
+    reason = Column(Text)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+class GovernanceReversal(Base):
+    """Append-only record that a governance decision batch was reverted."""
+
+    __tablename__ = "governance_reversals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_batch_id = Column(String(64), nullable=False, index=True)
+    reversed_by = Column(String(100), nullable=False, default="local-user")
     reason = Column(Text)
     created_at = Column(DateTime, server_default=func.now(), index=True)

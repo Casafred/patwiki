@@ -27,6 +27,7 @@ from app.config import settings
 from app.models import (
     CustomField,
     GovernanceDecision,
+    GovernanceReversal,
     ImportBatch,
     ImportBatchStatus,
     ImportSourceRow,
@@ -103,6 +104,11 @@ class GovernanceDecisionRequest(BaseModel):
     apply_to_batch: bool = False
     adopted_value: bool = False
     decided_by: str = "local-user"
+    reason: Optional[str] = None
+
+
+class GovernanceRevertRequest(BaseModel):
+    reversed_by: str = "local-user"
     reason: Optional[str] = None
 
 
@@ -877,6 +883,19 @@ def _write_governance_value(patent: Patent, field_key: str, value: str) -> tuple
     return old_value, _text_value(coerced) or ""
 
 
+def _restore_governance_value(patent: Patent, field_key: str, value: str | None) -> None:
+    """Restore a value captured by a governance decision without deleting history."""
+    if field_key in SYSTEM_FIELD_KEYS:
+        setattr(patent, field_key, None if value is None else _coerce_governance_value(field_key, value))
+        return
+    current = dict(patent.custom_fields or {})
+    if value is None:
+        current.pop(field_key, None)
+    else:
+        current[field_key] = value
+    patent.custom_fields = current
+
+
 @router.patch("/import/observations/{observation_id}")
 def decide_import_observation(
     observation_id: int,
@@ -933,10 +952,25 @@ def decide_import_observation(
         "propose_field": ("candidate", "proposed"),
     }
     field_resolution, final_decision = resolution_by_action[req.action]
+    decision_batch_id = uuid.uuid4().hex
     changed_values = 0
     updated_items = []
 
     for target in targets:
+        before_field_resolution = target.field_resolution
+        before_final_decision = target.final_decision
+        before_proposed_action = target.proposed_action
+        before_canonical_field_key = target.canonical_field_key
+        before_decided_by = target.decided_by
+        before_decided_at = target.decided_at
+        decision_canonical_field_key = (
+            target_field if req.action == "map_existing" else target.canonical_field_key
+        )
+        patent = patents.get(target.patent_id) if req.action == "map_existing" else None
+        patent_value_before = _current_value(patent, target_field) if patent else None
+        patent_value_after = None
+        patent_value_changed = False
+
         target_field_for_observation = target_field if req.action == "map_existing" else target.canonical_field_key
         target.canonical_field_key = target_field_for_observation
         target.field_resolution = field_resolution
@@ -946,7 +980,6 @@ def decide_import_observation(
         target.decided_at = datetime.utcnow()
 
         if req.action == "map_existing" and target.patent_id and target.normalized_value:
-            patent = patents.get(target.patent_id)
             if patent:
                 current = _current_value(patent, target_field)
                 candidate = target.normalized_value
@@ -970,13 +1003,27 @@ def decide_import_observation(
                             source_field_name=target.source_field_name,
                         ))
                         changed_values += 1
+                        patent_value_after = new_value
+                        patent_value_changed = True
 
         db.add(GovernanceDecision(
             observation_id=target.id,
+            decision_batch_id=decision_batch_id,
             action=req.action,
             scope="batch_source_field" if req.apply_to_batch else "single",
-            canonical_field_key=target_field,
+            canonical_field_key=decision_canonical_field_key,
             mapping_version=batch.mapping_version,
+            before_field_resolution=before_field_resolution,
+            before_final_decision=before_final_decision,
+            before_proposed_action=before_proposed_action,
+            before_canonical_field_key=before_canonical_field_key,
+            before_decided_by=before_decided_by,
+            before_decided_at=before_decided_at,
+            patent_id=patent.id if patent else None,
+            patent_field_key=target_field if patent else None,
+            patent_value_before=patent_value_before,
+            patent_value_after=patent_value_after,
+            patent_value_changed=patent_value_changed,
             adopted_value=req.adopted_value,
             decided_by=target.decided_by,
             reason=req.reason,
@@ -993,9 +1040,169 @@ def decide_import_observation(
     return {
         "action": req.action,
         "scope": "batch_source_field" if req.apply_to_batch else "single",
+        "decision_batch_id": decision_batch_id,
         "updated_count": len(targets),
         "adopted_value_count": changed_values,
         "items": updated_items,
+    }
+
+
+@router.get("/import/governance/batches")
+def list_governance_batches(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    grouped = (
+        db.query(
+            GovernanceDecision.decision_batch_id.label("batch_id"),
+            func.count(GovernanceDecision.id).label("decision_count"),
+            func.min(GovernanceDecision.created_at).label("created_at"),
+            func.max(GovernanceDecision.id).label("last_decision_id"),
+        )
+        .filter(GovernanceDecision.decision_batch_id.isnot(None))
+        .group_by(GovernanceDecision.decision_batch_id)
+    )
+    total = db.query(func.count(func.distinct(GovernanceDecision.decision_batch_id))).filter(
+        GovernanceDecision.decision_batch_id.isnot(None)
+    ).scalar() or 0
+    rows = grouped.order_by(func.max(GovernanceDecision.id).desc()).offset(offset).limit(limit).all()
+    items = []
+    for row in rows:
+        first = db.query(GovernanceDecision).filter(
+            GovernanceDecision.decision_batch_id == row.batch_id,
+        ).order_by(GovernanceDecision.id.asc()).first()
+        reversal = db.query(GovernanceReversal).filter(
+            GovernanceReversal.decision_batch_id == row.batch_id,
+        ).order_by(GovernanceReversal.id.desc()).first()
+        items.append({
+            "decision_batch_id": row.batch_id,
+            "decision_count": row.decision_count,
+            "action": first.action if first else None,
+            "scope": first.scope if first else None,
+            "mapping_version": first.mapping_version if first else None,
+            "decided_by": first.decided_by if first else None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "reversed": reversal is not None,
+            "reversal_reason": reversal.reason if reversal else None,
+            "reversed_at": reversal.created_at.isoformat() if reversal and reversal.created_at else None,
+        })
+    return {"total": total, "offset": offset, "limit": limit, "items": items}
+
+
+@router.post("/import/governance/batches/{decision_batch_id}/revert")
+def revert_governance_batch(
+    decision_batch_id: str,
+    req: GovernanceRevertRequest,
+    db: Session = Depends(get_db),
+):
+    decisions = db.query(GovernanceDecision).filter(
+        GovernanceDecision.decision_batch_id == decision_batch_id,
+    ).order_by(GovernanceDecision.id.asc()).all()
+    if not decisions:
+        raise NotFoundException("治理决策批次不存在")
+    if db.query(GovernanceReversal).filter(
+        GovernanceReversal.decision_batch_id == decision_batch_id,
+    ).first():
+        raise BadRequestException("该治理决策批次已经恢复，不能重复操作")
+
+    after_state = {
+        "retain_source": ("source_only", "retained"),
+        "ignore": ("ignored", "ignored"),
+        "map_existing": ("mapped", "mapped"),
+        "propose_field": ("candidate", "proposed"),
+    }
+    observation_ids = {decision.observation_id for decision in decisions}
+    observations = {
+        item.id: item
+        for item in db.query(FieldObservation).filter(FieldObservation.id.in_(observation_ids)).all()
+    }
+    for decision in decisions:
+        observation = observations.get(decision.observation_id)
+        if not observation:
+            raise BadRequestException("治理批次引用的来源观察已不存在，无法安全恢复")
+        latest = db.query(GovernanceDecision).filter(
+            GovernanceDecision.observation_id == decision.observation_id,
+        ).order_by(GovernanceDecision.id.desc()).first()
+        if not latest or latest.id != decision.id:
+            raise BadRequestException("治理批次中的观察已有后续决策，请先处理后续变更")
+        expected_resolution, expected_final = after_state[decision.action]
+        if (
+            observation.field_resolution != expected_resolution
+            or observation.final_decision != expected_final
+            or observation.proposed_action != decision.action
+            or observation.canonical_field_key != decision.canonical_field_key
+        ):
+            raise BadRequestException("治理批次中的观察已发生后续修改，拒绝覆盖")
+
+    patents = {
+        item.id: item
+        for item in db.query(Patent).filter(
+            Patent.id.in_({decision.patent_id for decision in decisions if decision.patent_id})
+        ).all()
+    }
+    latest_values = {}
+    for decision in decisions:
+        if decision.patent_value_changed and decision.patent_id and decision.patent_field_key:
+            latest_values[(decision.patent_id, decision.patent_field_key)] = decision.patent_value_after
+    for (patent_id, field_key), expected_value in latest_values.items():
+        patent = patents.get(patent_id)
+        if not patent or (_current_value(patent, field_key) or "") != (expected_value or ""):
+            raise BadRequestException("专利字段已被后续修改，拒绝覆盖；请人工确认后再恢复")
+
+    restored_values = 0
+    for decision in reversed(decisions):
+        observation = observations[decision.observation_id]
+        observation.field_resolution = decision.before_field_resolution
+        observation.final_decision = decision.before_final_decision
+        observation.proposed_action = decision.before_proposed_action
+        observation.canonical_field_key = decision.before_canonical_field_key
+        observation.decided_by = decision.before_decided_by
+        observation.decided_at = decision.before_decided_at
+
+        if decision.patent_value_changed and decision.patent_id and decision.patent_field_key:
+            patent = patents[decision.patent_id]
+            current_value = _current_value(patent, decision.patent_field_key)
+            _restore_governance_value(
+                patent,
+                decision.patent_field_key,
+                decision.patent_value_before,
+            )
+            batch = db.query(ImportBatch).filter(
+                ImportBatch.id == observation.import_batch_id,
+            ).first()
+            source_row = db.query(ImportSourceRow).filter(
+                ImportSourceRow.id == observation.source_row_id,
+            ).first()
+            db.add(PatentHistory(
+                patent_id=patent.id,
+                field_key=decision.patent_field_key,
+                field_display_name=decision.patent_field_key,
+                old_value=current_value,
+                new_value=decision.patent_value_before,
+                source="governance_revert",
+                changed_by=req.reversed_by.strip() or "local-user",
+                import_batch_id=batch.id if batch else None,
+                source_table_title=batch.source_table_title if batch else None,
+                source_row=source_row.source_row if source_row else None,
+                source_field_name=observation.source_field_name,
+            ))
+            restored_values += 1
+
+    db.add(GovernanceReversal(
+        decision_batch_id=decision_batch_id,
+        reversed_by=req.reversed_by.strip() or "local-user",
+        reason=req.reason,
+    ))
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "decision_batch_id": decision_batch_id,
+        "restored_observation_count": len(decisions),
+        "restored_value_count": restored_values,
     }
 
 
@@ -1006,10 +1213,18 @@ def list_import_observation_decisions(observation_id: int, db: Session = Depends
     decisions = db.query(GovernanceDecision).filter(
         GovernanceDecision.observation_id == observation_id,
     ).order_by(GovernanceDecision.id.desc()).all()
+    batch_ids = {decision.decision_batch_id for decision in decisions if decision.decision_batch_id}
+    reversed_batch_ids = {
+        reversal.decision_batch_id
+        for reversal in db.query(GovernanceReversal).filter(
+            GovernanceReversal.decision_batch_id.in_(batch_ids)
+        ).all()
+    } if batch_ids else set()
     return [
         {
             "id": decision.id,
             "observation_id": decision.observation_id,
+            "decision_batch_id": decision.decision_batch_id,
             "action": decision.action,
             "scope": decision.scope,
             "canonical_field_key": decision.canonical_field_key,
@@ -1017,6 +1232,7 @@ def list_import_observation_decisions(observation_id: int, db: Session = Depends
             "adopted_value": decision.adopted_value,
             "decided_by": decision.decided_by,
             "reason": decision.reason,
+            "reversed": decision.decision_batch_id in reversed_batch_ids,
             "created_at": decision.created_at.isoformat() if decision.created_at else None,
         }
         for decision in decisions

@@ -606,6 +606,7 @@ export interface GovernanceObservation {
 export interface GovernanceDecision {
   id: number
   observation_id: number
+  decision_batch_id?: string | null
   action: GovernanceAction
   scope: string
   canonical_field_key?: string | null
@@ -613,7 +614,21 @@ export interface GovernanceDecision {
   adopted_value: boolean
   decided_by: string
   reason?: string | null
+  reversed?: boolean
   created_at?: string | null
+}
+
+export interface GovernanceBatch {
+  decision_batch_id: string
+  decision_count: number
+  action?: GovernanceAction | null
+  scope?: string | null
+  mapping_version?: string | null
+  decided_by?: string | null
+  created_at?: string | null
+  reversed: boolean
+  reversal_reason?: string | null
+  reversed_at?: string | null
 }
 
 export interface Stats {
