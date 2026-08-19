@@ -1,7 +1,7 @@
 # 21 - V2 实施契约：从设计目标到可交付开发
 
 > 状态：`approved-for-phase-0-planning`
-> 更新：2026-08-15
+> 更新：2026-08-17
 > 本文是 V2 设计包的实现锚点。执行开发任务的 Agent 必须先阅读 `25-agent-development-protocol.md`；2026 年业务范围以 `23-2026-product-scope-and-business-rules.md` 为最高优先级；若长期目标模型与当年范围冲突，不得用长期能力阻塞专利信息中心。
 
 ## 0. 2026 范围硬约束
@@ -95,7 +95,38 @@
 
 11. 恢复前必须验证：观察没有后续决策、观察状态仍等于该批次产生的状态、专利字段仍等于该批次最后采用值。任一条件不满足必须拒绝恢复并保留现值；禁止用“强制恢复”覆盖后续人工修改。恢复专利字段时追加 `PatentHistory(source=governance_revert)`。
 
-本切片的完成定义：单条确认、同来源列批量确认、已有字段映射回填、来源专用字段保留、决策历史查询、完整证据导出、分页、可恢复批次和冲突保护全部可重复验证。统一专利身份、高频业务视图和工作文件模板仍按 G0-7 后续顺序实现；Agent 不得把 G0 整体标成完成。
+本切片的完成定义：单条确认、同来源列批量确认、已有字段映射回填、来源专用字段保留、决策历史查询、完整证据导出、分页、可恢复批次和冲突保护全部可重复验证。统一专利身份、高频业务视图和工作文件模板在 G0-7 章节定义；只有 G0-1 至 G0-8 的代码、测试和文档门禁全部满足后，Agent 才能把 G0 整体标成完成。
+
+### 4.0.1 G0-7：统一专利身份、高频视图与工作文件
+
+本节是 G0-7 的执行合同，优先级高于任何“方便但会猜测合并”的实现。
+
+#### A. PatentIdentifier
+
+- `PatentIdentifier` 是独立索引实体；`Patent.application_number`、`publication_number`、`grant_number` 是兼容投影，不得把身份链塞入 `custom_fields`。
+- 官方身份类型固定为 `application`、`publication`、`grant`；外部平台编号使用 `external` 并必须带来源系统。每条身份保存 `raw_value`、`raw_values`、`normalized_value`、法域、kind code、来源系统和来源时间。
+- 规范化只用于匹配：Unicode NFKC、大写、去除空格和展示分隔符；原始写法永远保留。号码根只能提示候选，不能独立创建合并结论。
+- 同一国家申请链中，申请号、公开号和授权号命中同一 Patent；不同国家/地区同族必须保持独立 Patent，只建立 `PatentFamily` 关联。
+- 一行导入中的身份标识命中多个 Patent 时，整行进入 `quarantined`，不得先更新部分字段；原始文件、`ImportSourceRow`、`FieldObservation` 和行号必须保留。
+- 创建、详情编辑、关系占位创建、导入确认都必须调用身份服务；新增或格式变化的号码只能通过服务写入身份索引。身份冲突必须返回候选 Patent ID 和可人工确认的原因。
+- 详情使用 `GET /patents/{patent_id}/identifiers` 展示身份类型、原始写法、规范化值和来源，不得只显示三个投影列而隐藏身份冲突。
+
+#### B. 高频保存视图
+
+视图是同一 Patent 主表的查询/列投影，不是复制台账。每个数据库初始化以下稳定 `template_key`，允许用户继续调整列、筛选和分组：
+
+`risk_meeting_statistics`、`company_filing_category`、`ip_risk_control`、`ip_application_control`、`product_category_master`、`daily_patent_accumulation`。
+
+视图名称可以被用户改写，但 key 用于幂等初始化和后续 Agent 识别。任何新增高频表先作为保存视图评估，不得新建第二份专利事实表。
+
+#### C. Excel/Word 工作文件
+
+- `PatentExportTemplate` 保存数据库、可选视图、字段 key、筛选、排序、分组、输出格式和版本；模板不保存数据快照。
+- 系统初始化的工作文件模板包括风险会统计 Excel、申请管控 Excel、专利检索分析 Word 和日常积累 CSV。用户模板通过 `/export/templates` CRUD 管理。
+- `/export/excel`、`/export/csv`、`/export/word` 支持 `template_id`；Excel 必须附带“导出说明”页，列出字段 key、列标题、字段分组、系统/自定义来源、模板版本、视图、筛选和导出时间；Word 必须在开头写出模板版本、数据库/视图和字段来源说明。
+- Word 只负责可编辑的数据工作文件装配，不在 G0-7 引入复杂报告编辑器、自动法律结论或不可追溯的摘要改写。
+
+G0-7 完成定义：身份服务接管新增/编辑/导入/关系号码；格式差异可复用且原始写法可查；跨 Patent 身份冲突整行隔离；六个保存视图幂等可用；至少 Excel/Word 模板可按视图输出且字段血缘随文件交付；相关规则有自动化测试。
 
 ### 4.1 Phase 0A：迁移平台先行
 

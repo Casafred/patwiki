@@ -66,6 +66,23 @@ export interface Patent {
   updated_at: string
 }
 
+export interface PatentIdentifier {
+  id: number
+  patent_id: number
+  identifier_namespace: string
+  identifier_type: 'application' | 'publication' | 'grant' | 'external' | string
+  raw_value: string
+  raw_values: string[]
+  normalized_value: string
+  jurisdiction_code?: string | null
+  kind_code?: string | null
+  source_system?: string | null
+  source_timestamp?: string | null
+  is_primary: boolean
+  valid_from?: string | null
+  valid_to?: string | null
+}
+
 export interface PatentShare {
   id: number
   patent_id: number
@@ -233,6 +250,7 @@ export interface PatentView {
   id: number
   name: string
   description?: string
+  template_key?: string | null
   database_id: number
   // view_type 表示可见范围；layout_type 表示展示形态。
   view_type: 'personal' | 'shared' | 'department_master' | string
@@ -250,6 +268,24 @@ export interface PatentView {
   local_fields?: ViewLocalField[]
   created_at?: string
   updated_at?: string
+}
+
+export interface PatentExportTemplate {
+  id: number
+  database_id: number
+  view_id?: number | null
+  template_key: string
+  name: string
+  description?: string | null
+  output_format: 'excel' | 'word' | 'csv' | string
+  field_keys: string[]
+  filter_config: JsonObject
+  sort_config: JsonObject
+  group_by?: string | null
+  version: number
+  is_system: boolean
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface KanbanConfig {

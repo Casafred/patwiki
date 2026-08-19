@@ -1,5 +1,6 @@
 from app.database import SessionLocal, init_db
-from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase
+from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase, PatentExportTemplate
+from app.services.view_service import ViewService
 
 
 def _ensure_organization_structure(db):
@@ -52,6 +53,62 @@ def init_default_data():
             )
             db.add(default_db)
             db.flush()
+
+        for database in db.query(PatentDatabase).filter(PatentDatabase.is_archived == False).all():
+            views = ViewService.ensure_default_business_views(db, database.id)
+            view_by_key = {view.template_key: view for view in views if view.template_key}
+            export_templates = [
+                {
+                    "key": "risk_meeting_excel",
+                    "name": "风险会风险统计表 · Excel",
+                    "format": "excel",
+                    "view_key": "risk_meeting_statistics",
+                    "fields": ["application_number", "publication_number", "title", "country", "risk_level", "risk_description", "legal_status"],
+                    "group_by": "risk_level",
+                },
+                {
+                    "key": "ip_application_control_excel",
+                    "name": "IP事务管控表之申请管控表 · Excel",
+                    "format": "excel",
+                    "view_key": "ip_application_control",
+                    "fields": ["application_number", "publication_number", "grant_number", "title", "applicant", "inventor", "agent", "filing_date", "publication_date", "grant_date", "application_status", "legal_status"],
+                },
+                {
+                    "key": "patent_analysis_work_file",
+                    "name": "专利检索分析工作文件 · Word",
+                    "format": "word",
+                    "view_key": "daily_patent_accumulation",
+                    "fields": ["publication_number", "title", "abstract", "claims", "applicant", "inventor", "ipc_main", "priority_date", "legal_status", "risk_level", "notes"],
+                },
+                {
+                    "key": "daily_patent_accumulation_csv",
+                    "name": "日常相关专利积累 · CSV",
+                    "format": "csv",
+                    "view_key": "daily_patent_accumulation",
+                    "fields": ["application_number", "publication_number", "title", "country", "category", "subcategory", "applicant", "ipc_main", "legal_status", "notes"],
+                },
+            ]
+            for definition in export_templates:
+                if db.query(PatentExportTemplate).filter(
+                    PatentExportTemplate.database_id == database.id,
+                    PatentExportTemplate.template_key == definition["key"],
+                ).first():
+                    continue
+                view = view_by_key.get(definition["view_key"])
+                db.add(PatentExportTemplate(
+                    database_id=database.id,
+                    view_id=view.id if view else None,
+                    template_key=definition["key"],
+                    name=definition["name"],
+                    description="系统提供的工作文件模板；输出时自动附带模板版本、字段来源和筛选条件。",
+                    output_format=definition["format"],
+                    field_keys=definition["fields"],
+                    filter_config={},
+                    sort_config={"sort_by": "filing_date", "sort_order": "desc"},
+                    group_by=definition.get("group_by"),
+                    version=1,
+                    is_system=True,
+                ))
 
         if db.query(TagGroup).count() == 0:
             tag_groups = [

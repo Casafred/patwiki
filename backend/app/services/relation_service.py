@@ -12,6 +12,11 @@ from sqlalchemy.orm import Session
 from app.models import (
     Patent, PatentFamily, Citation,
 )
+from app.services.patent_identity_service import (
+    find_patents_by_identifiers,
+    parse_identifier,
+    ensure_patent_identifiers,
+)
 
 
 # 同族/引用列的常见分隔符：分号、逗号、顿号、竖线、换行、Tab、连续空格（≥2）
@@ -142,6 +147,23 @@ def _find_or_create_patent_by_number(
         return None
     number = normalized
 
+    # 统一身份索引优先于旧字段精确匹配。一个关系号码可能是申请号、
+    # 公开号或授权号，逐类型查询可以命中同一 Patent，但绝不因同族关系
+    # 把不同国家成员合并为一条记录。
+    identity_specs = [
+        spec
+        for identifier_type in ("application", "publication", "grant")
+        for spec in [parse_identifier(number, identifier_type)]
+        if spec
+    ]
+    identity_matches = find_patents_by_identifiers(db, identity_specs)
+    if len(identity_matches) == 1:
+        return identity_matches[0]
+    if len(identity_matches) > 1:
+        # 关系列只提供一个号码时无法判断应关联哪一条，保持占位流程之外
+        # 的保守行为：不选择任意一条已有专利。
+        return None
+
     # 生成查询变体：原号、去后缀号、补国家码号
     variants = _generate_lookup_variants(number)
 
@@ -173,14 +195,16 @@ def _find_or_create_patent_by_number(
     # 创建占位专利
     placeholder = Patent(
         title="待补全",
-        application_number=number if number.startswith(("CN", "US", "EP", "JP", "KR", "WO", "PCT")) else None,
-        publication_number=number if not number.startswith(("CN", "US", "EP", "JP", "KR", "WO", "PCT")) else None,
+        # 关系列通常提供公开号；以公开号作为占位锚点，后续导入申请/授权号
+        # 时由统一身份服务补齐同一 Patent，而不是误把关系号写成申请号。
+        publication_number=number,
         country=number[:2] if number[:2].isalpha() else "CN",
         database_id=database_id,
         notes="由同族/引用关系解析自动创建的占位专利",
     )
     db.add(placeholder)
     db.flush()
+    ensure_patent_identifiers(db, placeholder, source_system="relation")
     return placeholder
 
 

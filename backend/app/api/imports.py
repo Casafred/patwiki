@@ -23,6 +23,12 @@ from app.services.import_service import IMPORT_SKIP_FIELD, ImportService
 from app.services.patent_service import PatentService
 from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
 from app.services.merge_service import merge_patent_data, _is_empty
+from app.services.patent_identity_service import (
+    backfill_patent_identifiers,
+    ensure_patent_identifiers,
+    find_patents_by_identifiers,
+    identifier_specs_from_values,
+)
 from app.config import settings
 from app.models import (
     CustomField,
@@ -404,6 +410,8 @@ def confirm_import(
     error_count = 0
     family_links = 0
     citation_links = 0
+    identity_conflicts = 0
+    identity_index_report: dict = {"indexed": 0, "conflicts": []}
     BATCH_SIZE = 500
     batch: ImportBatch | None = None
 
@@ -476,6 +484,14 @@ def confirm_import(
                     "country": country,
                     "app_num": app_num,
                     "pub_num": pub_num,
+                    "identity_specs": identifier_specs_from_values(
+                        {
+                            "application": patent_data.get("application_number"),
+                            "publication": patent_data.get("publication_number"),
+                            "grant": patent_data.get("grant_number"),
+                        },
+                        country,
+                    ),
                     "row_num": idx + 2,
                 })
             except Exception as e:
@@ -489,6 +505,10 @@ def confirm_import(
                 errors.append(report)
                 row_reports.append(report)
                 error_count += 1
+
+        # 旧库可能只有 Patent 的兼容号码字段；先补建统一身份索引。
+        # 冲突只作为诊断返回，不自动合并或改写历史记录。
+        identity_index_report = backfill_patent_identifiers(db)
 
         all_app_nums: dict[tuple[str, str], Patent] = {}
         all_pub_nums: dict[tuple[str, str], Patent] = {}
@@ -542,10 +562,29 @@ def confirm_import(
         imported_patent_ids: set[int] = set()
 
         for i, rd in enumerate(rows_data):
+            source_row = source_rows[rd["idx"]]
+            identity_matches = find_patents_by_identifiers(db, rd["identity_specs"])
+            if len(identity_matches) > 1:
+                identity_conflicts += 1
+                source_row.resolution_status = "quarantined"
+                source_row.resolution_reason = (
+                    "一个导入行的申请号/公开号/授权号分别命中多个专利，已隔离等待人工确认"
+                )
+                unmapped_retained += _record_field_observations(
+                    db, batch, source_row, source_row.raw_row, columns, mapping,
+                    None, rd["patent_data"], rd["virtual"], {},
+                    "quarantined", "identity_conflict",
+                )
+                row_reports.append({
+                    "row": rd["row_num"],
+                    "status": "identity_conflict",
+                    "reason": source_row.resolution_reason,
+                    "candidate_patent_ids": [patent.id for patent in identity_matches],
+                })
+                continue
             try:
                 with db.begin_nested():
                     patent_data = rd["patent_data"]
-                    source_row = source_rows[rd["idx"]]
                     before_values: dict[str, str | None] = {}
                     adoption_decision: str | None = None
                     current_patent = None
@@ -558,10 +597,10 @@ def confirm_import(
                         skipped += 1
                         row_reports.append({"row": rd["row_num"], "status": "skipped_missing_title", "reason": "标题为空，无法创建专利"})
                     else:
-                        existing = None
+                        existing = identity_matches[0] if identity_matches else None
                         if req.dedupe_by in ("both", "application_number") and app_num:
                             key = (app_num, country)
-                            existing = all_app_nums.get(key)
+                            existing = existing or all_app_nums.get(key)
                         if not existing and req.dedupe_by in ("both", "publication_number") and pub_num:
                             key = (pub_num, country)
                             existing = all_pub_nums.get(key)
@@ -633,6 +672,13 @@ def confirm_import(
                                     all_pub_nums[(pub_num, country)] = patent
 
                         if current_patent is not None:
+                            ensure_patent_identifiers(
+                                db,
+                                current_patent,
+                                additional_specs=rd["identity_specs"],
+                                source_system=req.source_system or "import",
+                                source_timestamp=datetime.utcnow(),
+                            )
                             source_row.patent_id = current_patent.id
                             source_row.resolution_status = "resolved"
                             unknown_in_row = _record_field_observations(
@@ -765,6 +811,8 @@ def confirm_import(
         "database_id": database_id,
         "family_links": family_links,
         "citation_links": citation_links,
+        "identity_conflicts": identity_conflicts,
+        "identity_index": identity_index_report,
         "unmapped_retained": unmapped_retained,
         "unknown_columns": [
             column for column in columns

@@ -99,8 +99,12 @@ class DatabaseService:
                     column_config=[],
                     sort_config={"sort_by": "filing_date", "sort_order": "desc"},
                 )
+            from app.services.view_service import ViewService as BusinessViewService
+            BusinessViewService.ensure_default_business_views(db, database.id)
+            from app.services.export_service import ExportService
+            ExportService.ensure_default_templates(db, database.id)
         except Exception:
-            # 主视图创建失败不应阻断建库流程
+            # 主视图/业务模板创建失败不应阻断建库流程；下次启动会幂等补齐。
             pass
         return database
 

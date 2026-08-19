@@ -14,8 +14,9 @@ from app.schemas.schemas import (
 )
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
-from app.models import AIFieldValue, Citation, CustomField, CustomFieldType, Patent as PatentModel, PatentHistory
+from app.models import AIFieldValue, Citation, CustomField, CustomFieldType, Patent as PatentModel, PatentHistory, PatentIdentifier
 from app.core.exceptions import NotFoundException
+from app.services.patent_identity_service import list_patent_identifiers
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -94,6 +95,33 @@ def get_patent(patent_id: int, db: Session = Depends(get_db)):
     if not patent:
         raise NotFoundException("Patent not found")
     return patent
+
+
+@router.get("/{patent_id}/identifiers")
+def get_patent_identifiers(patent_id: int, db: Session = Depends(get_db)):
+    """返回专利身份链，供详情页展示号码类型、规范化值和来源。"""
+    patent = db.query(PatentModel).filter(PatentModel.id == patent_id).first()
+    if not patent:
+        raise NotFoundException("Patent not found")
+    return [
+        {
+            "id": identifier.id,
+            "patent_id": identifier.patent_id,
+            "identifier_namespace": identifier.identifier_namespace,
+            "identifier_type": identifier.identifier_type,
+            "raw_value": identifier.raw_value,
+            "raw_values": identifier.raw_values or [identifier.raw_value],
+            "normalized_value": identifier.normalized_value,
+            "jurisdiction_code": identifier.jurisdiction_code,
+            "kind_code": identifier.kind_code,
+            "source_system": identifier.source_system,
+            "source_timestamp": identifier.source_timestamp.isoformat() if identifier.source_timestamp else None,
+            "is_primary": identifier.is_primary,
+            "valid_from": identifier.valid_from.isoformat() if identifier.valid_from else None,
+            "valid_to": identifier.valid_to.isoformat() if identifier.valid_to else None,
+        }
+        for identifier in list_patent_identifiers(db, patent_id)
+    ]
 
 
 @router.get("/{patent_id}/graph")

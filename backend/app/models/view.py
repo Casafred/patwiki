@@ -40,6 +40,8 @@ class PatentView(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False)
     description = Column(Text)
+    # 系统提供的高频业务模板使用稳定 key 幂等创建；普通用户视图为空。
+    template_key = Column(String(100), nullable=True, index=True)
     database_id = Column(Integer, ForeignKey("patent_databases.id", ondelete="CASCADE"), nullable=False, index=True)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 

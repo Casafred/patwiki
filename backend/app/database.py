@@ -80,6 +80,8 @@ def _ensure_column_migration():
          "ALTER TABLE patent_views ADD COLUMN form_config JSON"),
         ("patent_views", "gantt_config",
          "ALTER TABLE patent_views ADD COLUMN gantt_config JSON"),
+        ("patent_views", "template_key",
+         "ALTER TABLE patent_views ADD COLUMN template_key VARCHAR(100)"),
         # M3：通用关联字段配置
         ("custom_fields", "link_config",
          "ALTER TABLE custom_fields ADD COLUMN link_config JSON"),

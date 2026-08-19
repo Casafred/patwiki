@@ -122,6 +122,7 @@ class ViewService:
         gantt_config: Optional[dict] = None,
         is_department_master: bool = False,
         membership_based: bool = False,
+        template_key: Optional[str] = None,
     ) -> PatentView:
         if layout_type not in ViewService.SUPPORTED_LAYOUT_TYPES:
             raise ValueError(f"不支持的视图展示类型：{layout_type}")
@@ -144,6 +145,7 @@ class ViewService:
         view = PatentView(
             name=name,
             description=description,
+            template_key=template_key,
             database_id=database_id,
             owner_id=owner_id,
             view_type=view_type,
@@ -224,6 +226,7 @@ class ViewService:
             "id": view.id,
             "name": view.name,
             "description": view.description,
+            "template_key": view.template_key,
             "database_id": view.database_id,
             "owner_id": view.owner_id,
             "view_type": view.view_type,
@@ -246,6 +249,95 @@ class ViewService:
                 ViewService.local_field_to_dict(f) for f in view.local_fields
             ]
         return result
+
+    @staticmethod
+    def ensure_default_business_views(db: Session, database_id: int) -> list[PatentView]:
+        """为每个专利库建立六个可直接使用、可继续修改的高频业务视图。
+
+        视图只保存筛选/列/排序配置，不复制 Patent 数据；用户可以在前端
+        继续调整列和筛选，导出时仍从同一专利主表取数。
+        """
+        common = [
+            ("application_number", 150), ("publication_number", 140),
+            ("title", 300), ("country", 70),
+        ]
+        definitions = [
+            {
+                "key": "risk_meeting_statistics",
+                "name": "风险会风险统计表",
+                "description": "风险会议统计底表；以风险等级分组，可继续叠加项目/国家筛选。",
+                "columns": common + [("risk_level", 100), ("risk_description", 260), ("legal_status", 100)],
+                "filter": {"has_risk": {"eq": True}},
+                "group": {"fields": [{"field": "risk_level", "direction": "asc"}]},
+            },
+            {
+                "key": "company_filing_category",
+                "name": "品类我司专利申请类",
+                "description": "按品类整理我司申请/布局专利的工作底表；不预设公司名称，避免把业务判断硬编码。",
+                "columns": common + [("category", 130), ("subcategory", 130), ("applicant", 180), ("filing_date", 110), ("legal_status", 100)],
+                "filter": {},
+                "group": {"fields": [{"field": "category", "direction": "asc"}]},
+            },
+            {
+                "key": "ip_risk_control",
+                "name": "IP事务管控表之风险管控表",
+                "description": "风险管控工作底表；保留风险描述、项目关联和法律状态字段供人工维护。",
+                "columns": common + [("category", 130), ("risk_level", 100), ("risk_description", 300), ("has_risk", 80), ("application_status", 120)],
+                "filter": {"has_risk": {"eq": True}},
+                "group": {"fields": [{"field": "risk_level", "direction": "desc"}, {"field": "category", "direction": "asc"}]},
+            },
+            {
+                "key": "ip_application_control",
+                "name": "IP事务管控表之申请管控表",
+                "description": "申请管控工作底表；申请号、公开号、日期、代理和状态来自同一专利记录。",
+                "columns": common + [("applicant", 180), ("inventor", 160), ("agent", 160), ("filing_date", 110), ("publication_date", 110), ("grant_date", 110), ("application_status", 120)],
+                "filter": {},
+                "group": {"fields": [{"field": "application_status", "direction": "asc"}]},
+            },
+            {
+                "key": "product_category_master",
+                "name": "产品品类数据总库",
+                "description": "产品/品类维度专利总库；视图是查询投影，不另建一份数据。",
+                "columns": common + [("category", 130), ("subcategory", 130), ("module", 160), ("ipc_main", 120), ("applicant", 180), ("legal_status", 100)],
+                "filter": {},
+                "group": {"fields": [{"field": "category", "direction": "asc"}, {"field": "subcategory", "direction": "asc"}]},
+            },
+            {
+                "key": "daily_patent_accumulation",
+                "name": "日常相关专利积累",
+                "description": "日常检索、分析和撰写调用的宽口径专利积累视图；允许逐步补充人工字段。",
+                "columns": common + [("abstract", 260), ("applicant", 180), ("inventor", 160), ("ipc_main", 120), ("priority_date", 110), ("legal_status", 100), ("notes", 220)],
+                "filter": {},
+                "group": {"fields": [{"field": "country", "direction": "asc"}]},
+            },
+        ]
+        created: list[PatentView] = []
+        for definition in definitions:
+            existing = db.query(PatentView).filter(
+                PatentView.database_id == database_id,
+                PatentView.template_key == definition["key"],
+            ).first()
+            if existing:
+                created.append(existing)
+                continue
+            column_config = [
+                {"key": key, "visible": True, "width": width, "order": index}
+                for index, (key, width) in enumerate(definition["columns"])
+            ]
+            created.append(ViewService.create_view(
+                db,
+                name=definition["name"],
+                description=definition["description"],
+                database_id=database_id,
+                view_type="shared",
+                layout_type="table",
+                filter_config=definition["filter"],
+                column_config=column_config,
+                sort_config={"sort_by": "filing_date", "sort_order": "desc"},
+                group_by_config=definition["group"],
+                template_key=definition["key"],
+            ))
+        return created
 
     # ========== 视图数据查询 ==========
 

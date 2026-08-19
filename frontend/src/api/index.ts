@@ -2,7 +2,7 @@ import api from '../lib/api'
 import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department, ProductLine,
-  AITask, AIFieldValue, FieldMeta, CellUpdateRequest, PatentDatabase,
+  AITask, AIFieldValue, FieldMeta, CellUpdateRequest, PatentDatabase, PatentIdentifier, PatentExportTemplate,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
@@ -283,6 +283,8 @@ export const patentApi = {
     api.get('/patents', { params }),
 
   get: (id: number): Promise<Patent> => api.get(`/patents/${id}`),
+
+  identifiers: (id: number): Promise<PatentIdentifier[]> => api.get(`/patents/${id}/identifiers`),
 
   create: (data: Partial<Patent>): Promise<Patent> => api.post('/patents', data),
 
@@ -595,6 +597,18 @@ export const exportApi = {
     api.post('/export/excel', payload, { responseType: 'blob' }),
   csv: (payload: JsonObject): Promise<Blob> =>
     api.post('/export/csv', payload, { responseType: 'blob' }),
+  word: (payload: JsonObject): Promise<Blob> =>
+    api.post('/export/word', payload, { responseType: 'blob' }),
+  listTemplates: (databaseId?: number | null): Promise<PatentExportTemplate[]> =>
+    api.get('/export/templates', { params: { database_id: databaseId ?? undefined } }),
+  getTemplate: (id: number): Promise<PatentExportTemplate> =>
+    api.get(`/export/templates/${id}`),
+  createTemplate: (payload: Partial<PatentExportTemplate> & { database_id: number; template_key: string; name: string }): Promise<PatentExportTemplate> =>
+    api.post('/export/templates', payload),
+  updateTemplate: (id: number, payload: Partial<PatentExportTemplate> & { database_id: number; template_key: string; name: string }): Promise<PatentExportTemplate> =>
+    api.put(`/export/templates/${id}`, payload),
+  deleteTemplate: (id: number): Promise<{ success: boolean }> =>
+    api.delete(`/export/templates/${id}`),
 }
 
 export const settingsApi = {

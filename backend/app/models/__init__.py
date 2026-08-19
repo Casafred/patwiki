@@ -12,6 +12,7 @@
 - field:          CustomField
 - database:       PatentDatabase（P0-8 新增）
 - patent:         Patent / PatentFamily / Citation
+- identity:       PatentIdentifier（统一专利身份索引）
 - ai:             AITask / AIFieldValue
 - importing:      FieldMapping / ImportBatch
 - user:           User / DatabaseMembership
@@ -56,6 +57,8 @@ from app.models.database import PatentDatabase
 
 # 专利主表+同族+引用
 from app.models.patent import Patent, PatentFamily, Citation
+from app.models.identity import PatentIdentifier
+from app.models.export_template import PatentExportTemplate
 
 # AI
 from app.models.ai import AITask, AIFieldValue
@@ -104,7 +107,7 @@ __all__ = [
     # database
     "PatentDatabase",
     # patent
-    "Patent", "PatentFamily", "Citation",
+    "Patent", "PatentFamily", "Citation", "PatentIdentifier", "PatentExportTemplate",
     # ai
     "AITask", "AIFieldValue",
     # importing

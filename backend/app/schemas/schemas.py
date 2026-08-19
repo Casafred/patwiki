@@ -57,6 +57,10 @@ class PatentCreate(PatentBase):
 
 
 class PatentUpdate(BaseSchema):
+    application_number: Optional[str] = None
+    publication_number: Optional[str] = None
+    grant_number: Optional[str] = None
+    country: Optional[str] = None
     title: Optional[str] = None
     abstract: Optional[str] = None
     claims: Optional[str] = None

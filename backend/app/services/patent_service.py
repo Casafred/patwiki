@@ -272,6 +272,9 @@ class PatentService:
         patent.custom_fields = custom_fields
 
         db.add(patent)
+        db.flush()
+        from app.services.patent_identity_service import ensure_patent_identifiers
+        ensure_patent_identifiers(db, patent, source_system="manual")
         db.commit()
         db.refresh(patent)
         from app.services.formula_service import FormulaService
@@ -368,6 +371,8 @@ class PatentService:
             projects = db.query(Project).filter(Project.id.in_(project_ids)).all()
             patent.projects = projects
 
+        from app.services.patent_identity_service import ensure_patent_identifiers
+        ensure_patent_identifiers(db, patent, source_system=source)
         db.add(patent)
         # 批量插入历史记录
         for h in history_entries:
