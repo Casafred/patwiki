@@ -127,6 +127,8 @@ class ViewService:
         if layout_type not in ViewService.SUPPORTED_LAYOUT_TYPES:
             raise ValueError(f"不支持的视图展示类型：{layout_type}")
 
+        column_config = ViewService.validate_column_config(column_config or [])
+
         # 部门总表视图每库唯一
         group_by_config = ViewService.validate_group_by_config(group_by_config or {})
         conditional_formatting = ViewService.validate_conditional_formatting(
@@ -152,7 +154,7 @@ class ViewService:
             layout_type=layout_type,
             is_department_master=is_department_master,
             filter_config=filter_config or {},
-            column_config=column_config or [],
+            column_config=column_config,
             sort_config=sort_config or {},
             group_by_config=group_by_config or {},
             conditional_formatting=conditional_formatting or [],
@@ -179,6 +181,10 @@ class ViewService:
         layout_type = updates.get("layout_type")
         if layout_type is not None and layout_type not in ViewService.SUPPORTED_LAYOUT_TYPES:
             raise ValueError(f"不支持的视图展示类型：{layout_type}")
+        if "column_config" in updates:
+            updates["column_config"] = ViewService.validate_column_config(
+                updates["column_config"] or []
+            )
         if "group_by_config" in updates:
             updates["group_by_config"] = ViewService.validate_group_by_config(
                 updates["group_by_config"]
@@ -202,6 +208,36 @@ class ViewService:
         db.commit()
         db.refresh(view)
         return view
+
+    @staticmethod
+    def validate_column_config(config: list[dict]) -> list[dict]:
+        """校验视图列投影，但不限制字段 key 必须已经注册。
+
+        未注册 key 需要保留，便于字段注册表演进和旧视图兼容；真正的字段
+        是否可展示由前端字段元数据和视图配置共同决定。
+        """
+        if not isinstance(config, list):
+            raise ValueError("column_config 必须是数组")
+        normalized = []
+        seen = set()
+        for item in config:
+            if not isinstance(item, dict) or not isinstance(item.get("key"), str) or not item["key"].strip():
+                raise ValueError("column_config 中每项必须包含非空 key")
+            key = item["key"].strip()
+            if key in seen:
+                raise ValueError(f"column_config 存在重复字段：{key}")
+            seen.add(key)
+            visible = item.get("visible", True)
+            if not isinstance(visible, bool):
+                raise ValueError(f"字段 {key} 的 visible 必须是布尔值")
+            width = item.get("width")
+            if width is not None and (not isinstance(width, int) or isinstance(width, bool) or width < 40 or width > 1200):
+                raise ValueError(f"字段 {key} 的 width 必须在 40-1200 之间")
+            order = item.get("order", 0)
+            if not isinstance(order, int) or isinstance(order, bool) or order < 0:
+                raise ValueError(f"字段 {key} 的 order 必须是非负整数")
+            normalized.append({"key": key, "visible": visible, "width": width, "order": order})
+        return normalized
 
     @staticmethod
     def archive_view(db: Session, view: PatentView) -> PatentView:

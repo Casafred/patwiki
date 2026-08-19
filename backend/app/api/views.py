@@ -66,7 +66,7 @@ def create_view(view_in: PatentViewCreate, db: Session = Depends(get_db)):
             view_type=view_in.view_type or "personal",
             layout_type=view_in.layout_type or "table",
             filter_config=view_in.filter_config,
-            column_config=view_in.column_config,
+            column_config=[item.model_dump(exclude_none=True) for item in (view_in.column_config or [])],
             sort_config=view_in.sort_config,
             group_by_config=view_in.group_by_config,
             conditional_formatting=view_in.conditional_formatting,

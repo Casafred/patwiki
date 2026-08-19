@@ -80,6 +80,7 @@ export const customFieldService = {
 }
 
 export const viewService = {
+  update: (...args: Parameters<typeof viewApi.update>) => viewApi.update(...args),
   grouped: (...args: Parameters<typeof viewApi.grouped>) => viewApi.grouped(...args),
   listPatents: (...args: Parameters<typeof viewApi.listPatents>) => viewApi.listPatents(...args),
   updateSharedField: (...args: Parameters<typeof viewApi.updateSharedField>) => viewApi.updateSharedField(...args),

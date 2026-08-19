@@ -520,10 +520,10 @@ class StatsResponse(BaseSchema):
 
 class ViewColumnConfig(BaseSchema):
     """视图列配置项。"""
-    key: str
+    key: str = Field(min_length=1, max_length=100)
     visible: Optional[bool] = True
-    width: Optional[int] = None
-    order: Optional[int] = 0
+    width: Optional[int] = Field(default=None, ge=40, le=1200)
+    order: Optional[int] = Field(default=0, ge=0)
 
 
 class PatentViewBase(BaseSchema):
@@ -533,7 +533,7 @@ class PatentViewBase(BaseSchema):
     view_type: Optional[str] = "personal"  # personal / shared / department_master
     layout_type: Optional[str] = "table"  # table / kanban / form / gantt / calendar
     filter_config: Optional[dict[str, Any]] = {}
-    column_config: Optional[list[dict[str, Any]]] = []
+    column_config: Optional[list[ViewColumnConfig]] = Field(default_factory=list)
     sort_config: Optional[dict[str, Any]] = {}
     group_by_config: Optional[dict[str, Any]] = {}
     conditional_formatting: Optional[list[dict[str, Any]]] = []
@@ -554,7 +554,7 @@ class PatentViewUpdate(BaseSchema):
     view_type: Optional[str] = None
     layout_type: Optional[str] = None
     filter_config: Optional[dict[str, Any]] = None
-    column_config: Optional[list[dict[str, Any]]] = None
+    column_config: Optional[list[ViewColumnConfig]] = None
     sort_config: Optional[dict[str, Any]] = None
     group_by_config: Optional[dict[str, Any]] = None
     conditional_formatting: Optional[list[dict[str, Any]]] = None

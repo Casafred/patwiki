@@ -14,12 +14,13 @@ import {
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
-  ViewGroupField, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget, SearchSuggestion,
+  ViewGroupField, ViewColumnConfig, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget, SearchSuggestion,
   Tag,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import Icon from '../common/Icon'
 import GroupConfigPanel from '../views/GroupConfigPanel'
+import ViewColumnConfigPanel from '../views/ViewColumnConfigPanel'
 import ConditionalFormatPanel from '../views/ConditionalFormatPanel'
 import KanbanView from '../views/KanbanView'
 import FormView from '../views/FormView'
@@ -64,6 +65,23 @@ function getViewGroupFields(view?: PatentView): ViewGroupField[] {
   const config = view?.group_by_config
   if (Array.isArray(config)) return config as ViewGroupField[]
   return (config as { fields?: ViewGroupField[] } | undefined)?.fields || []
+}
+
+function buildViewColumnConfig(view: PatentView, fields: FieldMeta[]): ViewColumnConfig[] {
+  const configured = view.column_config || []
+  const byKey = new Map(configured.map(column => [column.key, column]))
+  const known = fields.map((field, index) => {
+    const column = byKey.get(field.key)
+    return {
+      key: field.key,
+      visible: column?.visible ?? (configured.length === 0 ? field.visible !== false : false),
+      width: column?.width ?? field.width ?? DEFAULT_COLUMN_WIDTH,
+      order: column?.order ?? configured.length + index,
+    }
+  })
+  const knownKeys = new Set(known.map(column => column.key))
+  return [...known, ...configured.filter(column => !knownKeys.has(column.key))]
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 }
 
 function flattenGroups(groups: ViewGroup[]): Patent[] {
@@ -267,6 +285,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     : Number.isInteger(queryDatabaseId) && queryDatabaseId > 0
       ? queryDatabaseId
       : currentDatabaseId
+  const activeView = views.find(view => view.id === viewId && view.database_id === activeDatabaseId)
   const [page, setPage] = useState(() => readPageParam(searchParams))
   const [pageSize] = useState(50)
   const [searchText, setSearchText] = useState(() => searchParams.get('q') || '')
@@ -284,6 +303,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
+  const [viewConfigNotice, setViewConfigNotice] = useState('')
   const [columnSearch, setColumnSearch] = useState('')
   const [showBulkEdit, setShowBulkEdit] = useState(false)
   const [showBulkTag, setShowBulkTag] = useState(false)
@@ -405,19 +425,22 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         }
       })()
       const forcedVisible = new Set([...persistedForcedVisible, ...forceVisibleKeys, ...DEFAULT_VISIBLE_CONTENT_FIELDS])
-      // 应用 localStorage 持久化的可见性设置
-      try {
-        const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
-        if (hiddenRaw) {
-          const hiddenKeys: string[] = JSON.parse(hiddenRaw)
-          fieldsData.forEach(f => {
-            if (hiddenKeys.includes(f.key) && !forcedVisible.has(f.key)) f.visible = false
-          })
-        }
-      } catch (error) { console.error('Failed to read hidden fields:', error) }
-      fieldsData.forEach(field => {
-        if (forcedVisible.has(field.key)) field.visible = true
-      })
+      // 保存视图有独立的字段投影；只有未进入视图时才应用旧的浏览器级配置。
+      // 这样一个视图隐藏字段不会影响其他视图，也不会把字段状态写回主数据。
+      if (viewId === null) {
+        try {
+          const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
+          if (hiddenRaw) {
+            const hiddenKeys: string[] = JSON.parse(hiddenRaw)
+            fieldsData.forEach(f => {
+              if (hiddenKeys.includes(f.key) && !forcedVisible.has(f.key)) f.visible = false
+            })
+          }
+        } catch (error) { console.error('Failed to read hidden fields:', error) }
+        fieldsData.forEach(field => {
+          if (forcedVisible.has(field.key)) field.visible = true
+        })
+      }
       setFields(fieldsData)
       try {
         const savedFrozen = JSON.parse(localStorage.getItem('patwiki_frozen_fields') || 'null') as unknown
@@ -430,17 +453,19 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       fieldsData.forEach(f => {
         widths[f.key] = f.width || DEFAULT_COLUMN_WIDTH
       })
-      try {
-        const saved = JSON.parse(localStorage.getItem('patwiki_column_widths') || '{}') as Record<string, unknown>
-        Object.entries(saved).forEach(([key, value]) => {
-          if (typeof value === 'number' && value >= 80 && value <= 1200 && key in widths) widths[key] = value
-        })
-      } catch (error) { console.error('Failed to read column widths:', error) }
+      if (viewId === null) {
+        try {
+          const saved = JSON.parse(localStorage.getItem('patwiki_column_widths') || '{}') as Record<string, unknown>
+          Object.entries(saved).forEach(([key, value]) => {
+            if (typeof value === 'number' && value >= 80 && value <= 1200 && key in widths) widths[key] = value
+          })
+        } catch (error) { console.error('Failed to read column widths:', error) }
+      }
       setColumnWidths(widths)
     } catch (e) {
       console.error('Failed to load fields:', e)
     }
-  }, [])
+  }, [viewId])
 
   const loadCustomFields = useCallback(async () => {
     try {
@@ -579,6 +604,33 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
   }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, page, searchParams, searchParamsString, searchText, setSearchParams, sortField, sortOrder, viewId])
 
+  const saveViewColumnConfig = useCallback(async (columnConfig: ViewColumnConfig[]) => {
+    if (!activeView) return
+    const updated = await viewApi.update(activeView.id, { column_config: columnConfig })
+    const nextViews = viewsRef.current.map(view => view.id === updated.id ? updated : view)
+    viewsRef.current = nextViews
+    setViews(nextViews)
+    const widths: Record<string, number> = {}
+    columnConfig.forEach(column => {
+      if (column.width) widths[column.key] = column.width
+    })
+    setColumnWidths(previous => ({ ...previous, ...widths }))
+    setViewConfigNotice('当前视图列配置已保存')
+    window.setTimeout(() => setViewConfigNotice(''), 3000)
+    await loadPatents()
+  }, [activeView, loadPatents, setViews])
+
+  useEffect(() => {
+    if (!activeView?.column_config) return
+    const configuredWidths: Record<string, number> = {}
+    activeView.column_config.forEach(column => {
+      if (column.width) configuredWidths[column.key] = column.width
+    })
+    // View configuration is external state loaded asynchronously after the field registry.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setColumnWidths(previous => ({ ...previous, ...configuredWidths }))
+  }, [activeView])
+
   useEffect(() => {
     // Field metadata is loaded asynchronously when the page mounts.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -670,7 +722,21 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     const handlePointerUp = () => {
       if (resizing) {
         setColumnWidths(widths => {
-          try { localStorage.setItem('patwiki_column_widths', JSON.stringify(widths)) } catch (error) { console.error('Failed to save column widths:', error) }
+          if (activeView) {
+            const configured = activeView.column_config || []
+            const nextConfig: ViewColumnConfig[] = (configured.length > 0 ? configured : fields.map((field, order) => ({
+              key: field.key,
+              visible: field.visible !== false,
+              width: field.width || DEFAULT_COLUMN_WIDTH,
+              order,
+            }))).map(column => ({
+              ...column,
+              width: widths[column.key] || column.width || DEFAULT_COLUMN_WIDTH,
+            }))
+            void saveViewColumnConfig(nextConfig)
+          } else {
+            try { localStorage.setItem('patwiki_column_widths', JSON.stringify(widths)) } catch (error) { console.error('Failed to save column widths:', error) }
+          }
           return widths
         })
       }
@@ -690,7 +756,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-  }, [resizing])
+  }, [activeView, fields, resizing, saveViewColumnConfig])
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -868,6 +934,14 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   }
 
   const handleToggleFieldVisible = (fieldKey: string) => {
+    if (activeView) {
+      const next = buildViewColumnConfig(activeView, fields).map(column =>
+        column.key === fieldKey ? { ...column, visible: column.visible === false } : column,
+      )
+      void saveViewColumnConfig(next).catch(error => alert('视图列配置保存失败: ' + getErrorMessage(error)))
+      setActiveHeaderMenu(null)
+      return
+    }
     setFields(prev => {
       const next = prev.map(f =>
         f.key === fieldKey ? { ...f, visible: f.visible === false } : f
@@ -884,6 +958,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
   // 批量设置可见性
   const handleSetAllVisible = (visible: boolean) => {
+    if (activeView) {
+      void saveViewColumnConfig(buildViewColumnConfig(activeView, fields).map(column => ({ ...column, visible })))
+        .catch(error => alert('视图列配置保存失败: ' + getErrorMessage(error)))
+      return
+    }
     setFields(prev => {
       const next = prev.map(f => ({ ...f, visible }))
       try {
@@ -899,6 +978,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
   // 重置为默认（系统字段可见，自定义字段可见）
   const handleResetVisibility = () => {
+    if (activeView) {
+      void saveViewColumnConfig(buildViewColumnConfig({ ...activeView, column_config: [] }, fields))
+        .catch(error => alert('视图列配置保存失败: ' + getErrorMessage(error)))
+      return
+    }
     setFields(prev => {
       const next = prev.map(f => ({ ...f, visible: true }))
       try {
@@ -1462,7 +1546,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     return map[level || 'none'] || '-'
   }
 
-  const activeView = views.find(view => view.id === viewId && view.database_id === activeDatabaseId)
   const groupPresentation = groupedGroups.length > 0
     ? getGroupPresentation(groupedGroups, collapsedGroupKeys)
     : null
@@ -1536,15 +1619,15 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }
   const visibleFields = (() => {
-    const baseFields = fields.filter(f => f.visible !== false)
+    const baseFields = activeView?.column_config?.length ? fields : fields.filter(f => f.visible !== false)
     const columnConfig = activeView?.column_config || []
     if (columnConfig.length === 0) return baseFields
 
     const configByKey = new Map(columnConfig.map(column => [column.key, column]))
     return baseFields
-      // A view configuration predates newly imported fields. Fields missing from
-      // that configuration default to visible instead of being silently omitted.
-      .filter(field => configByKey.get(field.key)?.visible !== false)
+      // Explicit view configuration is authoritative. Newly imported fields are
+      // available in column management but do not silently enter this work table.
+      .filter(field => configByKey.get(field.key)?.visible === true)
       .sort((a, b) => {
         const aOrder = configByKey.get(a.key)?.order ?? Number.MAX_SAFE_INTEGER
         const bOrder = configByKey.get(b.key)?.order ?? Number.MAX_SAFE_INTEGER
@@ -1836,6 +1919,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
               <Icon name="columns" /> 列管理
             </button>
+            {viewConfigNotice && <span style={{ fontSize: 12, color: '#047857' }}>{viewConfigNotice}</span>}
           </div>
           <button
             className="btn btn-sm btn-primary datagrid-primary-action"
@@ -2441,7 +2525,18 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         </div>
       </div>}
 
-      {showFieldConfig && (
+      {showFieldConfig && activeView && (
+        <ViewColumnConfigPanel
+          key={activeView.id}
+          open
+          view={activeView}
+          fields={fields}
+          onClose={() => setShowFieldConfig(false)}
+          onSave={saveViewColumnConfig}
+        />
+      )}
+
+      {showFieldConfig && !activeView && (
       <Modal title="列管理" onClose={() => setShowFieldConfig(false)} width={680}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* 搜索 + 批量操作 */}

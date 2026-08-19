@@ -261,6 +261,13 @@ export interface ConditionalFormatRule {
   conditions: ConditionalFormatCondition[]
 }
 
+export interface ViewColumnConfig {
+  key: string
+  visible?: boolean
+  width?: number
+  order?: number
+}
+
 export interface ViewGroup {
   key: JsonValue
   label: string
@@ -293,7 +300,7 @@ export interface PatentView {
   is_department_master?: boolean
   is_archived?: boolean
   filter_config?: JsonObject
-  column_config?: { key: string; visible?: boolean; width?: number; order?: number }[]
+  column_config?: ViewColumnConfig[]
   sort_config?: { sort_by?: string; sort_order?: 'asc' | 'desc' }
   group_by_config?: { fields?: ViewGroupField[] } | JsonObject
   conditional_formatting?: ConditionalFormatRule[]
