@@ -2,7 +2,7 @@ import api from '../lib/api'
 import type {
   Patent, PatentListResponse, Product, Project, Tag, TagGroup,
   CustomField, ImportBatch, ImportPreview, ImportResult, FieldMapping, Stats, Person, Department, ProductLine,
-  AITask, AIFieldValue, FieldMeta, CellUpdateRequest, PatentDatabase, PatentIdentifier, PatentExportTemplate,
+  AITask, AIFieldValue, FieldMeta, CellUpdateRequest, PatentDatabase, PatentIdentifier, PatentFieldSource, PatentIdentityConflict, PatentExportTemplate,
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
@@ -285,6 +285,10 @@ export const patentApi = {
   get: (id: number): Promise<Patent> => api.get(`/patents/${id}`),
 
   identifiers: (id: number): Promise<PatentIdentifier[]> => api.get(`/patents/${id}/identifiers`),
+
+  fieldSources: (id: number): Promise<PatentFieldSource[]> => api.get(`/patents/${id}/field-sources`),
+
+  identityConflicts: (id: number): Promise<PatentIdentityConflict[]> => api.get(`/patents/${id}/identity-conflicts`),
 
   create: (data: Partial<Patent>): Promise<Patent> => api.post('/patents', data),
 

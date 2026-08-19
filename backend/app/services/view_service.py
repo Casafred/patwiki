@@ -1259,6 +1259,10 @@ class ViewService:
                 "last_changed_at": h.created_at.isoformat() if h.created_at else None,
                 "last_source_view_id": h.source_view_id,
                 "last_source_view_name": h.source_view_name,
+                "import_batch_id": h.import_batch_id,
+                "source_table_title": h.source_table_title,
+                "source_row": h.source_row,
+                "source_field_name": h.source_field_name,
             })
         return result
 

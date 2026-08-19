@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fieldApi, importApi } from '../../api'
 import type { FieldMeta, GovernanceAction, GovernanceDecision, GovernanceObservation } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -31,6 +32,7 @@ function formatDate(value?: string | null) {
 }
 
 export default function ImportGovernancePage() {
+  const [searchParams] = useSearchParams()
   const [items, setItems] = useState<GovernanceObservation[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -38,6 +40,8 @@ export default function ImportGovernancePage() {
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [sourceField, setSourceField] = useState('')
   const [batchId, setBatchId] = useState('')
+  const [patentId, setPatentId] = useState(() => searchParams.get('patent_id')?.replace(/\D/g, '') || '')
+  const [sourceRowId, setSourceRowId] = useState(() => searchParams.get('source_row_id')?.replace(/\D/g, '') || '')
   const [mappingBySource, setMappingBySource] = useState<Record<string, string>>({})
   const [batchScope, setBatchScope] = useState(true)
   const [adoptedValue, setAdoptedValue] = useState(false)
@@ -57,6 +61,8 @@ export default function ImportGovernancePage() {
       const result = await importApi.listUnmapped({
         source_field: sourceField.trim() || undefined,
         batch_id: batchId.trim() ? Number(batchId) : undefined,
+        patent_id: patentId.trim() ? Number(patentId) : undefined,
+        source_row_id: sourceRowId.trim() ? Number(sourceRowId) : undefined,
         offset,
         limit: pageSize,
       })
@@ -69,7 +75,7 @@ export default function ImportGovernancePage() {
       setLoading(false)
     }
     return null
-  }, [batchId, offset, pageSize, sourceField])
+  }, [batchId, offset, pageSize, patentId, sourceField, sourceRowId])
 
   useEffect(() => {
     // Synchronize the table with the current filters.
@@ -168,6 +174,8 @@ export default function ImportGovernancePage() {
           {sourceFields.map(field => <option key={field} value={field} />)}
         </datalist>
         <input className="form-input" value={batchId} onChange={event => { setBatchId(event.target.value.replace(/\D/g, '')); setOffset(0) }} placeholder="导入批次 ID" inputMode="numeric" style={{ width: 130 }} />
+        <input className="form-input" value={patentId} onChange={event => { setPatentId(event.target.value.replace(/\D/g, '')); setOffset(0) }} placeholder="专利 ID" inputMode="numeric" style={{ width: 110 }} />
+        <input className="form-input" value={sourceRowId} onChange={event => { setSourceRowId(event.target.value.replace(/\D/g, '')); setOffset(0) }} placeholder="来源行 ID" inputMode="numeric" style={{ width: 120 }} />
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#475569' }}>
           <input type="checkbox" checked={batchScope} onChange={event => setBatchScope(event.target.checked)} />
           按同批次同来源列处理

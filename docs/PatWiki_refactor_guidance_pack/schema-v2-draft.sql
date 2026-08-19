@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS import_source_rows (
     row_hash TEXT,
     resolution_status TEXT NOT NULL DEFAULT 'unmapped_retained', -- resolved/unmapped_retained/quarantined
     resolved_patent_id INTEGER,
+    candidate_patent_ids JSON,
     created_at DATETIME NOT NULL,
     UNIQUE(import_batch_id, source_row),
     FOREIGN KEY(import_batch_id) REFERENCES import_batches(id),

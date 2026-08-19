@@ -14,7 +14,18 @@ from app.schemas.schemas import (
 )
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
-from app.models import AIFieldValue, Citation, CustomField, CustomFieldType, Patent as PatentModel, PatentHistory, PatentIdentifier
+from app.models import (
+    AIFieldValue,
+    Citation,
+    CustomField,
+    CustomFieldType,
+    FieldObservation,
+    ImportBatch,
+    ImportSourceRow,
+    Patent as PatentModel,
+    PatentHistory,
+    PatentIdentifier,
+)
 from app.core.exceptions import NotFoundException
 from app.services.patent_identity_service import list_patent_identifiers
 
@@ -89,14 +100,6 @@ def list_patents(
     }
 
 
-@router.get("/{patent_id}", response_model=Patent)
-def get_patent(patent_id: int, db: Session = Depends(get_db)):
-    patent = PatentService.get_patent(db, patent_id)
-    if not patent:
-        raise NotFoundException("Patent not found")
-    return patent
-
-
 @router.get("/{patent_id}/identifiers")
 def get_patent_identifiers(patent_id: int, db: Session = Depends(get_db)):
     """返回专利身份链，供详情页展示号码类型、规范化值和来源。"""
@@ -122,6 +125,59 @@ def get_patent_identifiers(patent_id: int, db: Session = Depends(get_db)):
         }
         for identifier in list_patent_identifiers(db, patent_id)
     ]
+
+
+@router.get("/{patent_id}/identity-conflicts")
+def get_patent_identity_conflicts(patent_id: int, db: Session = Depends(get_db)):
+    """Return quarantined import rows whose identity match included this patent."""
+    patent = db.query(PatentModel).filter(PatentModel.id == patent_id).first()
+    if not patent:
+        raise NotFoundException("Patent not found")
+
+    rows = db.query(ImportSourceRow, ImportBatch).join(
+        ImportBatch, ImportBatch.id == ImportSourceRow.import_batch_id,
+    ).filter(
+        ImportSourceRow.resolution_status == "quarantined",
+    ).order_by(ImportSourceRow.id.desc()).all()
+    result = []
+    for source_row, batch in rows:
+        candidates = source_row.candidate_patent_ids or []
+        if patent_id not in candidates:
+            continue
+        observations = db.query(FieldObservation).filter(
+            FieldObservation.source_row_id == source_row.id,
+        ).order_by(FieldObservation.source_column_index.asc(), FieldObservation.id.asc()).all()
+        result.append({
+            "source_row_id": source_row.id,
+            "batch_id": batch.id,
+            "filename": batch.filename,
+            "source_table_title": batch.source_table_title,
+            "worksheet_name": batch.worksheet_name,
+            "source_row": source_row.source_row,
+            "resolution_reason": source_row.resolution_reason,
+            "candidate_patent_ids": candidates,
+            "source_row_values": source_row.raw_row,
+            "observations": [
+                {
+                    "id": item.id,
+                    "source_field_name": item.source_field_name,
+                    "raw_value": item.raw_value,
+                    "candidate_value": item.candidate_value,
+                    "difference_type": item.difference_type,
+                }
+                for item in observations
+            ],
+            "created_at": source_row.created_at.isoformat() if source_row.created_at else None,
+        })
+    return result
+
+
+@router.get("/{patent_id}", response_model=Patent)
+def get_patent(patent_id: int, db: Session = Depends(get_db)):
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise NotFoundException("Patent not found")
+    return patent
 
 
 @router.get("/{patent_id}/graph")

@@ -21,6 +21,9 @@ class ImportSourceRow(Base):
     resolution_status = Column(String(30), nullable=False, default="unmapped_retained", index=True)
     resolution_reason = Column(Text)
     patent_id = Column(Integer, ForeignKey("patents.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Identity conflicts keep the complete candidate set so the detail page
+    # can link back to an actionable governance record without guessing.
+    candidate_patent_ids = Column(JSON)
     created_at = Column(DateTime, server_default=func.now(), index=True)
 
 

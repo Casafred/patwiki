@@ -6,7 +6,19 @@ import {
   tagService as tagApi,
   aiService as aiApi,
 } from '../../services'
-import type { Patent, Product, Project, Tag, CustomField, AITask, AIFieldValue, PatentHistory } from '../../types'
+import type {
+  Patent,
+  Product,
+  Project,
+  Tag,
+  CustomField,
+  AITask,
+  AIFieldValue,
+  PatentHistory,
+  PatentIdentifier,
+  PatentFieldSource,
+  PatentIdentityConflict,
+} from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import PatentShareDialog from './PatentShareDialog'
 import PatentGraph from './PatentGraph'
@@ -18,7 +30,7 @@ interface PatentDetailPageProps {
   onBack: () => void
 }
 
-type Tab = 'basic' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'history' | 'comments'
+type Tab = 'basic' | 'identity' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'history' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
 export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageProps) {
@@ -37,6 +49,10 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
   const [aiTaskInfo, setAiTaskInfo] = useState<AITask | null>(null)
   const [history, setHistory] = useState<PatentHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [identifiers, setIdentifiers] = useState<PatentIdentifier[]>([])
+  const [fieldSources, setFieldSources] = useState<PatentFieldSource[]>([])
+  const [identityConflicts, setIdentityConflicts] = useState<PatentIdentityConflict[]>([])
+  const [identityLoading, setIdentityLoading] = useState(false)
   const [showShareDialog, setShowShareDialog] = useState(false)
   const [openCommentCount, setOpenCommentCount] = useState(0)
 
@@ -63,6 +79,27 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       console.error('Failed to load history:', e)
     } finally {
       setHistoryLoading(false)
+    }
+  }, [patentId])
+
+  const loadIdentity = useCallback(async () => {
+    setIdentityLoading(true)
+    try {
+      const [identityRows, sourceRows, conflictRows] = await Promise.all([
+        patentApi.identifiers(patentId),
+        patentApi.fieldSources(patentId),
+        patentApi.identityConflicts(patentId),
+      ])
+      setIdentifiers(identityRows)
+      setFieldSources(sourceRows)
+      setIdentityConflicts(conflictRows)
+    } catch (e) {
+      console.error('Failed to load patent identity:', e)
+      setIdentifiers([])
+      setFieldSources([])
+      setIdentityConflicts([])
+    } finally {
+      setIdentityLoading(false)
     }
   }, [patentId])
 
@@ -99,8 +136,9 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
     void loadPatent()
     void loadMeta()
     void loadHistory()
+    void loadIdentity()
     void loadAIValues()
-  }, [loadAIValues, loadHistory, loadMeta, loadPatent])
+  }, [loadAIValues, loadHistory, loadIdentity, loadMeta, loadPatent])
 
   const handleSave = async () => {
     if (!patent) return
@@ -218,6 +256,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'basic', label: '基础著录' },
+    { key: 'identity', label: '身份与来源' },
     { key: 'technical', label: '技术信息' },
     { key: 'risk', label: '风险与应用' },
     { key: 'ai', label: 'AI 分析' },
@@ -289,6 +328,15 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
         {activeTab === 'basic' && (
           <BasicInfoTab patent={patent} formData={formData} editing={editing} updateField={updateField} products={products} />
         )}
+        {activeTab === 'identity' && (
+          <IdentityTab
+            patent={patent}
+            identifiers={identifiers}
+            fieldSources={fieldSources}
+            identityConflicts={identityConflicts}
+            loading={identityLoading}
+          />
+        )}
         {activeTab === 'technical' && (
           <TechnicalTab patent={patent} formData={formData} editing={editing} updateField={updateField} />
         )}
@@ -343,6 +391,212 @@ function AttachmentsTab({ patent }: { patent: Patent }) {
         fieldKey="attachments"
         value={patent.custom_fields?.attachments ?? null}
       />
+    </div>
+  )
+}
+
+const IDENTIFIER_TYPE_LABELS: Record<string, string> = {
+  application: '申请号',
+  publication: '公开号',
+  grant: '授权号',
+  external: '外部编号',
+}
+
+const FIELD_SOURCE_LABELS: Record<string, string> = {
+  manual: '人工',
+  bulk: '批量',
+  import: '外部导入',
+  governance: '治理回填',
+  governance_revert: '治理恢复',
+  ai: 'AI',
+  api: 'API',
+}
+
+function formatDateTime(value?: string | null): string {
+  return value ? new Date(value).toLocaleString('zh-CN') : '-'
+}
+
+function IdentityTab({ patent, identifiers, fieldSources, identityConflicts, loading }: {
+  patent: Patent
+  identifiers: PatentIdentifier[]
+  fieldSources: PatentFieldSource[]
+  identityConflicts: PatentIdentityConflict[]
+  loading: boolean
+}) {
+  const [copied, setCopied] = useState<string | null>(null)
+
+  const copyValue = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(value)
+      window.setTimeout(() => setCopied(current => current === value ? null : current), 1600)
+    } catch {
+      setCopied(null)
+    }
+  }
+
+  const projections = [
+    { label: '申请号', value: patent.application_number },
+    { label: '公开号', value: patent.publication_number },
+    { label: '授权号', value: patent.grant_number },
+  ]
+
+  return (
+    <div className="identity-tab-content">
+      <section className="identity-summary-panel">
+        <div>
+          <div className="section-eyebrow">专利身份锚点</div>
+          <h3>公开号优先，申请链归并</h3>
+          <p>申请号、公开号和授权号只在同一法域申请链内归入本篇专利；同族成员仍保持独立记录。</p>
+        </div>
+        <div className={`identity-status ${identifiers.length > 0 ? 'is-ready' : 'is-missing'}`}>
+          <strong>{identifiers.length > 0 ? '身份索引已建立' : '身份索引待补充'}</strong>
+          <span>{identifiers.length} 条身份事实</span>
+        </div>
+      </section>
+
+      <section className="identity-section">
+        <div className="identity-section-heading">
+          <div>
+            <h3>当前主表投影</h3>
+            <p>详情页兼容展示值；真正的匹配依据和历史别名见下方身份索引。</p>
+          </div>
+        </div>
+        <div className="identity-projection-grid">
+          {projections.map(item => (
+            <div className="identity-projection" key={item.label}>
+              <span>{item.label}</span>
+              <strong className="mono">{item.value || '未填写'}</strong>
+              {item.value && (
+                <button className="btn btn-ghost identity-copy-btn" onClick={() => void copyValue(item.value || '')}>
+                  {copied === item.value ? '已复制' : '复制'}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {identityConflicts.length > 0 && (
+        <section className="identity-section identity-conflict-section">
+          <div className="identity-section-heading">
+            <div>
+              <h3>待确认身份冲突</h3>
+              <p>以下导入行的多个号码命中了不同专利。系统已阻断整行写入，请依据原始行确认后再治理。</p>
+            </div>
+            <span className="identity-conflict-count">{identityConflicts.length} 行</span>
+          </div>
+          <div className="identity-conflict-list">
+            {identityConflicts.map(conflict => (
+              <div className="identity-conflict-row" key={conflict.source_row_id}>
+                <div>
+                  <strong>{conflict.source_table_title || conflict.filename}</strong>
+                  <span>{conflict.worksheet_name ? `${conflict.worksheet_name} · ` : ''}第 {conflict.source_row} 行</span>
+                </div>
+                <div className="identity-conflict-detail">
+                  <span>{conflict.resolution_reason || '身份命中多个专利'}</span>
+                  <span>候选专利：{conflict.candidate_patent_ids.map(id => `#${id}`).join('、')}</span>
+                </div>
+                <div className="identity-conflict-values">
+                  {conflict.observations.slice(0, 4).map(item => (
+                    <span key={item.id}><b>{item.source_field_name}</b>：{item.raw_value || item.candidate_value || '-'}</span>
+                  ))}
+                </div>
+                {patent.database_id && (
+                  <a className="btn btn-secondary identity-governance-link" href={`/db/${patent.database_id}/governance?source_row_id=${conflict.source_row_id}`}>
+                    打开治理工作台
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="identity-section">
+        <div className="identity-section-heading">
+          <div>
+            <h3>身份索引与来源别名</h3>
+            <p>规范化值只用于匹配，原始写法永久保留；来源时间是该身份事实的观察时间。</p>
+          </div>
+          {loading && <span className="identity-loading">刷新中...</span>}
+        </div>
+        {identifiers.length === 0 ? (
+          <div className="identity-empty">尚未建立身份索引。可以先在基础著录中补充公开号，再通过导入或保存动作建立来源记录。</div>
+        ) : (
+          <div className="identity-table-wrap">
+            <table className="identity-table">
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>原始写法</th>
+                  <th>规范化值</th>
+                  <th>法域 / kind code</th>
+                  <th>来源</th>
+                  <th>来源时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {identifiers.map(identifier => (
+                  <tr key={identifier.id}>
+                    <td>
+                      <span className="identity-type">{IDENTIFIER_TYPE_LABELS[identifier.identifier_type] || identifier.identifier_type}</span>
+                      {identifier.is_primary && <span className="identity-primary">主标识</span>}
+                    </td>
+                    <td>
+                      <div className="identity-raw-value">
+                        <span className="mono">{identifier.raw_value || '-'}</span>
+                        <button className="btn btn-ghost identity-copy-btn" onClick={() => void copyValue(identifier.raw_value)}>
+                          {copied === identifier.raw_value ? '已复制' : '复制'}
+                        </button>
+                      </div>
+                      {identifier.raw_values.length > 1 && (
+                        <div className="identity-aliases">别名：{identifier.raw_values.join(' / ')}</div>
+                      )}
+                    </td>
+                    <td className="mono">{identifier.normalized_value || '-'}</td>
+                    <td className="mono">{[identifier.jurisdiction_code, identifier.kind_code].filter(Boolean).join(' / ') || '-'}</td>
+                    <td>{identifier.source_system || '未标注来源'}</td>
+                    <td>{formatDateTime(identifier.source_timestamp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="identity-section">
+        <div className="identity-section-heading">
+          <div>
+            <h3>字段最近来源</h3>
+            <p>这里显示每个已记录字段最近一次写入的来源；完整变更前后值仍在 Wiki 历史中。</p>
+          </div>
+        </div>
+        {fieldSources.length === 0 ? (
+          <div className="identity-empty">暂无字段来源历史。首次导入或人工保存后，这里会显示来源和时间。</div>
+        ) : (
+          <div className="field-source-list">
+            {fieldSources.map(source => (
+              <div className="field-source-row" key={source.field_key}>
+                <div className="field-source-name">
+                  <strong>{source.field_display_name || source.field_key}</strong>
+                  <span className="mono">{source.field_key}</span>
+                </div>
+                <div className="field-source-value">{source.current_value || '（空）'}</div>
+                <div className="field-source-meta">
+                  <span className="source-badge">{FIELD_SOURCE_LABELS[source.last_source || ''] || source.last_source || '未知来源'}</span>
+                  <span>{source.last_changed_by || '未标注操作者'}</span>
+                  <span>{formatDateTime(source.last_changed_at)}</span>
+                  {source.last_source_view_name && <span>视图：{source.last_source_view_name}</span>}
+                  {source.source_table_title && <span>来源表：{source.source_table_title}</span>}
+                  {source.source_row && <span>第 {source.source_row} 行</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   )
 }

@@ -120,6 +120,7 @@ def _ensure_column_migration():
         ("patent_histories", "source_table_title", "ALTER TABLE patent_histories ADD COLUMN source_table_title VARCHAR(500)"),
         ("patent_histories", "source_row", "ALTER TABLE patent_histories ADD COLUMN source_row INTEGER"),
         ("patent_histories", "source_field_name", "ALTER TABLE patent_histories ADD COLUMN source_field_name VARCHAR(500)"),
+        ("import_source_rows", "candidate_patent_ids", "ALTER TABLE import_source_rows ADD COLUMN candidate_patent_ids JSON"),
         # G0：治理决策固定记录当时使用的导入映射版本。
         ("governance_decisions", "mapping_version", "ALTER TABLE governance_decisions ADD COLUMN mapping_version VARCHAR(100)"),
         ("governance_decisions", "decision_batch_id", "ALTER TABLE governance_decisions ADD COLUMN decision_batch_id VARCHAR(64)"),

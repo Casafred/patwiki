@@ -570,6 +570,7 @@ def confirm_import(
                 source_row.resolution_reason = (
                     "一个导入行的申请号/公开号/授权号分别命中多个专利，已隔离等待人工确认"
                 )
+                source_row.candidate_patent_ids = [patent.id for patent in identity_matches]
                 unmapped_retained += _record_field_observations(
                     db, batch, source_row, source_row.raw_row, columns, mapping,
                     None, rd["patent_data"], rd["virtual"], {},
@@ -850,6 +851,7 @@ def _unmapped_observation_query(
     batch_id: Optional[int] = None,
     source_field: Optional[str] = None,
     patent_id: Optional[int] = None,
+    source_row_id: Optional[int] = None,
     status: Optional[str] = "unmapped_retained",
 ):
     query = (
@@ -863,6 +865,8 @@ def _unmapped_observation_query(
         query = query.filter(FieldObservation.source_field_name == source_field)
     if patent_id is not None:
         query = query.filter(FieldObservation.patent_id == patent_id)
+    if source_row_id is not None:
+        query = query.filter(FieldObservation.source_row_id == source_row_id)
     if status and status != "all":
         query = query.filter(FieldObservation.field_resolution == status)
     return query
@@ -878,6 +882,7 @@ def _observation_to_dict(observation: FieldObservation, source_row: ImportSource
         "source_row_id": source_row.id,
         "source_row": source_row.source_row,
         "patent_id": observation.patent_id,
+        "candidate_patent_ids": source_row.candidate_patent_ids or [],
         "source_field_name": observation.source_field_name,
         "source_column_index": observation.source_column_index,
         "canonical_field_key": observation.canonical_field_key,
@@ -1292,12 +1297,13 @@ def list_unmapped_observations(
     batch_id: Optional[int] = None,
     source_field: Optional[str] = None,
     patent_id: Optional[int] = None,
+    source_row_id: Optional[int] = None,
     status: Optional[str] = Query("unmapped_retained"),
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
-    query = _unmapped_observation_query(db, batch_id, source_field, patent_id, status)
+    query = _unmapped_observation_query(db, batch_id, source_field, patent_id, source_row_id, status)
     total = query.count()
     rows = query.order_by(FieldObservation.id.desc()).offset(offset).limit(limit).all()
     return {
@@ -1313,10 +1319,11 @@ def export_unmapped_observations(
     batch_id: Optional[int] = None,
     source_field: Optional[str] = None,
     patent_id: Optional[int] = None,
+    source_row_id: Optional[int] = None,
     status: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
-    rows = _unmapped_observation_query(db, batch_id, source_field, patent_id, status).order_by(FieldObservation.id.asc()).all()
+    rows = _unmapped_observation_query(db, batch_id, source_field, patent_id, source_row_id, status).order_by(FieldObservation.id.asc()).all()
     output = StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow([

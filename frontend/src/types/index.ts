@@ -83,6 +83,41 @@ export interface PatentIdentifier {
   valid_to?: string | null
 }
 
+export interface PatentFieldSource {
+  field_key: string
+  field_display_name: string
+  current_value?: string | null
+  last_source?: string | null
+  last_changed_by?: string | null
+  last_changed_at?: string | null
+  last_source_view_id?: number | null
+  last_source_view_name?: string | null
+  import_batch_id?: number | null
+  source_table_title?: string | null
+  source_row?: number | null
+  source_field_name?: string | null
+}
+
+export interface PatentIdentityConflict {
+  source_row_id: number
+  batch_id: number
+  filename: string
+  source_table_title?: string | null
+  worksheet_name?: string | null
+  source_row: number
+  resolution_reason?: string | null
+  candidate_patent_ids: number[]
+  source_row_values: JsonObject
+  observations: {
+    id: number
+    source_field_name: string
+    raw_value?: string | null
+    candidate_value?: string | null
+    difference_type: string
+  }[]
+  created_at?: string | null
+}
+
 export interface PatentShare {
   id: number
   patent_id: number
@@ -867,6 +902,10 @@ export interface PatentHistory {
   new_value?: string | null
   source: string  // manual / bulk / ai / import / api
   changed_by?: string | null
+  import_batch_id?: number | null
+  source_table_title?: string | null
+  source_row?: number | null
+  source_field_name?: string | null
   created_at?: string
 }
 

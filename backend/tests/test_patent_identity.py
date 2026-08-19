@@ -2,13 +2,26 @@ import unittest
 from io import BytesIO
 
 from docx import Document
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.database import Base
-from app.models import Patent, PatentDatabase, PatentExportTemplate, PatentIdentifier
+from app.api.patents import router as patent_router
+from app.database import Base, get_db
+from app.models import (
+    FieldObservation,
+    ImportBatch,
+    ImportBatchStatus,
+    ImportSourceRow,
+    Patent,
+    PatentDatabase,
+    PatentExportTemplate,
+    PatentHistory,
+    PatentIdentifier,
+)
 from app.services.export_service import ExportService
 from app.services.patent_identity_service import (
     ensure_patent_identifiers,
@@ -28,6 +41,10 @@ class PatentIdentityTest(unittest.TestCase):
         )
         Base.metadata.create_all(self.engine)
         self.db = Session(self.engine)
+        app = FastAPI()
+        app.include_router(patent_router)
+        app.dependency_overrides[get_db] = lambda: self.db
+        self.client = TestClient(app)
 
     def tearDown(self):
         self.db.close()
@@ -78,6 +95,78 @@ class PatentIdentityTest(unittest.TestCase):
             {item.id for item in find_patents_by_identifiers(self.db, specs)},
             {app_patent.id, pub_patent.id},
         )
+
+    def test_identity_api_exposes_index_and_quarantined_conflicts(self):
+        database = PatentDatabase(name="身份接口库")
+        patent = Patent(
+            title="接口展示专利",
+            country="CN",
+            publication_number="CN123456792A1",
+            database=database,
+        )
+        self.db.add_all([database, patent])
+        self.db.flush()
+        ensure_patent_identifiers(self.db, patent, source_system="智慧芽")
+        batch = ImportBatch(
+            filename="冲突.xlsx",
+            status=ImportBatchStatus.COMPLETED,
+            source_table_title="风险跟踪表",
+            worksheet_name="Sheet1",
+        )
+        self.db.add(batch)
+        self.db.flush()
+        source_row = ImportSourceRow(
+            import_batch_id=batch.id,
+            source_row=8,
+            raw_row={"公开号": "CN123456792A1", "申请号": "CN202400000008"},
+            resolution_status="quarantined",
+            resolution_reason="身份命中多个专利",
+            candidate_patent_ids=[patent.id, patent.id + 1],
+        )
+        self.db.add(source_row)
+        self.db.flush()
+        self.db.add(FieldObservation(
+            import_batch_id=batch.id,
+            source_row_id=source_row.id,
+            source_field_name="公开号",
+            raw_value="CN123456792A1",
+            candidate_value="CN123456792A1",
+            difference_type="quarantined",
+            field_resolution="quarantined",
+        ))
+        self.db.commit()
+
+        identity = self.client.get(f"/patents/{patent.id}/identifiers")
+        self.assertEqual(identity.status_code, 200)
+        self.assertEqual(identity.json()[0]["source_system"], "智慧芽")
+
+        self.db.add(PatentHistory(
+            patent_id=patent.id,
+            field_key="publication_number",
+            field_display_name="公开号",
+            old_value=None,
+            new_value="CN123456792A1",
+            source="import",
+            changed_by="检索师",
+            import_batch_id=batch.id,
+            source_table_title="风险跟踪表",
+            source_row=8,
+            source_field_name="公开号",
+        ))
+        self.db.commit()
+        sources = self.client.get(f"/patents/{patent.id}/field-sources")
+        self.assertEqual(sources.status_code, 200)
+        self.assertEqual(sources.json()[0]["source_table_title"], "风险跟踪表")
+        self.assertEqual(sources.json()[0]["source_row"], 8)
+
+        detail = self.client.get(f"/patents/{patent.id}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["publication_number"], "CN123456792A1")
+
+        conflicts = self.client.get(f"/patents/{patent.id}/identity-conflicts")
+        self.assertEqual(conflicts.status_code, 200)
+        self.assertEqual(conflicts.json()[0]["source_table_title"], "风险跟踪表")
+        self.assertEqual(conflicts.json()[0]["candidate_patent_ids"], [patent.id, patent.id + 1])
 
     def test_default_business_views_are_idempotent(self):
         database = PatentDatabase(name="视图测试库")
