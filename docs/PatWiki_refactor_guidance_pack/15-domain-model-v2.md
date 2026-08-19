@@ -311,3 +311,5 @@ Project 只保存当前快照字段，如 `current_stage`；历史阶段保存�
 - `PatentHistory` 在兼容期继续保留，新 V2 聚合根统一写 `AuditEvent`；不要删除既有历史。
 - `PatentDatabase` 是所有 V2 Case 的工作台归属；每个关联两端必须属于同一 `database_id`，除非明确实现受审计的跨库引用。
 - 任何新增物理表、外键和索引均通过受版本控制的迁移引入，不能直接执行 `schema-v2-draft.sql`。
+
+当前轻量实现补充：`ProjectSolutionVersion`、`RiskCase`、`RiskAssessmentVersion` 和 `RiskReviewEvent` 已按独立生命周期建模；正式评估的方案和法域在草稿阶段可空，但确认阶段必须存在。通用 `ArtifactLink` 尚未实现，当前只保存来源描述类字段。

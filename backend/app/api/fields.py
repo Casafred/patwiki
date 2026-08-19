@@ -51,6 +51,8 @@ def update_cell(
     if field_key in SYSTEM_FIELD_KEYS:
         if field_key in ("id", "created_at", "updated_at"):
             raise BadRequestException(f"Field '{field_key}' is read-only")
+        if field_key in {"has_risk", "risk_level", "risk_description"}:
+            raise BadRequestException("风险兼容投影不可直接编辑，请通过风险案例追加结构化评估")
         value = req.value
         if field_key in ("filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date") and value:
             try:

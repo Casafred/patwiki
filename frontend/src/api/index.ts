@@ -9,6 +9,7 @@ import type {
   PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
   GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
+  ProjectSolutionVersion, RiskCase,
 } from '../types'
 
 export const fieldApi = {
@@ -613,6 +614,20 @@ export const exportApi = {
     api.put(`/export/templates/${id}`, payload),
   deleteTemplate: (id: number): Promise<{ success: boolean }> =>
     api.delete(`/export/templates/${id}`),
+}
+
+export const projectRiskApi = {
+  listSolutionVersions: (projectId: number, databaseId?: number): Promise<ProjectSolutionVersion[]> =>
+    api.get(`/projects/${projectId}/solution-versions`, { params: { database_id: databaseId } }),
+  createSolutionVersion: (projectId: number, data: Record<string, unknown>): Promise<ProjectSolutionVersion> =>
+    api.post(`/projects/${projectId}/solution-versions`, data),
+  confirmSolutionVersion: (id: number, confirmedBy: string): Promise<ProjectSolutionVersion> =>
+    api.post(`/solution-versions/${id}/confirm`, { confirmed_by: confirmedBy }),
+  listRiskCases: (databaseId: number, patentId?: number): Promise<RiskCase[]> =>
+    api.get('/risk-cases', { params: { database_id: databaseId, patent_id: patentId } }),
+  createRiskCase: (data: Record<string, unknown>): Promise<RiskCase> => api.post('/risk-cases', data),
+  addAssessment: (id: number, data: Record<string, unknown>): Promise<RiskCase> => api.post(`/risk-cases/${id}/assessments`, data),
+  addReview: (id: number, data: Record<string, unknown>): Promise<RiskCase> => api.post(`/risk-cases/${id}/reviews`, data),
 }
 
 export const settingsApi = {

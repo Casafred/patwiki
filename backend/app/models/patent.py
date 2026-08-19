@@ -143,6 +143,12 @@ class Patent(Base):
         cascade="all, delete-orphan",
         order_by="PatentIdentifier.id",
     )
+    risk_links = relationship(
+        "RiskPatentLink",
+        back_populates="patent",
+        cascade="all, delete-orphan",
+        order_by="RiskPatentLink.id",
+    )
 
     __table_args__ = (
         UniqueConstraint("application_number", "country", name="_app_num_country_uc"),

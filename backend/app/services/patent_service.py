@@ -10,6 +10,7 @@ from app.models import (
 )
 from app.schemas.schemas import PatentCreate, PatentUpdate
 from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
+from app.core.exceptions import BadRequestException
 
 
 SYSTEM_FIELDS = {
@@ -27,6 +28,10 @@ SYSTEM_FIELDS = {
     "created_at", "updated_at", "tags", "projects",
     "view_id",
 }
+
+# These fields remain readable for legacy views, but structured RiskCase and
+# RiskAssessmentVersion are now the only supported write path.
+RISK_PROJECTION_FIELDS = {"has_risk", "risk_level", "risk_description"}
 
 
 def _normalize_value(v: Any) -> Any:
@@ -268,6 +273,20 @@ class PatentService:
         data = patent_in.model_dump(exclude_unset=True)
         custom_fields = data.pop("custom_fields", {}) or {}
 
+        legacy_risk_values = {
+            "has_risk": data.pop("has_risk", None),
+            "risk_level": data.pop("risk_level", None),
+            "risk_description": data.pop("risk_description", None),
+        }
+        if (
+            legacy_risk_values["has_risk"] is True
+            or legacy_risk_values["risk_level"] not in (None, "none")
+            or legacy_risk_values["risk_description"] not in (None, "")
+        ):
+            raise BadRequestException(
+                "风险兼容投影不可直接写入，请先创建专利，再通过风险案例追加结构化评估"
+            )
+
         patent = Patent(**data)
         patent.custom_fields = custom_fields
 
@@ -310,6 +329,13 @@ class PatentService:
         tag_ids = update_data.pop("tag_ids", None)
         project_ids = update_data.pop("project_ids", None)
         custom_fields_data = update_data.pop("custom_fields", None)
+
+        forbidden_projection_fields = RISK_PROJECTION_FIELDS.intersection(update_data)
+        if forbidden_projection_fields:
+            raise BadRequestException(
+                "风险兼容投影不可直接编辑，请通过风险案例追加结构化评估："
+                + ", ".join(sorted(forbidden_projection_fields))
+            )
 
         # 字段名 → 显示名映射（用于历史记录的可读性）
         field_display_map: dict[str, str] = {}

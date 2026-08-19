@@ -501,6 +501,133 @@ export interface Project {
   updated_at: string
 }
 
+export interface ProjectSolutionChange {
+  id: number
+  change_type?: string | null
+  feature_name: string
+  before_description?: string | null
+  after_description?: string | null
+  impact_description?: string | null
+  source_description?: string | null
+  created_by: string
+  created_at: string
+}
+
+export interface ProjectSolutionRegion {
+  id: number
+  region_code: string
+  region_name?: string | null
+  created_at: string
+}
+
+export interface ProjectSolutionVersion {
+  id: number
+  database_id: number
+  project_id: number
+  version_no: string
+  name: string
+  project_stage?: string | null
+  status: string
+  effective_from?: string | null
+  effective_to?: string | null
+  change_summary?: string | null
+  change_reason?: string | null
+  source_type?: string | null
+  source_description?: string | null
+  created_by: string
+  confirmed_by?: string | null
+  confirmed_at?: string | null
+  created_at: string
+  updated_at: string
+  changes: ProjectSolutionChange[]
+  regions: ProjectSolutionRegion[]
+}
+
+export interface RiskPatentLink {
+  id: number
+  patent_id: number
+  link_role: string
+  notes?: string | null
+  created_at: string
+}
+
+export interface RiskSolutionLink {
+  id: number
+  solution_version_id: number
+  link_role: string
+  created_at: string
+}
+
+export interface RiskCaseRegion {
+  id: number
+  region_code: string
+  region_name?: string | null
+  created_at: string
+}
+
+export interface RiskAssessment {
+  id: number
+  risk_case_id: number
+  solution_version_id?: number | null
+  jurisdiction_code?: string | null
+  input_hash?: string | null
+  version_no: number
+  assessment_stage?: string | null
+  preliminary_assessment?: string | null
+  analysis_confirmation?: string | null
+  discussion_conclusion?: string | null
+  leadership_confirmation?: string | null
+  decision: string
+  risk_level: string
+  gate_impact: string
+  decision_basis?: string | null
+  mitigation_summary?: string | null
+  evidence_summary?: string | null
+  assessed_by?: string | null
+  reviewed_by?: string | null
+  confirmed_by?: string | null
+  decided_by?: string | null
+  decision_at?: string | null
+  created_by: string
+  created_at: string
+}
+
+export interface RiskReview {
+  id: number
+  risk_case_id: number
+  trigger_type: string
+  trigger_description?: string | null
+  review_outcome: string
+  next_review_condition?: string | null
+  next_review_at?: string | null
+  reviewed_by: string
+  created_at: string
+}
+
+export interface RiskCase {
+  id: number
+  database_id: number
+  case_no?: string | null
+  title: string
+  trigger_reason: string
+  status: string
+  current_risk_level: string
+  current_decision: string
+  current_gate_impact: string
+  current_gate?: string | null
+  next_review_condition?: string | null
+  next_review_at?: string | null
+  notes?: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  patent_links: RiskPatentLink[]
+  solution_links: RiskSolutionLink[]
+  regions: RiskCaseRegion[]
+  assessments: RiskAssessment[]
+  reviews: RiskReview[]
+}
+
 export interface Tag {
   id: number
   name: string

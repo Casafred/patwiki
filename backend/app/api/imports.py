@@ -659,7 +659,13 @@ def confirm_import(
                                 if batch is not None:
                                     patent_data["source_batch_id"] = batch.id
                                 custom_fields = patent_data.pop("custom_fields", {}) or {}
-                                patent = Patent(**patent_data)
+                                # Legacy risk columns remain in the observation
+                                # payload, but cannot initialize the old Patent
+                                # projection from an external file.
+                                patent_create_data = dict(patent_data)
+                                for protected_field in ("has_risk", "risk_level", "risk_description"):
+                                    patent_create_data.pop(protected_field, None)
+                                patent = Patent(**patent_create_data)
                                 patent.custom_fields = custom_fields
                                 db.add(patent)
                                 db.flush()

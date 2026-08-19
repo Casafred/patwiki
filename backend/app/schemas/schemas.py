@@ -182,6 +182,250 @@ class Project(ProjectBase):
     patent_count: Optional[int] = 0
 
 
+class ProjectSolutionChangeInput(BaseSchema):
+    change_type: Optional[str] = None
+    feature_name: str
+    before_description: Optional[str] = None
+    after_description: Optional[str] = None
+    impact_description: Optional[str] = None
+    source_description: Optional[str] = None
+
+
+class ProjectSolutionRegionInput(BaseSchema):
+    region_code: str
+    region_name: Optional[str] = None
+
+
+class ProjectSolutionVersionCreate(BaseSchema):
+    database_id: int
+    version_no: Optional[str] = None
+    name: str
+    project_stage: Optional[str] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    change_summary: Optional[str] = None
+    change_reason: Optional[str] = None
+    source_type: Optional[str] = None
+    source_description: Optional[str] = None
+    created_by: Optional[str] = "local-user"
+    changes: list[ProjectSolutionChangeInput] = []
+    regions: list[ProjectSolutionRegionInput] = []
+
+
+class ProjectSolutionVersionUpdate(BaseSchema):
+    name: Optional[str] = None
+    project_stage: Optional[str] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    change_summary: Optional[str] = None
+    change_reason: Optional[str] = None
+    source_type: Optional[str] = None
+    source_description: Optional[str] = None
+
+
+class ProjectSolutionChange(BaseSchema):
+    id: int
+    change_type: Optional[str] = None
+    feature_name: str
+    before_description: Optional[str] = None
+    after_description: Optional[str] = None
+    impact_description: Optional[str] = None
+    source_description: Optional[str] = None
+    created_by: str
+    created_at: datetime
+
+
+class ProjectSolutionRegion(BaseSchema):
+    id: int
+    region_code: str
+    region_name: Optional[str] = None
+    created_at: datetime
+
+
+class ProjectSolutionVersion(BaseSchema):
+    id: int
+    database_id: int
+    project_id: int
+    version_no: str
+    name: str
+    project_stage: Optional[str] = None
+    status: str
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    change_summary: Optional[str] = None
+    change_reason: Optional[str] = None
+    source_type: Optional[str] = None
+    source_description: Optional[str] = None
+    created_by: str
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    changes: list[ProjectSolutionChange] = []
+    regions: list[ProjectSolutionRegion] = []
+
+
+class SolutionVersionConfirmRequest(BaseSchema):
+    confirmed_by: str = "local-user"
+
+
+class RiskPatentLinkInput(BaseSchema):
+    patent_id: int
+    link_role: Optional[str] = "risk_patent"
+    notes: Optional[str] = None
+
+
+class RiskSolutionLinkInput(BaseSchema):
+    solution_version_id: int
+    link_role: Optional[str] = "primary_solution"
+
+
+class RiskRegionInput(BaseSchema):
+    region_code: str
+    region_name: Optional[str] = None
+
+
+class RiskCaseCreate(BaseSchema):
+    database_id: int
+    case_no: Optional[str] = None
+    title: str
+    trigger_reason: str
+    current_gate: Optional[str] = None
+    notes: Optional[str] = None
+    created_by: Optional[str] = "local-user"
+    patent_links: list[RiskPatentLinkInput] = []
+    solution_links: list[RiskSolutionLinkInput] = []
+    regions: list[RiskRegionInput] = []
+
+
+class RiskCaseUpdate(BaseSchema):
+    case_no: Optional[str] = None
+    title: Optional[str] = None
+    trigger_reason: Optional[str] = None
+    current_gate: Optional[str] = None
+    notes: Optional[str] = None
+    next_review_condition: Optional[str] = None
+    next_review_at: Optional[date] = None
+
+
+class RiskAssessmentCreate(BaseSchema):
+    solution_version_id: Optional[int] = None
+    jurisdiction_code: Optional[str] = None
+    assessment_stage: Optional[str] = None
+    preliminary_assessment: Optional[str] = None
+    analysis_confirmation: Optional[str] = None
+    discussion_conclusion: Optional[str] = None
+    leadership_confirmation: Optional[str] = None
+    decision: str = "pending"
+    risk_level: str = "none"
+    gate_impact: str = "unknown"
+    decision_basis: Optional[str] = None
+    mitigation_summary: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    assessed_by: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    decided_by: Optional[str] = None
+    decision_at: Optional[datetime] = None
+    created_by: Optional[str] = "local-user"
+
+
+class RiskReviewCreate(BaseSchema):
+    trigger_type: str
+    trigger_description: Optional[str] = None
+    review_outcome: str
+    next_review_condition: Optional[str] = None
+    next_review_at: Optional[date] = None
+    reviewed_by: Optional[str] = "local-user"
+
+
+class RiskPatentLink(BaseSchema):
+    id: int
+    patent_id: int
+    link_role: str
+    notes: Optional[str] = None
+    created_at: datetime
+
+
+class RiskSolutionLink(BaseSchema):
+    id: int
+    solution_version_id: int
+    link_role: str
+    created_at: datetime
+
+
+class RiskCaseRegion(BaseSchema):
+    id: int
+    region_code: str
+    region_name: Optional[str] = None
+    created_at: datetime
+
+
+class RiskAssessment(BaseSchema):
+    id: int
+    risk_case_id: int
+    solution_version_id: Optional[int] = None
+    jurisdiction_code: Optional[str] = None
+    input_hash: Optional[str] = None
+    version_no: int
+    assessment_stage: Optional[str] = None
+    preliminary_assessment: Optional[str] = None
+    analysis_confirmation: Optional[str] = None
+    discussion_conclusion: Optional[str] = None
+    leadership_confirmation: Optional[str] = None
+    decision: str
+    risk_level: str
+    gate_impact: str
+    decision_basis: Optional[str] = None
+    mitigation_summary: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    assessed_by: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    decided_by: Optional[str] = None
+    decision_at: Optional[datetime] = None
+    created_by: str
+    created_at: datetime
+
+
+class RiskReview(BaseSchema):
+    id: int
+    risk_case_id: int
+    trigger_type: str
+    trigger_description: Optional[str] = None
+    review_outcome: str
+    next_review_condition: Optional[str] = None
+    next_review_at: Optional[date] = None
+    reviewed_by: str
+    created_at: datetime
+
+
+class RiskCase(BaseSchema):
+    id: int
+    database_id: int
+    case_no: Optional[str] = None
+    title: str
+    trigger_reason: str
+    status: str
+    current_risk_level: str
+    current_decision: str
+    current_gate_impact: str
+    current_gate: Optional[str] = None
+    next_review_condition: Optional[str] = None
+    next_review_at: Optional[date] = None
+    notes: Optional[str] = None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    patent_links: list[RiskPatentLink] = []
+    solution_links: list[RiskSolutionLink] = []
+    regions: list[RiskCaseRegion] = []
+    assessments: list[RiskAssessment] = []
+    reviews: list[RiskReview] = []
+
+
 class TagBase(BaseSchema):
     name: str
     group_id: Optional[int] = None

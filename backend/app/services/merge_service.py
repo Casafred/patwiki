@@ -19,6 +19,11 @@ ANNOTATION_FIELDS = {
     "scope_description", "notes",
 }
 
+# External tables may contain legacy risk columns. Keep them as
+# FieldObservation evidence, but never let an import overwrite the legacy
+# Patent projection or bypass the structured RiskCase workflow.
+PROTECTED_RISK_PROJECTION_FIELDS = {"has_risk", "risk_level", "risk_description"}
+
 
 def _is_empty(value: Any) -> bool:
     """判断值是否为空（None / 空字符串 / 空列表 / 空字典）。"""
@@ -45,6 +50,9 @@ def merge_patent_data(existing: Patent, new_data: dict) -> dict:
 
     for field, new_value in new_data.items():
         if field == "custom_fields":
+            continue
+
+        if field in PROTECTED_RISK_PROJECTION_FIELDS:
             continue
 
         if _is_empty(new_value):

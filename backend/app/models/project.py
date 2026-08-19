@@ -23,3 +23,9 @@ class Project(Base):
 
     product = relationship("Product", back_populates="projects")
     patents = relationship("Patent", secondary="patent_projects", back_populates="projects")
+    solution_versions = relationship(
+        "ProjectSolutionVersion",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="ProjectSolutionVersion.id.desc()",
+    )

@@ -9,6 +9,7 @@ import {
   patentApi,
   productApi,
   projectApi,
+  projectRiskApi,
   searchApi,
   tagApi,
   viewApi,
@@ -70,6 +71,15 @@ export const metadataService = {
 
 export const productService = { list: (params: JsonObject = {}) => productApi.list(params) }
 export const projectService = { list: (params: JsonObject = {}) => projectApi.list(params) }
+export const projectRiskService = {
+  listSolutionVersions: (...args: Parameters<typeof projectRiskApi.listSolutionVersions>) => projectRiskApi.listSolutionVersions(...args),
+  createSolutionVersion: (...args: Parameters<typeof projectRiskApi.createSolutionVersion>) => projectRiskApi.createSolutionVersion(...args),
+  confirmSolutionVersion: (...args: Parameters<typeof projectRiskApi.confirmSolutionVersion>) => projectRiskApi.confirmSolutionVersion(...args),
+  listRiskCases: (...args: Parameters<typeof projectRiskApi.listRiskCases>) => projectRiskApi.listRiskCases(...args),
+  createRiskCase: (...args: Parameters<typeof projectRiskApi.createRiskCase>) => projectRiskApi.createRiskCase(...args),
+  addAssessment: (...args: Parameters<typeof projectRiskApi.addAssessment>) => projectRiskApi.addAssessment(...args),
+  addReview: (...args: Parameters<typeof projectRiskApi.addReview>) => projectRiskApi.addReview(...args),
+}
 export const tagService = { list: () => tagApi.list() }
 
 export const customFieldService = {

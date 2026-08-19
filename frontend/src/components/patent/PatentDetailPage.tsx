@@ -24,6 +24,7 @@ import PatentShareDialog from './PatentShareDialog'
 import PatentGraph from './PatentGraph'
 import CommentPanel from './CommentPanel'
 import AttachmentField from '../common/AttachmentField'
+import ProjectRiskContextPanel from './ProjectRiskContextPanel'
 
 interface PatentDetailPageProps {
   patentId: number
@@ -152,6 +153,11 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       delete updates.ai_fields
       delete updates.tags
       delete updates.projects
+      // Risk conclusions are now append-only structured records. The legacy
+      // projection must never be edited through the patent detail form.
+      delete updates.has_risk
+      delete updates.risk_level
+      delete updates.risk_description
       await patentApi.update(patent.id, updates)
       setEditing(false)
       await loadPatent()
@@ -341,7 +347,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           <TechnicalTab patent={patent} formData={formData} editing={editing} updateField={updateField} />
         )}
         {activeTab === 'risk' && (
-          <RiskTab patent={patent} formData={formData} editing={editing} updateField={updateField} />
+          <RiskTab patent={patent} formData={formData} editing={editing} updateField={updateField} projects={projects} />
         )}
         {activeTab === 'ai' && (
           <AITab
@@ -814,39 +820,31 @@ function TechnicalTab({ patent, formData, editing, updateField }: {
 }
 
 // ============ 风险与应用 Tab ============
-function RiskTab({ patent, formData, editing, updateField }: {
+function RiskTab({ patent, formData, editing, updateField, projects }: {
   patent: Patent
   formData: PatentEditData
   editing: boolean
   updateField: (key: keyof PatentEditData, value: unknown) => void
+  projects: Project[]
 }) {
   return (
-    <div className="detail-grid">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <ProjectRiskContextPanel patent={patent} projects={projects} />
+      <section className="identity-section">
+      <div className="identity-section-heading">
+        <div><h3>兼容风险投影</h3><p>以下旧字段仅用于兼容既有业务表和筛选结果；结构化风险案例才是新的正式来源。</p></div>
+      </div>
+      <div className="detail-grid">
       <Field label="是否有风险">
-        {editing ? (
-          <select className="form-input" value={formData.has_risk ? 'true' : 'false'} onChange={e => updateField('has_risk', e.target.value === 'true')}>
-            <option value="false">无风险</option>
-            <option value="true">有风险</option>
-          </select>
-        ) : <div className="field-value">{patent.has_risk ? '有风险' : '无风险'}</div>}
+        <div className="field-value">{patent.has_risk ? '有风险' : '无风险'}</div>
       </Field>
 
       <Field label="风险等级">
-        {editing ? (
-          <select className="form-input" value={formData.risk_level || 'none'} onChange={e => updateField('risk_level', e.target.value)}>
-            <option value="none">无</option>
-            <option value="low">低</option>
-            <option value="medium">中</option>
-            <option value="high">高</option>
-            <option value="critical">严重</option>
-          </select>
-        ) : <div className="field-value">{patent.risk_level || '-'}</div>}
+        <div className="field-value">{patent.risk_level || '-'}</div>
       </Field>
 
       <Field label="风险描述" full>
-        {editing ? (
-          <textarea className="form-input" rows={4} value={formData.risk_description || ''} onChange={e => updateField('risk_description', e.target.value)} />
-        ) : <div className="field-value">{patent.risk_description || '-'}</div>}
+        <div className="field-value">{patent.risk_description || '-'}</div>
       </Field>
 
       <Field label="关联模块">
@@ -866,6 +864,8 @@ function RiskTab({ patent, formData, editing, updateField }: {
           <textarea className="form-input" rows={4} value={formData.notes || ''} onChange={e => updateField('notes', e.target.value)} />
         ) : <div className="field-value">{patent.notes || '-'}</div>}
       </Field>
+      </div>
+      </section>
     </div>
   )
 }

@@ -59,6 +59,17 @@ from app.models.database import PatentDatabase
 from app.models.patent import Patent, PatentFamily, Citation
 from app.models.identity import PatentIdentifier
 from app.models.export_template import PatentExportTemplate
+from app.models.project_risk import (
+    ProjectSolutionVersion,
+    ProjectSolutionChange,
+    ProjectSolutionRegion,
+    RiskCase,
+    RiskPatentLink,
+    RiskSolutionLink,
+    RiskCaseRegion,
+    RiskAssessmentVersion,
+    RiskReviewEvent,
+)
 
 # AI
 from app.models.ai import AITask, AIFieldValue
@@ -108,6 +119,9 @@ __all__ = [
     "PatentDatabase",
     # patent
     "Patent", "PatentFamily", "Citation", "PatentIdentifier", "PatentExportTemplate",
+    "ProjectSolutionVersion", "ProjectSolutionChange", "ProjectSolutionRegion",
+    "RiskCase", "RiskPatentLink", "RiskSolutionLink", "RiskCaseRegion",
+    "RiskAssessmentVersion", "RiskReviewEvent",
     # ai
     "AITask", "AIFieldValue",
     # importing

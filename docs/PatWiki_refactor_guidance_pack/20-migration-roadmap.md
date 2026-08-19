@@ -155,6 +155,8 @@
 
 ## Phase 2 — 轻量 ProjectSolutionVersion
 
+> 当前状态（2026-08-19）：轻量切片已实现。已落地方案版本、变化点、地区、来源描述、确认/替代关系，以及风险案例所需的方案关联；TechnicalFeature、Artifact、BOM/图纸和 PLM 同步仍未实现。
+
 目标：为专利风险和项目关联补充可复原的方案上下文，不建设完整研发版本管理。
 
 工作：
@@ -178,6 +180,8 @@
 ---
 
 ## Phase 3 — Risk V2
+
+> 当前状态（2026-08-19）：基础切片已实现，完整 Risk V2 尚未完成。已落地 RiskCase、RiskPatentLink、RiskSolutionLink、追加式 RiskAssessmentVersion 和 RiskReviewEvent；ClaimAnalysis、Mitigation、RiskDecision、RiskWatch、ArtifactLink、Patent.risk_* rollup 和正式版本化迁移仍属于后续工作。
 
 目标：移除 Patent 全局风险真相。
 
