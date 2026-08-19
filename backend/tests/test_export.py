@@ -11,6 +11,8 @@ from sqlalchemy.pool import StaticPool
 from app.api.export import router
 from app.database import Base, get_db
 from app.models import Patent, PatentDatabase
+from app.services.export_service import ExportService
+from app.services.view_service import ViewService
 
 
 class ExportApiTest(unittest.TestCase):
@@ -65,6 +67,32 @@ class ExportApiTest(unittest.TestCase):
         self.assertEqual(sheet.freeze_panes, "A2")
         self.assertEqual(sheet["A1"].value, "标题")
         self.assertEqual(sheet.max_row, 3)
+
+    def test_system_work_file_templates_are_listed_and_used_by_export(self):
+        ViewService.ensure_default_business_views(self.db, self.database_id)
+        templates = ExportService.ensure_default_templates(self.db, self.database_id)
+        self.assertEqual(
+            {template.template_key for template in templates},
+            {
+                "risk_meeting_excel",
+                "ip_application_control_excel",
+                "patent_analysis_work_file",
+                "daily_patent_accumulation_csv",
+            },
+        )
+
+        listed = self.client.get("/export/templates", params={"database_id": self.database_id})
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()), 4)
+
+        csv_template = next(item for item in listed.json() if item["output_format"] == "csv")
+        response = self.client.post("/export/csv", json={
+            "database_id": self.database_id,
+            "template_id": csv_template["id"],
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.content.startswith(b"\xef\xbb\xbf"))
+        self.assertIn("标题", response.content.decode("utf-8-sig"))
 
 
 if __name__ == "__main__":

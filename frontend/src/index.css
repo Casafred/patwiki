@@ -297,6 +297,242 @@ input, select, textarea {
   margin-top: 2px;
 }
 
+.high-frequency-views {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+}
+
+.high-frequency-views-label {
+  padding: 2px 4px 5px;
+  color: #6f8a8c;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.high-frequency-view {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #9fb6b7;
+  font-size: 11px;
+  text-align: left;
+}
+
+.high-frequency-view:hover,
+.high-frequency-view.active {
+  background: #203f43;
+  color: #d7f7f2;
+}
+
+.high-frequency-view.active {
+  font-weight: 600;
+}
+
+.high-frequency-view-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #73c9bb;
+}
+
+.work-file-action {
+  border-color: #0f766e;
+  background: #0f766e;
+}
+
+.work-file-action:hover {
+  background: #115e59;
+}
+
+.work-file-modal {
+  max-width: 860px;
+}
+
+.work-file-subtitle {
+  margin: 5px 0 0;
+  color: var(--ink-500);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.work-file-error {
+  margin: 0 20px 12px;
+  padding: 9px 11px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.work-file-loading,
+.work-file-empty {
+  min-height: 180px;
+}
+
+.work-file-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.95fr) minmax(0, 1.35fr);
+  gap: 16px;
+  padding: 4px 20px 0;
+}
+
+.work-file-template-list {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+
+.work-file-template {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink-700);
+  text-align: left;
+}
+
+.work-file-template:hover,
+.work-file-template.active {
+  border-color: #5eead4;
+  background: #f0fdfa;
+}
+
+.work-file-template.active {
+  box-shadow: inset 3px 0 #0f766e;
+}
+
+.work-file-format {
+  min-width: 42px;
+  padding: 4px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.work-file-format-excel { background: #dcfce7; color: #166534; }
+.work-file-format-word { background: #dbeafe; color: #1d4ed8; }
+.work-file-format-csv { background: #fef3c7; color: #92400e; }
+
+.work-file-template-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.work-file-template-copy strong {
+  color: var(--ink-900);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.work-file-template-copy small {
+  color: var(--ink-500);
+  font-size: 10px;
+}
+
+.work-file-preview {
+  min-height: 280px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.work-file-preview-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.work-file-preview h4 {
+  margin: 4px 0 0;
+  color: var(--ink-950);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.work-file-version {
+  flex: 0 0 auto;
+  color: var(--ink-500);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+}
+
+.work-file-preview > p {
+  margin: 12px 0;
+  color: var(--ink-600);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.work-file-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin: 0;
+}
+
+.work-file-meta > div {
+  padding: 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.work-file-meta dt {
+  color: var(--ink-500);
+  font-size: 10px;
+}
+
+.work-file-meta dd {
+  margin: 4px 0 0;
+  color: var(--ink-800);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.work-file-note {
+  margin-top: 12px;
+  padding: 9px 10px;
+  border-left: 3px solid #14b8a6;
+  background: #ecfdf5;
+  color: #166534;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.work-file-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 18px 20px 20px;
+}
+
+@media (max-width: 700px) {
+  .work-file-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .work-file-preview {
+    min-height: 0;
+  }
+}
+
 /* Shared workspace pages: a consistent, dense surface for every sidebar tool. */
 .page-container {
   width: min(1360px, 100%);

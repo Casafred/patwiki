@@ -25,6 +25,7 @@ import KanbanView from '../views/KanbanView'
 import FormView from '../views/FormView'
 import GanttView from '../views/GanttView'
 import ExportDialog from '../common/ExportDialog'
+import WorkFileDialog from '../common/WorkFileDialog'
 import AttachmentField from '../common/AttachmentField'
 import AIQuickAnalyzeModal from '../ai/AIQuickAnalyzeModal'
 
@@ -353,6 +354,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [showGroupConfig, setShowGroupConfig] = useState(false)
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
+  const [showWorkFileDialog, setShowWorkFileDialog] = useState(false)
 
   // 用于丢弃快速翻页/切库时旧请求的响应：每次发起 loadPatents 自增，
   // 返回时若 ID 不等于最新值，说明已有更新请求在路上，直接丢弃结果。
@@ -1854,6 +1856,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           </button>
           <button className="btn btn-sm btn-secondary datagrid-export-action" onClick={handleExport}>
             <Icon name="download" /> 导出
+          </button>
+          <button className="btn btn-sm btn-primary work-file-action" onClick={() => setShowWorkFileDialog(true)} title="按业务模板生成 Excel、Word 或 CSV 工作文件">
+            <Icon name="file" /> 工作文件
           </button>
           <button
             className="btn btn-sm btn-secondary datagrid-utility-action"
@@ -3374,6 +3379,14 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           search={searchText}
           filters={filterValues}
           onClose={() => setShowExportDialog(false)}
+        />
+      )}
+      {showWorkFileDialog && (
+        <WorkFileDialog
+          databaseId={activeDatabaseId}
+          search={searchText}
+          filters={filterValues}
+          onClose={() => setShowWorkFileDialog(false)}
         />
       )}
     </div>

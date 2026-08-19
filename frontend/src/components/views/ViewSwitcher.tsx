@@ -14,6 +14,15 @@ const layoutLabels: Record<string, string> = {
   calendar: '日历',
 }
 
+const highFrequencyViewKeys = new Set([
+  'risk_meeting_statistics',
+  'company_filing_category',
+  'ip_risk_control',
+  'ip_application_control',
+  'product_category_master',
+  'daily_patent_accumulation',
+])
+
 export default function ViewSwitcher({ onOpenView }: ViewSwitcherProps) {
   const {
     currentDatabaseId,
@@ -25,6 +34,7 @@ export default function ViewSwitcher({ onOpenView }: ViewSwitcherProps) {
   const [showCreate, setShowCreate] = useState(false)
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
+  const highFrequencyViews = views.filter(view => view.template_key && highFrequencyViewKeys.has(view.template_key))
 
   const handleChange = (viewId: number) => {
     setCurrentViewId(viewId)
@@ -80,6 +90,23 @@ export default function ViewSwitcher({ onOpenView }: ViewSwitcherProps) {
           +
         </button>
       </div>
+      {highFrequencyViews.length > 0 && (
+        <div className="high-frequency-views" aria-label="高频业务视图">
+          <div className="high-frequency-views-label">高频业务视图</div>
+          {highFrequencyViews.map(view => (
+            <button
+              type="button"
+              key={view.id}
+              className={`high-frequency-view ${currentViewId === view.id ? 'active' : ''}`}
+              onClick={() => handleChange(view.id)}
+              title={view.description || view.name}
+            >
+              <span className="high-frequency-view-dot" />
+              <span>{view.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {showCreate && (
         <div className="view-create-form">
           <input
