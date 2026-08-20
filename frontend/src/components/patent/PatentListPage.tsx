@@ -371,6 +371,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   } | null>(null)
   const [groupedGroups, setGroupedGroups] = useState<ViewGroup[]>([])
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set())
+  const [collapsedFamilyKeys, setCollapsedFamilyKeys] = useState<Set<string>>(new Set())
   const [showGroupConfig, setShowGroupConfig] = useState(false)
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
@@ -499,13 +500,14 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             return
           }
           const groupFields = getViewGroupFields(activeViewForLoad!)
-          if (groupFields.length > 0) {
+          if (groupFields.length > 0 && !groupByFamily) {
             const result = await viewApi.grouped(viewId, {
               page,
               page_size: pageSize,
               search: searchText || undefined,
               sort_by: sortField,
               sort_order: sortOrder,
+              group_by_family: groupByFamily,
               extra_filters: viewFilters,
             })
             if (myRequestId !== loadPatentsRequestId.current) return
@@ -522,6 +524,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             search: searchText || undefined,
             sort_by: sortField,
             sort_order: sortOrder,
+            group_by_family: groupByFamily,
             extra_filters: viewFilters,
           })
           if (myRequestId !== loadPatentsRequestId.current) return
@@ -543,7 +546,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       }
       if (currentProductId) params.product_id = currentProductId
       // P2-8：大表直查（无产品筛选）时透传同族聚拢开关
-      if (groupByFamily && !currentProductId) {
+      if (groupByFamily) {
         params.group_by_family = true
       }
 
@@ -1552,6 +1555,16 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const displayPatents = groupPresentation
     ? patents.filter(patent => groupPresentation.visibleIds.has(patent.id) || groupPresentation.headerIds.has(patent.id))
     : patents
+  const familyFirstIds = new Set<number>()
+  if (groupByFamily) {
+    let previousFamilyKey: string | null = null
+    displayPatents.forEach(patent => {
+      const familyKey = patent.family_id ? `family:${patent.family_id}` : null
+      if (familyKey && familyKey !== previousFamilyKey) familyFirstIds.add(patent.id)
+      previousFamilyKey = familyKey
+    })
+  }
+  const familyDisplayPatents = displayPatents
   const saveGroupConfig = async (fields: ViewGroupField[]) => {
     if (!activeView) return
     const result = await viewApi.updateGroupConfig(activeView.id, { fields })
@@ -2266,7 +2279,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
               </tr>
             </thead>
             <tbody>
-              {displayPatents.map((p, rowIdx) => {
+              {familyDisplayPatents.map((p, rowIdx) => {
                 // P2-8：同族聚拢模式下，为同族组交替背景色 + 行首徽章
                 const familyBgColors = ['#faf5ff', '#eff6ff', '#f0fdf4', '#fefce8', '#fff7ed', '#fdf2f8']
                 let rowBg: string | undefined
@@ -2276,7 +2289,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   const colorSlot = p.family_id % familyBgColors.length
                   rowBg = familyBgColors[colorSlot]
                   // 检测同族组首行（前一行 family_id 不同）
-                  const prevFamilyId = rowIdx > 0 ? patents[rowIdx - 1].family_id : undefined
+                  const prevFamilyId = rowIdx > 0 ? familyDisplayPatents[rowIdx - 1].family_id : undefined
                   const isGroupStart = prevFamilyId !== p.family_id
                   if (isGroupStart) {
                     familyBadge = (
@@ -2301,6 +2314,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 }
                 const groupHeaders = groupPresentation?.headers.get(p.id) || []
                 const isGroupRowCollapsed = groupHeaders.some(header => collapsedGroupKeys.has(header.id))
+                const familyKey = p.family_id ? `family:${p.family_id}` : null
+                const isFamilyStart = groupByFamily && !!p.family_id && familyFirstIds.has(p.id)
+                const isFamilyRowCollapsed = !!familyKey && collapsedFamilyKeys.has(familyKey)
                 return (
                 <Fragment key={p.id}>
                 {groupHeaders.map(groupHeader => (
@@ -2321,7 +2337,24 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                     </td>
                   </tr>
                 ))}
-                {!isGroupRowCollapsed && (
+                {isFamilyStart && (
+                  <tr
+                    className="family-group-header"
+                    onClick={() => setCollapsedFamilyKeys(previous => {
+                      const next = new Set(previous)
+                      if (familyKey && next.has(familyKey)) next.delete(familyKey)
+                      else if (familyKey) next.add(familyKey)
+                      return next
+                    })}
+                  >
+                    <td colSpan={visibleFields.length + 2}>
+                      <span className="family-group-toggle">{familyKey && collapsedFamilyKeys.has(familyKey) ? '›' : '⌄'}</span>
+                      <strong>{p.family_key || `同族 ${p.family_id}`}</strong>
+                      <span className="family-group-count">{p.family_size || 1} 件独立专利</span>
+                    </td>
+                  </tr>
+                )}
+                {!isGroupRowCollapsed && !isFamilyRowCollapsed && (
                 <tr
                   key={p.id}
                   className={selectedIds.includes(p.id) ? 'row-selected' : ''}

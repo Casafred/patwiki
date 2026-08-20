@@ -60,6 +60,7 @@ export interface Patent {
   // P2-8：同族聚拢相关
   family_id?: number | null
   family_size?: number | null
+  family_key?: string | null
   tags?: Tag[]
   projects?: Project[]
   created_at: string
@@ -259,6 +260,28 @@ export interface ConditionalFormatRule {
   id: string
   field: string
   conditions: ConditionalFormatCondition[]
+}
+
+export interface PatentFamilyMember {
+  id: number
+  publication_number?: string | null
+  application_number?: string | null
+  grant_number?: string | null
+  title: string
+  country?: string | null
+  legal_status?: string | null
+  filing_date?: string | null
+  publication_date?: string | null
+  grant_date?: string | null
+  is_current: boolean
+}
+
+export interface PatentFamilyResponse {
+  root_id: number
+  family_id?: number | null
+  family_key?: string | null
+  family_type?: string | null
+  members: PatentFamilyMember[]
 }
 
 export interface ViewColumnConfig {

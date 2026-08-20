@@ -6,6 +6,7 @@ import { getErrorMessage } from '../../lib/errors'
 
 interface PatentGraphProps {
   patentId: number
+  onPatentNavigate?: (patentId: number) => void
 }
 
 function nodeKind(data: NodeData): string {
@@ -16,7 +17,7 @@ function edgeRelation(data: EdgeData): string {
   return String(data.data?.relation || '')
 }
 
-export default function PatentGraph({ patentId }: PatentGraphProps) {
+export default function PatentGraph({ patentId, onPatentNavigate }: PatentGraphProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const graphRef = useRef<Graph | null>(null)
   const [graphData, setGraphData] = useState<PatentGraphResponse | null>(null)
@@ -178,6 +179,15 @@ export default function PatentGraph({ patentId }: PatentGraphProps) {
           <strong>{selectedNode.title}</strong>
           <span>{selectedNode.number}</span>
           <span>{selectedNode.kind === 'family' ? '同族专利' : selectedNode.kind === 'citation' ? '引用关系节点' : '当前专利'}</span>
+          {selectedNode.patent_id !== patentId && onPatentNavigate && (
+            <button
+              className="btn btn-xs btn-primary"
+              type="button"
+              onClick={() => onPatentNavigate(selectedNode.patent_id)}
+            >
+              打开专利详情
+            </button>
+          )}
         </div>
       )}
       {!error && graphData && graphData.nodes.length === 1 && (

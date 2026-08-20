@@ -226,6 +226,7 @@ def list_view_patents(
     search: Optional[str] = Query(None),
     sort_by: Optional[str] = Query(None),
     sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
+    group_by_family: bool = Query(False, description="按同族聚拢当前视图中的专利"),
     extra_filters: Optional[str] = Query(None, description="JSON 字符串：临时筛选，与视图自身 filter 合并"),
     db: Session = Depends(get_db),
 ):
@@ -243,6 +244,7 @@ def list_view_patents(
     patents, total = ViewService.list_view_patents(
         db, view, page=page, page_size=page_size, extra_filters=ef,
         search=search, sort_by=sort_by, sort_order=sort_order,
+        group_by_family=group_by_family,
     )
 
     # 批量返回视图本地字段值（避免 N+1：逐条查询 patent_view_field_values）
@@ -267,6 +269,7 @@ def get_grouped_view_patents(
     search: Optional[str] = Query(None),
     sort_by: Optional[str] = Query(None),
     sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
+    group_by_family: bool = Query(False, description="按同族聚拢当前视图中的专利"),
     extra_filters: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
@@ -284,6 +287,7 @@ def get_grouped_view_patents(
     return ViewService.get_grouped_data(
         db, view, page=page, page_size=page_size, extra_filters=ef,
         search=search, sort_by=sort_by, sort_order=sort_order,
+        group_by_family=group_by_family,
     )
 
 

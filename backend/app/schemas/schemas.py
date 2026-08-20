@@ -102,6 +102,7 @@ class Patent(PatentBase):
     # family_size 由 list_patents 在 group_by_family=True 时聚合附加，None 表示未计算）
     family_id: Optional[int] = None
     family_size: Optional[int] = None
+    family_key: Optional[str] = None
     tags: list["Tag"] = []
     projects: list["Project"] = []
 

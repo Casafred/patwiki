@@ -24,6 +24,7 @@ from app.models import (
     ImportSourceRow,
     PatentProjectLink,
     Patent as PatentModel,
+    PatentFamily,
     PatentHistory,
     PatentIdentifier,
 )
@@ -235,6 +236,54 @@ def get_patent(patent_id: int, db: Session = Depends(get_db)):
     return patent
 
 
+@router.get("/{patent_id}/family")
+def get_patent_family(patent_id: int, db: Session = Depends(get_db)):
+    """返回当前专利所在库中的同族成员。
+
+    同族成员是独立 Patent 记录，详情页需要用其 id 进行真实导航；
+    database_id 限制保证历史数据中跨库复用 family_id 时不会串库。
+    """
+    root = db.query(PatentModel).filter(PatentModel.id == patent_id).first()
+    if not root:
+        raise NotFoundException("Patent not found")
+
+    members = [root]
+    if root.family_id is not None:
+        members = db.query(PatentModel).filter(
+            PatentModel.family_id == root.family_id,
+            PatentModel.database_id == root.database_id,
+        ).order_by(
+            (PatentModel.id == root.id).desc(),
+            PatentModel.filing_date.desc(),
+            PatentModel.id.asc(),
+        ).all()
+
+    family = db.query(PatentFamily).filter(PatentFamily.id == root.family_id).first() if root.family_id else None
+
+    def serialize(member: PatentModel) -> dict[str, Any]:
+        return {
+            "id": member.id,
+            "publication_number": member.publication_number,
+            "application_number": member.application_number,
+            "grant_number": member.grant_number,
+            "title": member.title,
+            "country": member.country,
+            "legal_status": member.legal_status.value if member.legal_status else None,
+            "filing_date": member.filing_date.isoformat() if member.filing_date else None,
+            "publication_date": member.publication_date.isoformat() if member.publication_date else None,
+            "grant_date": member.grant_date.isoformat() if member.grant_date else None,
+            "is_current": member.id == root.id,
+        }
+
+    return {
+        "root_id": root.id,
+        "family_id": root.family_id,
+        "family_key": family.family_id if family else None,
+        "family_type": family.family_type if family else None,
+        "members": [serialize(member) for member in members],
+    }
+
+
 @router.get("/{patent_id}/graph")
 def get_patent_graph(
     patent_id: int,
@@ -275,7 +324,10 @@ def get_patent_graph(
             frontier_patents = db.query(PatentModel).filter(PatentModel.id.in_(frontier)).all()
             family_ids = {patent.family_id for patent in frontier_patents if patent.family_id is not None}
             if family_ids:
-                family_members = db.query(PatentModel).filter(PatentModel.family_id.in_(family_ids)).all()
+                family_members = db.query(PatentModel).filter(
+                    PatentModel.family_id.in_(family_ids),
+                    PatentModel.database_id == root.database_id,
+                ).all()
                 for member in family_members:
                     patents_by_id[member.id] = member
                 for family_id in family_ids:

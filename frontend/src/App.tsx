@@ -79,7 +79,14 @@ function PatentDetailRoute() {
     return <Navigate to={databaseId ? `/db/${databaseId}/patents` : '/patents'} replace />
   }
 
-  return <PatentDetailPage patentId={parsedPatentId} onBack={() => navigate(databaseId ? `/db/${databaseId}/patents` : '/patents')} />
+  const detailPath = (id: number) => databaseId ? `/db/${databaseId}/patents/${id}` : `/patents/${id}`
+  return (
+    <PatentDetailPage
+      patentId={parsedPatentId}
+      onBack={() => navigate(databaseId ? `/db/${databaseId}/patents` : '/patents')}
+      onPatentNavigate={(id) => navigate(detailPath(id))}
+    />
+  )
 }
 
 function PublicPatentShareRoute() {

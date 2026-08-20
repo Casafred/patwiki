@@ -6,7 +6,7 @@ import type {
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
-  PatentGraphResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
+  PatentGraphResponse, PatentFamilyResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
   GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
   ProjectSolutionVersion, RiskCase,
@@ -124,6 +124,7 @@ export const viewApi = {
     search?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
+    group_by_family?: boolean
     extra_filters?: JsonObject
   } = {}): Promise<ViewPatentListResponse> => {
     const { extra_filters, ...query } = params
@@ -143,6 +144,7 @@ export const viewApi = {
     search?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
+    group_by_family?: boolean
     extra_filters?: JsonObject
   } = {}): Promise<GroupedViewResponse> => {
     const { extra_filters, ...query } = params
@@ -284,6 +286,8 @@ export const patentApi = {
     api.get('/patents', { params }),
 
   get: (id: number): Promise<Patent> => api.get(`/patents/${id}`),
+
+  family: (id: number): Promise<PatentFamilyResponse> => api.get(`/patents/${id}/family`),
 
   identifiers: (id: number): Promise<PatentIdentifier[]> => api.get(`/patents/${id}/identifiers`),
 

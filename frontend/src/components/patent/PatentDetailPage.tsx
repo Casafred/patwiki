@@ -18,6 +18,7 @@ import type {
   PatentIdentifier,
   PatentFieldSource,
   PatentIdentityConflict,
+  PatentFamilyMember,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import PatentShareDialog from './PatentShareDialog'
@@ -29,12 +30,13 @@ import ProjectRiskContextPanel from './ProjectRiskContextPanel'
 interface PatentDetailPageProps {
   patentId: number
   onBack: () => void
+  onPatentNavigate?: (patentId: number) => void
 }
 
 type Tab = 'basic' | 'identity' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'history' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
-export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageProps) {
+export default function PatentDetailPage({ patentId, onBack, onPatentNavigate }: PatentDetailPageProps) {
   const [patent, setPatent] = useState<Patent | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -373,6 +375,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
             editing={editing}
             updateField={updateField}
             onProjectsChanged={loadPatent}
+            onPatentNavigate={onPatentNavigate}
           />
         )}
         {activeTab === 'history' && (
@@ -1072,7 +1075,7 @@ function CustomTab({ patent, editing, updateField }: {
 }
 
 // ============ 关联关系 Tab ============
-function RelationsTab({ patent, formData, tags, projects, editing, updateField, onProjectsChanged }: {
+function RelationsTab({ patent, formData, tags, projects, editing, updateField, onProjectsChanged, onPatentNavigate }: {
   patent: Patent
   formData: PatentEditData
   tags: Tag[]
@@ -1080,12 +1083,41 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
   editing: boolean
   updateField: (key: keyof PatentEditData, value: unknown) => void
   onProjectsChanged: () => Promise<void>
+  onPatentNavigate?: (patentId: number) => void
 }) {
   const patentTags = patent.tags || []
   const patentProjects = patent.projects || []
   const [projectId, setProjectId] = useState('')
   const [projectSaving, setProjectSaving] = useState(false)
   const [projectError, setProjectError] = useState('')
+  const [familyMembers, setFamilyMembers] = useState<PatentFamilyMember[]>([])
+  const [familyKey, setFamilyKey] = useState<string | null>(null)
+  const [familyLoading, setFamilyLoading] = useState(false)
+  const [familyError, setFamilyError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    // The request lifecycle owns these local loading/error states.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFamilyLoading(true)
+    setFamilyError('')
+    void patentApi.family(patent.id)
+      .then(result => {
+        if (cancelled) return
+        setFamilyMembers(result.members)
+        setFamilyKey(result.family_key || null)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setFamilyMembers([])
+        setFamilyKey(null)
+        setFamilyError(getErrorMessage(error, '同族信息加载失败'))
+      })
+      .finally(() => {
+        if (!cancelled) setFamilyLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [patent.id])
 
   // 编辑态下从 patent 现有标签初始化，后续变更通过 updateField 写入 formData
   // 这里直接用 patent 数据作为初始选中态，保存时由父组件的 formData 决定
@@ -1224,7 +1256,50 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
       </Field>
 
       <div style={{ gridColumn: '1 / -1' }}>
-        <PatentGraph patentId={patent.id} />
+        <section className="family-members-panel" aria-label="同族专利成员">
+          <div className="family-members-heading">
+            <div>
+              <h3>同族专利</h3>
+              <p>{familyKey ? `${familyKey} · ${familyMembers.length} 个独立专利记录` : '当前专利尚未建立同族关系'}</p>
+            </div>
+            {familyLoading && <span className="family-members-status">加载中...</span>}
+          </div>
+          {familyError ? (
+            <div className="patent-graph-message error">{familyError}</div>
+          ) : familyMembers.length <= 1 ? (
+            <div className="family-members-empty">暂无其他已入库的同族成员。</div>
+          ) : (
+            <div className="family-members-list">
+              {familyMembers.map(member => {
+                const number = member.publication_number || member.application_number || member.grant_number || `专利 #${member.id}`
+                return (
+                  <div className={`family-member-row ${member.is_current ? 'is-current' : ''}`} key={member.id}>
+                    <div className="family-member-main">
+                      <strong>{member.title || number}</strong>
+                      <span className="family-member-number">{number}</span>
+                    </div>
+                    <div className="family-member-meta">
+                      <span>{member.country || '-'}</span>
+                      <span>{member.legal_status || '未知状态'}</span>
+                      {member.publication_date && <span>公开 {member.publication_date}</span>}
+                    </div>
+                    {member.is_current ? (
+                      <span className="family-member-current">当前专利</span>
+                    ) : onPatentNavigate ? (
+                      <button className="btn btn-xs btn-secondary" type="button" onClick={() => onPatentNavigate(member.id)}>
+                        查看详情
+                      </button>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div style={{ gridColumn: '1 / -1' }}>
+        <PatentGraph patentId={patent.id} onPatentNavigate={onPatentNavigate} />
       </div>
     </div>
   )

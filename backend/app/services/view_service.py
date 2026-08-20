@@ -387,6 +387,7 @@ class ViewService:
         search: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
+        group_by_family: bool = False,
     ) -> tuple[list[Patent], int]:
         """获取视图中的专利列表。
 
@@ -410,6 +411,7 @@ class ViewService:
             filters=merged_filters if merged_filters else None,
             sort_by=sort_by,
             sort_order=sort_order,
+            group_by_family=group_by_family,
         )
         return patents, total
 
@@ -829,6 +831,7 @@ class ViewService:
         search: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
+        group_by_family: bool = False,
     ) -> dict:
         """Return the current view page as nested groups."""
         group_fields = ViewService.validate_group_by_config(view.group_by_config).get("fields", [])
@@ -837,6 +840,7 @@ class ViewService:
             db, view, page=page, page_size=normalized_page_size,
             extra_filters=extra_filters, search=search,
             sort_by=sort_by, sort_order=sort_order,
+            group_by_family=group_by_family,
         )
         local_values = {}
         if patents:
