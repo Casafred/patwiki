@@ -125,6 +125,7 @@ def _find_or_create_patent_by_number(
     db: Session,
     number: str,
     database_id: Optional[int] = None,
+    create_placeholder: bool = True,
 ) -> Optional[Patent]:
     """根据申请号或公开号找专利；找不到则创建占位专利。
 
@@ -192,7 +193,11 @@ def _find_or_create_patent_by_number(
         if existing:
             return existing
 
-    # 创建占位专利
+    if not create_placeholder:
+        return None
+
+    # 创建占位专利。仅供明确需要建立身份锚点的兼容调用使用；关系导入
+    # 默认不创建占位记录，以便读模型真实区分 missing_record。
     placeholder = Patent(
         title="待补全",
         # 关系列通常提供公开号；以公开号作为占位锚点，后续导入申请/授权号
@@ -206,6 +211,42 @@ def _find_or_create_patent_by_number(
     db.flush()
     ensure_patent_identifiers(db, placeholder, source_system="relation")
     return placeholder
+
+
+def find_existing_patent_by_number(
+    db: Session,
+    number: str,
+) -> Optional[Patent]:
+    """只查找已有 Patent，不创建占位记录。
+
+    关系读接口需要区分“已入库”和“仅在来源列出现”。因此不能复用
+    `_find_or_create_patent_by_number`，否则读取关系会产生副作用。
+    """
+    normalized = _normalize_patent_number(number)
+    if not normalized:
+        return None
+
+    identity_specs = [
+        spec
+        for identifier_type in ("application", "publication", "grant")
+        for spec in [parse_identifier(normalized, identifier_type)]
+        if spec
+    ]
+    identity_matches = find_patents_by_identifiers(db, identity_specs)
+    if len(identity_matches) == 1:
+        return identity_matches[0]
+    if len(identity_matches) > 1:
+        return None
+
+    for variant in _generate_lookup_variants(normalized):
+        existing = db.query(Patent).filter(
+            (Patent.application_number == variant)
+            | (Patent.publication_number == variant)
+            | (Patent.grant_number == variant)
+        ).first()
+        if existing:
+            return existing
+    return None
 
 
 def _get_or_create_family_by_ids(
@@ -266,6 +307,7 @@ def process_family_members(
     current_patent: Patent,
     family_numbers: list[str],
     database_id: Optional[int] = None,
+    create_placeholders: bool = True,
 ) -> dict:
     """处理同族号列表：找/建成员专利，再用成员 ID 哈希建 PatentFamily，
     把所有成员的 family_id 指向同一族。
@@ -288,7 +330,9 @@ def process_family_members(
         if not num:
             continue
         all_numbers_for_desc.append(num)
-        member = _find_or_create_patent_by_number(db, num, database_id)
+        member = _find_or_create_patent_by_number(
+            db, num, database_id, create_placeholder=create_placeholders,
+        )
         if member is None:
             continue
         if member.id is None:
@@ -326,6 +370,7 @@ def process_citations(
     current_patent: Patent,
     cited_numbers: list[str],
     database_id: Optional[int] = None,
+    create_placeholders: bool = True,
 ) -> dict:
     """处理"引用专利"列：当前专利 → 引用列中的专利。
 
@@ -335,6 +380,7 @@ def process_citations(
         db, current_patent, cited_numbers,
         is_citing=True,  # 当前专利是 citing
         database_id=database_id,
+        create_placeholders=create_placeholders,
     )
 
 
@@ -343,6 +389,7 @@ def process_citing_patents(
     current_patent: Patent,
     citing_numbers: list[str],
     database_id: Optional[int] = None,
+    create_placeholders: bool = True,
 ) -> dict:
     """处理"被引用专利"列：列中专利 → 引用当前专利。
 
@@ -352,6 +399,7 @@ def process_citing_patents(
         db, current_patent, citing_numbers,
         is_citing=False,  # 当前专利是被 cited 的
         database_id=database_id,
+        create_placeholders=create_placeholders,
     )
 
 
@@ -361,6 +409,7 @@ def _process_citation_direction(
     numbers: list[str],
     is_citing: bool,
     database_id: Optional[int] = None,
+    create_placeholders: bool = True,
 ) -> dict:
     created = 0
     links = 0
@@ -371,7 +420,9 @@ def _process_citation_direction(
         num = num.strip()
         if not num:
             continue
-        other = _find_or_create_patent_by_number(db, num, database_id)
+        other = _find_or_create_patent_by_number(
+            db, num, database_id, create_placeholder=create_placeholders,
+        )
         # 号格式不合法时跳过，不创建占位专利也不建关系
         if other is None:
             continue

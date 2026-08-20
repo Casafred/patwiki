@@ -6,7 +6,7 @@ from datetime import date
 
 from app.database import get_db
 from app.models import CustomField, CustomFieldType, Patent, PatentHistory
-from app.services.field_registry import get_all_fields_meta, SYSTEM_FIELD_KEYS, get_system_field_meta
+from app.services.field_registry import get_all_fields_meta, RELATION_FIELD_KEYS, SYSTEM_FIELD_KEYS, get_system_field_meta
 from app.services.patent_service import PatentService, _is_value_changed, _stringify_value
 from app.services.formula_service import FormulaService
 from app.core.exceptions import BadRequestException, NotFoundException
@@ -46,6 +46,9 @@ def update_cell(
     patent = db.query(Patent).filter(Patent.id == patent_id).first()
     if not patent:
         raise NotFoundException("Patent not found")
+
+    if field_key in RELATION_FIELD_KEYS:
+        raise BadRequestException("同族/引用原始列是导入来源投影，请在关系面板维护结构化关系")
 
     history_entry = None
     if field_key in SYSTEM_FIELD_KEYS:

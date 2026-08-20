@@ -15,11 +15,14 @@ from app.database import Base, get_db
 from app.core.exceptions import BadRequestException
 from app.models import (
     CustomField, CustomFieldType, FieldObservation, GovernanceDecision,
-    ImportBatch, ImportSourceRow, Patent, PatentDatabase, PatentHistory,
+    Citation, ImportBatch, ImportSourceRow, Patent, PatentDatabase, PatentHistory,
 )
 from app.services.field_registry import get_all_fields_meta
 from app.services.import_service import ImportService
-from app.services.relation_service import parse_patent_numbers, process_family_members
+from app.services.relation_service import (
+    parse_patent_numbers, process_citations, process_citing_patents,
+    process_family_members,
+)
 
 
 class ImportPipelineTest(unittest.TestCase):
@@ -54,6 +57,161 @@ class ImportPipelineTest(unittest.TestCase):
 
         self.assertEqual(STANDARD_FIELD_MAPPINGS["同族列"], "family_members")
         self.assertEqual(STANDARD_FIELD_MAPPINGS["family members"], "family_members")
+
+    def test_citation_column_aliases_and_raw_projection_are_preserved(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        mapping, issues = ImportService.suggest_mapping(
+            ["引用专利号", "被引用专利号", "引用说明"],
+            db,
+        )
+        try:
+            self.assertEqual(mapping["引用专利号"], "cited_patents")
+            self.assertEqual(mapping["被引用专利号"], "citing_patents")
+            self.assertEqual(mapping["引用说明"], "")
+            self.assertEqual(issues, [])
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_relation_import_keeps_raw_columns_and_does_not_create_missing_targets(self):
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        try:
+            database = PatentDatabase(name="关系导入库")
+            current = Patent(title="当前专利", publication_number="CN100000001A", country="CN", database=database)
+            cited = Patent(title="已存在被引专利", publication_number="US100000002A", country="US", database=database)
+            db.add_all([database, current, cited])
+            db.commit()
+            patent_data, virtual = ImportService._row_to_patent_data(
+                {"引用专利号": "US100000002A | EP999999999A1", "被引用专利号": "CN100000003A"},
+                {"引用专利号": "cited_patents", "被引用专利号": "citing_patents"},
+                db,
+            )
+            self.assertEqual(patent_data["custom_fields"]["cited_patents"], "US100000002A | EP999999999A1")
+            self.assertEqual(virtual["cited_numbers"], ["US100000002A", "EP999999999A1"])
+            result = process_citations(db, current, virtual["cited_numbers"], database.id, create_placeholders=False)
+            self.assertEqual(result["links"], 1)
+            self.assertEqual(db.query(Patent).count(), 2)
+            self.assertEqual(
+                db.query(Patent).filter(
+                    Patent.publication_number == "EP999999999A1",
+                ).count(),
+                0,
+            )
+            reverse = process_citing_patents(db, current, virtual["citing_numbers"], database.id, create_placeholders=False)
+            self.assertEqual(reverse["links"], 0)
+            self.assertEqual(db.query(Citation).count(), 1)
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_full_import_preserves_relation_columns_and_creates_only_real_links(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        original_temp_dir = import_routes.TEMP_DIR
+        original_source_dir = import_routes.SOURCE_DIR
+        try:
+            database = PatentDatabase(name="完整关系导入库")
+            cited = Patent(
+                title="已存在被引用专利",
+                publication_number="US100000010A",
+                database=database,
+            )
+            citing = Patent(
+                title="已存在引用专利",
+                publication_number="CN100000011A",
+                database=database,
+            )
+            db.add_all([database, cited, citing])
+            db.commit()
+
+            with TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                import_routes.TEMP_DIR = root / "sessions"
+                import_routes.SOURCE_DIR = root / "artifacts"
+                import_routes.TEMP_DIR.mkdir()
+                import_routes.SOURCE_DIR.mkdir()
+                import_routes.TEMP_FILES.clear()
+
+                app = FastAPI()
+                app.include_router(import_routes.router)
+                app.dependency_overrides[get_db] = lambda: db
+                client = TestClient(app)
+                content = (
+                    "标题,公开号,引用专利号,被引用专利号\n"
+                    "核心导入专利,CN100000012A,US100000010A | EP100000099A1,CN100000011A\n"
+                ).encode("utf-8-sig")
+                preview = client.post(
+                    "/import/preview",
+                    files={"file": ("引用关系导入.csv", content, "text/csv")},
+                )
+                self.assertEqual(preview.status_code, 200, preview.text)
+                self.assertEqual(preview.json()["suggested_mapping"]["引用专利号"], "cited_patents")
+                self.assertEqual(preview.json()["suggested_mapping"]["被引用专利号"], "citing_patents")
+
+                result = client.post(
+                    "/import/confirm",
+                    json={
+                        "import_id": preview.json()["import_id"],
+                        "field_mappings": [
+                            {"source_column": "标题", "target_field": "title"},
+                            {"source_column": "公开号", "target_field": "publication_number"},
+                            {"source_column": "引用专利号", "target_field": "cited_patents"},
+                            {"source_column": "被引用专利号", "target_field": "citing_patents"},
+                        ],
+                        "database_id": database.id,
+                        "source_table_title": "引用关系月度表",
+                        "source_system": "商业专利数据库",
+                    },
+                )
+                self.assertEqual(result.status_code, 200, result.text)
+                body = result.json()
+                self.assertEqual(body["created"], 1)
+                self.assertEqual(body["citation_links"], 2)
+                imported = db.query(Patent).filter(
+                    Patent.publication_number == "CN100000012A",
+                ).one()
+                self.assertEqual(
+                    imported.custom_fields["cited_patents"],
+                    "US100000010A | EP100000099A1",
+                )
+                self.assertEqual(imported.custom_fields["citing_patents"], "CN100000011A")
+                self.assertEqual(db.query(Citation).count(), 2)
+                self.assertEqual(
+                    db.query(Patent).filter(
+                        Patent.publication_number == "EP100000099A1",
+                    ).count(),
+                    0,
+                )
+                batch_id = body["batch_id"]
+                observations = db.query(FieldObservation).filter(
+                    FieldObservation.import_batch_id == batch_id,
+                    FieldObservation.source_field_name.in_(["引用专利号", "被引用专利号"]),
+                ).all()
+                self.assertEqual({item.canonical_field_key for item in observations}, {
+                    "cited_patents", "citing_patents",
+                })
+                self.assertEqual({item.raw_value for item in observations}, {
+                    "US100000010A | EP100000099A1", "CN100000011A",
+                })
+        finally:
+            import_routes.TEMP_DIR = original_temp_dir
+            import_routes.SOURCE_DIR = original_source_dir
+            import_routes.TEMP_FILES.clear()
+            db.close()
+            engine.dispose()
 
     def test_family_members_are_created_and_linked_in_database_scope(self):
         engine = create_engine(

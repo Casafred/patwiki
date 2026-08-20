@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Patent
 from app.models import PatentExportTemplate
-from app.services.field_registry import get_all_fields_meta
+from app.services.field_registry import RELATION_FIELD_KEYS, get_all_fields_meta
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
 
@@ -86,6 +86,10 @@ class ExportService:
 
     @staticmethod
     def _field_value(patent: Patent, field_key: str) -> Any:
+        # These canonical keys also exist as SQLAlchemy relationship attributes
+        # on Patent. Export must use the raw source projection, not Citation rows.
+        if field_key in RELATION_FIELD_KEYS:
+            return (patent.custom_fields or {}).get(field_key)
         if hasattr(patent, field_key):
             return getattr(patent, field_key)
         return (patent.custom_fields or {}).get(field_key)

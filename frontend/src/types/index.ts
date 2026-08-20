@@ -263,7 +263,7 @@ export interface ConditionalFormatRule {
 }
 
 export interface PatentFamilyMember {
-  id: number
+  id: number | null
   publication_number?: string | null
   application_number?: string | null
   grant_number?: string | null
@@ -274,6 +274,9 @@ export interface PatentFamilyMember {
   publication_date?: string | null
   grant_date?: string | null
   is_current: boolean
+  database_id?: number | null
+  in_current_database?: boolean
+  status?: 'in_database' | 'other_database' | 'missing_record' | string
 }
 
 export interface PatentFamilyResponse {
@@ -282,6 +285,29 @@ export interface PatentFamilyResponse {
   family_key?: string | null
   family_type?: string | null
   members: PatentFamilyMember[]
+  external_members?: PatentFamilyMember[]
+  missing_members?: PatentFamilyMember[]
+}
+
+export interface PatentCitationItem {
+  relation_id?: number | null
+  patent_id?: number | null
+  publication_number?: string | null
+  application_number?: string | null
+  grant_number?: string | null
+  title?: string | null
+  country?: string | null
+  database_id?: number | null
+  in_current_database: boolean
+  status: 'in_database' | 'other_database' | 'missing_record' | string
+  direction: 'cited' | 'citing' | string
+}
+
+export interface PatentCitationResponse {
+  root_id: number
+  database_id?: number | null
+  cited: PatentCitationItem[]
+  citing: PatentCitationItem[]
 }
 
 export interface ViewColumnConfig {

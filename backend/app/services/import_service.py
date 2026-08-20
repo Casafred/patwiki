@@ -83,6 +83,10 @@ STANDARD_FIELD_MAPPINGS = {
     "引用文献": "cited_patents",
     "被引用专利": "citing_patents",
     "被引用专利号": "citing_patents",
+    "cited patents": "cited_patents",
+    "cited patent numbers": "cited_patents",
+    "citing patents": "citing_patents",
+    "citing patent numbers": "citing_patents",
 }
 
 LEGAL_STATUS_MAP = {
@@ -342,19 +346,29 @@ class ImportService:
             value = row.get(excel_col, "")
             if value is None:
                 value = ""
-            value = str(value).strip()
+            raw_value = str(value)
+            value = raw_value.strip()
             if value == "":
                 continue
 
             # 虚拟字段：解析专利号列表，不写入 Patent 主表
             if field_key == "family_members":
-                virtual["family_numbers"] = parse_patent_numbers(value)
+                virtual["family_numbers"] = list(dict.fromkeys([
+                    *virtual["family_numbers"], *parse_patent_numbers(value),
+                ]))
+                custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
                 continue
             if field_key == "cited_patents":
-                virtual["cited_numbers"] = parse_patent_numbers(value)
+                virtual["cited_numbers"] = list(dict.fromkeys([
+                    *virtual["cited_numbers"], *parse_patent_numbers(value),
+                ]))
+                custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
                 continue
             if field_key == "citing_patents":
-                virtual["citing_numbers"] = parse_patent_numbers(value)
+                virtual["citing_numbers"] = list(dict.fromkeys([
+                    *virtual["citing_numbers"], *parse_patent_numbers(value),
+                ]))
+                custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
                 continue
 
             # 自定义字段
@@ -394,3 +408,12 @@ class ImportService:
 
         data["custom_fields"] = custom
         return data, virtual
+
+
+def _append_relation_raw_value(existing: Any, value: str) -> str:
+    """保留关系列原始文本；同一规范字段映射多个来源列时不覆盖。"""
+    if not existing:
+        return value
+    if str(existing) == value:
+        return str(existing)
+    return f"{existing}\n{value}"

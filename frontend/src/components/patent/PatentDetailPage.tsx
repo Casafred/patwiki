@@ -19,6 +19,7 @@ import type {
   PatentFieldSource,
   PatentIdentityConflict,
   PatentFamilyMember,
+  PatentCitationItem,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import PatentShareDialog from './PatentShareDialog'
@@ -1094,6 +1095,9 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
   const [familyKey, setFamilyKey] = useState<string | null>(null)
   const [familyLoading, setFamilyLoading] = useState(false)
   const [familyError, setFamilyError] = useState('')
+  const [citationItems, setCitationItems] = useState<{ cited: PatentCitationItem[]; citing: PatentCitationItem[] }>({ cited: [], citing: [] })
+  const [citationLoading, setCitationLoading] = useState(false)
+  const [citationError, setCitationError] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -1104,7 +1108,11 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
     void patentApi.family(patent.id)
       .then(result => {
         if (cancelled) return
-        setFamilyMembers(result.members)
+        setFamilyMembers([
+          ...result.members,
+          ...(result.external_members || []),
+          ...(result.missing_members || []),
+        ])
         setFamilyKey(result.family_key || null)
       })
       .catch((error: unknown) => {
@@ -1115,6 +1123,28 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
       })
       .finally(() => {
         if (!cancelled) setFamilyLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [patent.id])
+
+  useEffect(() => {
+    let cancelled = false
+    // 引用清单是确定性读模型，关系图只作为补充探索入口。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCitationLoading(true)
+    setCitationError('')
+    void patentApi.citations(patent.id)
+      .then(result => {
+        if (cancelled) return
+        setCitationItems({ cited: result.cited, citing: result.citing })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setCitationItems({ cited: [], citing: [] })
+        setCitationError(getErrorMessage(error, '引用关系加载失败'))
+      })
+      .finally(() => {
+        if (!cancelled) setCitationLoading(false)
       })
     return () => { cancelled = true }
   }, [patent.id])
@@ -1271,22 +1301,30 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
           ) : (
             <div className="family-members-list">
               {familyMembers.map(member => {
-                const number = member.publication_number || member.application_number || member.grant_number || `专利 #${member.id}`
+                const number = member.publication_number || member.application_number || member.grant_number || (member.id ? `专利 #${member.id}` : '未入库号码')
+                const statusLabel = member.is_current
+                  ? '当前专利'
+                  : member.status === 'missing_record'
+                    ? '未入库'
+                    : member.status === 'other_database'
+                      ? '其他数据库'
+                      : '当前数据库'
                 return (
-                  <div className={`family-member-row ${member.is_current ? 'is-current' : ''}`} key={member.id}>
+                  <div className={`family-member-row ${member.is_current ? 'is-current' : ''}`} key={`${member.status || 'in_database'}:${member.id || number}`}>
                     <div className="family-member-main">
                       <strong>{member.title || number}</strong>
                       <span className="family-member-number">{number}</span>
                     </div>
                     <div className="family-member-meta">
                       <span>{member.country || '-'}</span>
-                      <span>{member.legal_status || '未知状态'}</span>
+                      <span>{statusLabel}</span>
+                      {!member.is_current && member.status !== 'missing_record' && <span>{member.legal_status || '未知状态'}</span>}
                       {member.publication_date && <span>公开 {member.publication_date}</span>}
                     </div>
                     {member.is_current ? (
                       <span className="family-member-current">当前专利</span>
-                    ) : onPatentNavigate ? (
-                      <button className="btn btn-xs btn-secondary" type="button" onClick={() => onPatentNavigate(member.id)}>
+                    ) : member.id != null && onPatentNavigate ? (
+                      <button className="btn btn-xs btn-secondary" type="button" onClick={() => onPatentNavigate(member.id as number)}>
                         查看详情
                       </button>
                     ) : null}
@@ -1299,8 +1337,79 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
       </div>
 
       <div style={{ gridColumn: '1 / -1' }}>
+        <section className="family-members-panel" aria-label="引用关系清单">
+          <div className="family-members-heading">
+            <div>
+              <h3>引用关系</h3>
+              <p>原始引用号码与结构化关系同时保留；状态用于判断目标是否在当前库中。</p>
+            </div>
+            {citationLoading && <span className="family-members-status">加载中...</span>}
+          </div>
+          {citationError ? (
+            <div className="patent-graph-message error">{citationError}</div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+              <CitationList
+                title="我引用的专利"
+                items={citationItems.cited}
+                onPatentNavigate={onPatentNavigate}
+              />
+              <CitationList
+                title="引用我的专利"
+                items={citationItems.citing}
+                onPatentNavigate={onPatentNavigate}
+              />
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div style={{ gridColumn: '1 / -1' }}>
         <PatentGraph patentId={patent.id} onPatentNavigate={onPatentNavigate} />
       </div>
+    </div>
+  )
+}
+
+function CitationList({ title, items, onPatentNavigate }: {
+  title: string
+  items: PatentCitationItem[]
+  onPatentNavigate?: (patentId: number) => void
+}) {
+  const statusLabel = (status: string) => status === 'in_database'
+    ? '当前数据库'
+    : status === 'other_database'
+      ? '其他数据库'
+      : '未入库'
+  return (
+    <div>
+      <h4 style={{ margin: '0 0 8px', color: '#334155', fontSize: 13 }}>{title} · {items.length}</h4>
+      {items.length === 0 ? (
+        <div className="family-members-empty">暂无记录</div>
+      ) : (
+        <div className="family-members-list">
+          {items.map((item, index) => {
+            const number = item.publication_number || item.application_number || item.grant_number || '未入库号码'
+            return (
+              <div className="family-member-row" key={`${item.relation_id || 'raw'}:${item.patent_id || number}:${index}`}>
+                <div className="family-member-main">
+                  <strong>{item.title || number}</strong>
+                  <span className="family-member-number">{number}</span>
+                </div>
+                <div className="family-member-meta">
+                  <span>{item.country || '-'}</span>
+                  <span>{statusLabel(item.status)}</span>
+                </div>
+                {item.patent_id != null && onPatentNavigate && (
+                  <button className="btn btn-xs btn-secondary" type="button" onClick={() => onPatentNavigate(item.patent_id as number)}>
+                    查看详情
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

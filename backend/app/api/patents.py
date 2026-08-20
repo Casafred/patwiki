@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import date, datetime, timezone
@@ -30,6 +31,7 @@ from app.models import (
 )
 from app.core.exceptions import NotFoundException
 from app.services.patent_identity_service import list_patent_identifiers
+from app.services.relation_service import find_existing_patent_by_number, parse_patent_numbers
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -260,7 +262,7 @@ def get_patent_family(patent_id: int, db: Session = Depends(get_db)):
 
     family = db.query(PatentFamily).filter(PatentFamily.id == root.family_id).first() if root.family_id else None
 
-    def serialize(member: PatentModel) -> dict[str, Any]:
+    def serialize(member: PatentModel, status: str | None = None) -> dict[str, Any]:
         return {
             "id": member.id,
             "publication_number": member.publication_number,
@@ -273,14 +275,151 @@ def get_patent_family(patent_id: int, db: Session = Depends(get_db)):
             "publication_date": member.publication_date.isoformat() if member.publication_date else None,
             "grant_date": member.grant_date.isoformat() if member.grant_date else None,
             "is_current": member.id == root.id,
+            "database_id": member.database_id,
+            "in_current_database": member.database_id == root.database_id,
+            "status": status or ("in_database" if member.database_id == root.database_id else "other_database"),
         }
+
+    external_members: list[dict[str, Any]] = []
+    if root.family_id is not None:
+        external = db.query(PatentModel).filter(
+            PatentModel.family_id == root.family_id,
+            PatentModel.database_id != root.database_id,
+        ).order_by(PatentModel.id.asc()).all()
+        external_members = [serialize(member, "other_database") for member in external]
+
+    raw_family_numbers = parse_patent_numbers(
+        str((root.custom_fields or {}).get("family_members") or "")
+    )
+    missing_members: list[dict[str, Any]] = []
+    observed_current_members: list[dict[str, Any]] = []
+    current_member_ids = {member.id for member in members}
+    external_member_ids = {member["id"] for member in external_members}
+    for number in raw_family_numbers:
+        existing = find_existing_patent_by_number(db, number)
+        if existing is None:
+            missing_members.append({
+                "id": None,
+                "publication_number": number,
+                "application_number": None,
+                "grant_number": None,
+                "title": None,
+                "country": number[:2] if number[:2].isalpha() else None,
+                "is_current": False,
+                "database_id": None,
+                "in_current_database": False,
+                "status": "missing_record",
+            })
+        elif existing.database_id == root.database_id and existing.id not in current_member_ids:
+            observed_current_members.append(serialize(existing))
+            current_member_ids.add(existing.id)
+        elif existing.database_id != root.database_id and existing.id not in external_member_ids:
+            external_members.append(serialize(existing, "other_database"))
+            external_member_ids.add(existing.id)
 
     return {
         "root_id": root.id,
         "family_id": root.family_id,
         "family_key": family.family_id if family else None,
         "family_type": family.family_type if family else None,
-        "members": [serialize(member) for member in members],
+        "members": [serialize(member) for member in members] + observed_current_members,
+        "external_members": external_members,
+        "missing_members": missing_members,
+    }
+
+
+def _serialize_relation_patent(root: PatentModel, patent: PatentModel | None, number: str, relation_id: int | None, direction: str) -> dict[str, Any]:
+    if patent is None:
+        return {
+            "relation_id": relation_id,
+            "patent_id": None,
+            "publication_number": number,
+            "application_number": None,
+            "grant_number": None,
+            "title": None,
+            "country": number[:2] if number[:2].isalpha() else None,
+            "database_id": None,
+            "in_current_database": False,
+            "status": "missing_record",
+            "direction": direction,
+        }
+    return {
+        "relation_id": relation_id,
+        "patent_id": patent.id,
+        "publication_number": patent.publication_number,
+        "application_number": patent.application_number,
+        "grant_number": patent.grant_number,
+        "title": patent.title,
+        "country": patent.country,
+        "database_id": patent.database_id,
+        "in_current_database": patent.database_id == root.database_id,
+        "status": "in_database" if patent.database_id == root.database_id else "other_database",
+        "direction": direction,
+    }
+
+
+@router.get("/{patent_id}/citations")
+def get_patent_citations(patent_id: int, db: Session = Depends(get_db)):
+    """返回正向/反向引用，并明确目标是否属于当前数据库。
+
+    该读取接口不创建占位 Patent；仅在原始关系列中出现的号码返回
+    `missing_record`，使来源文本和结构化关系的差异对用户可见。
+    """
+    root = db.query(PatentModel).filter(PatentModel.id == patent_id).first()
+    if not root:
+        raise NotFoundException("Patent not found")
+
+    citing = aliased(PatentModel)
+    cited = aliased(PatentModel)
+    rows = db.query(Citation, citing, cited).join(
+        citing, citing.id == Citation.citing_patent_id,
+    ).join(
+        cited, cited.id == Citation.cited_patent_id,
+    ).filter(
+        or_(Citation.citing_patent_id == root.id, Citation.cited_patent_id == root.id),
+    ).order_by(Citation.id.asc()).all()
+
+    cited_items: list[dict[str, Any]] = []
+    citing_items: list[dict[str, Any]] = []
+    seen_cited: set[tuple[int | None, str]] = set()
+    seen_citing: set[tuple[int | None, str]] = set()
+    for citation, citing_patent, cited_patent in rows:
+        if citation.citing_patent_id == root.id:
+            item = _serialize_relation_patent(root, cited_patent, cited_patent.publication_number or cited_patent.application_number or "", citation.id, "cited")
+            key = (item["patent_id"], item["publication_number"] or "")
+            if key not in seen_cited:
+                cited_items.append(item)
+                seen_cited.add(key)
+        if citation.cited_patent_id == root.id:
+            item = _serialize_relation_patent(root, citing_patent, citing_patent.publication_number or citing_patent.application_number or "", citation.id, "citing")
+            key = (item["patent_id"], item["publication_number"] or "")
+            if key not in seen_citing:
+                citing_items.append(item)
+                seen_citing.add(key)
+
+    def append_missing(raw_key: str, target: list[dict[str, Any]], seen: set[tuple[int | None, str]], direction: str):
+        for number in parse_patent_numbers(str((root.custom_fields or {}).get(raw_key) or "")):
+            existing = find_existing_patent_by_number(db, number)
+            if existing is not None:
+                key = (existing.id, existing.publication_number or existing.application_number or number)
+            else:
+                key = (None, number)
+            if key in seen:
+                continue
+            if existing is not None:
+                # A raw column can exist before the Citation entity is created.
+                target.append(_serialize_relation_patent(root, existing, number, None, direction))
+            else:
+                target.append(_serialize_relation_patent(root, None, number, None, direction))
+            seen.add(key)
+
+    append_missing("cited_patents", cited_items, seen_cited, "cited")
+    append_missing("citing_patents", citing_items, seen_citing, "citing")
+    return {
+        "root_id": root.id,
+        "database_id": root.database_id,
+        "cited": cited_items,
+        "citing": citing_items,
     }
 
 
@@ -358,7 +497,7 @@ def get_patent_graph(
             }
             citation_patents = db.query(PatentModel).filter(
                 PatentModel.id.in_(citation_patent_ids)
-            ).all() if citation_patent_ids else []
+            ).filter(PatentModel.database_id == root.database_id).all() if citation_patent_ids else []
             citation_patents_by_id = {patent.id: patent for patent in citation_patents}
             for citation in citation_rows:
                 citing = citation_patents_by_id.get(citation.citing_patent_id)

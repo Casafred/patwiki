@@ -74,7 +74,11 @@ function buildViewColumnConfig(view: PatentView, fields: FieldMeta[]): ViewColum
     const column = byKey.get(field.key)
     return {
       key: field.key,
-      visible: column?.visible ?? (configured.length === 0 ? field.visible !== false : false),
+      // 关系原始列属于信息中心的正式只读投影。历史视图没有保存这些新列
+      // 时默认展示；用户明确隐藏后仍以视图配置为准。
+      visible: column?.visible ?? (configured.length === 0 || ['family_members', 'cited_patents', 'citing_patents'].includes(field.key)
+        ? field.visible !== false
+        : false),
       width: column?.width ?? field.width ?? DEFAULT_COLUMN_WIDTH,
       order: column?.order ?? configured.length + index,
     }
@@ -1508,6 +1512,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const getFieldValue = (patent: Patent, fieldKey: string): JsonValue => {
     const field = fields.find(f => f.key === fieldKey)
     if (!field) return null
+    // 关系原始列是系统注册字段，但实际值保存在 custom_fields，
+    // 以保留来源单元格而不把关系实体 ID 写进 Patent 主表。
+    if (['family_members', 'cited_patents', 'citing_patents'].includes(fieldKey)) {
+      return patent.custom_fields?.[fieldKey] ?? null
+    }
     if (field.is_system) {
       return (patent as unknown as Record<string, JsonValue>)[fieldKey] ?? null
     }
@@ -1640,7 +1649,14 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     return baseFields
       // Explicit view configuration is authoritative. Newly imported fields are
       // available in column management but do not silently enter this work table.
-      .filter(field => configByKey.get(field.key)?.visible === true)
+      .filter(field => {
+        const configuredColumn = configByKey.get(field.key)
+        return configuredColumn?.visible === true || (
+          configuredColumn === undefined
+          && ['family_members', 'cited_patents', 'citing_patents'].includes(field.key)
+          && field.visible !== false
+        )
+      })
       .sort((a, b) => {
         const aOrder = configByKey.get(a.key)?.order ?? Number.MAX_SAFE_INTEGER
         const bOrder = configByKey.get(b.key)?.order ?? Number.MAX_SAFE_INTEGER

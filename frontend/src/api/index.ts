@@ -6,7 +6,7 @@ import type {
   User, DatabaseMember, SharedDatabase, PatentHistory, PatentView, ViewPatentListResponse,
   GroupedViewResponse, ViewGroupField, ConditionalFormatRule, KanbanResponse, JsonObject, JsonValue,
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
-  PatentGraphResponse, PatentFamilyResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
+  PatentGraphResponse, PatentFamilyResponse, PatentCitationResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
   GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
   ProjectSolutionVersion, RiskCase,
@@ -288,6 +288,7 @@ export const patentApi = {
   get: (id: number): Promise<Patent> => api.get(`/patents/${id}`),
 
   family: (id: number): Promise<PatentFamilyResponse> => api.get(`/patents/${id}/family`),
+  citations: (id: number): Promise<PatentCitationResponse> => api.get(`/patents/${id}/citations`),
 
   identifiers: (id: number): Promise<PatentIdentifier[]> => api.get(`/patents/${id}/identifiers`),
 

@@ -6,6 +6,10 @@ from typing import Any, Iterable, Mapping
 
 FieldMeta = dict[str, Any]
 
+# 关系列是正式的只读展示字段：导入时保留原始单元格，关系实体另行解析。
+# 这些键位于 Patent.custom_fields 中，避免把来源文本误当作关系 ID。
+RELATION_FIELD_KEYS = {"family_members", "cited_patents", "citing_patents"}
+
 
 class FieldHandler:
     """字段适配器基类，统一字段元数据和记录值访问边界。"""
@@ -636,6 +640,45 @@ SYSTEM_FIELD_DEFINITIONS = [
         "filterable": False,
         "editable": False,
         "visible": False,
+    },
+    {
+        "key": "family_members",
+        "name": "同族专利号",
+        "field_type": "longtext",
+        "group_name": "关系",
+        "options": None,
+        "width": 240,
+        "sortable": False,
+        "filterable": True,
+        "editable": False,
+        "visible": True,
+        "description": "导入表格中的原始同族公开号；同时由系统建立可导航的同族关系。",
+    },
+    {
+        "key": "cited_patents",
+        "name": "引用专利号",
+        "field_type": "longtext",
+        "group_name": "关系",
+        "options": None,
+        "width": 240,
+        "sortable": False,
+        "filterable": True,
+        "editable": False,
+        "visible": True,
+        "description": "当前专利引用的原始公开号；同时由系统建立正向引用关系。",
+    },
+    {
+        "key": "citing_patents",
+        "name": "被引用专利号",
+        "field_type": "longtext",
+        "group_name": "关系",
+        "options": None,
+        "width": 240,
+        "sortable": False,
+        "filterable": True,
+        "editable": False,
+        "visible": True,
+        "description": "引用当前专利的原始公开号；同时由系统建立反向引用关系。",
     },
 ]
 

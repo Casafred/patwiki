@@ -235,9 +235,11 @@ def _candidate_value(field_key: str, patent_data: dict | None, virtual: dict) ->
 
 
 def _current_value(patent: Patent | None, field_key: str) -> str | None:
-    if patent is None or field_key in {"family_members", "cited_patents", "citing_patents"}:
+    if patent is None:
         return None
     custom = patent.custom_fields or {}
+    if field_key in {"family_members", "cited_patents", "citing_patents"}:
+        return _text_value(custom.get(field_key))
     if field_key in custom:
         return _text_value(custom.get(field_key))
     return _text_value(getattr(patent, field_key, None))
@@ -1426,13 +1428,22 @@ def _process_relations(db: Session, patent: Patent, virtual: dict, database_id: 
     family_links = 0
     citation_links = 0
     if virtual["family_numbers"]:
-        family_result = process_family_members(db, patent, virtual["family_numbers"], database_id=database_id)
+        family_result = process_family_members(
+            db, patent, virtual["family_numbers"],
+            database_id=database_id, create_placeholders=False,
+        )
         family_links += family_result["members_linked"]
     if virtual["cited_numbers"]:
-        citation_result = process_citations(db, patent, virtual["cited_numbers"], database_id=database_id)
+        citation_result = process_citations(
+            db, patent, virtual["cited_numbers"],
+            database_id=database_id, create_placeholders=False,
+        )
         citation_links += citation_result["links"]
     if virtual["citing_numbers"]:
-        citation_result = process_citing_patents(db, patent, virtual["citing_numbers"], database_id=database_id)
+        citation_result = process_citing_patents(
+            db, patent, virtual["citing_numbers"],
+            database_id=database_id, create_placeholders=False,
+        )
         citation_links += citation_result["links"]
     return {"family_links": family_links, "citation_links": citation_links}
 

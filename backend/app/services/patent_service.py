@@ -10,7 +10,11 @@ from app.models import (
     ProjectRole, RiskLevel, RelationType, DocumentRole,
 )
 from app.schemas.schemas import PatentCreate, PatentUpdate
-from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
+from app.services.field_registry import (
+    RELATION_FIELD_KEYS,
+    SYSTEM_FIELD_KEYS,
+    get_all_fields_meta,
+)
 from app.core.exceptions import BadRequestException
 
 
@@ -276,6 +280,11 @@ class PatentService:
     def create_patent(db: Session, patent_in: PatentCreate) -> Patent:
         data = patent_in.model_dump(exclude_unset=True)
         custom_fields = data.pop("custom_fields", {}) or {}
+        relation_fields = RELATION_FIELD_KEYS.intersection(custom_fields)
+        if relation_fields:
+            raise BadRequestException(
+                "同族/引用原始列只能通过导入来源维护，请使用关系列导入或关系服务"
+            )
 
         legacy_risk_values = {
             "has_risk": data.pop("has_risk", None),
@@ -382,6 +391,12 @@ class PatentService:
 
         # 自定义字段修改
         if custom_fields_data is not None:
+            relation_fields = RELATION_FIELD_KEYS.intersection(custom_fields_data)
+            if relation_fields:
+                raise BadRequestException(
+                    "同族/引用原始列是导入来源投影，不能通过普通专利编辑修改："
+                    + ", ".join(sorted(relation_fields))
+                )
             # JSON 列没有 MutableDict 追踪，先复制再赋值才能稳定触发 SQLAlchemy 更新。
             current = dict(patent.custom_fields or {})
             for k, v in custom_fields_data.items():

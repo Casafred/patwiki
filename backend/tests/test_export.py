@@ -68,6 +68,30 @@ class ExportApiTest(unittest.TestCase):
         self.assertEqual(sheet["A1"].value, "标题")
         self.assertEqual(sheet.max_row, 3)
 
+    def test_relation_projection_columns_are_exported_as_raw_source_values(self):
+        patent = Patent(
+            title="关系导出专利",
+            database_id=self.database_id,
+            custom_fields={
+                "family_members": "US100000020A;CN100000020A",
+                "cited_patents": "EP100000020A1 | JP100000020A1",
+                "citing_patents": "WO100000020A1",
+            },
+        )
+        self.db.add(patent)
+        self.db.commit()
+
+        response = self.client.post("/export/csv", json={
+            "database_id": self.database_id,
+            "field_keys": ["title", "family_members", "cited_patents", "citing_patents"],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        content = response.content.decode("utf-8-sig")
+        self.assertIn("同族专利号,引用专利号,被引用专利号", content)
+        self.assertIn("US100000020A;CN100000020A", content)
+        self.assertIn("EP100000020A1 | JP100000020A1", content)
+        self.assertIn("WO100000020A1", content)
+
     def test_system_work_file_templates_are_listed_and_used_by_export(self):
         ViewService.ensure_default_business_views(self.db, self.database_id)
         templates = ExportService.ensure_default_templates(self.db, self.database_id)

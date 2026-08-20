@@ -102,6 +102,38 @@
 - 列表同族聚拢只能是当前数据库/视图筛选结果的展示投影，成员仍按 Patent 行保留；组头支持展开/收起，成员数必须基于同一查询范围计算。
 - 同族接口、关系图和组头不得跨数据库泄漏同一 `family_id` 下的记录；不得为聚拢新建或复制 Patent 数据。
 
+## 4.2 引用关系导入与读模型
+
+引用关系是正式关系类型，与同族关系共享“原始来源列 + 结构化关系实体”的双轨规则。Agent 必须使用以下 canonical keys：
+
+| key | 来源列示例 | 方向 | 关系实体 |
+|---|---|---|---|
+| `family_members` | 同族专利号、同族公开号 | 当前专利 ↔ 同族成员 | `PatentFamily` / 当前兼容 family 关系 |
+| `cited_patents` | 引用专利号、引用专利 | 当前专利 -> 目标专利 | `Citation.citing_patent_id=current` |
+| `citing_patents` | 被引用专利号、被引用专利 | 来源专利 -> 当前专利 | `Citation.cited_patent_id=current` |
+
+### 4.2.1 必须保存的两条路径
+
+1. 原始 Excel/CSV 单元格文本必须写入 `ImportSourceRow.raw_row`、对应 `FieldObservation.raw_value`，并投影到 `Patent.custom_fields` 的关系字段，使列表/详情/导出可以继续显示原始列。不能只保存解析后的号码数组、关系 ID 或规范化文本。
+2. 解析后的每个合法公开号必须通过 `patent_identity_service` 查找 Patent，并在目标明确存在时建立幂等 `PatentFamily`/`Citation`。一个目标缺失不能阻断同一行其他字段，也不能删除原始列。
+
+### 4.2.2 状态和副作用
+
+关系读 API 对每个号码必须返回：
+
+- `in_database`：目标 Patent 存在且与根专利同属当前数据库，返回 `patent_id` 和可导航动作；
+- `other_database`：目标 Patent 存在但属于其他数据库，返回号码和库标识，不作为当前库图谱/聚拢成员；
+- `missing_record`：来源列有号码但没有 Patent 记录，返回 `patent_id=null` 和号码，不提供详情跳转。
+
+读取 `/patents/{id}/family`、`/patents/{id}/citations` 或 `/patents/{id}/graph` 不得创建占位专利、修改 `custom_fields` 或写入关系。普通关系导入也默认 `create_placeholders=false`；只有显式的兼容旧流程可以创建占位，并且必须在调用点写明原因和测试。
+
+### 4.2.3 UI、导出和编辑边界
+
+- 详情页必须显示同族清单、我引用的专利、引用我的专利；当前库目标可“查看详情”，其他库/未入库目标必须显示对应状态。
+- 关系列列表列必须继续显示原始文本，选中导出字段时必须输出原始文本；不得把 `Citation.id`、Patent ID 或逗号拼接的结构化结果替代来源列。
+- `family_members`、`cited_patents`、`citing_patents` 是只读原始来源投影。单元格 PATCH、普通 Patent 更新、批量更新和普通创建不得直接改写；关系导入是原始投影的写入入口，结构化关系通过 `relation_service` 写入。
+- 关系图只是补充探索，不能代替有方向的清单；图谱和同族聚拢必须限制根专利的 `database_id`。
+
 ## 5. 自动化验收门禁
 
 ### 导入
@@ -111,6 +143,7 @@
 - 有公开号无标题创建 `created_pending_title`；
 - 无身份有内容进入 `retained_source_row`；完全空行才是 `skipped_empty_row`；
 - 重复导入仍保留观察、来源表、Sheet、行号和导入时间。
+- 关系列原始文本、FieldObservation 和关系实体同时存在；多值列分隔符可解析，缺失目标不建占位，真实 `citation_links` 与 `family_links` 统计可验证。
 
 ### AI
 
@@ -127,6 +160,14 @@
 - 关系操作不改变专利其他字段；
 - 前端 ESLint、TypeScript、Vite build 与相关后端测试必须通过。
 
+### 同族与引用关系
+
+- 正向/反向引用方向和同族关系类型分别可在 API 测试中验证；
+- 当前库、其他库、未入库目标状态可在详情读模型中验证；
+- 关系读取前后 Patent 数量、Citation 数量和原始投影不因缺失目标而改变；
+- 关系原始列可在 CSV/Excel 导出中按原文恢复；
+- 普通编辑接口拒绝修改关系原始投影，并返回可读错误。
+
 ## 6. 禁止回退
 
 - 禁止恢复“标题为空即 skipped”；
@@ -135,3 +176,4 @@
 - 禁止只在浏览器控制台记录 AI 错误而不写 `AITask`；
 - 禁止要求用户进入整篇编辑模式才能维护单条项目关系；
 - 禁止用 `except Exception: pass` 隐藏 LLM 配置读取、请求或任务状态更新失败。
+- 禁止只保存引用关系 ID 而丢弃来源列；禁止只保存引用号码文本而不建立可导航 `Citation`；禁止在读取关系时自动创建占位专利。
