@@ -89,7 +89,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     family_links?: number; citation_links?: number;
     error_details?: { row: number; status?: string; reason?: string; error?: string; patent_id?: number }[]
     row_reports?: { row: number; status: string; reason: string; patent_id?: number }[]
-    unmapped_retained?: number; unknown_columns?: string[];
+    unmapped_retained?: number; retained_source_rows?: number; unknown_columns?: string[];
     batch_id?: number | null;
   } | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -537,8 +537,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                     {preview.detected_columns.map((col) => {
                       const mappedKey = mapping[col] || ''
                       const isVirtual = ['family_members', 'cited_patents', 'citing_patents'].includes(mappedKey)
-                      const isGovernancePending = unmappedColumns.has(col) && !mappedKey
-                      const isSkipped = mappedKey === SKIP_COLUMN || (!mappedKey && !unmappedColumns.has(col))
+                      const isGovernancePending = !mappedKey
+                      const isSkipped = mappedKey === SKIP_COLUMN
                       return (
                         <tr key={col} style={{ borderTop: '1px solid #f1f5f9', opacity: isSkipped ? 0.6 : 1 }}>
                           <td style={{ padding: '8px 12px', fontWeight: 500 }}>{col}</td>
@@ -549,7 +549,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                               value={mappedKey}
                               onChange={(e) => setMapping(prev => ({ ...prev, [col]: e.target.value }))}
                             >
-                              <option value="">{unmappedColumns.has(col) ? '-- 保留待治理（默认）--' : '-- 不导入此列 --'}</option>
+                              <option value="">-- 保留原始列，待治理（默认）--</option>
                               <option value={SKIP_COLUMN}>-- 跳过本列 --</option>
                               <optgroup label="系统字段">
                                 {Object.entries(SYSTEM_FIELD_LABELS).map(([f, l]) => (
@@ -747,6 +747,12 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: 24, fontWeight: 700, color: '#b45309' }}>{importResult.unmapped_retained}</div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>待治理字段值</div>
+                  </div>
+                )}
+                {(importResult.retained_source_rows || 0) > 0 && (
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: '#b45309' }}>{importResult.retained_source_rows}</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>来源行待补身份</div>
                   </div>
                 )}
               </div>

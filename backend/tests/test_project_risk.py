@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.api.project_risk import router
+from app.api.patents import router as patents_router
 from app.database import Base, get_db
 from app.core.exceptions import BadRequestException
-from app.models import Patent, PatentDatabase, Project
+from app.models import Patent, PatentDatabase, Project, PatentProjectLink, RelationType
 from app.schemas.schemas import PatentCreate
 from app.services.merge_service import merge_patent_data
 from app.services.patent_service import PatentService
@@ -26,6 +27,7 @@ class ProjectRiskTest(unittest.TestCase):
         self.db = Session(self.engine)
         app = FastAPI()
         app.include_router(router)
+        app.include_router(patents_router)
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)
 
@@ -93,6 +95,49 @@ class ProjectRiskTest(unittest.TestCase):
         self.assertEqual(second_confirmed.status_code, 200)
         old = self.client.get(f"/solution-versions/{version['id']}")
         self.assertEqual(old.json()["status"], "superseded")
+
+    def test_patent_projects_can_be_added_and_removed_from_detail_scope(self):
+        database, project, patent = self._seed()
+        other_project = Project(name="国内项目", code="CN-001")
+        self.db.add(other_project)
+        self.db.commit()
+
+        added = self.client.put(
+            f"/patents/{patent.id}/projects",
+            json={
+                "links": [
+                    {"project_id": project.id, "relation_type": "risk", "notes": "美国风险排查"},
+                    {"project_id": other_project.id},
+                ],
+            },
+        )
+        self.assertEqual(added.status_code, 200, added.text)
+        self.assertEqual({item["id"] for item in added.json()["projects"]}, {project.id, other_project.id})
+
+        listed = self.client.get(f"/patents/{patent.id}/projects")
+        self.assertEqual({item["id"] for item in listed.json()}, {project.id, other_project.id})
+        risk_link = next(item for item in listed.json() if item["id"] == project.id)
+        self.assertEqual(risk_link["relation_type"], "risk")
+        self.assertEqual(risk_link["notes"], "美国风险排查")
+
+        before_ids = {item.project_id for item in self.db.query(PatentProjectLink).filter_by(patent_id=patent.id).all()}
+        invalid = self.client.put(
+            f"/patents/{patent.id}/projects",
+            json={"project_ids": [project.id, 999999]},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        after_ids = {item.project_id for item in self.db.query(PatentProjectLink).filter_by(patent_id=patent.id).all()}
+        self.assertEqual(after_ids, before_ids)
+
+        removed = self.client.put(
+            f"/patents/{patent.id}/projects",
+            json={"project_ids": [project.id]},
+        )
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual([item["id"] for item in removed.json()["projects"]], [project.id])
+        preserved = self.client.get(f"/patents/{patent.id}/projects").json()[0]
+        self.assertEqual(preserved["relation_type"], "risk")
+        self.assertEqual(preserved["notes"], "美国风险排查")
 
     def test_risk_case_keeps_assessment_versions_and_review_history(self):
         database, project, patent = self._seed()

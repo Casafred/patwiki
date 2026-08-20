@@ -252,7 +252,9 @@ export default function AITaskMonitor() {
                     }}>
                       {task.errors.slice(0, 10).map((err, i) => (
                         <div key={i} style={{ marginBottom: 4 }}>
-                          专利 #{err.patent_id}: {err.error}
+                          {err.patent_id ? `专利 #${err.patent_id}：` : ''}
+                          {err.stage ? `[${err.stage}] ` : ''}
+                          {err.error || '未知错误'}
                         </div>
                       ))}
                       {task.errors.length > 10 && (

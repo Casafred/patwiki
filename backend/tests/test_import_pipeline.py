@@ -371,6 +371,98 @@ class ImportPipelineTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
+    def test_rows_without_official_identity_are_retained_instead_of_skipped(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        original_temp_dir = import_routes.TEMP_DIR
+        original_source_dir = import_routes.SOURCE_DIR
+        try:
+            database = PatentDatabase(name="来源行保留测试库")
+            db.add(database)
+            db.commit()
+            with TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                import_routes.TEMP_DIR = root / "sessions"
+                import_routes.SOURCE_DIR = root / "artifacts"
+                import_routes.TEMP_DIR.mkdir()
+                import_routes.SOURCE_DIR.mkdir()
+                import_routes.TEMP_FILES.clear()
+                app = FastAPI()
+                app.include_router(import_routes.router)
+                app.dependency_overrides[get_db] = lambda: db
+                client = TestClient(app)
+                content = "标题,检索师备注\n,需要补充公开号\n".encode("utf-8-sig")
+                preview = client.post("/import/preview", files={"file": ("待补身份.csv", content, "text/csv")})
+                self.assertEqual(preview.status_code, 200, preview.text)
+                result = client.post("/import/confirm", json={
+                    "import_id": preview.json()["import_id"],
+                    "field_mappings": [
+                        {"source_column": "标题", "target_field": "title"},
+                        {"source_column": "检索师备注", "target_field": ""},
+                    ],
+                    "database_id": database.id,
+                })
+                self.assertEqual(result.status_code, 200, result.text)
+                body = result.json()
+                self.assertEqual(body["created"], 0)
+                self.assertEqual(body["retained_source_rows"], 1)
+                self.assertEqual(db.query(Patent).count(), 0)
+                self.assertEqual(db.query(ImportSourceRow).count(), 1)
+        finally:
+            import_routes.TEMP_DIR = original_temp_dir
+            import_routes.SOURCE_DIR = original_source_dir
+            import_routes.TEMP_FILES.clear()
+            db.close()
+            engine.dispose()
+
+    def test_identifier_without_title_creates_pending_patent(self):
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = Session(engine)
+        original_temp_dir = import_routes.TEMP_DIR
+        original_source_dir = import_routes.SOURCE_DIR
+        try:
+            database = PatentDatabase(name="待补标题测试库")
+            db.add(database)
+            db.commit()
+            with TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                import_routes.TEMP_DIR = root / "sessions"
+                import_routes.SOURCE_DIR = root / "artifacts"
+                import_routes.TEMP_DIR.mkdir()
+                import_routes.SOURCE_DIR.mkdir()
+                import_routes.TEMP_FILES.clear()
+                app = FastAPI()
+                app.include_router(import_routes.router)
+                app.dependency_overrides[get_db] = lambda: db
+                client = TestClient(app)
+                content = "公开号,检索师备注\nUS1234567A1,待补标题\n".encode("utf-8-sig")
+                preview = client.post("/import/preview", files={"file": ("待补标题.csv", content, "text/csv")})
+                result = client.post("/import/confirm", json={
+                    "import_id": preview.json()["import_id"],
+                    "field_mappings": [
+                        {"source_column": "公开号", "target_field": "publication_number"},
+                        {"source_column": "检索师备注", "target_field": ""},
+                    ],
+                    "database_id": database.id,
+                })
+                self.assertEqual(result.status_code, 200, result.text)
+                body = result.json()
+                self.assertEqual(body["created"], 1)
+                self.assertEqual(body["row_reports"][0]["status"], "created_pending_title")
+                self.assertEqual(db.query(Patent).one().title, "待补全")
+        finally:
+            import_routes.TEMP_DIR = original_temp_dir
+            import_routes.SOURCE_DIR = original_source_dir
+            import_routes.TEMP_FILES.clear()
+            db.close()
+            engine.dispose()
+
     def test_governance_decision_maps_and_adopts_value_with_append_only_history(self):
         engine = create_engine(
             "sqlite://",

@@ -42,6 +42,8 @@ export const patentService = {
   list: (params: JsonObject = {}) => patentApi.list(params),
   get: (id: number) => patentApi.get(id),
   update: (...args: Parameters<typeof patentApi.update>) => patentApi.update(...args),
+  listProjects: (id: number) => patentApi.listProjects(id),
+  replaceProjects: (...args: Parameters<typeof patentApi.replaceProjects>) => patentApi.replaceProjects(...args),
   delete: (id: number) => patentApi.delete(id),
   bulkUpdate: (...args: Parameters<typeof patentApi.bulkUpdate>) => patentApi.bulkUpdate(...args),
   bulkTag: (...args: Parameters<typeof patentApi.bulkTag>) => patentApi.bulkTag(...args),

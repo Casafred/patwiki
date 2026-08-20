@@ -309,8 +309,15 @@ def _record_field_observations(
         candidate = _candidate_value(target, patent_data, virtual)
         current_before = before_values.get(target)
         current_after = _current_value(patent, target)
-        difference = "quarantined" if resolution_status == "quarantined" else _difference_type(current_before, candidate)
-        action = "quarantine" if resolution_status == "quarantined" else {
+        source_only = patent is None and resolution_status != "quarantined"
+        difference = (
+            "quarantined"
+            if resolution_status == "quarantined"
+            else "unknown"
+            if source_only
+            else _difference_type(current_before, candidate)
+        )
+        action = "quarantine" if resolution_status == "quarantined" else "retain" if source_only else {
             "new": "fill",
             "same": "keep",
             "format": "keep",
@@ -332,9 +339,15 @@ def _record_field_observations(
             current_value=current_after,
             candidate_value=candidate or raw_value,
             difference_type=difference,
-            field_resolution="quarantined" if resolution_status == "quarantined" else "mapped",
+            field_resolution=(
+                "quarantined"
+                if resolution_status == "quarantined"
+                else "unmapped_retained"
+                if source_only
+                else "mapped"
+            ),
             proposed_action=action,
-            final_decision=decision,
+            final_decision=("retained" if source_only and decision is None else decision),
         ))
         if patent:
             db.add(PatentHistory(
@@ -453,6 +466,7 @@ def confirm_import(
         row_reports: list[dict] = []
         source_rows: dict[int, ImportSourceRow] = {}
         unmapped_retained = 0
+        retained_source_rows = 0
         for idx, (_, row) in enumerate(df.iterrows()):
             row_dict = _raw_row_dict(row.to_dict())
             source_row = ImportSourceRow(
@@ -594,11 +608,38 @@ def confirm_import(
                     app_num = rd["app_num"]
                     pub_num = rd["pub_num"]
 
-                    if not patent_data.get("title"):
-                        skipped += 1
-                        row_reports.append({"row": rd["row_num"], "status": "skipped_missing_title", "reason": "标题为空，无法创建专利"})
+                    existing = identity_matches[0] if identity_matches else None
+                    if not rd["identity_specs"]:
+                        has_source_value = any(
+                            str(value or "").strip() for value in source_row.raw_row.values()
+                        )
+                        if has_source_value:
+                            source_row.resolution_status = "unmapped_retained"
+                            source_row.resolution_reason = (
+                                "缺少官方身份标识；原始行已保留，待补充身份"
+                            )
+                            unmapped_retained += _record_field_observations(
+                                db, batch, source_row, source_row.raw_row, columns, mapping,
+                                None, patent_data, virtual, {}, "unmapped_retained", "retained",
+                            )
+                            retained_source_rows += 1
+                            row_reports.append({
+                                "row": rd["row_num"],
+                                "status": "retained_source_row",
+                                "reason": source_row.resolution_reason,
+                            })
+                        else:
+                            skipped += 1
+                            row_reports.append({
+                                "row": rd["row_num"],
+                                "status": "skipped_empty_row",
+                                "reason": "整行为空，没有可保留的数据",
+                            })
                     else:
-                        existing = identity_matches[0] if identity_matches else None
+                        provisional_title = False
+                        if not patent_data.get("title"):
+                            patent_data["title"] = "待补全"
+                            provisional_title = True
                         if req.dedupe_by in ("both", "application_number") and app_num:
                             key = (app_num, country)
                             existing = existing or all_app_nums.get(key)
@@ -672,7 +713,12 @@ def confirm_import(
                                 patent_data["custom_fields"] = custom_fields
                                 inserted += 1
                                 current_patent = patent
-                                row_reports.append({"row": rd["row_num"], "status": "created", "reason": "已创建", "patent_id": patent.id})
+                                row_reports.append({
+                                    "row": rd["row_num"],
+                                    "status": "created_pending_title" if provisional_title else "created",
+                                    "reason": "身份已锚定，标题待补全" if provisional_title else "已创建",
+                                    "patent_id": patent.id,
+                                })
                                 if app_num:
                                     all_app_nums[(app_num, country)] = patent
                                 if pub_num:
@@ -695,8 +741,13 @@ def confirm_import(
                             )
                             unmapped_retained += unknown_in_row
                             source_row.resolution_reason = (
-                                "mapped; unknown properties retained"
-                                if unknown_in_row else "mapped"
+                                "identity resolved; title pending; unknown properties retained"
+                                if provisional_title and unknown_in_row
+                                else "identity resolved; title pending"
+                                if provisional_title
+                                else "mapped; unknown properties retained"
+                                if unknown_in_row
+                                else "mapped"
                             )
                             imported_patent_ids.add(current_patent.id)
                             has_rel = virtual["family_numbers"] or virtual["cited_numbers"] or virtual["citing_numbers"]
@@ -821,6 +872,7 @@ def confirm_import(
         "identity_conflicts": identity_conflicts,
         "identity_index": identity_index_report,
         "unmapped_retained": unmapped_retained,
+        "retained_source_rows": retained_source_rows,
         "unknown_columns": [
             column for column in columns
             if not mapping.get(column) and mapping.get(column) != IMPORT_SKIP_FIELD

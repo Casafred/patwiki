@@ -165,36 +165,19 @@ async def update_settings(payload: dict):
 @router.post("/settings/test-llm")
 async def test_llm_connection(payload: dict):
     """测试 LLM 连接是否可用"""
-    api_key = payload.get("api_key", "")
-    base_url = payload.get("base_url", "https://api.openai.com/v1")
-    model = payload.get("model", "gpt-4o-mini")
-
-    # 若传的是脱敏值，用已存的
-    if not api_key or "****" in api_key:
-        app_settings = get_app_settings()
-        api_key = app_settings.llm.llm_api_key
-
-    if not api_key:
-        return {"success": False, "message": "未配置 API Key"}
-
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            headers = {"Authorization": f"Bearer {api_key}"}
-            # OpenAI 兼容接口：发送一个极小的请求
-            resp = await client.post(
-                f"{base_url.rstrip('/')}/chat/completions",
-                headers=headers,
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": "ping"}],
-                    "max_tokens": 5,
-                },
-            )
-            if resp.status_code == 200:
-                return {"success": True, "message": f"连接成功，模型: {model}"}
-            else:
-                detail = resp.text[:200]
-                return {"success": False, "message": f"HTTP {resp.status_code}: {detail}"}
+        from app.services.llm_service import chat_completion, load_llm_config
+
+        api_key = payload.get("api_key", "")
+        # 脱敏值不能作为覆盖配置，使用当前已保存的 key。
+        overrides = {
+            "base_url": payload.get("base_url"),
+            "model": payload.get("model"),
+        }
+        if api_key and "****" not in api_key:
+            overrides["api_key"] = api_key
+        config = load_llm_config(overrides)
+        result = chat_completion("ping", config, max_tokens=5, retries=0)
+        return {"success": True, "message": f"连接成功，模型: {result['model']}，地址: {config.base_url}"}
     except Exception as e:
         return {"success": False, "message": f"连接失败: {str(e)}"}

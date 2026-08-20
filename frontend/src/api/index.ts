@@ -295,6 +295,11 @@ export const patentApi = {
 
   update: (id: number, data: Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }): Promise<Patent> => api.put(`/patents/${id}`, data),
 
+  listProjects: (id: number): Promise<Project[]> => api.get(`/patents/${id}/projects`),
+
+  replaceProjects: (id: number, projectIds: number[]): Promise<Patent> =>
+    api.put(`/patents/${id}/projects`, { project_ids: projectIds }),
+
   delete: (id: number): Promise<{ success: boolean }> => api.delete(`/patents/${id}`),
 
   bulkUpdate: (ids: number[], updates: Partial<Patent>): Promise<{ success: boolean; updated_count: number }> =>

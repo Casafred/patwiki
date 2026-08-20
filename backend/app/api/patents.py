@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import date, datetime, timezone
 import json
 from typing import Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_db
 from app.api.deps import get_pagination_params
@@ -22,6 +22,7 @@ from app.models import (
     FieldObservation,
     ImportBatch,
     ImportSourceRow,
+    PatentProjectLink,
     Patent as PatentModel,
     PatentHistory,
     PatentIdentifier,
@@ -170,6 +171,60 @@ def get_patent_identity_conflicts(patent_id: int, db: Session = Depends(get_db))
             "created_at": source_row.created_at.isoformat() if source_row.created_at else None,
         })
     return result
+
+
+class PatentProjectLinksRequest(BaseModel):
+    project_ids: list[int] = Field(default_factory=list)
+    links: Optional[list[dict[str, Any]]] = None
+
+
+@router.get("/{patent_id}/projects", response_model=list[dict[str, Any]])
+def list_patent_projects(patent_id: int, db: Session = Depends(get_db)):
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise NotFoundException("Patent not found")
+    links = db.query(PatentProjectLink).filter(
+        PatentProjectLink.patent_id == patent.id,
+    ).all()
+    projects_by_id = {project.id: project for project in patent.projects}
+    return [
+        {
+            "id": project.id,
+            "project_id": project.id,
+            "relationship_id": link.id,
+            "name": project.name,
+            "code": project.code,
+            "module": project.module,
+            "status": project.status,
+            "role": link.role.value if link.role else None,
+            "relation_type": link.relation_type.value if link.relation_type else None,
+            "risk_level": link.risk_level.value if link.risk_level else None,
+            "document_role": link.document_role.value if link.document_role else None,
+            "relevance_score": link.relevance_score,
+            "importance": link.importance,
+            "notes": link.notes,
+            "assigned_to_id": link.assigned_to_id,
+        }
+        for link in links
+        if (project := projects_by_id.get(link.project_id)) is not None
+    ]
+
+
+@router.put("/{patent_id}/projects", response_model=Patent)
+def replace_patent_projects(
+    patent_id: int,
+    request: PatentProjectLinksRequest,
+    db: Session = Depends(get_db),
+):
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise NotFoundException("Patent not found")
+    return PatentService.set_patent_projects(
+        db,
+        patent,
+        request.project_ids,
+        link_specs=request.links,
+    )
 
 
 @router.get("/{patent_id}", response_model=Patent)

@@ -6,7 +6,8 @@ from sqlalchemy import func, or_, and_, desc, text, String
 from app.models import (
     Patent, Product, Project, Tag, CustomField,
     patent_tag, patent_project, LegalStatus, PatentType,
-    PatentHistory,
+    PatentHistory, PatentProjectLink,
+    ProjectRole, RiskLevel, RelationType, DocumentRole,
 )
 from app.schemas.schemas import PatentCreate, PatentUpdate
 from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
@@ -394,8 +395,7 @@ class PatentService:
             patent.tags = tags
 
         if project_ids is not None:
-            projects = db.query(Project).filter(Project.id.in_(project_ids)).all()
-            patent.projects = projects
+            PatentService.set_patent_projects(db, patent, project_ids, commit=False)
 
         from app.services.patent_identity_service import ensure_patent_identifiers
         ensure_patent_identifiers(db, patent, source_system=source)
@@ -410,6 +410,131 @@ class PatentService:
             FormulaService.on_field_changed(db, patent, changed_fields)
             from app.services.automation_service import AutomationEngine
             AutomationEngine.on_event(db, "field_changed", patent_id=patent.id, field_changes=changed_fields)
+        return patent
+
+    @staticmethod
+    def set_patent_projects(
+        db: Session,
+        patent: Patent,
+        project_ids: list[int] | None = None,
+        link_specs: list[dict[str, Any]] | None = None,
+        commit: bool = True,
+    ) -> Patent:
+        """以专利为中心维护项目关系，校验后整体替换并立即提交。
+
+        关系维护有独立 API，详情页不必先进入整篇专利编辑态；不存在的项目
+        会明确报错，不能静默丢失用户选择。
+        """
+        if link_specs is not None:
+            requested_links = link_specs
+        else:
+            # Keep the legacy project_ids API compatible without discarding
+            # metadata on relationships that remain attached.
+            existing_links = {
+                link.project_id: link
+                for link in db.query(PatentProjectLink).filter(
+                    PatentProjectLink.patent_id == patent.id,
+                ).all()
+            }
+            requested_links = []
+            for project_id in (project_ids or []):
+                existing = existing_links.get(project_id)
+                if existing is None:
+                    requested_links.append({"project_id": project_id})
+                else:
+                    requested_links.append({
+                        "project_id": project_id,
+                        "role": existing.role.value if existing.role else None,
+                        "relation_type": existing.relation_type.value if existing.relation_type else None,
+                        "risk_level": existing.risk_level.value if existing.risk_level else None,
+                        "document_role": existing.document_role.value if existing.document_role else None,
+                        "relevance_score": existing.relevance_score,
+                        "importance": existing.importance,
+                        "notes": existing.notes,
+                        "assigned_to_id": existing.assigned_to_id,
+                    })
+
+        normalized_links: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+        try:
+            for spec in requested_links:
+                project_id = int(spec.get("project_id"))
+                if project_id in seen_ids:
+                    continue
+                seen_ids.add(project_id)
+                normalized_links.append({**spec, "project_id": project_id})
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise BadRequestException("项目关联中的 project_id 无效，未更新关联") from exc
+
+        projects = []
+        normalized_ids = [spec["project_id"] for spec in normalized_links]
+        if normalized_ids:
+            projects = db.query(Project).filter(Project.id.in_(normalized_ids)).all()
+            found_ids = {project.id for project in projects}
+            missing_ids = [project_id for project_id in normalized_ids if project_id not in found_ids]
+            if missing_ids:
+                raise BadRequestException(f"项目不存在，未更新关联：{missing_ids}")
+
+        def enum_value(spec: dict[str, Any], key: str, enum_type, default):
+            raw = spec.get(key)
+            if raw in (None, ""):
+                return default
+            try:
+                return enum_type(raw)
+            except ValueError as exc:
+                raise BadRequestException(f"项目关联字段 {key} 值无效：{raw}") from exc
+
+        normalized_rows: list[dict[str, Any]] = []
+        for spec in normalized_links:
+            relevance_score = spec.get("relevance_score")
+            if relevance_score is not None:
+                try:
+                    relevance_score = int(relevance_score)
+                except (TypeError, ValueError) as exc:
+                    raise BadRequestException("项目关联 relevance_score 必须是数字") from exc
+                if not 0 <= relevance_score <= 100:
+                    raise BadRequestException("项目关联 relevance_score 必须在 0-100 之间")
+            # Validate and normalize every value before touching existing rows.
+            normalized_rows.append({
+                "project_id": spec["project_id"],
+                "role": enum_value(spec, "role", ProjectRole, ProjectRole.REFERENCE),
+                "relation_type": enum_value(spec, "relation_type", RelationType, RelationType.REFERENCE),
+                "risk_level": enum_value(spec, "risk_level", RiskLevel, RiskLevel.NONE),
+                "document_role": enum_value(spec, "document_role", DocumentRole, DocumentRole.OTHER),
+                "relevance_score": relevance_score,
+                "importance": spec.get("importance"),
+                "notes": spec.get("notes"),
+                "assigned_to_id": spec.get("assigned_to_id"),
+            })
+
+        # Replace relationship rows explicitly so relation metadata is not lost
+        # when the detail page adds or removes a project.
+        existing_rows = db.query(PatentProjectLink).filter(
+            PatentProjectLink.patent_id == patent.id,
+        ).all()
+        for existing_row in existing_rows:
+            db.delete(existing_row)
+        # SQLite checks the unique (patent_id, project_id) constraint during
+        # INSERT; flush deletions before recreating retained project links.
+        db.flush()
+        for spec in normalized_rows:
+            db.add(PatentProjectLink(
+                patent_id=patent.id,
+                project_id=spec["project_id"],
+                role=spec["role"],
+                relation_type=spec["relation_type"],
+                risk_level=spec["risk_level"],
+                document_role=spec["document_role"],
+                relevance_score=spec["relevance_score"],
+                importance=spec.get("importance"),
+                notes=spec.get("notes"),
+                assigned_to_id=spec.get("assigned_to_id"),
+            ))
+        db.expire(patent, ["projects"])
+        db.add(patent)
+        if commit:
+            db.commit()
+            db.refresh(patent)
         return patent
 
     @staticmethod

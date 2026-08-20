@@ -31,6 +31,7 @@ PatWiki 当前不是全面 IP 工作流平台。Agent 的首要目标是交付�
 | 数据库模型、关系、事件、版本 | `15-domain-model-v2.md`、`schema-v2-draft.sql` |
 | 迁移、备份、回滚、历史数据 | `20-migration-roadmap.md`、`12-实施基线与迁移门禁.csv` |
 | 风险、检索、保护流程 | `17-risk-search-protection-workflows.md` |
+| 导入可靠性、数据库 AI 调用、专利详情项目关系 | `28-agent-import-ai-relation-reliability-contract.md` |
 | 审计、责任、附件、发布 | `18-security-audit-snapshot.md` |
 | AI、自动化、MCP | `19-ai-automation-mcp.md` |
 | 长期产品形态 | `22-target-product-architecture.md`，只能作为长期上下文，不能覆盖 2026 范围 |

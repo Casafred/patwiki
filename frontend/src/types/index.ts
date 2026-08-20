@@ -1086,6 +1086,7 @@ export type FilterCondition = {
 
 export interface AITaskError {
   patent_id?: number
+  stage?: string
   error?: string
 }
 

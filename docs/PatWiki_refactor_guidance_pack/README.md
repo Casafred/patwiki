@@ -38,6 +38,8 @@
 11. `schema-v2-draft.sql`：概念性 DDL，用于技术评审和 ORM/Alembic 设计输入，不建议直接生产执行。
 12. `25-agent-development-protocol.md`：Agent 开发前置阅读、任务循环、禁止行为、完成定义和最终报告格式；任何开发任务必须先读。
 13. `26-human-data-entry-interaction-spec.md`：快速录入、详情编辑、Excel 粘贴/导入、批量编辑、草稿恢复和未知属性治理的可执行交互规格。
+14. `27-agent-project-risk-module-contract.md`：轻量项目方案和风险上下文的 Agent 契约。
+15. `28-agent-import-ai-relation-reliability-contract.md`：导入缺失字段、数据库 AI 任务和专利-项目关系维护的可靠性契约；涉及这三类问题时必须额外读取。
 
 ## 阅读与决策顺序
 
@@ -78,3 +80,5 @@
 - 不允许通过新增同义 CustomField、逗号分隔 ID 或覆盖历史结论绕开治理设计；此类需求必须回到 Field Registry 评审。
 - 不允许因列尚未进入 Field Registry 就丢弃导入值；未知列必须进入来源扩展/观察层，并在语义确认后再决定是否升级为正式字段。
 - 不允许只实现“能编辑”的表单而忽略草稿、保存状态、空值不覆盖、批量粘贴、失败重试和来源追溯；人工录入交互必须遵守 `26-human-data-entry-interaction-spec.md`。
+- 导入空映射默认保留来源；只有显式跳过才离开治理队列。无标题有官方号码进入待补全专利，无身份有内容进入待补身份来源行，完全空行才跳过。
+- AI 设置测试、实际调用和任务监控必须遵守 `28-agent-import-ai-relation-reliability-contract.md` 的统一配置和任务落库门禁。

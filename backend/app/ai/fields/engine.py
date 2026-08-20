@@ -15,53 +15,11 @@ class AIFieldEngine:
         self.db = db
 
     def _get_llm(self):
-        """获取 LLM 客户端。返回 (llm, model_name) —— model_name 为实际使用的模型名。
+        """获取统一 LLM 客户端；设置页测试和后台任务使用同一配置边界。"""
+        from app.services.llm_service import UnifiedLLM, load_llm_config
 
-        优先从 settings.json 读取最新配置（用户可能通过设置页修改过）。
-        """
-        # 优先从 settings.json 读取最新配置（用户可能通过设置页修改过）
-        try:
-            from app.api.settings import get_app_settings, apply_llm_to_settings
-            app_settings = get_app_settings()
-            apply_llm_to_settings(app_settings)
-        except Exception:
-            pass
-
-        if not settings.LLM_API_KEY:
-            raise ValueError("LLM API key not configured. 请在设置页配置 LLM API Key。")
-
-        try:
-            from langchain_openai import ChatOpenAI
-            kwargs = {
-                "model": settings.LLM_MODEL,
-                "api_key": settings.LLM_API_KEY,
-                "temperature": 0.0,
-            }
-            if settings.LLM_BASE_URL:
-                kwargs["base_url"] = settings.LLM_BASE_URL
-            return ChatOpenAI(**kwargs), settings.LLM_MODEL
-        except ImportError:
-            # 兜底：直接用 openai SDK
-            try:
-                from openai import OpenAI
-                class _OpenAICompat:
-                    def __init__(self):
-                        self._client = OpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL or None)
-                        self._model = settings.LLM_MODEL
-                    def invoke(self, prompt: str):
-                        resp = self._client.chat.completions.create(
-                            model=self._model,
-                            messages=[{"role": "user", "content": prompt}],
-                            temperature=0.0,
-                        )
-                        class _R:
-                            def __init__(self, content, model=None):
-                                self.content = content
-                                self.response_model = model or resp.model or self._model
-                        return _R(resp.choices[0].message.content or "", resp.model)
-                return _OpenAICompat(), settings.LLM_MODEL
-            except ImportError:
-                raise ImportError(" neither langchain-openai nor openai installed，请安装其中一个")
+        config = load_llm_config()
+        return UnifiedLLM(config), config.model
 
     def _resolve_field_value(self, patent: Patent, key: str) -> str:
         """根据字段key从patent中解析出值，支持系统字段、custom_fields.xxx、ai_fields.xxx"""
@@ -215,7 +173,9 @@ class AIFieldEngine:
         field_def = self.db.query(CustomField).filter(CustomField.key == field_key).first()
         if not field_def:
             task.status = "failed"
-            task.errors = {"error": f"Field '{field_key}' not found"}
+            task.errors = [{"stage": "prepare", "error": f"Field '{field_key}' not found"}]
+            task.failed_count = task.total_items or 0
+            task.processed_items = task.total_items or 0
             task.completed_at = datetime.now()
             self.db.commit()
             return
@@ -236,27 +196,27 @@ class AIFieldEngine:
             patent = self.db.query(Patent).filter(Patent.id == patent_id).first()
             if not patent:
                 failed += 1
-                continue
-
-            try:
-                _, call_info = self.process_single(patent, field_def, force=force)
-                success += 1
-                # 记录请求/返回样本（仅前若干条）
-                if call_info and len(request_samples) < max_samples:
-                    request_samples.append({
-                        "patent_id": call_info["patent_id"],
-                        "prompt": call_info["prompt"][:4000],  # 截断避免超大
-                    })
-                    response_samples.append({
-                        "patent_id": call_info["patent_id"],
-                        "response": call_info["response"][:4000],
-                        "model": call_info["model"],
-                    })
-                    if recorded_model is None:
-                        recorded_model = call_info["model"]
-            except Exception as e:
-                failed += 1
-                errors.append({"patent_id": patent_id, "error": str(e)})
+                errors.append({"patent_id": patent_id, "stage": "execute", "error": "Patent not found"})
+            else:
+                try:
+                    _, call_info = self.process_single(patent, field_def, force=force)
+                    success += 1
+                    # 记录请求/返回样本（仅前若干条）
+                    if call_info and len(request_samples) < max_samples:
+                        request_samples.append({
+                            "patent_id": call_info["patent_id"],
+                            "prompt": call_info["prompt"][:4000],  # 截断避免超大
+                        })
+                        response_samples.append({
+                            "patent_id": call_info["patent_id"],
+                            "response": call_info["response"][:4000],
+                            "model": call_info["model"],
+                        })
+                        if recorded_model is None:
+                            recorded_model = call_info["model"]
+                except Exception as e:
+                    failed += 1
+                    errors.append({"patent_id": patent_id, "stage": "execute", "error": str(e)})
 
             task.processed_items = idx + 1
             task.success_count = success
@@ -339,7 +299,7 @@ class AIFieldEngine:
                     return obj
             except (json.JSONDecodeError, TypeError):
                 pass
-        return {}
+        raise ValueError("LLM 返回内容无法解析为 JSON 对象")
 
     def quick_analyze_single(self, patent: Patent, input_fields: list[str],
                              user_prompt: str, extraction_targets: list[dict]) -> tuple[dict, Optional[dict]]:
@@ -411,25 +371,26 @@ class AIFieldEngine:
             patent = self.db.query(Patent).filter(Patent.id == patent_id).first()
             if not patent:
                 failed += 1
-                continue
-            try:
-                _, call_info = self.quick_analyze_single(patent, input_fields, user_prompt, extraction_targets)
-                success += 1
-                if call_info and len(request_samples) < max_samples:
-                    request_samples.append({
-                        "patent_id": call_info["patent_id"],
-                        "prompt": call_info["prompt"][:4000],
-                    })
-                    response_samples.append({
-                        "patent_id": call_info["patent_id"],
-                        "response": call_info["response"][:4000],
-                        "model": call_info["model"],
-                    })
-                    if recorded_model is None:
-                        recorded_model = call_info["model"]
-            except Exception as e:
-                failed += 1
-                errors.append({"patent_id": patent_id, "error": str(e)})
+                errors.append({"patent_id": patent_id, "stage": "execute", "error": "Patent not found"})
+            else:
+                try:
+                    _, call_info = self.quick_analyze_single(patent, input_fields, user_prompt, extraction_targets)
+                    success += 1
+                    if call_info and len(request_samples) < max_samples:
+                        request_samples.append({
+                            "patent_id": call_info["patent_id"],
+                            "prompt": call_info["prompt"][:4000],
+                        })
+                        response_samples.append({
+                            "patent_id": call_info["patent_id"],
+                            "response": call_info["response"][:4000],
+                            "model": call_info["model"],
+                        })
+                        if recorded_model is None:
+                            recorded_model = call_info["model"]
+                except Exception as e:
+                    failed += 1
+                    errors.append({"patent_id": patent_id, "stage": "execute", "error": str(e)})
 
             task.processed_items = idx + 1
             task.success_count = success

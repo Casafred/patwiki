@@ -15,6 +15,8 @@
     "24-patent-information-hub-functional-spec.md",
     "25-agent-development-protocol.md",
     "26-human-data-entry-interaction-spec.md",
+    "27-agent-project-risk-module-contract.md",
+    "28-agent-import-ai-relation-reliability-contract.md",
     "schema-v2-draft.sql"
   ],
   "status": "agent-executable",

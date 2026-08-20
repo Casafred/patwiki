@@ -204,7 +204,7 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
       try {
         const task = await aiApi.getTask(taskId)
         setAiTaskInfo(task)
-        if (task.status === 'running' || task.status === 'pending') {
+        if (task.status === 'running' || task.status === 'pending' || task.status === 'processing') {
           setTimeout(poll, 1500)
         } else {
           setAiProcessing(null)
@@ -365,7 +365,15 @@ export default function PatentDetailPage({ patentId, onBack }: PatentDetailPageP
           <CustomTab patent={patent} editing={editing} updateField={updateField} />
         )}
         {activeTab === 'relations' && (
-          <RelationsTab patent={patent} formData={formData} tags={tags} projects={projects} editing={editing} updateField={updateField} />
+          <RelationsTab
+            patent={patent}
+            formData={formData}
+            tags={tags}
+            projects={projects}
+            editing={editing}
+            updateField={updateField}
+            onProjectsChanged={loadPatent}
+          />
         )}
         {activeTab === 'history' && (
           <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
@@ -1064,21 +1072,39 @@ function CustomTab({ patent, editing, updateField }: {
 }
 
 // ============ 关联关系 Tab ============
-function RelationsTab({ patent, formData, tags, projects, editing, updateField }: {
+function RelationsTab({ patent, formData, tags, projects, editing, updateField, onProjectsChanged }: {
   patent: Patent
   formData: PatentEditData
   tags: Tag[]
   projects: Project[]
   editing: boolean
   updateField: (key: keyof PatentEditData, value: unknown) => void
+  onProjectsChanged: () => Promise<void>
 }) {
   const patentTags = patent.tags || []
   const patentProjects = patent.projects || []
+  const [projectId, setProjectId] = useState('')
+  const [projectSaving, setProjectSaving] = useState(false)
+  const [projectError, setProjectError] = useState('')
 
   // 编辑态下从 patent 现有标签初始化，后续变更通过 updateField 写入 formData
   // 这里直接用 patent 数据作为初始选中态，保存时由父组件的 formData 决定
   const currentTagIds = editing ? (formData.tag_ids ?? patentTags.map(t => t.id)) : patentTags.map(t => t.id)
   const currentProjectIds = editing ? (formData.project_ids ?? patentProjects.map(p => p.id)) : patentProjects.map(p => p.id)
+
+  const saveProjectLinks = async (nextIds: number[]) => {
+    setProjectSaving(true)
+    setProjectError('')
+    try {
+      await patentApi.replaceProjects(patent.id, nextIds)
+      setProjectId('')
+      await onProjectsChanged()
+    } catch (error: unknown) {
+      setProjectError(getErrorMessage(error, '项目关联保存失败'))
+    } finally {
+      setProjectSaving(false)
+    }
+  }
 
   return (
     <div className="detail-grid">
@@ -1129,6 +1155,31 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField }
       </Field>
 
       <Field label="关联项目" full>
+        {!editing && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <select
+              className="form-input"
+              style={{ minWidth: 240, flex: 1 }}
+              value={projectId}
+              onChange={event => setProjectId(event.target.value)}
+              disabled={projectSaving}
+            >
+              <option value="">选择项目后添加</option>
+              {projects.filter(project => !patentProjects.some(item => item.id === project.id)).map(project => (
+                <option key={project.id} value={project.id}>{project.name}{project.code ? ` · ${project.code}` : ''}</option>
+              ))}
+            </select>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              disabled={!projectId || projectSaving}
+              onClick={() => void saveProjectLinks([...patentProjects.map(project => project.id), Number(projectId)])}
+            >
+              {projectSaving ? '保存中...' : '添加项目'}
+            </button>
+          </div>
+        )}
+        {projectError && !editing && <div style={{ color: '#b91c1c', fontSize: 12, marginBottom: 8 }}>{projectError}</div>}
         {editing ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {projects.map(proj => {
@@ -1154,8 +1205,17 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField }
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {patentProjects.length === 0 ? <span style={{ color: '#94a3b8' }}>-</span> :
               patentProjects.map(proj => (
-                <div key={proj.id} style={{ fontSize: 13 }}>
-                  {proj.name} {proj.module && <span style={{ color: '#94a3b8' }}>· {proj.module}</span>}
+                <div key={proj.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                  <span style={{ flex: 1 }}>{proj.name} {proj.module && <span style={{ color: '#94a3b8' }}>· {proj.module}</span>}</span>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    disabled={projectSaving}
+                    onClick={() => void saveProjectLinks(patentProjects.filter(item => item.id !== proj.id).map(item => item.id))}
+                    title="移除该项目关联"
+                  >
+                    移除
+                  </button>
                 </div>
               ))
             }

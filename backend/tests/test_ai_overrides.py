@@ -9,8 +9,9 @@ from sqlalchemy.pool import StaticPool
 
 from app.ai.fields.engine import AIFieldEngine
 from app.api.patents import router
+from app.api.ai import router as ai_router
 from app.database import Base, get_db
-from app.models import AIFieldValue, CustomField, CustomFieldType, Patent, PatentHistory
+from app.models import AIFieldValue, AITask, CustomField, CustomFieldType, Patent, PatentHistory
 
 
 class _FakeResponse:
@@ -54,6 +55,7 @@ class AIOverrideApiTest(unittest.TestCase):
 
         app = FastAPI()
         app.include_router(router)
+        app.include_router(ai_router)
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)
 
@@ -119,6 +121,70 @@ class AIOverrideApiTest(unittest.TestCase):
         self.assertIsNone(value.overridden_value)
         self.assertEqual(value.value, "重新生成的 AI 值")
         self.assertEqual(self.patent.ai_fields["ai_summary"], "重新生成的 AI 值")
+
+    def test_quick_analyze_prepare_failure_is_persisted_as_failed_task(self):
+        response = self.client.post(
+            "/ai/quick-analyze",
+            json={
+                "patent_ids": [self.patent.id],
+                "input_fields": ["title"],
+                "prompt": "提取摘要",
+                "extractions": [{
+                    "name": "摘要",
+                    "target_field_key": "missing_field",
+                }],
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        task = response.json()
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(task["errors"][0]["stage"], "prepare")
+        persisted = self.db.query(AITask).filter(AITask.id == task["id"]).one()
+        self.assertEqual(persisted.status, "failed")
+
+    def test_standard_ai_missing_field_is_persisted_and_listed_as_failed_task(self):
+        response = self.client.post(
+            "/ai/process",
+            json={"patent_ids": [self.patent.id], "field_key": "missing_field"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        task = response.json()
+        self.assertEqual(task["status"], "failed")
+        self.assertIsInstance(task["errors"], list)
+        listed = self.client.get("/ai/tasks").json()
+        listed_task = next(item for item in listed if item["id"] == task["id"])
+        self.assertEqual(listed_task["status"], "failed")
+        self.assertEqual(listed_task["errors"][0]["stage"], "prepare")
+
+    def test_quick_analyze_parse_failure_is_failed_without_writing_empty_value(self):
+        target = CustomField(
+            key="cf_quick_result",
+            name="快速结果",
+            field_type=CustomFieldType.TEXT,
+        )
+        self.db.add(target)
+        task = AITask(
+            task_type="quick_analyze",
+            total_items=1,
+            status="pending",
+        )
+        self.db.add(task)
+        self.db.commit()
+        class InvalidLLM:
+            def invoke(self, _prompt):
+                return type("Response", (), {"content": "这不是 JSON"})()
+
+        with patch.object(AIFieldEngine, "_get_llm", return_value=(InvalidLLM(), "test-model")):
+            AIFieldEngine(self.db).quick_analyze_batch(
+                task.id, [self.patent.id], ["title"], "提取摘要",
+                [{"name": "摘要", "target_field_key": "cf_quick_result"}],
+            )
+        self.db.refresh(self.patent)
+        persisted = self.db.query(AITask).filter(AITask.id == task.id).one()
+        self.assertEqual(persisted.status, "failed")
+        self.assertEqual(persisted.failed_count, 1)
+        self.assertEqual(persisted.errors[0]["patent_id"], self.patent.id)
+        self.assertIsNone((self.patent.custom_fields or {}).get("cf_quick_result"))
 
 
 if __name__ == "__main__":
