@@ -52,10 +52,16 @@ async def start_ai_process(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
+    try:
+        from app.services.llm_service import load_llm_config
+        runtime_model = load_llm_config({"model": req.model}).model if req.model else load_llm_config().model
+    except Exception:
+        runtime_model = req.model or settings.LLM_MODEL
+
     task = AITask(
         task_type="field_calculation",
         field_key=req.field_key,
-        model_name=req.model or settings.LLM_MODEL,
+        model_name=runtime_model,
         total_items=len(req.patent_ids),
         status="pending",
         config={"patent_ids": req.patent_ids, "force": req.force_recalculate},

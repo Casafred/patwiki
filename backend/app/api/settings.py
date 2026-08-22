@@ -4,7 +4,7 @@
 import json
 from pathlib import Path
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.config import settings
@@ -20,12 +20,16 @@ SENSITIVE_KEYS = {"llm_api_key", "embedding_api_key"}
 
 
 class LLMSettings(BaseModel):
-    llm_provider: str = "openai"
+    llm_provider: str = "deepseek"
     llm_api_key: str = ""
-    llm_model: str = "gpt-4o-mini"
-    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "deepseek-v4-flash"
+    llm_base_url: str = "https://api.deepseek.com"
     llm_temperature: float = 0.2
     llm_max_tokens: int = 2000
+    # DeepSeek V4 supports thinking by default. Extraction normally does not
+    # need a reasoning trace, so the default is intentionally disabled.
+    llm_thinking_mode: str = "disabled"
+    llm_reasoning_effort: str = "low"
     # Embedding（向量检索，暂留接口）
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
@@ -38,7 +42,7 @@ class AppSettings(BaseModel):
     # 是否启用 AI 功能
     ai_enabled: bool = False
     # 批量处理并发数
-    ai_batch_concurrency: int = 3
+    ai_batch_concurrency: int = Field(default=3, ge=1, le=10)
     # 缓存命中是否跳过 API 调用
     ai_use_cache: bool = True
 
@@ -55,6 +59,14 @@ def _load_settings() -> dict:
 def _save_settings(data: dict) -> None:
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _bounded_concurrency(value: object) -> int:
+    """Keep old/manual settings files from creating an unbounded worker pool."""
+    try:
+        return min(10, max(1, int(value)))
+    except (TypeError, ValueError):
+        return 3
 
 
 def _mask_sensitive(data: dict) -> dict:
@@ -84,7 +96,7 @@ def get_app_settings() -> AppSettings:
     return AppSettings(
         llm=llm,
         ai_enabled=ai_enabled,
-        ai_batch_concurrency=data.get("ai_batch_concurrency", 3),
+        ai_batch_concurrency=_bounded_concurrency(data.get("ai_batch_concurrency", 3)),
         ai_use_cache=data.get("ai_use_cache", True),
     )
 
@@ -109,14 +121,17 @@ async def get_settings():
         llm_data["llm_model"] = settings.LLM_MODEL
     if settings.LLM_BASE_URL and not llm_data.get("llm_base_url"):
         llm_data["llm_base_url"] = settings.LLM_BASE_URL
-    masked_llm = _mask_sensitive(llm_data)
+    # Return complete defaults as well as saved values so a fresh install is
+    # immediately configured for the current DeepSeek V4 Flash integration.
+    llm = get_app_settings().llm
+    masked_llm = _mask_sensitive(llm.model_dump())
     return {
         "llm": masked_llm,
-        "ai_enabled": data.get("ai_enabled", bool(llm_data.get("llm_api_key"))),
-        "ai_batch_concurrency": data.get("ai_batch_concurrency", 3),
+        "ai_enabled": data.get("ai_enabled", bool(llm.llm_api_key)),
+        "ai_batch_concurrency": _bounded_concurrency(data.get("ai_batch_concurrency", 3)),
         "ai_use_cache": data.get("ai_use_cache", True),
         # 标识 API key 是否已配置
-        "has_api_key": bool(llm_data.get("llm_api_key")),
+        "has_api_key": bool(llm.llm_api_key),
     }
 
 
@@ -136,12 +151,25 @@ async def update_settings(payload: dict):
         current_llm["llm_api_key"] = settings.LLM_API_KEY
 
     for k, v in new_llm.items():
+        if k not in LLMSettings.model_fields:
+            continue
         # 跳过脱敏字段（值为 **** 开头说明是前端回显，不覆盖）
         if k in SENSITIVE_KEYS and isinstance(v, str) and ("****" in v or v == ""):
             continue
         current_llm[k] = v
 
-    current["llm"] = current_llm
+    # Validate and canonicalize at the persistence boundary. This prevents a
+    # malformed manual/old setting from later surfacing as a vague NetworkError.
+    normalized_llm = LLMSettings(**{
+        k: v for k, v in current_llm.items() if k in LLMSettings.model_fields
+    })
+    if normalized_llm.llm_provider.strip().lower() == "deepseek":
+        aliases = {"v4flash": "deepseek-v4-flash", "v4-flash": "deepseek-v4-flash", "deepseek-v4flash": "deepseek-v4-flash"}
+        normalized_llm.llm_model = aliases.get(normalized_llm.llm_model.strip().lower(), normalized_llm.llm_model.strip())
+        if not normalized_llm.llm_base_url.strip():
+            normalized_llm.llm_base_url = "https://api.deepseek.com"
+
+    current["llm"] = normalized_llm.model_dump()
 
     if "ai_enabled" in payload:
         current["ai_enabled"] = payload["ai_enabled"]
@@ -149,7 +177,7 @@ async def update_settings(payload: dict):
         current["ai_enabled"] = bool(current_llm.get("llm_api_key"))
 
     if "ai_batch_concurrency" in payload:
-        current["ai_batch_concurrency"] = payload["ai_batch_concurrency"]
+        current["ai_batch_concurrency"] = _bounded_concurrency(payload["ai_batch_concurrency"])
     if "ai_use_cache" in payload:
         current["ai_use_cache"] = payload["ai_use_cache"]
 
@@ -171,9 +199,15 @@ async def test_llm_connection(payload: dict):
         api_key = payload.get("api_key", "")
         # 脱敏值不能作为覆盖配置，使用当前已保存的 key。
         overrides = {
+            "provider": payload.get("provider") or payload.get("llm_provider"),
             "base_url": payload.get("base_url"),
             "model": payload.get("model"),
+            "temperature": payload.get("temperature"),
+            "max_tokens": payload.get("max_tokens"),
+            "thinking_mode": payload.get("thinking_mode"),
+            "reasoning_effort": payload.get("reasoning_effort"),
         }
+        overrides = {key: value for key, value in overrides.items() if value is not None}
         if api_key and "****" not in api_key:
             overrides["api_key"] = api_key
         config = load_llm_config(overrides)

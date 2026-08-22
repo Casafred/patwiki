@@ -9,12 +9,14 @@ export default function SettingsPage() {
   const [hasApiKey, setHasApiKey] = useState(false)
 
   const [llm, setLLM] = useState({
-    llm_provider: 'openai',
+    llm_provider: 'deepseek',
     llm_api_key: '',
-    llm_model: 'gpt-4o-mini',
-    llm_base_url: 'https://api.openai.com/v1',
+    llm_model: 'deepseek-v4-flash',
+    llm_base_url: 'https://api.deepseek.com',
     llm_temperature: 0.2,
     llm_max_tokens: 2000,
+    llm_thinking_mode: 'disabled',
+    llm_reasoning_effort: 'low',
   })
   const [aiBatchConcurrency, setAiBatchConcurrency] = useState(3)
   const [aiUseCache, setAiUseCache] = useState(true)
@@ -78,8 +80,13 @@ export default function SettingsPage() {
     try {
       const result = await settingsApi.testLLM({
         api_key: apiKeyEdited ? llm.llm_api_key : '',
+        provider: llm.llm_provider,
         base_url: llm.llm_base_url,
         model: llm.llm_model,
+        temperature: llm.llm_temperature,
+        max_tokens: llm.llm_max_tokens,
+        thinking_mode: llm.llm_thinking_mode,
+        reasoning_effort: llm.llm_reasoning_effort,
       })
       setTestResult(result)
     } catch (error: unknown) {
@@ -133,8 +140,23 @@ export default function SettingsPage() {
             <select
               className="form-input"
               value={llm.llm_provider}
-              onChange={(e) => setLLM({ ...llm, llm_provider: e.target.value })}
+              onChange={(e) => {
+                const provider = e.target.value
+                if (provider === 'deepseek') {
+                  setLLM({
+                    ...llm,
+                    llm_provider: provider,
+                    llm_base_url: 'https://api.deepseek.com',
+                    llm_model: 'deepseek-v4-flash',
+                    llm_thinking_mode: 'disabled',
+                    llm_reasoning_effort: 'low',
+                  })
+                } else {
+                  setLLM({ ...llm, llm_provider: provider })
+                }
+              }}
             >
+              <option value="deepseek">DeepSeek V4 Flash（官方）</option>
               <option value="openai">OpenAI 兼容（含国内代理）</option>
               <option value="anthropic">Anthropic Claude</option>
               <option value="custom">自定义</option>
@@ -156,7 +178,7 @@ export default function SettingsPage() {
               placeholder={hasApiKey ? '已配置（输入新值可覆盖）' : 'sk-... 或国内代理 API Key'}
             />
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              支持所有 OpenAI 兼容 API（OpenAI / DeepSeek / 通义千问 / 智谱 / Moonshot 等）
+              DeepSeek 使用平台 API Key；也可切换到其他 OpenAI 兼容服务。
             </div>
           </div>
 
@@ -173,7 +195,7 @@ export default function SettingsPage() {
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
               常见值：<br />
               • OpenAI: https://api.openai.com/v1<br />
-              • DeepSeek: https://api.deepseek.com/v1<br />
+              • DeepSeek 官方: https://api.deepseek.com<br />
               • 通义千问: https://dashscope.aliyuncs.com/compatible-mode/v1<br />
               • 智谱: https://open.bigmodel.cn/api/paas/v4<br />
               • Moonshot: https://api.moonshot.cn/v1
@@ -188,9 +210,42 @@ export default function SettingsPage() {
               className="form-input"
               value={llm.llm_model}
               onChange={(e) => setLLM({ ...llm, llm_model: e.target.value })}
-              placeholder="gpt-4o-mini / deepseek-chat / qwen-plus 等"
+              placeholder="deepseek-v4-flash / gpt-4o-mini / qwen-plus 等"
             />
           </div>
+
+          {llm.llm_provider === 'deepseek' && (
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 6, fontWeight: 500 }}>
+                  思考模式
+                </label>
+                <select
+                  className="form-input"
+                  value={llm.llm_thinking_mode}
+                  onChange={(e) => setLLM({ ...llm, llm_thinking_mode: e.target.value })}
+                >
+                  <option value="disabled">关闭（推荐用于字段抽取）</option>
+                  <option value="enabled">开启</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 6, fontWeight: 500 }}>
+                  推理强度
+                </label>
+                <select
+                  className="form-input"
+                  value={llm.llm_reasoning_effort}
+                  disabled={llm.llm_thinking_mode !== 'enabled'}
+                  onChange={(e) => setLLM({ ...llm, llm_reasoning_effort: e.target.value })}
+                >
+                  <option value="low">低</option>
+                  <option value="high">高</option>
+                  <option value="max">最高</option>
+                </select>
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 16 }}>
             <div style={{ flex: 1 }}>
@@ -213,7 +268,8 @@ export default function SettingsPage() {
               </label>
               <input
                 type="number"
-                min="100"
+                min="1"
+                max="384000"
                 className="form-input"
                 value={llm.llm_max_tokens}
                 onChange={(e) => setLLM({ ...llm, llm_max_tokens: Number(e.target.value) })}
@@ -283,7 +339,7 @@ export default function SettingsPage() {
               onChange={(e) => setAiBatchConcurrency(Number(e.target.value))}
             />
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              控制 AI 批量处理时同时发起的请求数。值越大处理越快，但可能触发 API 限流。
+              控制 AI 批量处理时同时发起的请求数（1-10）。PatWiki 会在此上限内并发请求、串行写入本地数据库；较高值可能触发服务商限流。
             </div>
           </div>
 

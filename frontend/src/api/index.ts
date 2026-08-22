@@ -655,7 +655,16 @@ export const settingsApi = {
   update: (payload: JsonObject): Promise<{ success: boolean; message: string }> =>
     api.put('/settings', payload),
 
-  testLLM: (payload: { api_key?: string; base_url?: string; model?: string }): Promise<{ success: boolean; message: string }> =>
+  testLLM: (payload: {
+    api_key?: string
+    provider?: string
+    base_url?: string
+    model?: string
+    temperature?: number
+    max_tokens?: number
+    thinking_mode?: string
+    reasoning_effort?: string
+  }): Promise<{ success: boolean; message: string }> =>
     api.post('/settings/test-llm', payload),
 }
 

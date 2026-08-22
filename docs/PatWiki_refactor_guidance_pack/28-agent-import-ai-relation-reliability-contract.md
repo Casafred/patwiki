@@ -53,6 +53,26 @@
 - 网络重试只能在连接/超时类错误执行，不能对明确的 4xx 配置错误盲目重试；
 - 不得在设置页使用一套客户端、在 AI engine 使用另一套 URL 拼接或另一套配置优先级。
 
+#### 3.1.1 DeepSeek V4 当前接入基线（2026-08-23）
+
+官方文档来源：`https://api-docs.deepseek.com/zh-cn/`，Agent 修改 LLM 接入前必须重新核对该页面，不能把以下值视为永久不变的常量。
+
+- Provider：`deepseek`；OpenAI-compatible Base URL：`https://api.deepseek.com`；服务层统一拼接 `/chat/completions`。
+- 用户说的 `v4flash` 只作为兼容别名，持久化和请求必须规范化为官方模型 ID `deepseek-v4-flash`。
+- 当前 V4 模型请求使用 `max_tokens`、`temperature`，可使用 `thinking: {"type": "enabled"|"disabled"}`；思考开启时可传 `reasoning_effort: "low"|"high"|"max"`。
+- 快速抽取必须传 `response_format: {"type": "json_object"}`，并在 prompt 中要求 JSON；非 JSON 响应仍必须失败并保留原始响应。
+- 响应读取 `choices[0].message.content`；同时保留 `reasoning_content`、`finish_reason`、`usage` 和实际 `model` 到任务样本/结果元数据，不能把推理内容误当正式字段值。
+- `429` 和 `5xx` 可使用指数退避并尊重 `Retry-After`；认证、余额、请求参数等明确 `4xx` 不得盲目重试。错误必须转换为 `LLMServiceError`。
+
+模型名不能只凭用户口述或旧文章猜测。若官方模型 ID 发生变化，Agent 必须更新设置预设、别名映射、测试和本文档，并保留用户自定义模型输入能力。
+
+#### 3.1.2 并发边界
+
+- `ai_batch_concurrency` 是唯一批处理并发上限，服务层必须限制为 `1..10`；不得创建无界任务、线程或请求队列。
+- 并发工作器只能执行网络调用并返回普通 Python 数据；不得在线程之间共享 SQLAlchemy `Session`、ORM 实体或写库事务。
+- 批任务由所属后台 Session 串行写入专利字段、AI 值、任务进度和错误。单条请求失败写入该条错误，不得回滚已成功的其他条目。
+- JSON 快速抽取、标准字段批处理和设置页测试都必须经过 `llm_service.py`；任何新 AI 入口违反此边界视为阻断性问题。
+
 ### 3.2 AITask 事务和生命周期
 
 任何快速抽取或批量 AI 调用必须遵守以下顺序：
