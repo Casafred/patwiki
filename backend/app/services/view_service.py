@@ -317,8 +317,8 @@ class ViewService:
             {
                 "key": "ip_risk_control",
                 "name": "IP事务管控表之风险管控表",
-                "description": "风险管控工作底表；保留风险描述、项目关联和法律状态字段供人工维护。",
-                "columns": common + [("category", 130), ("risk_level", 100), ("risk_description", 300), ("has_risk", 80), ("application_status", 120)],
+                "description": "风险管控工作底表；显示产品、关联项目、风险描述和法律状态，关系实体仍由详情页维护。",
+                "columns": common + [("product_id", 150), ("projects", 220), ("category", 130), ("risk_level", 100), ("risk_description", 300), ("has_risk", 80), ("application_status", 120)],
                 "filter": {"has_risk": {"eq": True}},
                 "group": {"fields": [{"field": "risk_level", "direction": "desc"}, {"field": "category", "direction": "asc"}]},
             },
@@ -354,6 +354,20 @@ class ViewService:
                 PatentView.template_key == definition["key"],
             ).first()
             if existing:
+                # Default templates are additive: introduce newly required
+                # business projections without overwriting user column choices.
+                if definition["key"] == "ip_risk_control":
+                    configured = list(existing.column_config or [])
+                    configured_keys = {item.get("key") for item in configured if isinstance(item, dict)}
+                    next_order = max((item.get("order", 0) for item in configured if isinstance(item, dict)), default=-1) + 1
+                    for key, width in (("product_id", 150), ("projects", 220)):
+                        if key not in configured_keys:
+                            configured.append({"key": key, "visible": True, "width": width, "order": next_order})
+                            next_order += 1
+                    if configured != (existing.column_config or []):
+                        existing.column_config = configured
+                        db.add(existing)
+                        db.commit()
                 created.append(existing)
                 continue
             column_config = [

@@ -318,6 +318,15 @@ export const patentApi = {
   bulkDelete: (ids: number[]): Promise<{ success: boolean; deleted_count: number }> =>
     api.post('/patents/bulk-delete', ids),
 
+  bulkMoveDatabase: (patentIds: number[], targetDatabaseId: number): Promise<{ success: boolean; moved_count: number; target_database_id: number }> =>
+    api.post('/patents/bulk-move-database', { patent_ids: patentIds, target_database_id: targetDatabaseId }),
+
+  bulkMoveView: (patentIds: number[], targetViewId: number | null): Promise<{ success: boolean; moved_count: number; target_view_id: number | null }> =>
+    api.post('/patents/bulk-move-view', { patent_ids: patentIds, target_view_id: targetViewId }),
+
+  bulkDuplicate: (patentIds: number[], options: { target_database_id?: number; target_view_id?: number } = {}): Promise<{ success: boolean; created_count: number; created_ids: number[] }> =>
+    api.post('/patents/bulk-duplicate', { patent_ids: patentIds, ...options }),
+
   // 清理无效占位专利（title="待补全" 且号格式不合法的历史残留）
   cleanupInvalidPlaceholders: (dryRun: boolean = true): Promise<{
     deleted_count: number

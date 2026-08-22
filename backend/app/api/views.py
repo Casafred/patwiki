@@ -44,6 +44,10 @@ def list_views(
     db: Session = Depends(get_db),
 ):
     """列出视图。"""
+    # Existing local databases may predate the additive business-view columns.
+    # Reconcile the idempotent defaults before returning the workspace scope.
+    if database_id is not None:
+        ViewService.ensure_default_business_views(db, database_id)
     views = ViewService.list_views(
         db,
         database_id=database_id,

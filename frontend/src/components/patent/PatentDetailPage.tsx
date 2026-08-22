@@ -1442,17 +1442,37 @@ function HistoryTab({ patent, history, loading, onReload }: {
   onReload: () => void
 }) {
   const [sourceFilter, setSourceFilter] = useState<string>('all')
+  const [expandedImportBatches, setExpandedImportBatches] = useState<Set<string>>(new Set())
 
   const filtered = sourceFilter === 'all'
     ? history
     : history.filter(h => h.source === sourceFilter)
 
-  // 按日期分组
-  const groups: Record<string, PatentHistory[]> = {}
+  type HistoryItem = { kind: 'entry'; history: PatentHistory } | { kind: 'import_batch'; key: string; histories: PatentHistory[] }
+
+  // 按日期分组；同一次导入只在时间线中显示一个可展开的摘要。
+  const groups: Record<string, HistoryItem[]> = {}
+  const importItemsByKey = new Map<string, Extract<HistoryItem, { kind: 'import_batch' }>>()
   filtered.forEach(h => {
     const day = h.created_at ? new Date(h.created_at).toLocaleDateString('zh-CN') : '未知日期'
     if (!groups[day]) groups[day] = []
-    groups[day].push(h)
+    if (h.source !== 'import') {
+      groups[day].push({ kind: 'entry', history: h })
+      return
+    }
+    // New batches have an immutable ID. Older records fall back to table + minute,
+    // so they remain compact without accidentally merging separate imports.
+    const fallbackTime = h.created_at ? h.created_at.slice(0, 16) : String(h.id)
+    const batchKey = h.import_batch_id != null
+      ? `batch:${h.import_batch_id}`
+      : `legacy:${day}:${h.source_table_title || 'unknown'}:${fallbackTime}`
+    let batch = importItemsByKey.get(batchKey)
+    if (!batch) {
+      batch = { kind: 'import_batch', key: batchKey, histories: [] }
+      importItemsByKey.set(batchKey, batch)
+      groups[day].push(batch)
+    }
+    batch.histories.push(h)
   })
 
   const sourceOptions = ['all', 'manual', 'bulk', 'ai', 'import', 'api']
@@ -1476,7 +1496,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
             ))}
           </select>
           <span style={{ color: '#94a3b8' }}>·</span>
-          <span style={{ color: '#64748b' }}>共 {filtered.length} 条</span>
+          <span style={{ color: '#64748b' }}>共 {filtered.length} 项字段记录</span>
         </div>
         <button className="btn btn-secondary" onClick={onReload} disabled={loading} style={{ fontSize: 13, padding: '4px 12px' }}>
           {loading ? '刷新中...' : '刷新'}
@@ -1507,10 +1527,53 @@ function HistoryTab({ patent, history, loading, onReload }: {
                 fontSize: 12, color: '#94a3b8', marginBottom: 8,
                 paddingBottom: 4, borderBottom: '1px solid #e2e8f0',
               }}>
-                {day} · {items.length} 次修改
+                {day} · {items.reduce((total, item) => total + (item.kind === 'import_batch' ? item.histories.length : 1), 0)} 项字段变更
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {items.map(h => {
+                {items.map(item => {
+                  if (item.kind === 'import_batch') {
+                    const first = item.histories[0]
+                    const rows = [...new Set(item.histories.map(history => history.source_row).filter((row): row is number => row != null))]
+                    const sourceName = first.source_table_title || '未标注来源文件'
+                    const isExpanded = expandedImportBatches.has(item.key)
+                    return (
+                      <div key={item.key} style={{ border: '1px solid #fde68a', borderRadius: 8, background: '#fffbeb' }}>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedImportBatches(previous => {
+                            const next = new Set(previous)
+                            if (next.has(item.key)) next.delete(item.key)
+                            else next.add(item.key)
+                            return next
+                          })}
+                          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
+                        >
+                          <span style={{ color: '#92400e', fontSize: 14 }}>{isExpanded ? '▾' : '▸'}</span>
+                          <span style={{ padding: '1px 8px', borderRadius: 10, fontSize: 11, background: '#fef3c7', color: '#92400e', fontWeight: 500 }}>导入批次</span>
+                          <strong style={{ fontSize: 13, color: '#78350f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sourceName}</strong>
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#a16207', whiteSpace: 'nowrap' }}>
+                            {item.histories.length} 项字段变更{rows.length > 0 ? ` · 来源行 ${rows.join('、')}` : ''}
+                          </span>
+                        </button>
+                        {isExpanded && (
+                          <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {item.histories.map(h => renderHistoryEntry(h))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }
+                  return renderHistoryEntry(item.history)
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  function renderHistoryEntry(h: PatentHistory) {
                   const src = SOURCE_LABELS[h.source] || { label: h.source, color: '#475569', bg: '#e2e8f0' }
                   const time = h.created_at ? new Date(h.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
                   return (
@@ -1569,14 +1632,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
                       </div>
                     </div>
                   )
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  }
 }
 
 // ============ 通用 Field 组件 ============

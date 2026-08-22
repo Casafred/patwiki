@@ -37,6 +37,7 @@ interface PatentListPageProps {
 
 type SortOrder = 'asc' | 'desc'
 type RelationCellData = { links?: LinkRecord[]; value?: JsonValue; aggregation?: string }
+type BulkTransferAction = 'move_database' | 'move_view' | 'duplicate'
 
 function readPageParam(params: URLSearchParams): number {
   const page = Number(params.get('page'))
@@ -263,7 +264,7 @@ function LinkFieldEditor({ patentId, field, currentLinks, onChanged, onCancel }:
 
 export default function PatentListPage({ onPatentClick, viewId = null }: PatentListPageProps) {
   const {
-    patents, totalPatents, currentProductId, currentDatabaseId, loading,
+    patents, totalPatents, currentProductId, currentDatabaseId, loading, databases, products,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
     groupByFamily, setGroupByFamily, views, setViews, setCurrentProductId,
     dataVersion,
@@ -311,6 +312,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [columnSearch, setColumnSearch] = useState('')
   const [showBulkEdit, setShowBulkEdit] = useState(false)
   const [showBulkTag, setShowBulkTag] = useState(false)
+  const [bulkTransferAction, setBulkTransferAction] = useState<BulkTransferAction | null>(null)
+  const [bulkTargetDatabaseId, setBulkTargetDatabaseId] = useState<number | null>(null)
+  const [bulkTargetViewId, setBulkTargetViewId] = useState<number | null>(null)
   const [showAIBatch, setShowAIBatch] = useState(false)
   const [showQuickAnalyze, setShowQuickAnalyze] = useState(false)
   const [quickAnalyzePatentIds, setQuickAnalyzePatentIds] = useState<number[]>([])
@@ -336,12 +340,15 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [bulkLegalStatus, setBulkLegalStatus] = useState('')
   const [bulkCountry, setBulkCountry] = useState('')
   const [bulkApplicant, setBulkApplicant] = useState('')
+  const [bulkFieldKey, setBulkFieldKey] = useState('')
+  const [bulkFieldValue, setBulkFieldValue] = useState('')
   // 批量打标签
   const [tagsList, setTagsList] = useState<Tag[]>([])
   const [bulkTagIds, setBulkTagIds] = useState<number[]>([])
   const [bulkTagMode, setBulkTagMode] = useState<'add' | 'remove' | 'replace'>('add')
   const [bulkTagLoading, setBulkTagLoading] = useState(false)
   const [aiFieldKey, setAiFieldKey] = useState('')
+  const [aiScope, setAiScope] = useState<'selected' | 'visible'>('selected')
   const [aiFields, setAiFields] = useState<CustomField[]>([])
   const [filterValues, setFilterValues] = useState<Record<string, string>>(() => readFilterParam(searchParams))
   const [customFields, setCustomFields] = useState<CustomField[]>([])
@@ -859,6 +866,38 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       loadPatents()
     } catch (error: unknown) {
       alert(getErrorMessage(error, '删除失败'))
+    }
+  }
+
+  const openBulkTransfer = (action: BulkTransferAction) => {
+    setBulkTransferAction(action)
+    setBulkTargetDatabaseId(action === 'duplicate' ? activeDatabaseId ?? null : null)
+    setBulkTargetViewId(null)
+  }
+
+  const handleBulkTransfer = async () => {
+    if (!bulkTransferAction || selectedIds.length === 0) return
+    try {
+      if (bulkTransferAction === 'move_database') {
+        if (bulkTargetDatabaseId == null) {
+          alert('请选择目标数据库')
+          return
+        }
+        const result = await patentApi.bulkMoveDatabase(selectedIds, bulkTargetDatabaseId)
+        alert(`已移库 ${result.moved_count} 条专利`)
+      } else if (bulkTransferAction === 'move_view') {
+        const result = await patentApi.bulkMoveView(selectedIds, bulkTargetViewId)
+        alert(result.target_view_id == null ? `已将 ${result.moved_count} 条专利移回库主表` : `已移动 ${result.moved_count} 条专利到目标视图`)
+      } else {
+        const options = bulkTargetDatabaseId == null ? {} : { target_database_id: bulkTargetDatabaseId }
+        const result = await patentApi.bulkDuplicate(selectedIds, options)
+        alert(`已创建 ${result.created_count} 条工作副本。副本不带官方号码，不会与原专利混淆。`)
+      }
+      setBulkTransferAction(null)
+      clearSelection()
+      await loadPatents()
+    } catch (error: unknown) {
+      alert('批量操作失败: ' + getErrorMessage(error))
     }
   }
 
@@ -1441,6 +1480,21 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     if (bulkLegalStatus) updates.legal_status = bulkLegalStatus
     if (bulkCountry) updates.country = bulkCountry
     if (bulkApplicant) updates.applicant = bulkApplicant
+    if (bulkFieldKey) {
+      const field = fields.find(item => item.key === bulkFieldKey)
+      if (!field) {
+        alert('请选择有效字段')
+        return
+      }
+      const typedValue: JsonValue = field.field_type === 'boolean'
+        ? bulkFieldValue === 'true'
+        : bulkFieldValue
+      if (field.is_system) {
+        ;(updates as Record<string, JsonValue>)[field.key] = typedValue
+      } else {
+        updates.custom_fields = { [field.key]: typedValue }
+      }
+    }
     if (Object.keys(updates).length === 0) {
       alert('请至少填写一个要修改的字段')
       return
@@ -1455,6 +1509,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       setBulkLegalStatus('')
       setBulkCountry('')
       setBulkApplicant('')
+      setBulkFieldKey('')
+      setBulkFieldValue('')
       clearSelection()
       loadPatents()
     } catch (error: unknown) {
@@ -1490,14 +1546,24 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       alert('请选择要处理的 AI 字段')
       return
     }
+    const targetIds = aiScope === 'selected' ? selectedIds : patents.map(patent => patent.id)
+    if (targetIds.length === 0) {
+      alert(aiScope === 'selected' ? '请先选择专利，或切换为处理当前页面' : '当前页面没有可处理的专利')
+      return
+    }
     try {
-      await startAITask(selectedIds, aiFieldKey)
+      await startAITask(targetIds, aiFieldKey)
       setShowAIBatch(false)
       setAiFieldKey('')
-      clearSelection()
     } catch (error: unknown) {
       alert('启动 AI 任务失败: ' + getErrorMessage(error, '请先在设置页配置 LLM API'))
     }
+  }
+
+  const openAIBatch = (fieldKey?: string, scope: 'selected' | 'visible' = selectedIds.length > 0 ? 'selected' : 'visible') => {
+    setAiFieldKey(fieldKey || '')
+    setAiScope(scope)
+    setShowAIBatch(true)
   }
 
   const handlePageJump = () => {
@@ -1809,6 +1875,18 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       )
     }
 
+    if (field.key === 'product_id') {
+      const product = products.find(item => item.id === patent.product_id)
+      return <span style={{ color: product ? '#334155' : '#94a3b8' }}>{product?.name || (patent.product_id ? `产品 #${patent.product_id}` : '-')}</span>
+    }
+
+    if (field.key === 'projects') {
+      const linkedProjects = patent.projects || []
+      return linkedProjects.length > 0
+        ? <span style={{ color: '#1d4ed8' }}>{linkedProjects.map(project => project.name || `项目 #${project.id}`).join('、')}</span>
+        : <span style={{ color: '#94a3b8' }}>未关联项目</span>
+    }
+
     if (field.key === 'legal_status') {
       const status = value as string
       return (
@@ -2031,10 +2109,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           <div className="selection-actions">
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)}>批量编辑</button>
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)}>批量打标签</button>
+            <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_view')}>移动到视图</button>
+            <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_database')}>移库</button>
+            <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('duplicate')}>复制为工作副本</button>
             <button className="btn btn-xs btn-primary" onClick={() => { setQuickAnalyzePatentIds(selectedIds); setShowQuickAnalyze(true) }}>
               <Icon name="sparkles" size={13} /> AI 快速分析
             </button>
-            <button className="btn btn-xs btn-ghost" onClick={() => setShowAIBatch(true)}>AI 字段批量处理</button>
+            <button className="btn btn-xs btn-ghost" onClick={() => openAIBatch()}>AI 字段批量处理</button>
             <button
               className="btn btn-xs btn-danger"
               onClick={handleBulkDelete}
@@ -2274,8 +2355,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                                   alert('当前列表为空')
                                   return
                                 }
-                                if (!confirm(`将用此 AI 配置处理当前列表的 ${patents.length} 行，是否继续？`)) return
-                                startAITask(patents.map(p => p.id), field.key)
+                                openAIBatch(field.key, 'visible')
                               }}
                             >
                               <span style={{ color: '#7c3aed' }}><Icon name="activity" /> 批量处理此列（所有可见行）</span>
@@ -2472,8 +2552,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                               alert('下方没有更多行')
                               return
                             }
-                            if (!confirm(`将用此 AI 配置处理下方 ${belowPatents.length} 行，是否继续？`)) return
-                            startAITask(belowPatents.map(pp => pp.id), field.key)
+                            setAiFieldKey(field.key)
+                            setAiScope('visible')
+                            setShowAIBatch(true)
                           }}
                           style={{
                             position: 'absolute',
@@ -2788,9 +2869,80 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 <input className="form-input" value={bulkApplicant} onChange={e => setBulkApplicant(e.target.value)} placeholder="如：某科技公司" />
               </div>
             </div>
+            <details style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 12, color: '#475569', fontWeight: 600 }}>选择其他字段批量赋值</summary>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+                <select
+                  className="form-input"
+                  value={bulkFieldKey}
+                  onChange={e => { setBulkFieldKey(e.target.value); setBulkFieldValue('') }}
+                >
+                  <option value="">不追加其他字段</option>
+                  {fields.filter(field => field.editable && !['has_risk', 'risk_level', 'risk_description', 'family_members', 'cited_patents', 'citing_patents', 'projects'].includes(field.key)).map(field => (
+                    <option key={field.key} value={field.key}>{field.name}</option>
+                  ))}
+                </select>
+                {(() => {
+                  const selectedField = fields.find(field => field.key === bulkFieldKey)
+                  if (selectedField?.field_type === 'select' && selectedField.options) {
+                    return <select className="form-input" value={bulkFieldValue} onChange={e => setBulkFieldValue(e.target.value)}><option value="">请选择值</option>{selectedField.options.map(option => <option key={option} value={option}>{option}</option>)}</select>
+                  }
+                  if (selectedField?.field_type === 'boolean') {
+                    return <select className="form-input" value={bulkFieldValue} onChange={e => setBulkFieldValue(e.target.value)}><option value="">请选择值</option><option value="true">是</option><option value="false">否</option></select>
+                  }
+                  return <input className="form-input" value={bulkFieldValue} onChange={e => setBulkFieldValue(e.target.value)} placeholder="批量写入相同值" disabled={!bulkFieldKey} />
+                })()}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>空值不参与批量更新；风险正式结论和关系原始列不能在这里修改。</div>
+            </details>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
               <button className="btn btn-secondary" onClick={() => setShowBulkEdit(false)}>取消</button>
               <button className="btn btn-primary" onClick={handleBulkEditSave}>保存</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {bulkTransferAction && (
+        <Modal
+          title={bulkTransferAction === 'move_database' ? `移库 ${selectedIds.length} 条专利` : bulkTransferAction === 'move_view' ? `移动到视图 ${selectedIds.length} 条专利` : `复制 ${selectedIds.length} 条工作副本`}
+          onClose={() => setBulkTransferAction(null)}
+          width={520}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ padding: '10px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
+              {bulkTransferAction === 'duplicate'
+                ? '复制会生成可继续加工的工作副本，副本清空申请号、公开号和授权号，并保留来源专利 ID。'
+                : '整批操作会先校验全部记录和目标，校验失败时旧数据不改变。'}
+            </div>
+            {(bulkTransferAction === 'move_database' || bulkTransferAction === 'duplicate') && (
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>目标数据库</label>
+                <select className="form-input" value={bulkTargetDatabaseId ?? ''} onChange={e => setBulkTargetDatabaseId(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">请选择数据库</option>
+                  {databases.filter(database => !database.is_archived).map(database => (
+                    <option key={database.id} value={database.id}>{database.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {bulkTransferAction === 'move_view' && (
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>目标视图</label>
+                <select className="form-input" value={bulkTargetViewId ?? ''} onChange={e => setBulkTargetViewId(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">库主表（清除显式视图）</option>
+                  {views.filter(view => view.database_id === activeDatabaseId && !view.is_archived && view.layout_type === 'table').map(view => (
+                    <option key={view.id} value={view.id}>{view.name}</option>
+                  ))}
+                </select>
+                <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>只能移动到当前数据库的表格视图。</div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => setBulkTransferAction(null)}>取消</button>
+              <button className="btn btn-primary" onClick={handleBulkTransfer}>
+                {bulkTransferAction === 'duplicate' ? '创建工作副本' : '执行批量操作'}
+              </button>
             </div>
           </div>
         </Modal>
@@ -2881,14 +3033,24 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       )}
 
       {showAIBatch && (
-        <Modal title={`AI 批量处理 ${selectedIds.length} 条专利`} onClose={() => setShowAIBatch(false)} width={680}>
+        <Modal title="AI 字段批量处理" onClose={() => setShowAIBatch(false)} width={680}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{
               padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe',
               borderRadius: 6, fontSize: 12, color: '#1e40af', lineHeight: 1.6,
             }}>
-              <Icon name="sparkles" size={15} /> 选择下方任一 AI 字段，点击"运行"按钮即可对选中的 <strong>{selectedIds.length}</strong> 条专利批量执行 AI 分析。
-              结果将自动回填到对应列，并在右下角显示进度。
+              <Icon name="sparkles" size={15} /> 先选择处理范围，再选择一个 AI 输出列，最后统一启动任务。AI 结果写入草稿列，不覆盖人工确认值。
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <label style={{ padding: 10, border: `1px solid ${aiScope === 'selected' ? '#3b82f6' : '#e5e7eb'}`, borderRadius: 6, background: aiScope === 'selected' ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
+                <input type="radio" checked={aiScope === 'selected'} onChange={() => setAiScope('selected')} style={{ marginRight: 6 }} />
+                处理已选专利（{selectedIds.length} 条）
+              </label>
+              <label style={{ padding: 10, border: `1px solid ${aiScope === 'visible' ? '#3b82f6' : '#e5e7eb'}`, borderRadius: 6, background: aiScope === 'visible' ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
+                <input type="radio" checked={aiScope === 'visible'} onChange={() => setAiScope('visible')} style={{ marginRight: 6 }} />
+                处理当前页面（{patents.length} 条）
+              </label>
             </div>
 
             {aiFields.length === 0 ? (
@@ -2932,19 +3094,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                           background: '#ede9fe', color: '#6d28d9', borderRadius: 3,
                         }}><Icon name="sparkles" size={16} /></span>
                         <strong style={{ flex: 1, fontSize: 13, color: '#1f2937' }}>{f.name}</strong>
-                        <button
-                          className="btn btn-xs btn-primary"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (!confirm(`将对选中的 ${selectedIds.length} 条专利运行 AI 字段"${f.name}"，是否继续？`)) return
-                            startAITask(selectedIds, f.key)
-                            setShowAIBatch(false)
-                            setAiFieldKey('')
-                            clearSelection()
-                          }}
-                        >
-                          <Icon name="play" size={13} /> 运行
-                        </button>
+                        <span style={{ fontSize: 11, color: isSelected ? '#1d4ed8' : '#94a3b8' }}>{isSelected ? '已选择' : '点击选择'}</span>
                       </div>
                       {f.description && (
                         <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>{f.description}</div>
@@ -2980,10 +3130,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 <button
                   className="btn btn-primary"
                   onClick={handleAIBatchProcess}
-                  disabled={!aiFieldKey}
-                  title={!aiFieldKey ? '请先点击上方任一 AI 字段以选中' : '对选中的专利运行选中的 AI 字段'}
+                  disabled={!aiFieldKey || (aiScope === 'selected' ? selectedIds.length === 0 : patents.length === 0)}
+                  title={!aiFieldKey ? '请先点击上方任一 AI 字段以选中' : '按所选范围启动任务'}
                 >
-                  <Icon name="play" size={13} /> 启动 AI 任务{aiFieldKey ? `（${aiFields.find(f => f.key === aiFieldKey)?.name}）` : ''}
+                  <Icon name="play" size={13} /> 启动 AI 任务{aiFieldKey ? `（${aiFields.find(f => f.key === aiFieldKey)?.name} · ${aiScope === 'selected' ? selectedIds.length : patents.length} 条）` : ''}
                 </button>
               </div>
             )}
@@ -3340,8 +3490,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 {isAI && (
                   <div className="menu-item" style={{ color: '#7c3aed' }} onClick={() => {
                     if (patents.length === 0) { alert('当前列表为空'); return }
-                    if (!confirm(`将用此 AI 配置处理当前列表的 ${patents.length} 行，是否继续？`)) return
-                    startAITask(patents.map(p => p.id), field.key)
+                    openAIBatch(field.key, 'visible')
                   }}>
                     <Icon name="activity" /> 批量处理此列（所有可见行）
                   </div>

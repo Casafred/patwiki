@@ -1,4 +1,5 @@
 from typing import Optional, Any
+from copy import deepcopy
 from datetime import datetime, date
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, desc, text, String
@@ -324,6 +325,7 @@ class PatentService:
         changed_by: Optional[str] = None,
         source_view_id: Optional[int] = None,
         source_view_name: Optional[str] = None,
+        commit: bool = True,
     ) -> Patent:
         """更新专利字段并写入历史记录。
 
@@ -421,8 +423,9 @@ class PatentService:
         # 批量插入历史记录
         for h in history_entries:
             db.add(h)
-        db.commit()
-        db.refresh(patent)
+        if commit:
+            db.commit()
+            db.refresh(patent)
         if changed_fields:
             from app.services.formula_service import FormulaService
             FormulaService.on_field_changed(db, patent, changed_fields)
@@ -557,12 +560,25 @@ class PatentService:
 
     @staticmethod
     def bulk_update(db: Session, patent_ids: list[int], updates: dict) -> int:
-        count = 0
-        patents = db.query(Patent).filter(Patent.id.in_(patent_ids)).all()
-        for patent in patents:
-            PatentService.update_patent(db, patent, updates, source="bulk")
-            count += 1
-        return count
+        patents = PatentService._load_bulk_patents(db, patent_ids)
+        if RISK_PROJECTION_FIELDS.intersection(updates):
+            raise BadRequestException("风险兼容投影不可通过批量编辑修改，请使用风险案例")
+        custom_fields = updates.get("custom_fields") or {}
+        relation_fields = RELATION_FIELD_KEYS.intersection(custom_fields)
+        if relation_fields:
+            raise BadRequestException(
+                "同族/引用原始列不能通过批量编辑修改：" + ", ".join(sorted(relation_fields))
+            )
+        try:
+            for patent in patents:
+                PatentService.update_patent(
+                    db, patent, updates, source="bulk", commit=False,
+                )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        return len(patents)
 
     @staticmethod
     def bulk_tag(
@@ -579,9 +595,14 @@ class PatentService:
             - replace: 用指定标签替换所选专利的全部标签
         """
         from app.models import Tag
+        if mode not in {"add", "remove", "replace"}:
+            raise BadRequestException("标签批量操作模式无效")
+        patents = PatentService._load_bulk_patents(db, patent_ids)
         tags = db.query(Tag).filter(Tag.id.in_(tag_ids)).all() if tag_ids else []
+        missing_tags = [tag_id for tag_id in tag_ids if tag_id not in {tag.id for tag in tags}]
+        if missing_tags:
+            raise BadRequestException(f"标签不存在，整批未执行：{missing_tags}")
         tag_set = set(tags)
-        patents = db.query(Patent).filter(Patent.id.in_(patent_ids)).all()
         count = 0
         for patent in patents:
             current = set(patent.tags or [])
@@ -591,13 +612,236 @@ class PatentService:
                 new_tags = current - tag_set
             elif mode == "replace":
                 new_tags = tag_set
-            else:
+            old_tag_ids = sorted(tag.id for tag in current)
+            new_tag_ids = sorted(tag.id for tag in new_tags)
+            if old_tag_ids == new_tag_ids:
                 continue
             patent.tags = list(new_tags)
             db.add(patent)
+            db.add(PatentHistory(
+                patent_id=patent.id,
+                field_key="tags",
+                field_display_name="标签",
+                old_value=_stringify_value(old_tag_ids),
+                new_value=_stringify_value(new_tag_ids),
+                source="bulk",
+                changed_by="local-user",
+            ))
             count += 1
         db.commit()
         return count
+
+    @staticmethod
+    def _load_bulk_patents(db: Session, patent_ids: list[int]) -> list[Patent]:
+        """Load a complete selection and reject partial selections atomically."""
+        ids = list(dict.fromkeys(int(item) for item in patent_ids))
+        if not ids:
+            return []
+        patents = db.query(Patent).filter(Patent.id.in_(ids)).all()
+        found = {patent.id for patent in patents}
+        missing = [patent_id for patent_id in ids if patent_id not in found]
+        if missing:
+            raise BadRequestException(f"选中的专利不存在，整批未执行：{missing}")
+        return [next(patent for patent in patents if patent.id == patent_id) for patent_id in ids]
+
+    @staticmethod
+    def bulk_move_database(db: Session, patent_ids: list[int], target_database_id: int) -> int:
+        """Move master records to another library, retaining all patent data and audit history."""
+        from app.models import PatentDatabase
+
+        target = db.query(PatentDatabase).filter(
+            PatentDatabase.id == target_database_id,
+            PatentDatabase.is_archived == False,
+        ).first()
+        if not target:
+            raise BadRequestException("目标数据库不存在或已归档")
+        patents = PatentService._load_bulk_patents(db, patent_ids)
+        moved_count = 0
+        for patent in patents:
+            old_database_id = patent.database_id
+            if old_database_id == target_database_id:
+                continue
+            moved_count += 1
+            old_view_id = patent.view_id
+            patent.database_id = target_database_id
+            # A view belongs to one database; do not leave a cross-library view reference.
+            if patent.view is not None and patent.view.database_id != target_database_id:
+                patent.view_id = None
+            db.add(PatentHistory(
+                patent_id=patent.id,
+                field_key="database_id",
+                field_display_name="数据库",
+                old_value=_stringify_value(old_database_id),
+                new_value=_stringify_value(target_database_id),
+                source="bulk",
+                changed_by="local-user",
+            ))
+            if old_view_id != patent.view_id:
+                db.add(PatentHistory(
+                    patent_id=patent.id,
+                    field_key="view_id",
+                    field_display_name="视图",
+                    old_value=_stringify_value(old_view_id),
+                    new_value=_stringify_value(patent.view_id),
+                    source="bulk",
+                    changed_by="local-user",
+                ))
+        db.commit()
+        return moved_count
+
+    @staticmethod
+    def bulk_move_view(db: Session, patent_ids: list[int], target_view_id: int | None) -> int:
+        """Move records to a view in their current library, or clear the view with null."""
+        from app.models import PatentView
+
+        patents = PatentService._load_bulk_patents(db, patent_ids)
+        target_view = None
+        if target_view_id is not None:
+            target_view = db.query(PatentView).filter(
+                PatentView.id == target_view_id,
+                PatentView.is_archived == False,
+            ).first()
+            if not target_view:
+                raise BadRequestException("目标视图不存在或已归档")
+            mismatched = [
+                patent.id for patent in patents
+                if patent.database_id != target_view.database_id
+            ]
+            if mismatched:
+                raise BadRequestException(
+                    f"目标视图不属于所选专利所在数据库，整批未执行：{mismatched}"
+                )
+
+        moved_count = 0
+        for patent in patents:
+            old_view_id = patent.view_id
+            if old_view_id == target_view_id:
+                continue
+            moved_count += 1
+            patent.view_id = target_view_id
+            db.add(PatentHistory(
+                patent_id=patent.id,
+                field_key="view_id",
+                field_display_name="视图",
+                old_value=_stringify_value(old_view_id),
+                new_value=_stringify_value(target_view_id),
+                source="bulk",
+                changed_by="local-user",
+                source_view_id=target_view_id,
+                source_view_name=target_view.name if target_view else None,
+            ))
+        db.commit()
+        return moved_count
+
+    @staticmethod
+    def bulk_duplicate(db: Session, patent_ids: list[int], target_database_id: int | None = None, target_view_id: int | None = None) -> list[Patent]:
+        """Create editable working copies without pretending they are official patents.
+
+        Official identifiers are intentionally cleared because they are globally unique
+        and must never be duplicated. The copy retains research content and provenance,
+        and is explicitly marked as a draft in notes.
+        """
+        from app.models import PatentDatabase, PatentView, RiskLevel
+
+        sources = PatentService._load_bulk_patents(db, patent_ids)
+        if target_database_id is not None:
+            target = db.query(PatentDatabase).filter(
+                PatentDatabase.id == target_database_id,
+                PatentDatabase.is_archived == False,
+            ).first()
+            if not target:
+                raise BadRequestException("目标数据库不存在或已归档")
+        target_view = None
+        if target_view_id is not None:
+            target_view = db.query(PatentView).filter(
+                PatentView.id == target_view_id,
+                PatentView.is_archived == False,
+            ).first()
+            if not target_view:
+                raise BadRequestException("目标视图不存在或已归档")
+            if target_database_id is not None and target_view.database_id != target_database_id:
+                raise BadRequestException("目标视图不属于目标数据库")
+            if target_database_id is None:
+                mismatched = [
+                    source.id for source in sources
+                    if source.database_id != target_view.database_id
+                ]
+                if mismatched:
+                    raise BadRequestException(
+                        f"目标视图不属于来源专利所在数据库，整批未执行：{mismatched}"
+                    )
+
+        created: list[Patent] = []
+        for source in sources:
+            source_notes = f"来源专利 ID={source.id}"
+            if source.publication_number:
+                source_notes += f"，公开号={source.publication_number}"
+            existing_notes = source.notes.strip() if source.notes else ""
+            clone = Patent(
+                application_number=None,
+                publication_number=None,
+                grant_number=None,
+                title=f"副本：{source.title or '未命名专利'}",
+                abstract=source.abstract,
+                claims=source.claims,
+                description_full=source.description_full,
+                applicant=source.applicant,
+                inventor=source.inventor,
+                assignee=source.assignee,
+                agent=source.agent,
+                filing_date=source.filing_date,
+                publication_date=source.publication_date,
+                grant_date=source.grant_date,
+                priority_date=source.priority_date,
+                priority_number=source.priority_number,
+                priority_country=source.priority_country,
+                country=source.country,
+                patent_type=source.patent_type,
+                legal_status=source.legal_status,
+                legal_status_date=source.legal_status_date,
+                legal_status_details=source.legal_status_details,
+                ipc_main=source.ipc_main,
+                ipc_all=source.ipc_all,
+                cpc_main=source.cpc_main,
+                cpc_all=source.cpc_all,
+                database_id=target_database_id if target_database_id is not None else source.database_id,
+                product_id=source.product_id,
+                view_id=target_view_id if target_view_id is not None else source.view_id,
+                category=source.category,
+                subcategory=source.subcategory,
+                technical_problem=source.technical_problem,
+                technical_effect=source.technical_effect,
+                technical_solution=source.technical_solution,
+                has_risk=False,
+                risk_level=RiskLevel.NONE,
+                risk_description=None,
+                module=source.module,
+                application_status=source.application_status,
+                scope_description=source.scope_description,
+                notes=f"{existing_notes + '；' if existing_notes else ''}{source_notes}；工作副本，待补充正式专利身份。",
+                custom_fields=deepcopy(source.custom_fields or {}),
+                ai_fields=deepcopy(source.ai_fields or {}),
+                duplicate_of=source.id,
+            )
+            db.add(clone)
+            db.flush()
+            clone.tags = list(source.tags or [])
+            # Copy project links as context, while keeping the copy's formal risk state clear.
+            PatentService.set_patent_projects(db, clone, [project.id for project in source.projects], commit=False)
+            db.add(PatentHistory(
+                patent_id=clone.id,
+                field_key="duplicate_of",
+                field_display_name="来源专利",
+                old_value=None,
+                new_value=_stringify_value(source.id),
+                source="bulk",
+                changed_by="local-user",
+            ))
+            created.append(clone)
+        db.commit()
+        for clone in created:
+            db.refresh(clone)
+        return created
 
     @staticmethod
     def delete_patent(db: Session, patent_id: int) -> bool:

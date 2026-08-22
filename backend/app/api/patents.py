@@ -759,6 +759,22 @@ class BulkTagRequest(BaseModel):
     mode: str = "add"  # add / remove / replace
 
 
+class BulkMoveDatabaseRequest(BaseModel):
+    patent_ids: list[int]
+    target_database_id: int
+
+
+class BulkMoveViewRequest(BaseModel):
+    patent_ids: list[int]
+    target_view_id: Optional[int] = None
+
+
+class BulkDuplicateRequest(BaseModel):
+    patent_ids: list[int]
+    target_database_id: Optional[int] = None
+    target_view_id: Optional[int] = None
+
+
 @router.post("/bulk-tag")
 def bulk_tag_patents(
     payload: BulkTagRequest,
@@ -777,6 +793,55 @@ def bulk_tag_patents(
         db, payload.patent_ids, payload.tag_ids, mode=payload.mode
     )
     return {"success": True, "updated_count": count}
+
+
+@router.post("/bulk-move-database")
+def bulk_move_database(
+    payload: BulkMoveDatabaseRequest,
+    db: Session = Depends(get_db),
+):
+    """Move selected master patents into another library as one atomic command."""
+    count = PatentService.bulk_move_database(
+        db, payload.patent_ids, payload.target_database_id,
+    )
+    return {
+        "success": True,
+        "moved_count": count,
+        "target_database_id": payload.target_database_id,
+    }
+
+
+@router.post("/bulk-move-view")
+def bulk_move_view(
+    payload: BulkMoveViewRequest,
+    db: Session = Depends(get_db),
+):
+    """Move selected patents into a view in the same library, or clear their explicit view."""
+    count = PatentService.bulk_move_view(db, payload.patent_ids, payload.target_view_id)
+    return {
+        "success": True,
+        "moved_count": count,
+        "target_view_id": payload.target_view_id,
+    }
+
+
+@router.post("/bulk-duplicate")
+def bulk_duplicate_patents(
+    payload: BulkDuplicateRequest,
+    db: Session = Depends(get_db),
+):
+    """Create editable working copies while preserving the one-official-identity rule."""
+    copies = PatentService.bulk_duplicate(
+        db,
+        payload.patent_ids,
+        target_database_id=payload.target_database_id,
+        target_view_id=payload.target_view_id,
+    )
+    return {
+        "success": True,
+        "created_count": len(copies),
+        "created_ids": [patent.id for patent in copies],
+    }
 
 
 @router.delete("/by-database/{database_id}")
