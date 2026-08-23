@@ -204,7 +204,21 @@ class ImportService:
                 mapping[col_clean] = custom_field_by_name[col_clean]
                 continue
 
-            # 3. 模糊匹配标准字段（"包含"关系）
+            # 3. 已批准的来源字段治理别名。只有 registry 中明确标记为
+            # mapped 且目标仍是运行时字段时才自动采用；candidate 和
+            # unmapped_retained 必须继续显示为待治理证据。
+            from app.services.field_governance_service import find_approved_runtime_mapping
+
+            registry_target = find_approved_runtime_mapping(
+                db,
+                col_clean,
+                SYSTEM_FIELD_KEYS | VIRTUAL_FIELDS | set(custom_field_by_name.values()),
+            )
+            if registry_target:
+                mapping[col_clean] = registry_target
+                continue
+
+            # 4. 模糊匹配标准字段（"包含"关系）
             #    - 虚拟字段（family_members/cited_patents/citing_patents）必须精确命中
             #    - 含"同族/引用/被引用/family"等关系关键词的列，若未精确命中虚拟字段，
             #      一律作为自定义字段呈现，避免"同族备注"被误配到 notes、
@@ -223,7 +237,7 @@ class ImportService:
             if matched:
                 continue
 
-            # 4. 未知列：保留为未映射属性，等待用户后续治理。
+            # 5. 未知列：保留为未映射属性，等待用户后续治理。
             mapping[col_clean] = ""
 
         return mapping, mapping_issues

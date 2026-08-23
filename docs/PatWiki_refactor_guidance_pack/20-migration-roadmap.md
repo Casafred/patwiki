@@ -16,6 +16,12 @@
 
 ## Phase 0A — Migration Platform / Safety Gate
 
+### 当前实现状态（2026-08-23）
+
+Phase 0A 已落地首版平台：`backend/app/services/migration_service.py` 提供版本号、迁移校验和、运行记录、SQLite 文件备份、`PRAGMA integrity_check`、关键表行数、失败恢复和只读诊断；`backend/app/database.py` 在每个 SQLite 连接启用 `foreign_keys=ON`，迁移异常会阻止应用启动。旧 `_ensure_column_migration()` 已移除，兼容列和索引改为显式版本化操作。
+
+当前版本为 `2026-08-23.0`。这不是“所有未来 schema 已完成”的声明；新增 schema 仍必须追加新的版本化操作、测试和文档。迁移账本是追加式执行证据，失败重试允许同一版本产生新的运行记录，不能依赖唯一版本号覆盖历史。
+
 目标：让每一次模式和数据迁移可识别、可停止、可恢复。
 
 工作：
@@ -36,6 +42,12 @@
 ---
 
 ## Phase 0B — Field Registry / Baseline
+
+### 当前实现状态（2026-08-23）
+
+Phase 0B 已落地首版来源字段治理基线：`seed_registry_baseline()` 从 `docs/PatWiki_refactor_data/01-01_表格目录.csv`、`02-02_字段逐项盘点.csv`、`03-03_归一化字段字典.csv` 和 `10-10_字段元数据扩展.csv` 幂等载入 31 张来源表、140 个规范字段概念和 357 条来源字段映射。当前基线中 84 条来源映射为已批准的运行时字段映射，273 条保持 `candidate`；实际导入中系统不认识的新列仍由 `FieldObservation` 进入 `unmapped_retained`，不会因基线载入而自动创建正式字段。
+
+实现模型为 `FieldRegistrySnapshot`、`SourceTableDefinition`、`FieldDefinition` 和 `SourceFieldMapping`；只读诊断入口为 `/system/field-governance/*`。导入建议映射只有在来源映射明确为 `mapped` 且目标字段仍有效时才会采用，`candidate`、`unmapped_retained`、`deprecated` 和 `quarantined` 都不能自动写入正式字段。
 
 目标：冻结语义，不再继续制造同义字段。
 

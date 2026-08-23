@@ -1,7 +1,7 @@
 # 21 - V2 实施契约：从设计目标到可交付开发
 
-> 状态：`approved-for-phase-0-planning`
-> 更新：2026-08-17
+> 状态：`approved-for-phase-0-implementation`
+> 更新：2026-08-23
 > 本文是 V2 设计包的实现锚点。执行开发任务的 Agent 必须先阅读 `25-agent-development-protocol.md`；2026 年业务范围以 `23-2026-product-scope-and-business-rules.md` 为最高优先级；若长期目标模型与当年范围冲突，不得用长期能力阻塞专利信息中心。
 
 ## 0. 2026 范围硬约束
@@ -50,9 +50,9 @@
 | 主题 | 当前已具备 | 尚未具备 | V2 实施决定 |
 |---|---|---|---|
 | 运行形态 | React/Vite 前端、FastAPI/SQLAlchemy 后端、SQLite 本地文件、Tauri 启动本地后端 | 服务端多租户部署、并发协作控制 | V2 先按本地优先、单机可信边界设计；联网协作另立架构决策，不在本轮隐含实现。 |
-| 数据迁移 | `Base.metadata.create_all()` 与 `_ensure_column_migration()` 的容错加列 | 版本化迁移、迁移校验、备份恢复门禁 | 所有 V2 写模型之前先引入受版本控制的迁移账本和 SQLite 备份/恢复验证；禁止继续以吞异常的 `ALTER TABLE` 承担复杂迁移。 |
+| 数据迁移 | `MigrationService` 版本化操作、迁移账本、SQLite 备份/恢复、完整性和关键表行数核对、运行时外键 | 后续继续追加版本化 schema/data migration | `2026-08-23.0` 已作为当前迁移版本；异常必须停止启动并写入 `MigrationRun/MigrationIssue`，不得恢复旧的吞异常加列。 |
 | 专利与视图 | `Patent`、`PatentFamily`、`PatentDatabase`、`PatentView`、`PatentProjectLink` 已可用 | 跨实体 Dataset/View | 兼容期内物理表 `patents` 继续承担 `PatentDocument` 角色；不做表重命名。新领域读取通过适配层与现有 Patent API 共存。 |
-| 字段能力 | `CustomField`、`ViewLocalField`、公式、Link/Lookup/Rollup | 跨实体 Field Registry、别名注册、责任/敏感度/锁定策略 | 先新建字段注册与别名注册；不得把 Risk/Search/Protection 的生命周期对象继续塞入 `Patent.custom_fields`。 |
+| 字段能力 | `CustomField`、`ViewLocalField`、公式、Link/Lookup/Rollup；已载入 31 张来源表、140 个规范概念、357 条来源字段映射 | 注册表写治理、责任审批和历史观察可回放回填 | `FieldDefinition/SourceTableDefinition/SourceFieldMapping` 与运行时 `FieldRegistry` 并行；只有 `mapped` 且目标有效的来源别名可自动建议，未知属性继续 `unmapped_retained`。 |
 | 历史与审计 | `PatentHistory` 记录专利字段变更；导入批次和自动化日志存在 | 通用审计、审批、导出审计、不可变决策 | 保留 `PatentHistory` 供兼容读取；新 V2 服务统一写 `AuditEvent`。 |
 | 附件 | 附件仅绑定 `database_id + patent_id + attachment field` | 通用 Artifact、版本链、跨实体证据、附件 ACL | 不改旧附件路径；先通过迁移适配到 Artifact/ArtifactLink，再逐步切换上传入口。 |
 | 身份与权限 | User、DatabaseMembership、角色元数据 | 身份认证、请求身份注入、后端授权强制 | 现有角色不是安全边界：API 仍公开。L2-L5 写入、外部分享、MCP 写工具均必须等认证和服务端授权后才可上线。 |
@@ -168,6 +168,10 @@ G0-7 完成定义：身份服务接管新增/编辑/导入/关系号码；格式
 
 ### 4.1 Phase 0A：迁移平台先行
 
+当前实现：`backend/app/services/migration_service.py` 的 `run_pending_migrations()` 是唯一启动迁移入口，当前版本为 `2026-08-23.0`。`MigrationRun` 保存版本、校验和、应用版本、操作者、状态、备份路径、完整性结果和关键表行数；`MigrationIssue` 保存可查询失败原因。`Base.metadata.create_all()` 只在备份和 started 记录之后执行，兼容列/索引通过 `SCHEMA_OPERATIONS` 显式执行。`backend/app/database.py` 和迁移服务都确保 SQLite `foreign_keys=ON`。Agent 不得重新添加吞异常的 `ALTER TABLE`，不得在迁移失败后继续启动。
+
+只读诊断接口：`GET /system/migrations`、`GET /system/integrity`。测试最低闭环已落在 `backend/tests/test_migration_and_field_governance.py`：空库、重复执行、外键、失败恢复、恢复后错误记录和完整性检查。
+
 在创建任一 V2 业务表之前完成：
 
 - 引入版本化迁移账本：迁移版本、校验和、执行时间、应用版本、操作者和结果可查。
@@ -175,6 +179,14 @@ G0-7 完成定义：身份服务接管新增/编辑/导入/关系号码；格式
 - 对 SQLite 连接显式启用 `foreign_keys=ON`；不能把概念 DDL 中的一次 `PRAGMA` 当成应用运行时保证。
 - 迁移失败必须停止启动并给出可操作错误，不能吞掉异常后继续运行。
 - 建立 `migration_runs`、`migration_issues`、`legacy_row_links` 或等价审计模型，保留来源文件、工作表、行号、业务键、映射版本和隔离原因。
+
+### 4.1.1 Phase 0B：字段治理基线先行
+
+当前实现：`backend/app/services/field_governance_service.py` 从仓库内 UTF-8 CSV 基线幂等载入 `FieldRegistrySnapshot`、`SourceTableDefinition`、`FieldDefinition` 和 `SourceFieldMapping`。验收基线固定为 31 张来源表、140 个规范字段、357 条来源字段映射；当前版本示例为 84 条 `mapped`、273 条 `candidate`。注册表写入通过 `init_default_data()` 执行，缺失文档包不会破坏已有专利库，但会在返回值中报告不可用。
+
+Agent 必须把运行时字段注册 `backend/app/services/field_registry.py` 与语义注册表区分开：前者负责读写，后者负责来源/语义/责任/存储/状态门禁。`ImportService.suggest_mapping()` 只能采用 `mapped` 且目标有效的来源映射；未注册导入列仍由 `FieldObservation` 保留为 `unmapped_retained`，空目标不是跳过，`__skip__` 才是显式跳过。未知列不得自动创建 `CustomField`，不得进入默认统计或责任性导出。
+
+只读诊断接口：`GET /system/field-governance/summary`、`/tables`、`/fields`、`/mappings`。后续新增注册表写接口前，Agent 必须补充责任人、审批策略、变更版本、历史观察回填和失败重试测试。
 
 ### 4.2 每个领域阶段的切换门禁
 

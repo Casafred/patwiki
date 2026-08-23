@@ -98,6 +98,13 @@ from app.models.automation import AutomationRule, AutomationLog
 from app.models.attachment import Attachment
 from app.models.dashboard import Dashboard
 from app.models.comment import Comment
+from app.models.system import MigrationRun, MigrationIssue
+from app.models.field_governance import (
+    FieldRegistrySnapshot,
+    SourceTableDefinition,
+    FieldDefinition,
+    SourceFieldMapping,
+)
 
 
 __all__ = [
@@ -140,4 +147,7 @@ __all__ = [
     "Attachment",
     "Dashboard",
     "Comment",
+    "MigrationRun", "MigrationIssue",
+    "FieldRegistrySnapshot", "SourceTableDefinition",
+    "FieldDefinition", "SourceFieldMapping",
 ]

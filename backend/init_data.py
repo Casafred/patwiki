@@ -1,6 +1,7 @@
 from app.database import SessionLocal, init_db
 from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase, PatentExportTemplate
 from app.services.view_service import ViewService
+from app.services.field_governance_service import seed_registry_baseline
 
 
 def _ensure_organization_structure(db):
@@ -30,6 +31,9 @@ def _ensure_organization_structure(db):
 def init_default_data():
     db = SessionLocal()
     try:
+        # 31 张真实来源表和字段基线是治理平台的只读起点；导入时未知列
+        # 仍通过 FieldObservation 保留，不在这里自动创建 CustomField。
+        seed_registry_baseline(db)
         if db.query(Department).count() == 0:
             departments = [
                 Department(name="检索组", description="负责专利检索、数据收集、竞品监控"),

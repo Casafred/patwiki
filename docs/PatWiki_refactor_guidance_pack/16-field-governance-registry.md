@@ -19,6 +19,20 @@ Field Registry 的作用是让新增字段先回答“它是什么”，再决�
 
 字段注册必须与**存储决策**分离。每个 canonical field 必须声明一个且仅一个主存储位置：系统列、关系实体属性、事件/版本记录、`CustomField`、`ViewLocalField`、Artifact 元数据或 Snapshot 派生值。视图只投影字段，不能重新定义事实。
 
+## 0. 当前代码落点与 Agent 规则（已实现基线）
+
+当前首版注册表不替换运行时 `FieldRegistry`，而是与其并行：
+
+- `FieldRegistrySnapshot`：记录 CSV 基线文件哈希和 `registry_version`；同一版本重复初始化必须幂等；
+- `SourceTableDefinition`：记录 31 张真实来源表的稳定 `table_key`、用途、使用层级和重构目标；
+- `FieldDefinition`：记录 140 个规范字段概念、实体归属、语义、来源、变化性、校验、敏感度、存储位置和迁移状态；`canonical_key` 是稳定机器键，不能用展示名称做主键；
+- `SourceFieldMapping`：记录每个来源表/原始列/映射版本的别名、规范字段、运行时目标和状态；当前基线 357 条，其中 84 条 `mapped`、273 条 `candidate`；
+- `FieldObservation`：记录实际导入中未注册或未确认属性的原始值和来源。它不是注册表的替代品，但必须作为未知属性的保留证据。
+
+Agent 实现导入映射时必须调用服务层规则：硬编码明确别名和用户已确认的注册映射可以进入 `mapped` 目标；`candidate`、`unmapped_retained`、`deprecated`、`quarantined` 一律不得自动写入 Patent 正式字段。空映射表示“保留原始来源列，待治理”，只有显式 `__skip__` 才表示用户确认跳过治理队列。用户确认新语义后，先更新注册表，再通过可回放的治理回填处理历史 `FieldObservation`；不能把观察记录改写成仿佛导入时已经知道。
+
+只读诊断 API：`GET /system/field-governance/summary`、`/tables`、`/fields`、`/mappings`。修改注册表的接口尚未作为本轮自动化入口开放，后续 Agent 必须先补充责任人、审批和回填批次门禁，再增加写 API。
+
 ## 2. 每个字段的 12 维元数据
 
 建议 `FieldDefinition` 至少增加：
