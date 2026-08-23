@@ -57,10 +57,6 @@ function readFilterParam(params: URLSearchParams): Record<string, string> {
 }
 
 const DEFAULT_COLUMN_WIDTH = 150
-const DEFAULT_VISIBLE_CONTENT_FIELDS = new Set([
-  'title', 'application_number', 'publication_number', 'abstract', 'claims',
-  'technical_problem', 'technical_solution', 'technical_effect',
-])
 
 function getViewGroupFields(view?: PatentView): ViewGroupField[] {
   const config = view?.group_by_config
@@ -315,14 +311,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [bulkTransferAction, setBulkTransferAction] = useState<BulkTransferAction | null>(null)
   const [bulkTargetDatabaseId, setBulkTargetDatabaseId] = useState<number | null>(null)
   const [bulkTargetViewId, setBulkTargetViewId] = useState<number | null>(null)
-  const [showAIBatch, setShowAIBatch] = useState(false)
   const [showQuickAnalyze, setShowQuickAnalyze] = useState(false)
   const [quickAnalyzePatentIds, setQuickAnalyzePatentIds] = useState<number[]>([])
   const [showInsertAIColumn, setShowInsertAIColumn] = useState(false)
-  const [insertColType, setInsertColType] = useState<'text' | 'longtext' | 'number' | 'date' | 'select' | 'boolean' | 'attachment' | 'ai_field'>('text')
+  const [insertColType, setInsertColType] = useState<'text' | 'longtext' | 'number' | 'date' | 'select' | 'boolean' | 'attachment'>('text')
   const [insertColFrozen, setInsertColFrozen] = useState(false)
   const [newAIColumnName, setNewAIColumnName] = useState('')
-  const [newAIPrompt, setNewAIPrompt] = useState('')
   const [newColumnOptions, setNewColumnOptions] = useState('')
   const [creatingAIColumn, setCreatingAIColumn] = useState(false)
   const [frozenFields, setFrozenFields] = useState<Set<string>>(new Set())
@@ -347,9 +341,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [bulkTagIds, setBulkTagIds] = useState<number[]>([])
   const [bulkTagMode, setBulkTagMode] = useState<'add' | 'remove' | 'replace'>('add')
   const [bulkTagLoading, setBulkTagLoading] = useState(false)
-  const [aiFieldKey, setAiFieldKey] = useState('')
-  const [aiScope, setAiScope] = useState<'selected' | 'visible'>('selected')
-  const [aiFields, setAiFields] = useState<CustomField[]>([])
   const [filterValues, setFilterValues] = useState<Record<string, string>>(() => readFilterParam(searchParams))
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [relationData, setRelationData] = useState<Record<string, Record<number, RelationCellData>>>({})
@@ -425,18 +416,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     void loadRelationData()
   }, [loadRelationData])
 
-  const loadFields = useCallback(async (forceVisibleKeys: string[] = [], refresh = false) => {
+  const loadFields = useCallback(async (refresh = false) => {
     try {
       const fieldsData = await fieldApi.list(refresh)
-      const persistedForcedVisible = (() => {
-        try {
-          const parsed = JSON.parse(localStorage.getItem('patwiki_force_visible_fields') || '[]') as unknown
-          return Array.isArray(parsed) ? parsed.map(String) : []
-        } catch {
-          return []
-        }
-      })()
-      const forcedVisible = new Set([...persistedForcedVisible, ...forceVisibleKeys, ...DEFAULT_VISIBLE_CONTENT_FIELDS])
       // 保存视图有独立的字段投影；只有未进入视图时才应用旧的浏览器级配置。
       // 这样一个视图隐藏字段不会影响其他视图，也不会把字段状态写回主数据。
       if (viewId === null) {
@@ -445,13 +427,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           if (hiddenRaw) {
             const hiddenKeys: string[] = JSON.parse(hiddenRaw)
             fieldsData.forEach(f => {
-              if (hiddenKeys.includes(f.key) && !forcedVisible.has(f.key)) f.visible = false
+              if (hiddenKeys.includes(f.key)) f.visible = false
             })
           }
         } catch (error) { console.error('Failed to read hidden fields:', error) }
-        fieldsData.forEach(field => {
-          if (forcedVisible.has(field.key)) field.visible = true
-        })
       }
       setFields(fieldsData)
       try {
@@ -658,7 +637,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     if (dataVersion > 0) {
       // The registry refresh is an external synchronization triggered by import/field changes.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      void loadFields([], true)
+      void loadFields(true)
       void loadCustomFields()
     }
   }, [dataVersion, loadCustomFields, loadFields])
@@ -689,10 +668,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     setRedoStack([])
     setPage(1)
   }, [viewId, activeDatabaseId, clearSelection])
-
-  useEffect(() => {
-    void aiApi.listAIFields().then(setAiFields).catch(error => console.error('Failed to load AI fields:', error))
-  }, [])
 
   useEffect(() => {
     // Keep the input display in sync with pagination state.
@@ -796,17 +771,19 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       if (!target.closest('.context-menu')) close()
     }
     document.addEventListener('click', onClick)
-    document.addEventListener('contextmenu', (e) => {
+    const onContextMenu = (e: MouseEvent) => {
       // 在菜单已打开时，右键其他位置应直接切换菜单位置而不是叠加
       const target = e.target as HTMLElement
       if (!target.closest('.context-menu')) {
         // 让目标元素的 onContextMenu 重新接管
         close()
       }
-    })
+    }
+    document.addEventListener('contextmenu', onContextMenu)
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('click', onClick)
+      document.removeEventListener('contextmenu', onContextMenu)
       document.removeEventListener('keydown', onKey)
     }
   }, [contextMenu])
@@ -1033,7 +1010,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     })
   }
 
-  // 重置为默认（系统字段可见，自定义字段可见）
+  // 重置为默认（所有字段按字段注册表默认可见性展示）
   const handleResetVisibility = () => {
     if (activeView) {
       void saveViewColumnConfig(buildViewColumnConfig({ ...activeView, column_config: [] }, fields))
@@ -1121,53 +1098,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     return () => { document.removeEventListener('keydown', onKeyDown); document.removeEventListener('keydown', onRedo) }
   })
 
-  // 从 prompt 模板解析引用的列名（{xxx} 占位符）
-  const parseReferencedColumns = (prompt: string): string[] => {
-    if (!prompt) return []
-    const matches = prompt.match(/\{([a-zA-Z_][a-zA-Z0-9_.]*)\}/g) || []
-    const keys = matches.map(m => m.replace(/[{}]/g, ''))
-    // 把 key 映射为可读的字段名
-    return keys.map(k => {
-      const f = fields.find(x => x.key === k)
-      if (f) return f.name
-      if (k.startsWith('custom_fields.')) {
-        const sub = k.slice('custom_fields.'.length)
-        const cf = customFields.find(c => c.key === sub)
-        return cf?.name || sub
-      }
-      if (k.startsWith('ai_fields.')) {
-        const sub = k.slice('ai_fields.'.length)
-        const af = aiFields.find(a => a.key === sub)
-        return af?.name || sub
-      }
-      return k
-    })
-  }
-
-  // 启动 AI 任务并加入监控面板
-  const startAITask = async (patentIds: number[], fieldKey: string) => {
-    const aiField = aiFields.find(a => a.key === fieldKey)
-    const customField = customFields.find(c => c.key === fieldKey)
-    const fieldName = aiField?.name || customField?.name || fieldKey
-    const prompt = aiField?.ai_config?.prompt_template || customField?.ai_config?.prompt_template || ''
-    const referencedColumns = parseReferencedColumns(prompt)
-    const outputLocation = `ai_fields['${fieldKey}'] → 表格的"${fieldName}"列`
-
-    const task = await aiApi.process(patentIds, fieldKey)
-    setActiveAITasks(prev => [...prev, task])
-    setTaskMeta(prev => ({
-      ...prev,
-      [task.id]: {
-        fieldName, fieldKey, prompt,
-        referencedColumns,
-        outputLocation,
-        targetCount: patentIds.length,
-      },
-    }))
-    setAiPanelOpen(true)
-    return task
-  }
-
   // 轮询所有运行中的 AI 任务
   useEffect(() => {
     if (activeAITasks.length === 0) return
@@ -1208,6 +1138,17 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const handleQuickAnalyzeStarted = (task: AITask) => {
     setShowQuickAnalyze(false)
     setActiveAITasks(prev => [...prev, task])
+    setTaskMeta(prev => ({
+      ...prev,
+      [task.id]: {
+        fieldName: 'AI 快速分析',
+        fieldKey: 'quick_analyze',
+        prompt: '按本次快速分析弹窗中的模板、输入列和抽取目标执行',
+        referencedColumns: [],
+        outputLocation: '按本次抽取目标回填字段',
+        targetCount: task.total_items,
+      },
+    }))
     setAiPanelOpen(true)
     // 若是单行触发，设置行 loading
     if (quickAnalyzePatentIds.length === 1) {
@@ -1229,33 +1170,22 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       alert('请输入新列名称')
       return
     }
-    const isAI = insertColType === 'ai_field'
-    if (isAI && !newAIPrompt.trim()) {
-      alert('AI列必须填写分析提示词（Prompt）')
-      return
-    }
     if ((insertColType === 'select') && !newColumnOptions.trim()) {
       alert('单选列必须填写候选项（每行一个）')
       return
     }
     setCreatingAIColumn(true)
     try {
-      const key = (isAI ? 'ai_' : 'cf_') + Date.now().toString(36)
+      const key = 'cf_' + Date.now().toString(36)
       const payload: Partial<CustomField> = {
         key,
         name: newAIColumnName.trim(),
-        field_type: isAI ? 'ai_field' : insertColType,
+        field_type: insertColType,
         is_active: true,
         sort_order: fields.length,
       }
       if (insertColType === 'select' && newColumnOptions.trim()) {
         payload.options = newColumnOptions.split('\n').map(s => s.trim()).filter(Boolean)
-      }
-      if (isAI) {
-        payload.ai_config = {
-          prompt_template: newAIPrompt.trim(),
-          ai_enabled: true,
-        }
       }
       await customFieldApi.create(payload)
       // 记录冻结状态
@@ -1264,17 +1194,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       }
       await loadFields()
       await loadCustomFields()
-      // 刷新 aiFields 列表（让 startAITask 能找到新字段）
-      try {
-        const refreshedAiFields = await aiApi.listAIFields()
-        setAiFields(refreshedAiFields)
-      } catch (error) { console.error('Failed to refresh AI fields:', error) }
-      alert(isAI
-        ? `AI 分析列"${newAIColumnName.trim()}"已创建。请选中记录后使用批量处理执行。`
-        : `新列"${newAIColumnName.trim()}"已创建`)
+      alert(`新列"${newAIColumnName.trim()}"已创建`)
       setShowInsertAIColumn(false)
       setNewAIColumnName('')
-      setNewAIPrompt('')
       setNewColumnOptions('')
       setInsertColType('text')
       setInsertColFrozen(false)
@@ -1286,20 +1208,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }
 
-  const openInsertAIDialog = (anchorFieldKey?: string, mode: typeof insertColType = 'text') => {
+  const openInsertAIDialog = (mode: typeof insertColType = 'text') => {
     setActiveHeaderMenu(null)
     setInsertColType(mode)
     setNewAIColumnName('')
-    setNewAIPrompt('')
     setNewColumnOptions('')
-    // 预填一个引用锚点列的 prompt 模板
-    if (anchorFieldKey) {
-      const f = fields.find(x => x.key === anchorFieldKey)
-      if (f) {
-        setInsertColType('ai_field')
-        setNewAIPrompt(`请基于以下内容进行分析：\n{${anchorFieldKey}}\n\n要求：简洁准确地输出结果。`)
-      }
-    }
     setShowInsertAIColumn(true)
   }
 
@@ -1388,48 +1301,33 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }
 
-  const handleDeleteCustomField = async (id: number) => {
-    if (!confirm('确定要删除此字段吗？该字段的所有数据将被保留但不再显示。')) return
-    try {
-      await customFieldApi.delete(id)
-      await loadFields()
-      await loadCustomFields()
-    } catch (error: unknown) {
-      alert('删除失败: ' + getErrorMessage(error))
-    }
-  }
-
-  // 通过 fieldKey 找到对应的 CustomField 并删除（用于右键菜单"删除此列"）
+  // 从当前表格移除列。列移除只改变视图/浏览器列配置，不删除专利主数据。
   const handleDeleteColumnByKey = async (fieldKey: string) => {
     const field = fields.find(f => f.key === fieldKey)
     if (!field) {
       alert('未找到该列信息')
       return
     }
-    if (field.is_system) {
-      alert(`系统字段"${field.name}"不能删除`)
-      return
-    }
-    const cf = customFields.find(c => c.key === fieldKey)
-    if (!cf) {
-      alert('该列无法删除（可能是系统内置列）')
-      return
-    }
-    const confirmText = `确定要删除列"${field.name}"吗？\n\n• 列定义将被删除\n• 已录入的列值（custom_fields['${fieldKey}']）将保留在数据库中但不再显示\n• 此操作不可撤销`
+    const confirmText = `确定要从当前表格移除列"${field.name}"吗？\n\n• 只移除当前表格的显示配置\n• 专利主数据和该列已有内容都会保留\n• 之后可在列管理中重新显示`
     if (!confirm(confirmText)) return
     try {
-      await customFieldApi.delete(cf.id)
-      await loadFields()
-      await loadCustomFields()
-      // 如果是 AI 列，刷新 aiFields
-      if (field.field_type === 'ai_field') {
-        try {
-          const refreshedAiFields = await aiApi.listAIFields()
-          setAiFields(refreshedAiFields)
-        } catch (error) { console.error('Failed to refresh AI fields:', error) }
+      if (activeView) {
+        const next = buildViewColumnConfig(activeView, fields).map(column =>
+          column.key === fieldKey ? { ...column, visible: false } : column,
+        )
+        await saveViewColumnConfig(next)
+      } else {
+        setFields(previous => {
+          const next = previous.map(item => item.key === fieldKey ? { ...item, visible: false } : item)
+          try {
+            localStorage.setItem('patwiki_hidden_fields', JSON.stringify(next.filter(item => item.visible === false).map(item => item.key)))
+          } catch (error) { console.error('Failed to save hidden fields:', error) }
+          return next
+        })
       }
+      setContextMenu(null)
     } catch (error: unknown) {
-      alert('删除列失败: ' + getErrorMessage(error))
+      alert('移除列失败: ' + getErrorMessage(error))
     }
   }
 
@@ -1550,31 +1448,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
   const toggleBulkTagId = (tagId: number) => {
     setBulkTagIds(prev => prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId])
-  }
-
-  const handleAIBatchProcess = async () => {
-    if (!aiFieldKey) {
-      alert('请选择要处理的 AI 字段')
-      return
-    }
-    const targetIds = aiScope === 'selected' ? selectedIds : patents.map(patent => patent.id)
-    if (targetIds.length === 0) {
-      alert(aiScope === 'selected' ? '请先选择专利，或切换为处理当前页面' : '当前页面没有可处理的专利')
-      return
-    }
-    try {
-      await startAITask(targetIds, aiFieldKey)
-      setShowAIBatch(false)
-      setAiFieldKey('')
-    } catch (error: unknown) {
-      alert('启动 AI 任务失败: ' + getErrorMessage(error, '请先在设置页配置 LLM API'))
-    }
-  }
-
-  const openAIBatch = (fieldKey?: string, scope: 'selected' | 'visible' = selectedIds.length > 0 ? 'selected' : 'visible') => {
-    setAiFieldKey(fieldKey || '')
-    setAiScope(scope)
-    setShowAIBatch(true)
   }
 
   const handlePageJump = () => {
@@ -2042,12 +1915,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           <button
             className="btn btn-sm btn-primary datagrid-primary-action"
             onClick={() => openInsertAIDialog()}
-            title="插入新列（普通列或AI列）"
+            title="新建普通列"
           >
             + 插入新列
-          </button>
-          <button className="btn btn-sm btn-secondary" onClick={() => openInsertAIDialog(undefined, 'ai_field')} title="创建 AI 分析列">
-            <Icon name="sparkles" /> AI 分析列
           </button>
           <button
             className="btn btn-sm btn-primary"
@@ -2126,7 +1996,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             <button className="btn btn-xs btn-primary" onClick={() => { setQuickAnalyzePatentIds(selectedIds); setShowQuickAnalyze(true) }}>
               <Icon name="sparkles" size={13} /> AI 快速分析
             </button>
-            <button className="btn btn-xs btn-ghost" onClick={() => openAIBatch()}>AI 字段批量处理</button>
             <button
               className="btn btn-xs btn-danger"
               onClick={handleBulkDelete}
@@ -2341,9 +2210,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                           <div className="menu-divider" />
                           <div
                             className="menu-item"
-                            onClick={() => openInsertAIDialog(field.key)}
+                            onClick={() => openInsertAIDialog()}
                           >
-                            <span style={{ color: '#2563eb' }}><Icon name="sparkles" /> 基于此列插入新列</span>
+                            <span style={{ color: '#2563eb' }}><Icon name="columns" /> 新建普通列</span>
                           </div>
                           <div
                             className="menu-item"
@@ -2357,21 +2226,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                           >
                             <span style={{ color: '#0891b2' }}><Icon name="chart" /> 统计此列</span>
                           </div>
-                          {field.field_type === 'ai_field' && (
-                            <div
-                              className="menu-item"
-                              onClick={() => {
-                                setActiveHeaderMenu(null)
-                                if (patents.length === 0) {
-                                  alert('当前列表为空')
-                                  return
-                                }
-                                openAIBatch(field.key, 'visible')
-                              }}
-                            >
-                              <span style={{ color: '#7c3aed' }}><Icon name="activity" /> 批量处理此列（所有可见行）</span>
-                            </div>
-                          )}
                           <div
                             className="menu-item"
                             onClick={() => handleToggleFieldVisible(field.key)}
@@ -2531,7 +2385,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       className={`${isFrozen ? 'col-frozen' : ''} ${field.editable ? 'cell-editable' : ''}`}
                       style={{
                         width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
-                        maxWidth: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
                         padding: field.field_type === 'longtext' ? '8px 10px' : '6px 10px',
                         whiteSpace: 'normal',
                         wordBreak: 'break-word',
@@ -2550,43 +2403,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id, fieldKey: field.key })}
                     >
                       {renderCellContent(p, field)}
-                      {/* AI 列的拖动复用按钮（Excel 式填充柄） */}
-                      {field.field_type === 'ai_field' && (
-                        <button
-                          className="ai-fill-handle"
-                          title="拖动复用：用此 AI 配置处理下方所有行"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            const currentIndex = patents.findIndex(pp => pp.id === p.id)
-                            const belowPatents = patents.slice(currentIndex + 1)
-                            if (belowPatents.length === 0) {
-                              alert('下方没有更多行')
-                              return
-                            }
-                            setAiFieldKey(field.key)
-                            setAiScope('visible')
-                            setShowAIBatch(true)
-                          }}
-                          style={{
-                            position: 'absolute',
-                            right: 0,
-                            bottom: 0,
-                            width: 16,
-                            height: 16,
-                            background: '#3b82f6',
-                            color: '#fff',
-                            border: 'none',
-                            cursor: 'pointer',
-                            fontSize: 11,
-                            lineHeight: '16px',
-                            padding: 0,
-                            opacity: 0.35,
-                            borderRadius: '3px 0 0 0',
-                          }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
-                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.35' }}
-                        ><Icon name="download" size={12} /></button>
-                      )}
                     </td>
                     )
                   })}
@@ -2674,6 +2490,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           fields={fields}
           onClose={() => setShowFieldConfig(false)}
           onSave={saveViewColumnConfig}
+          onRemove={fieldKey => void handleDeleteColumnByKey(fieldKey)}
         />
       )}
 
@@ -2738,7 +2555,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       />
                       <span style={{ flex: 1, fontSize: 13, color: visible ? '#1f2937' : '#9ca3af' }}>
                         {field.name}
-                        {field.is_system && <span style={{ color: '#9ca3af', marginLeft: 6, fontSize: 11 }}>(系统)</span>}
                       </span>
                       <span style={{ fontSize: 10, padding: '2px 6px', background: '#eff6ff', color: '#1e40af', borderRadius: 3 }}>
                         {field.field_type}
@@ -2755,18 +2571,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       >
                         <Icon name={isFrozen ? 'lock' : 'unlock'} size={13} />{isFrozen ? ' 冻结' : ''}
                       </button>
-                      {!field.is_system && (
-                        <button
-                          onClick={() => {
-                            const cf = customFields.find(c => c.key === field.key)
-                            if (cf) handleDeleteCustomField(cf.id)
-                          }}
-                          title="删除字段"
-                          style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 14, padding: '0 4px' }}
-                        >
-                          ×
-                        </button>
-                      )}
+                      <button
+                        onClick={() => void handleDeleteColumnByKey(field.key)}
+                        title="从当前表格移除列"
+                        style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 14, padding: '0 4px' }}
+                      >
+                        ×
+                      </button>
                     </div>
                   )
                 })}
@@ -3043,115 +2854,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         />
       )}
 
-      {showAIBatch && (
-        <Modal title="AI 字段批量处理" onClose={() => setShowAIBatch(false)} width={680}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{
-              padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe',
-              borderRadius: 6, fontSize: 12, color: '#1e40af', lineHeight: 1.6,
-            }}>
-              <Icon name="sparkles" size={15} /> 先选择处理范围，再选择一个 AI 输出列，最后统一启动任务。AI 结果写入草稿列，不覆盖人工确认值。
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <label style={{ padding: 10, border: `1px solid ${aiScope === 'selected' ? '#3b82f6' : '#e5e7eb'}`, borderRadius: 6, background: aiScope === 'selected' ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
-                <input type="radio" checked={aiScope === 'selected'} onChange={() => setAiScope('selected')} style={{ marginRight: 6 }} />
-                处理已选专利（{selectedIds.length} 条）
-              </label>
-              <label style={{ padding: 10, border: `1px solid ${aiScope === 'visible' ? '#3b82f6' : '#e5e7eb'}`, borderRadius: 6, background: aiScope === 'visible' ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
-                <input type="radio" checked={aiScope === 'visible'} onChange={() => setAiScope('visible')} style={{ marginRight: 6 }} />
-                处理当前页面（{patents.length} 条）
-              </label>
-            </div>
-
-            {aiFields.length === 0 ? (
-              <div style={{
-                padding: 20, textAlign: 'center', color: '#6b7280',
-                border: '1px dashed #d1d5db', borderRadius: 6,
-              }}>
-                <div style={{ marginBottom: 8, color: '#6d28d9' }}><Icon name="sparkles" size={28} /></div>
-                <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>暂无 AI 字段</div>
-                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>
-                  请先通过"+ 插入新列"创建一个 AI 列并配置 Prompt 模板
-                </div>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => { setShowAIBatch(false); openInsertAIDialog() }}
-                >
-                  + 插入 AI 列
-                </button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {aiFields.map(f => {
-                  const prompt = f.ai_config?.prompt_template || ''
-                  const referenced = parseReferencedColumns(prompt)
-                  const isSelected = aiFieldKey === f.key
-                  return (
-                    <div
-                      key={f.key}
-                      style={{
-                        border: `1px solid ${isSelected ? '#3b82f6' : '#e5e7eb'}`,
-                        borderRadius: 6,
-                        padding: 10,
-                        background: isSelected ? '#eff6ff' : '#fff',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => setAiFieldKey(f.key)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        <span style={{
-                          fontSize: 16, padding: '2px 6px',
-                          background: '#ede9fe', color: '#6d28d9', borderRadius: 3,
-                        }}><Icon name="sparkles" size={16} /></span>
-                        <strong style={{ flex: 1, fontSize: 13, color: '#1f2937' }}>{f.name}</strong>
-                        <span style={{ fontSize: 11, color: isSelected ? '#1d4ed8' : '#94a3b8' }}>{isSelected ? '已选择' : '点击选择'}</span>
-                      </div>
-                      {f.description && (
-                        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>{f.description}</div>
-                      )}
-                      {prompt && (
-                        <details style={{ fontSize: 11 }}>
-                          <summary style={{ cursor: 'pointer', color: '#6b7280' }}>
-                            Prompt 预览 {referenced.length > 0 && `· 纳入 ${referenced.length} 列`}
-                          </summary>
-                          <pre style={{
-                            background: '#f9fafb', padding: 8, borderRadius: 3, marginTop: 4,
-                            fontSize: 11, maxHeight: 100, overflow: 'auto', whiteSpace: 'pre-wrap',
-                            border: '1px solid #e5e7eb',
-                          }}>
-                            {prompt}
-                          </pre>
-                          {referenced.length > 0 && (
-                            <div style={{ marginTop: 4, fontSize: 11, color: '#1e40af' }}>
-                              纳入的列：{referenced.join('、')}
-                            </div>
-                          )}
-                        </details>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {aiFields.length > 0 && (
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4, borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
-                <button className="btn btn-secondary" onClick={() => setShowAIBatch(false)}>取消</button>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleAIBatchProcess}
-                  disabled={!aiFieldKey || (aiScope === 'selected' ? selectedIds.length === 0 : patents.length === 0)}
-                  title={!aiFieldKey ? '请先点击上方任一 AI 字段以选中' : '按所选范围启动任务'}
-                >
-                  <Icon name="play" size={13} /> 启动 AI 任务{aiFieldKey ? `（${aiFields.find(f => f.key === aiFieldKey)?.name} · ${aiScope === 'selected' ? selectedIds.length : patents.length} 条）` : ''}
-                </button>
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
-
       {showInsertAIColumn && (
         <Modal
           title="插入新列"
@@ -3159,7 +2861,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           onClose={() => {
             setShowInsertAIColumn(false)
             setNewAIColumnName('')
-            setNewAIPrompt('')
             setNewColumnOptions('')
             setInsertColType('text')
             setInsertColFrozen(false)
@@ -3175,8 +2876,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
               color: '#1e40af',
               lineHeight: 1.6,
             }}>
-              新建字段分为两步：先保存字段配置，再按需执行。<strong>AI 分析列</strong>会根据 Prompt 和已有列内容生成结果。
-              在 Prompt 中使用 <code>{'{field_key}'}</code> 引用列，例如 <code>{'{title}'}</code>、<code>{'{abstract}'}</code>、<code>{'{applicant}'}</code>、<code>{'{claims}'}</code>。
+              新建普通字段用于人工补充、筛选和导出。AI 分析请统一从“AI 快速分析”进入，并在那里选择可复用模板、输入列和处理范围。
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -3200,7 +2900,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   value={insertColType}
                   onChange={e => {
                     const value = e.target.value
-                    if (['text', 'longtext', 'number', 'date', 'select', 'boolean', 'attachment', 'ai_field'].includes(value)) {
+                    if (['text', 'longtext', 'number', 'date', 'select', 'boolean', 'attachment'].includes(value)) {
                       setInsertColType(value as typeof insertColType)
                     }
                   }}
@@ -3212,7 +2912,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   <option value="select">单选（下拉）</option>
                   <option value="boolean">是/否</option>
                   <option value="attachment">附件</option>
-                  <option value="ai_field">AI 分析列</option>
                 </select>
               </div>
             </div>
@@ -3241,65 +2940,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
               冻结此列（始终显示在左侧）
             </label>
 
-            {insertColType === 'ai_field' && (
-              <>
-                <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: 12, marginTop: 4 }}>
-                  <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>
-                    AI 提示词 (Prompt) <span style={{ color: '#dc2626' }}>*</span>
-                  </label>
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
-                    点击下方列名按钮可快速插入变量到 Prompt 中：
-                  </div>
-                  <div style={{
-                    display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8,
-                    maxHeight: 80, overflowY: 'auto', padding: 6,
-                    background: '#f8fafc', borderRadius: 4, border: '1px solid #e2e8f0',
-                  }}>
-                    {fields.filter(f => f.key !== 'id').map(f => (
-                      <button
-                        key={f.key}
-                        onClick={() => setNewAIPrompt(prev => prev + `{${f.key}}`)}
-                        style={{
-                          padding: '2px 8px', fontSize: 11,
-                          background: '#fff', border: '1px solid #cbd5e1',
-                          borderRadius: 3, cursor: 'pointer', color: '#334155',
-                        }}
-                        title={f.name}
-                      >
-                        {`{${f.key}}`}
-                      </button>
-                    ))}
-                  </div>
-                  <textarea
-                    className="form-input"
-                    style={{ minHeight: 160, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5 }}
-                    value={newAIPrompt}
-                    onChange={e => setNewAIPrompt(e.target.value)}
-                    placeholder={'例如：\n请阅读以下专利信息，提取该专利的核心技术关键词（5-8个），用英文逗号分隔。\n\n标题：{title}\n摘要：{abstract}\n权利要求：{claims}'}
-                  />
-                </div>
-
-                <div style={{
-                  padding: '8px 10px', background: '#f8fafc', borderRadius: 4,
-                  fontSize: 11, color: '#64748b',
-                }}>
-                  处理范围：
-                  {selectedIds.length > 0 ? (
-                    <strong style={{ color: '#2563eb' }}>选中的 {selectedIds.length} 条专利</strong>
-                  ) : (
-                    <span>未选中专利，将仅创建字段。创建后可在选中记录时使用 AI 批量处理运行。</span>
-                  )}
-                </div>
-              </>
-            )}
-
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
               <button
                 className="btn btn-secondary"
                 onClick={() => {
                   setShowInsertAIColumn(false)
                   setNewAIColumnName('')
-                  setNewAIPrompt('')
                   setNewColumnOptions('')
                   setInsertColType('text')
                   setInsertColFrozen(false)
@@ -3312,7 +2958,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 onClick={() => void handleInsertAIColumn()}
                 disabled={creatingAIColumn}
               >
-                {creatingAIColumn ? '创建中...' : (insertColType === 'ai_field' ? '创建 AI 列' : '创建列')}
+                {creatingAIColumn ? '创建中...' : '创建列'}
               </button>
             </div>
           </div>
@@ -3426,14 +3072,14 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           className="context-menu"
           style={{
             position: 'fixed',
-            left: contextMenu.x,
-            top: contextMenu.y,
+            left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 240)),
+            top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 260)),
             zIndex: 1100,
             background: '#fff',
             border: '1px solid #e5e7eb',
             borderRadius: 8,
             boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
-            minWidth: 180,
+            minWidth: 200,
             padding: '4px 0',
             fontSize: 12,
           }}
@@ -3447,7 +3093,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 {/* 行操作 */}
                 {patent && (
                   <>
-                    <div style={{ padding: '6px 14px', fontSize: 11, color: '#9ca3af', borderBottom: '1px solid #f3f4f6' }}>
+                    <div className="menu-heading">
                       {patent.title?.slice(0, 30) || `#${patent.id}`}
                     </div>
                     <div className="menu-item" onClick={() => onPatentClick(contextMenu.patentId!)}>
@@ -3470,13 +3116,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           {contextMenu.type === 'header' && (() => {
             const field = fields.find(f => f.key === contextMenu.fieldKey)
             if (!field) return null
-            const isCustom = !field.is_system
-            const cf = customFields.find(c => c.key === field.key)
             const isFrozen = frozenFields.has(field.key)
-            const isAI = field.field_type === 'ai_field'
             return (
               <>
-                <div style={{ padding: '6px 14px', fontSize: 11, color: '#9ca3af', borderBottom: '1px solid #f3f4f6' }}>
+                <div className="menu-heading">
                   列：{field.name}
                   <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', background: '#eff6ff', color: '#1e40af', borderRadius: 2 }}>
                     {field.field_type}
@@ -3495,27 +3138,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   <Icon name="chart" /> 统计此列
                 </div>
                 <div className="menu-divider" />
-                <div className="menu-item" style={{ color: '#2563eb' }} onClick={() => openInsertAIDialog(field.key)}>
-                  <Icon name="sparkles" /> 基于此列插入新列
+                <div className="menu-item" style={{ color: '#2563eb' }} onClick={() => openInsertAIDialog()}>
+                  <Icon name="columns" /> 新建普通列
                 </div>
-                {isAI && (
-                  <div className="menu-item" style={{ color: '#7c3aed' }} onClick={() => {
-                    if (patents.length === 0) { alert('当前列表为空'); return }
-                    openAIBatch(field.key, 'visible')
-                  }}>
-                    <Icon name="activity" /> 批量处理此列（所有可见行）
-                  </div>
-                )}
                 <div className="menu-divider" />
-                {isCustom && cf ? (
-                  <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => handleDeleteColumnByKey(field.key)}>
-                    <Icon name="trash" /> 删除此列
-                  </div>
-                ) : (
-                  <div className="menu-item" style={{ color: '#9ca3af', cursor: 'default' }}>
-                    系统列不可删除
-                  </div>
-                )}
+                <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => void handleDeleteColumnByKey(field.key)}>
+                  <Icon name="trash" /> 从当前表格移除
+                </div>
               </>
             )
           })()}

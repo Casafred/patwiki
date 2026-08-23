@@ -831,7 +831,9 @@ input, select, textarea {
 }
 
 .data-grid {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12px;
@@ -851,6 +853,7 @@ input, select, textarea {
   text-align: left;
   white-space: nowrap;
   user-select: none;
+  overflow: visible;
 }
 
 /* 表头内部相对定位（用于列菜单/排序图标），不能覆盖外层 sticky */
@@ -1314,6 +1317,54 @@ input, select, textarea {
 }
 
 .col-header-menu .menu-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 4px 0;
+}
+
+/* 表头右键菜单与表头下拉菜单使用同一套视觉语言。 */
+.context-menu {
+  max-width: min(300px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  color: #374151;
+}
+
+.context-menu .menu-heading {
+  padding: 7px 14px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+  border-bottom: 1px solid #f3f4f6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 7px 14px;
+  cursor: pointer;
+  color: #374151;
+  white-space: nowrap;
+}
+
+.context-menu .menu-item:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.context-menu .menu-item svg,
+.col-header-menu .menu-item svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.context-menu .menu-divider {
   height: 1px;
   background: #e5e7eb;
   margin: 4px 0;
@@ -4241,6 +4292,11 @@ body {
   border-bottom: 1px solid #e2e8f0;
   text-align: left;
   vertical-align: top;
+}
+
+.data-grid-wrapper {
+  min-width: 0;
+  align-items: flex-start;
 }
 
 .identity-table th {

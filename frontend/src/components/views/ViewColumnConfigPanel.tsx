@@ -8,6 +8,7 @@ interface ViewColumnConfigPanelProps {
   fields: FieldMeta[]
   onClose: () => void
   onSave: (columnConfig: ViewColumnConfig[]) => Promise<void>
+  onRemove?: (fieldKey: string) => void
 }
 
 function buildInitialConfig(view: PatentView, fields: FieldMeta[]): ViewColumnConfig[] {
@@ -27,7 +28,7 @@ function buildInitialConfig(view: PatentView, fields: FieldMeta[]): ViewColumnCo
   return [...known, ...unknown].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 }
 
-export default function ViewColumnConfigPanel({ open, view, fields, onClose, onSave }: ViewColumnConfigPanelProps) {
+export default function ViewColumnConfigPanel({ open, view, fields, onClose, onSave, onRemove }: ViewColumnConfigPanelProps) {
   const initialConfig = useMemo(() => buildInitialConfig(view, fields), [view, fields])
   const [draft, setDraft] = useState<ViewColumnConfig[]>(initialConfig)
   const [search, setSearch] = useState('')
@@ -120,12 +121,12 @@ export default function ViewColumnConfigPanel({ open, view, fields, onClose, onS
               const position = draft.findIndex(item => item.key === column.key)
               const visible = column.visible !== false
               return (
-                <div key={column.key} style={{ display: 'grid', gridTemplateColumns: '32px minmax(180px, 1fr) 82px 86px 72px', gap: 8, alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: visible ? '#fff' : '#f8fafc', opacity: visible ? 1 : 0.68 }}>
+                <div key={column.key} style={{ display: 'grid', gridTemplateColumns: '32px minmax(180px, 1fr) 82px 86px 94px', gap: 8, alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: visible ? '#fff' : '#f8fafc', opacity: visible ? 1 : 0.68 }}>
                   <input type="checkbox" checked={visible} onChange={event => updateColumn(column.key, { visible: event.target.checked })} aria-label={`显示${field?.name || column.key}`} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, color: '#1f2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field?.name || column.key}</div>
                     <div style={{ fontSize: 10, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {field?.is_system ? '系统字段' : field ? '自定义字段' : '未注册字段'} · {field?.field_type || 'unknown'}
+                      {field ? `字段类型：${field.field_type}` : '未注册字段'}
                     </div>
                   </div>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#64748b' }}>
@@ -140,9 +141,12 @@ export default function ViewColumnConfigPanel({ open, view, fields, onClose, onS
                     />
                   </label>
                   <span style={{ fontSize: 11, color: '#64748b', textAlign: 'center' }}>第 {position + 1} 列</span>
-                  <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end', alignItems: 'center' }}>
                     <button className="btn btn-xs btn-ghost" type="button" onClick={() => moveColumn(column.key, -1)} disabled={position === 0} title="上移"><Icon name="chevron-up" size={14} /></button>
                     <button className="btn btn-xs btn-ghost" type="button" onClick={() => moveColumn(column.key, 1)} disabled={position === draft.length - 1} title="下移"><Icon name="chevron-down" size={14} /></button>
+                    {onRemove && (
+                      <button className="btn btn-xs btn-ghost" type="button" onClick={() => onRemove(column.key)} title="从当前视图移除" style={{ color: '#dc2626' }}><Icon name="trash" size={14} /></button>
+                    )}
                   </div>
                 </div>
               )

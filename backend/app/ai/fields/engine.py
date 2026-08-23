@@ -93,6 +93,14 @@ class AIFieldEngine:
         # 系统字段
         val = getattr(patent, key, None)
         if val is None:
+            # AI 模板里既支持系统字段 key，也支持直接填写自定义/AI 字段 key。
+            # 直接 key 是字段管理页当前推荐的录入方式，不能因为不是 ORM 属性而丢失上下文。
+            custom_value = (patent.custom_fields or {}).get(key)
+            if custom_value is not None:
+                return str(custom_value)
+            ai_value = (patent.ai_fields or {}).get(key)
+            if ai_value is not None:
+                return str(ai_value)
             return ""
         if hasattr(val, "isoformat"):  # date/datetime
             return val.isoformat()
