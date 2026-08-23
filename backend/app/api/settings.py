@@ -12,6 +12,8 @@ from app.api.deps import get_pagination_params
 
 router = APIRouter()
 
+MAX_AI_BATCH_CONCURRENCY = 50
+
 # 配置文件路径
 SETTINGS_FILE = settings.DATA_DIR / "settings.json"
 
@@ -42,7 +44,7 @@ class AppSettings(BaseModel):
     # 是否启用 AI 功能
     ai_enabled: bool = False
     # 批量处理并发数
-    ai_batch_concurrency: int = Field(default=3, ge=1, le=10)
+    ai_batch_concurrency: int = Field(default=3, ge=1, le=MAX_AI_BATCH_CONCURRENCY)
     # 缓存命中是否跳过 API 调用
     ai_use_cache: bool = True
 
@@ -62,9 +64,9 @@ def _save_settings(data: dict) -> None:
 
 
 def _bounded_concurrency(value: object) -> int:
-    """Keep old/manual settings files from creating an unbounded worker pool."""
+    """Keep old/manual settings files within the supported request limit."""
     try:
-        return min(10, max(1, int(value)))
+        return min(MAX_AI_BATCH_CONCURRENCY, max(1, int(value)))
     except (TypeError, ValueError):
         return 3
 

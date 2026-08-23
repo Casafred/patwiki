@@ -212,8 +212,9 @@ export default function SharingPage() {
   }
 
   return (
-    <div className="page-container sharing-page">
-      <div className="page-header">
+    <div className="workspace-page sharing-page">
+      <div className="workspace-page-shell sharing-shell">
+      <div className="page-header workspace-page-header">
         <h2 className="page-title">权限管理与协作</h2>
         <p className="page-subtitle">管理成员身份、部门归属与专利库访问权限</p>
       </div>
@@ -678,6 +679,7 @@ export default function SharingPage() {
             </tbody>
           </table>
         )}
+      </div>
       </div>
     </div>
   )

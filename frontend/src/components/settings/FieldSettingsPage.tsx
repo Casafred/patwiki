@@ -121,9 +121,9 @@ export default function FieldSettingsPage() {
   const [newField, setNewField] = useState<Partial<CustomField>>({
     key: '',
     name: '',
-    field_type: 'text',
+    field_type: 'textarea',
     is_active: true,
-    ai_config: {},
+    ai_config: { ai_enabled: true, prompt_template: '', input_fields: ['title', 'abstract', 'claims'] },
     formula_config: { expression: '', return_type: 'text' },
   })
   const { setCustomFields } = useAppStore()
@@ -184,8 +184,8 @@ export default function FieldSettingsPage() {
   }
 
   const handleAddField = async () => {
-    if (!newField.key?.trim() || !newField.name?.trim()) {
-      alert('请填写字段key和名称')
+    if (!newField.key?.trim() || !newField.name?.trim() || !newField.ai_config?.prompt_template?.trim()) {
+      alert('请填写字段 key、名称和提取提示词')
       return
     }
     setSaving(true)
@@ -198,9 +198,9 @@ export default function FieldSettingsPage() {
       setNewField({
         key: '',
         name: '',
-        field_type: 'text',
+        field_type: 'textarea',
         is_active: true,
-        ai_config: {},
+        ai_config: { ai_enabled: true, prompt_template: '', input_fields: ['title', 'abstract', 'claims'] },
         formula_config: { expression: '', return_type: 'text' },
       })
     } catch (error: unknown) {
@@ -243,6 +243,8 @@ export default function FieldSettingsPage() {
     attachment: '附件',
   }
 
+  const aiFields = fields.filter(isAiField)
+
   if (loading) {
     return (
       <div className="loading-spinner">
@@ -253,17 +255,18 @@ export default function FieldSettingsPage() {
   }
 
   return (
-    <div className="page-container settings-page">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="workspace-page ai-field-settings-page">
+      <div className="workspace-page-shell ai-field-settings-shell">
+      <div className="page-header workspace-page-header">
         <div>
-          <h2 className="page-title">字段管理</h2>
-          <p className="page-subtitle">管理自定义字段，配置AI字段的提取提示词</p>
+          <h2 className="page-title">AI 预置字段管理</h2>
+          <p className="page-subtitle">统一管理可复用的 AI 抽取字段、输入范围和提示词模板</p>
         </div>
         <button
           className="btn btn-primary"
           onClick={() => setShowAddForm(true)}
         >
-          + 新增字段
+          + 新增 AI 预置字段
         </button>
       </div>
 
@@ -275,7 +278,7 @@ export default function FieldSettingsPage() {
           padding: 20,
           marginBottom: 20,
         }}>
-          <h3 style={{ margin: '0 0 16px 0', fontSize: 15, fontWeight: 600 }}>新增字段</h3>
+          <h3 style={{ margin: '0 0 16px 0', fontSize: 15, fontWeight: 600 }}>新增 AI 预置字段</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 4, fontWeight: 500 }}>字段Key (英文)</label>
@@ -296,23 +299,12 @@ export default function FieldSettingsPage() {
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 4, fontWeight: 500 }}>字段类型</label>
-              <select
-                className="form-input"
-                value={newField.field_type}
-                onChange={(e) => setNewField({ ...newField, field_type: e.target.value })}
-              >
-                <option value="text">文本</option>
+              <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 4, fontWeight: 500 }}>输出类型</label>
+              <select className="form-input" value={newField.field_type} onChange={(e) => setNewField({ ...newField, field_type: e.target.value })}>
+                <option value="text">短文本</option>
                 <option value="textarea">长文本</option>
-                <option value="select">单选</option>
-                <option value="multi_select">多选</option>
                 <option value="number">数字</option>
-                <option value="date">日期</option>
                 <option value="boolean">是/否</option>
-                <option value="formula">公式</option>
-                <option value="link">关联记录（Link）</option>
-                <option value="lookup">查找引用（Lookup）</option>
-                <option value="rollup">汇总计算（Rollup）</option>
               </select>
             </div>
             <div>
@@ -324,6 +316,15 @@ export default function FieldSettingsPage() {
                 placeholder="例如: AI分析"
               />
             </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 4, fontWeight: 500 }}>抽取范围</label>
+            <input className="form-input" value={(newField.ai_config?.input_fields || []).join(', ')} onChange={e => setNewField({ ...newField, ai_config: { ...(newField.ai_config || {}), ai_enabled: true, input_fields: e.target.value.split(',').map(item => item.trim()).filter(Boolean) } })} placeholder="例如：title, abstract, claims, description_full" />
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>输入系统字段 key，用逗号分隔；Prompt 中也可用 {`{field_key}`} 引用字段。</div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 4, fontWeight: 500 }}>AI 提取提示词</label>
+            <textarea className="form-input" style={{ minHeight: 150, fontFamily: 'monospace', fontSize: 12 }} value={newField.ai_config?.prompt_template || ''} onChange={e => setNewField({ ...newField, ai_config: { ...(newField.ai_config || {}), ai_enabled: true, prompt_template: e.target.value } })} placeholder="告诉 AI 如何提取字段，保留可复用的 {title}、{abstract} 等变量。" />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <RelationConfigFields
@@ -348,7 +349,7 @@ export default function FieldSettingsPage() {
             </button>
             <button className="btn btn-secondary" onClick={() => {
               setShowAddForm(false)
-              setNewField({ key: '', name: '', field_type: 'text', is_active: true, ai_config: {}, formula_config: { expression: '', return_type: 'text' } })
+              setNewField({ key: '', name: '', field_type: 'textarea', is_active: true, ai_config: { ai_enabled: true, prompt_template: '', input_fields: ['title', 'abstract', 'claims'] }, formula_config: { expression: '', return_type: 'text' } })
             }}>
               取消
             </button>
@@ -357,7 +358,7 @@ export default function FieldSettingsPage() {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {fields.map(field => (
+        {aiFields.map(field => (
           <div
             key={field.id}
             style={{
@@ -380,22 +381,11 @@ export default function FieldSettingsPage() {
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>字段类型</label>
-                    <select
-                      className="form-input"
-                      value={editForm.field_type || 'text'}
-                      onChange={(e) => setEditForm({ ...editForm, field_type: e.target.value })}
-                    >
-                      <option value="text">文本</option>
+                    <select className="form-input" value={editForm.field_type || 'textarea'} onChange={(e) => setEditForm({ ...editForm, field_type: e.target.value })}>
+                      <option value="text">短文本</option>
                       <option value="textarea">长文本</option>
-                      <option value="select">单选</option>
-                      <option value="multi_select">多选</option>
                       <option value="number">数字</option>
-                      <option value="date">日期</option>
                       <option value="boolean">是/否</option>
-                      <option value="formula">公式</option>
-                      <option value="link">关联记录（Link）</option>
-                      <option value="lookup">查找引用（Lookup）</option>
-                      <option value="rollup">汇总计算（Rollup）</option>
                     </select>
                   </div>
                   <div>
@@ -457,6 +447,8 @@ export default function FieldSettingsPage() {
                 </div>
                 {(editForm.ai_config?.ai_enabled || editForm.ai_config?.prompt_template) && (
                   <div style={{ marginBottom: 12 }}>
+                    <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>抽取范围</label>
+                    <input className="form-input" style={{ marginBottom: 10 }} value={(editForm.ai_config?.input_fields || []).join(', ')} onChange={e => setEditForm({ ...editForm, ai_config: { ...(editForm.ai_config || {}), ai_enabled: true, input_fields: e.target.value.split(',').map(item => item.trim()).filter(Boolean) } })} placeholder="title, abstract, claims" />
                     <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>
                       AI提取提示词 (Prompt Template)
                     </label>
@@ -580,15 +572,16 @@ export default function FieldSettingsPage() {
         ))}
       </div>
 
-      {fields.length === 0 && !loading && (
+      {aiFields.length === 0 && !loading && (
         <div style={{
           textAlign: 'center',
           padding: 60,
           color: '#94a3b8',
         }}>
-          暂无自定义字段
+          暂无 AI 预置字段。可通过“新增 AI 预置字段”创建可复用的抽取模板。
         </div>
       )}
+      </div>
     </div>
   )
 }

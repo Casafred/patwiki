@@ -762,11 +762,17 @@ class BulkTagRequest(BaseModel):
 class BulkMoveDatabaseRequest(BaseModel):
     patent_ids: list[int]
     target_database_id: int
+    # A transfer must carry the UI scope that produced the selection. This
+    # prevents an empty or stale selection from becoming a whole-library move.
+    source_database_id: int
+    source_view_id: Optional[int] = None
 
 
 class BulkMoveViewRequest(BaseModel):
     patent_ids: list[int]
     target_view_id: Optional[int] = None
+    source_database_id: int
+    source_view_id: Optional[int] = None
 
 
 class BulkDuplicateRequest(BaseModel):
@@ -802,7 +808,11 @@ def bulk_move_database(
 ):
     """Move selected master patents into another library as one atomic command."""
     count = PatentService.bulk_move_database(
-        db, payload.patent_ids, payload.target_database_id,
+        db,
+        payload.patent_ids,
+        payload.target_database_id,
+        source_database_id=payload.source_database_id,
+        source_view_id=payload.source_view_id,
     )
     return {
         "success": True,
@@ -817,7 +827,13 @@ def bulk_move_view(
     db: Session = Depends(get_db),
 ):
     """Move selected patents into a view in the same library, or clear their explicit view."""
-    count = PatentService.bulk_move_view(db, payload.patent_ids, payload.target_view_id)
+    count = PatentService.bulk_move_view(
+        db,
+        payload.patent_ids,
+        payload.target_view_id,
+        source_database_id=payload.source_database_id,
+        source_view_id=payload.source_view_id,
+    )
     return {
         "success": True,
         "moved_count": count,

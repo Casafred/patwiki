@@ -102,6 +102,16 @@ class AIFieldEngine:
         ai_config = field_def.ai_config or {}
         template = ai_config.get("prompt_template", "")
 
+        # The reusable field definition can constrain the source context even
+        # when its prompt does not explicitly reference every input field.
+        scoped_fields = ai_config.get("input_fields") or []
+        scope_context = ""
+        if scoped_fields:
+            scope_context = "\n\n可用专利字段上下文：\n" + "\n".join(
+                f"【{key}】{self._resolve_field_value(patent, key) or ''}"
+                for key in scoped_fields
+            )
+
         if template:
             import re
             # 支持任意 {field_key} 变量替换，包括 {title}/{abstract}/{applicant}/{custom_fields.xxx}/{ai_fields.xxx} 等
@@ -120,7 +130,7 @@ class AIFieldEngine:
 
 请直接给出结果，不要多余的解释。"""
 
-        return text
+        return text + scope_context
 
     def _calculate_input_hash(self, patent: Patent, field_def: CustomField) -> str:
         ai_config = field_def.ai_config or {}

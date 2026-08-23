@@ -632,20 +632,62 @@ class PatentService:
         return count
 
     @staticmethod
-    def _load_bulk_patents(db: Session, patent_ids: list[int]) -> list[Patent]:
-        """Load a complete selection and reject partial selections atomically."""
+    def _load_bulk_patents(
+        db: Session,
+        patent_ids: list[int],
+        *,
+        source_database_id: int | None = None,
+        source_view_id: int | None = None,
+        require_nonempty: bool = False,
+    ) -> list[Patent]:
+        """Load a complete selection and validate its declared UI scope.
+
+        Legacy bulk edits keep their empty-selection no-op behavior. Transfer
+        commands opt into ``require_nonempty`` so an omitted selection can
+        never be interpreted as "all records".
+        """
         ids = list(dict.fromkeys(int(item) for item in patent_ids))
         if not ids:
+            if require_nonempty:
+                raise BadRequestException("未选择任何专利，批量移动未执行")
             return []
         patents = db.query(Patent).filter(Patent.id.in_(ids)).all()
         found = {patent.id for patent in patents}
         missing = [patent_id for patent_id in ids if patent_id not in found]
         if missing:
             raise BadRequestException(f"选中的专利不存在，整批未执行：{missing}")
-        return [next(patent for patent in patents if patent.id == patent_id) for patent_id in ids]
+        by_id = {patent.id: patent for patent in patents}
+        if source_database_id is not None:
+            mismatched = [
+                patent_id for patent_id in ids
+                if by_id[patent_id].database_id != source_database_id
+            ]
+            if mismatched:
+                raise BadRequestException(
+                    f"所选专利不属于当前数据库，整批未执行：{mismatched}"
+                )
+        # The main table intentionally spans the whole source library, while
+        # a saved view is a narrower explicit scope.
+        if source_view_id is not None:
+            mismatched = [
+                patent_id for patent_id in ids
+                if by_id[patent_id].view_id != source_view_id
+            ]
+            if mismatched:
+                raise BadRequestException(
+                    f"所选专利不属于当前视图，整批未执行：{mismatched}"
+                )
+        return [by_id[patent_id] for patent_id in ids]
 
     @staticmethod
-    def bulk_move_database(db: Session, patent_ids: list[int], target_database_id: int) -> int:
+    def bulk_move_database(
+        db: Session,
+        patent_ids: list[int],
+        target_database_id: int,
+        *,
+        source_database_id: int,
+        source_view_id: int | None = None,
+    ) -> int:
         """Move master records to another library, retaining all patent data and audit history."""
         from app.models import PatentDatabase
 
@@ -655,7 +697,13 @@ class PatentService:
         ).first()
         if not target:
             raise BadRequestException("目标数据库不存在或已归档")
-        patents = PatentService._load_bulk_patents(db, patent_ids)
+        patents = PatentService._load_bulk_patents(
+            db,
+            patent_ids,
+            source_database_id=source_database_id,
+            source_view_id=source_view_id,
+            require_nonempty=True,
+        )
         moved_count = 0
         for patent in patents:
             old_database_id = patent.database_id
@@ -690,11 +738,24 @@ class PatentService:
         return moved_count
 
     @staticmethod
-    def bulk_move_view(db: Session, patent_ids: list[int], target_view_id: int | None) -> int:
+    def bulk_move_view(
+        db: Session,
+        patent_ids: list[int],
+        target_view_id: int | None,
+        *,
+        source_database_id: int,
+        source_view_id: int | None = None,
+    ) -> int:
         """Move records to a view in their current library, or clear the view with null."""
         from app.models import PatentView
 
-        patents = PatentService._load_bulk_patents(db, patent_ids)
+        patents = PatentService._load_bulk_patents(
+            db,
+            patent_ids,
+            source_database_id=source_database_id,
+            source_view_id=source_view_id,
+            require_nonempty=True,
+        )
         target_view = None
         if target_view_id is not None:
             target_view = db.query(PatentView).filter(

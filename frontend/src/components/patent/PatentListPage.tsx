@@ -877,16 +877,27 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
 
   const handleBulkTransfer = async () => {
     if (!bulkTransferAction || selectedIds.length === 0) return
+    if (activeDatabaseId == null || !Number.isInteger(activeDatabaseId) || activeDatabaseId <= 0) {
+      alert('当前没有明确的数据库范围，批量操作已取消')
+      return
+    }
+    const sourceDatabaseId = activeDatabaseId
     try {
       if (bulkTransferAction === 'move_database') {
         if (bulkTargetDatabaseId == null) {
           alert('请选择目标数据库')
           return
         }
-        const result = await patentApi.bulkMoveDatabase(selectedIds, bulkTargetDatabaseId)
+        const result = await patentApi.bulkMoveDatabase(selectedIds, bulkTargetDatabaseId, {
+          sourceDatabaseId,
+          sourceViewId: viewId ?? null,
+        })
         alert(`已移库 ${result.moved_count} 条专利`)
       } else if (bulkTransferAction === 'move_view') {
-        const result = await patentApi.bulkMoveView(selectedIds, bulkTargetViewId)
+        const result = await patentApi.bulkMoveView(selectedIds, bulkTargetViewId, {
+          sourceDatabaseId,
+          sourceViewId: viewId ?? null,
+        })
         alert(result.target_view_id == null ? `已将 ${result.moved_count} 条专利移回库主表` : `已移动 ${result.moved_count} 条专利到目标视图`)
       } else {
         const options = bulkTargetDatabaseId == null ? {} : { target_database_id: bulkTargetDatabaseId }

@@ -5,6 +5,7 @@ export type JsonObject = { [key: string]: JsonValue | undefined }
 export interface AIConfig extends JsonObject {
   ai_enabled?: boolean
   prompt_template?: string
+  input_fields?: string[]
 }
 
 export type FormulaReturnType = 'text' | 'number' | 'date' | 'boolean'

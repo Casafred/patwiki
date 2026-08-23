@@ -109,20 +109,15 @@ export default function SettingsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 700 }}>
-      <div className="page-header">
+    <div className="workspace-page settings-page">
+      <div className="workspace-page-shell settings-shell">
+      <div className="page-header settings-page-header">
         <h2 className="page-title">设置</h2>
         <p className="page-subtitle">配置 LLM API 以启用 AI 字段抽取功能</p>
       </div>
 
       {/* LLM 配置卡片 */}
-      <div style={{
-        background: 'white',
-        border: '1px solid #e2e8f0',
-        borderRadius: 8,
-        padding: 24,
-        marginBottom: 20,
-      }}>
+      <div className="settings-panel">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>LLM 配置</h3>
           {hasApiKey ? (
@@ -315,13 +310,7 @@ export default function SettingsPage() {
       </div>
 
       {/* AI 高级配置 */}
-      <div style={{
-        background: 'white',
-        border: '1px solid #e2e8f0',
-        borderRadius: 8,
-        padding: 24,
-        marginBottom: 20,
-      }}>
+      <div className="settings-panel">
         <h3 style={{ margin: '0 0 16 0', fontSize: 16, fontWeight: 600 }}>AI 高级配置</h3>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -332,14 +321,14 @@ export default function SettingsPage() {
             <input
               type="number"
               min="1"
-              max="10"
+              max="50"
               className="form-input"
               style={{ maxWidth: 120 }}
               value={aiBatchConcurrency}
               onChange={(e) => setAiBatchConcurrency(Number(e.target.value))}
             />
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              控制 AI 批量处理时同时发起的请求数（1-10）。PatWiki 会在此上限内并发请求、串行写入本地数据库；较高值可能触发服务商限流。
+              控制 AI 批量处理时同时发起的请求数（1-50）。PatWiki 会在此上限内并发请求、串行写入本地数据库；实际吞吐仍受服务商限流、网络和本机资源影响。
             </div>
           </div>
 
@@ -364,18 +353,14 @@ export default function SettingsPage() {
       </div>
 
       {/* 数据目录信息 */}
-      <div style={{
-        background: '#f8fafc',
-        border: '1px solid #e2e8f0',
-        borderRadius: 8,
-        padding: 16,
-      }}>
+      <div className="settings-info-panel">
         <h3 style={{ margin: '0 0 8 0', fontSize: 14, fontWeight: 600, color: '#475569' }}>数据目录</h3>
         <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
           数据库、AI 缓存、设置文件等均存储在用户数据目录下，卸载应用不会删除。
           <br />
           Windows: <code>%LOCALAPPDATA%/PatWiki/</code>
         </p>
+      </div>
       </div>
     </div>
   )

@@ -11,14 +11,6 @@ const STATUS_LABELS: Record<string, string> = {
   rolled_back: '已回滚',
 }
 
-const STATUS_COLORS: Record<string, { background: string; color: string }> = {
-  pending: { background: '#fef3c7', color: '#92400e' },
-  processing: { background: '#dbeafe', color: '#1d4ed8' },
-  completed: { background: '#dcfce7', color: '#166534' },
-  failed: { background: '#fee2e2', color: '#b91c1c' },
-  rolled_back: { background: '#f1f5f9', color: '#475569' },
-}
-
 function formatDate(value?: string) {
   if (!value) return '-'
   const date = new Date(value)
@@ -34,6 +26,14 @@ export default function ImportHistoryPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  const summary = batches.reduce((result, batch) => ({
+    batches: result.batches + 1,
+    completed: result.completed + (batch.status.toLowerCase() === 'completed' ? 1 : 0),
+    failed: result.failed + (batch.status.toLowerCase() === 'failed' ? 1 : 0),
+    rows: result.rows + formatCount(batch.total_rows),
+    errors: result.errors + formatCount(batch.error_count),
+  }), { batches: 0, completed: 0, failed: 0, rows: 0, errors: 0 })
 
   const loadBatches = useCallback(async () => {
     setLoading(true)
@@ -58,14 +58,15 @@ export default function ImportHistoryPage() {
   }, [loadBatches])
 
   return (
-    <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+    <div className="workspace-page import-history-page">
+      <div className="workspace-page-shell import-history-shell">
+      <div className="page-header workspace-page-header">
         <div>
           <h2 className="page-title">导入历史</h2>
           <p className="page-subtitle">查看每次导入的处理结果与失败行数</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select className="form-input" value={statusFilter} onChange={event => setStatusFilter(event.target.value)} style={{ minWidth: 120, height: 32, fontSize: 13 }}>
+        <div className="workspace-page-actions">
+          <select className="form-input" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
             <option value="">全部状态</option>
             {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
@@ -73,19 +74,27 @@ export default function ImportHistoryPage() {
         </div>
       </div>
 
+      <div className="import-summary-strip">
+        <div><span>批次</span><strong>{summary.batches}</strong></div>
+        <div><span>成功</span><strong className="is-positive">{summary.completed}</strong></div>
+        <div><span>失败</span><strong className="is-negative">{summary.failed}</strong></div>
+        <div><span>处理行数</span><strong>{summary.rows}</strong></div>
+        <div><span>问题行数</span><strong className={summary.errors > 0 ? 'is-negative' : ''}>{summary.errors}</strong></div>
+      </div>
+
       {error && (
-        <div style={{ marginBottom: 12, padding: '8px 12px', border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', borderRadius: 6, fontSize: 13 }}>
+        <div className="workspace-error">
           {error}
         </div>
       )}
 
-      <div className="table-container" style={{ overflowX: 'auto' }}>
+      <div className="table-container import-history-table-wrap">
         {loading ? (
           <div className="loading-state" style={{ minHeight: 180 }}>加载中...</div>
         ) : batches.length === 0 ? (
           <div className="empty-state" style={{ minHeight: 180 }}>暂无导入记录</div>
         ) : (
-          <table className="data-grid" style={{ minWidth: 820 }}>
+          <table className="data-grid import-history-table">
             <thead>
               <tr>
                 <th>文件</th>
@@ -102,20 +111,22 @@ export default function ImportHistoryPage() {
             <tbody>
               {batches.map(batch => {
                 const statusKey = batch.status.toLowerCase()
-                const statusStyle = STATUS_COLORS[statusKey] || STATUS_COLORS.pending
                 return (
                   <tr key={batch.id}>
-                    <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={batch.filename}>{batch.filename}</td>
+                    <td className="import-file-cell" title={batch.filename}>
+                      <strong>{batch.filename}</strong>
+                      <span>{batch.source_table_title || '未命名来源表'}{batch.worksheet_name ? ` · ${batch.worksheet_name}` : ''}</span>
+                    </td>
                     <td>
-                      <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 4, background: statusStyle.background, color: statusStyle.color, fontSize: 12 }}>
+                      <span className={`status-badge status-${statusKey}`}>
                         {STATUS_LABELS[statusKey] || batch.status}
                       </span>
                     </td>
                     <td>{formatCount(batch.total_rows)}</td>
-                    <td style={{ color: '#166534' }}>{formatCount(batch.inserted_count)}</td>
-                    <td style={{ color: '#1d4ed8' }}>{formatCount(batch.updated_count)}</td>
+                    <td className="count-positive">{formatCount(batch.inserted_count)}</td>
+                    <td className="count-info">{formatCount(batch.updated_count)}</td>
                     <td>{formatCount(batch.skipped_count)}</td>
-                    <td style={{ color: batch.error_count > 0 ? '#b91c1c' : '#475569' }}>{formatCount(batch.error_count)}</td>
+                    <td className={batch.error_count > 0 ? 'count-negative' : ''}>{formatCount(batch.error_count)}</td>
                     <td>{formatDate(batch.started_at)}</td>
                     <td>{formatDate(batch.completed_at)}</td>
                   </tr>
@@ -124,6 +135,7 @@ export default function ImportHistoryPage() {
             </tbody>
           </table>
         )}
+      </div>
       </div>
     </div>
   )

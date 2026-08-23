@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
-  customFieldApi,
   departmentApi,
   personApi,
   productApi,
@@ -11,7 +9,6 @@ import {
   tagGroupApi,
 } from '../../api'
 import type {
-  CustomField,
   Department,
   Person,
   Product,
@@ -172,7 +169,6 @@ function optionalNumber(value: string): number | undefined {
 }
 
 export default function ManagementPage() {
-  const navigate = useNavigate()
   const [tab, setTab] = useState<ManagementTab>('products')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -184,7 +180,6 @@ export default function ManagementPage() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [people, setPeople] = useState<Person[]>([])
   const [productLines, setProductLines] = useState<ProductLine[]>([])
-  const [customFields, setCustomFields] = useState<CustomField[]>([])
 
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
   const [productForm, setProductForm] = useState<ProductForm>(emptyProduct)
@@ -212,9 +207,9 @@ export default function ManagementPage() {
     setLoading(true)
     setError('')
     try {
-      const [loadedProducts, loadedProjects, loadedTags, loadedGroups, loadedDepartments, loadedPeople, loadedLines, loadedFields] = await Promise.all([
+      const [loadedProducts, loadedProjects, loadedTags, loadedGroups, loadedDepartments, loadedPeople, loadedLines] = await Promise.all([
         productApi.list(), projectApi.list(), tagApi.list(), tagGroupApi.list(),
-        departmentApi.list(), personApi.list(), productLineApi.list(), customFieldApi.list(),
+        departmentApi.list(), personApi.list(), productLineApi.list(),
       ])
       setProducts(loadedProducts)
       setProjects(loadedProjects)
@@ -223,7 +218,6 @@ export default function ManagementPage() {
       setDepartments(loadedDepartments)
       setPeople(loadedPeople)
       setProductLines(loadedLines)
-      setCustomFields(loadedFields)
     } catch (loadError: unknown) {
       setError(getErrorMessage(loadError, '管理数据加载失败'))
     } finally {
@@ -418,7 +412,6 @@ export default function ManagementPage() {
     <div className="management-page">
       <div className="management-tabs" role="tablist" aria-label="管理资源">
         {tabs.map(item => <button key={item.key} className={`management-tab ${tab === item.key ? 'active' : ''}`} onClick={() => { setTab(item.key); setError('') }}>{item.label}</button>)}
-        <button className="management-tab" onClick={() => navigate('/fields')}>自定义字段</button>
       </div>
       {error && <div className="management-error">{error}</div>}
       {tab === 'products' && renderProducts()}
@@ -426,7 +419,6 @@ export default function ManagementPage() {
       {tab === 'tags' && renderTags()}
       {tab === 'organization' && renderOrganization()}
       {tab === 'product-lines' && renderProductLines()}
-      {customFields.length > 0 && <div style={{ marginTop: 12, color: '#94a3b8', fontSize: 11 }}>当前已有 {customFields.length} 个自定义字段，字段配置请进入“自定义字段”。</div>}
     </div>
   )
 }

@@ -51,20 +51,31 @@ class BulkCommandTest(unittest.TestCase):
     def test_bulk_commands_are_atomic_and_keep_identity_rules(self):
         with self.assertRaises(BadRequestException):
             PatentService.bulk_move_database(
-                self.db, [self.patent.id, 999999], self.target_db.id,
+                self.db,
+                [self.patent.id, 999999],
+                self.target_db.id,
+                source_database_id=self.source_db.id,
             )
         self.db.refresh(self.patent)
         self.assertEqual(self.patent.database_id, self.source_db.id)
 
         moved = PatentService.bulk_move_view(
-            self.db, [self.patent.id, self.other_patent.id], self.target_view.id,
+            self.db,
+            [self.patent.id, self.other_patent.id],
+            self.target_view.id,
+            source_database_id=self.source_db.id,
+            source_view_id=self.source_view.id,
         )
         self.assertEqual(moved, 2)
         self.db.refresh(self.patent)
         self.assertEqual(self.patent.view_id, self.target_view.id)
 
         moved = PatentService.bulk_move_database(
-            self.db, [self.patent.id, self.other_patent.id], self.target_db.id,
+            self.db,
+            [self.patent.id, self.other_patent.id],
+            self.target_db.id,
+            source_database_id=self.source_db.id,
+            source_view_id=self.target_view.id,
         )
         self.assertEqual(moved, 2)
         self.db.refresh(self.patent)
@@ -81,6 +92,29 @@ class BulkCommandTest(unittest.TestCase):
         self.assertEqual(copy.duplicate_of, self.patent.id)
         self.assertIn("工作副本", copy.notes)
         self.assertEqual(copy.custom_fields["manual_note"], "保留")
+
+    def test_transfer_rejects_empty_and_out_of_scope_selections(self):
+        with self.assertRaises(BadRequestException):
+            PatentService.bulk_move_database(
+                self.db,
+                [],
+                self.target_db.id,
+                source_database_id=self.source_db.id,
+            )
+
+        other_db = PatentDatabase(name="另一个源库", code="BULK_OTHER")
+        self.db.add(other_db)
+        self.db.commit()
+        with self.assertRaises(BadRequestException):
+            PatentService.bulk_move_database(
+                self.db,
+                [self.patent.id],
+                self.target_db.id,
+                source_database_id=other_db.id,
+            )
+
+        self.db.refresh(self.patent)
+        self.assertEqual(self.patent.database_id, self.source_db.id)
 
     def test_bulk_update_and_tag_commands_are_atomic_and_audited(self):
         with self.assertRaises(BadRequestException):

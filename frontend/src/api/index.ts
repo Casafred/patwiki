@@ -318,11 +318,21 @@ export const patentApi = {
   bulkDelete: (ids: number[]): Promise<{ success: boolean; deleted_count: number }> =>
     api.post('/patents/bulk-delete', ids),
 
-  bulkMoveDatabase: (patentIds: number[], targetDatabaseId: number): Promise<{ success: boolean; moved_count: number; target_database_id: number }> =>
-    api.post('/patents/bulk-move-database', { patent_ids: patentIds, target_database_id: targetDatabaseId }),
+  bulkMoveDatabase: (patentIds: number[], targetDatabaseId: number, scope: { sourceDatabaseId: number; sourceViewId?: number | null }): Promise<{ success: boolean; moved_count: number; target_database_id: number }> =>
+    api.post('/patents/bulk-move-database', {
+      patent_ids: patentIds,
+      target_database_id: targetDatabaseId,
+      source_database_id: scope.sourceDatabaseId,
+      source_view_id: scope.sourceViewId ?? null,
+    }),
 
-  bulkMoveView: (patentIds: number[], targetViewId: number | null): Promise<{ success: boolean; moved_count: number; target_view_id: number | null }> =>
-    api.post('/patents/bulk-move-view', { patent_ids: patentIds, target_view_id: targetViewId }),
+  bulkMoveView: (patentIds: number[], targetViewId: number | null, scope: { sourceDatabaseId: number; sourceViewId?: number | null }): Promise<{ success: boolean; moved_count: number; target_view_id: number | null }> =>
+    api.post('/patents/bulk-move-view', {
+      patent_ids: patentIds,
+      target_view_id: targetViewId,
+      source_database_id: scope.sourceDatabaseId,
+      source_view_id: scope.sourceViewId ?? null,
+    }),
 
   bulkDuplicate: (patentIds: number[], options: { target_database_id?: number; target_view_id?: number } = {}): Promise<{ success: boolean; created_count: number; created_ids: number[] }> =>
     api.post('/patents/bulk-duplicate', { patent_ids: patentIds, ...options }),
