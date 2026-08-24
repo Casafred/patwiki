@@ -813,6 +813,47 @@ input, select, textarea {
   flex-shrink: 0;
 }
 
+.data-grid-options-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 7px 20px;
+  min-height: 42px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.data-grid-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.data-grid-option select {
+  height: 28px;
+  padding: 0 26px 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  outline: none;
+}
+
+.data-grid-option select:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.12);
+}
+
+.data-grid-option-hint {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
 .data-grid-wrapper {
   flex: 1;
   margin: 0;
@@ -875,6 +916,24 @@ input, select, textarea {
 }
 
 .data-grid th.col-checkbox {
+  z-index: 17;
+  background: #f9fafb;
+}
+
+.data-grid th.col-sequence,
+.data-grid td.col-sequence {
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
+  text-align: center;
+  position: sticky;
+  left: 40px;
+  z-index: 7;
+  background: #fff;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
+}
+
+.data-grid th.col-sequence {
   z-index: 17;
   background: #f9fafb;
 }
@@ -4292,6 +4351,31 @@ body {
   border-bottom: 1px solid #e2e8f0;
   text-align: left;
   vertical-align: top;
+}
+
+.data-grid tr.row-height-capped > td {
+  height: var(--row-max-height);
+  max-height: var(--row-max-height);
+  overflow: hidden;
+}
+
+.data-grid tr.row-height-capped .cell-value-shell {
+  display: block;
+  height: calc(var(--row-max-height) - 16px);
+  max-height: calc(var(--row-max-height) - 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-grid tr.row-height-capped .cell-value-shell > * {
+  max-height: inherit;
+}
+
+.data-grid tr.row-height-capped > td.cell-editing,
+.data-grid tr.row-height-capped .cell-value-shell-editing {
+  height: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .data-grid-wrapper {

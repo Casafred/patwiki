@@ -38,6 +38,33 @@ interface PatentListPageProps {
 type SortOrder = 'asc' | 'desc'
 type RelationCellData = { links?: LinkRecord[]; value?: JsonValue; aggregation?: string }
 type BulkTransferAction = 'move_database' | 'move_view' | 'duplicate'
+type TableViewMode = 'pagination' | 'continuous'
+type RowHeightLimit = 'auto' | 56 | 72 | 96 | 120
+
+const TABLE_VIEW_MODE_STORAGE_KEY = 'patwiki_table_view_mode'
+const ROW_HEIGHT_LIMIT_STORAGE_KEY = 'patwiki_row_height_limit'
+const CHECKBOX_COLUMN_WIDTH = 40
+const INDEX_COLUMN_WIDTH = 56
+const ACTION_COLUMN_WIDTH = 70
+
+function readTableViewMode(): TableViewMode {
+  try {
+    return localStorage.getItem(TABLE_VIEW_MODE_STORAGE_KEY) === 'continuous' ? 'continuous' : 'pagination'
+  } catch {
+    return 'pagination'
+  }
+}
+
+function readRowHeightLimit(): RowHeightLimit {
+  try {
+    const value = localStorage.getItem(ROW_HEIGHT_LIMIT_STORAGE_KEY)
+    if (value === 'auto') return 'auto'
+    const parsed = Number(value)
+    return [56, 72, 96, 120].includes(parsed) ? parsed as RowHeightLimit : 72
+  } catch {
+    return 72
+  }
+}
 
 function readPageParam(params: URLSearchParams): number {
   const page = Number(params.get('page'))
@@ -289,6 +316,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const activeView = views.find(view => view.id === viewId && view.database_id === activeDatabaseId)
   const [page, setPage] = useState(() => readPageParam(searchParams))
   const [pageSize] = useState(50)
+  const [tableViewMode, setTableViewMode] = useState<TableViewMode>(() => readTableViewMode())
+  const [rowHeightLimit, setRowHeightLimit] = useState<RowHeightLimit>(() => readRowHeightLimit())
+  const [continuousLoading, setContinuousLoading] = useState(false)
   const [searchText, setSearchText] = useState(() => searchParams.get('q') || '')
   const [searchInputText, setSearchInputText] = useState(() => searchParams.get('q') || '')
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([])
@@ -382,6 +412,30 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   // 用于丢弃快速翻页/切库时旧请求的响应：每次发起 loadPatents 自增，
   // 返回时若 ID 不等于最新值，说明已有更新请求在路上，直接丢弃结果。
   const loadPatentsRequestId = useRef(0)
+  const patentsRef = useRef(patents)
+  const continuousPageRef = useRef(1)
+  const continuousLoadingRef = useRef(false)
+  const continuousHasMoreRef = useRef(true)
+  const tableWrapperRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    patentsRef.current = patents
+  }, [patents])
+
+  const handleTableViewModeChange = (mode: TableViewMode) => {
+    try { localStorage.setItem(TABLE_VIEW_MODE_STORAGE_KEY, mode) } catch { /* storage is optional */ }
+    continuousPageRef.current = 1
+    continuousHasMoreRef.current = true
+    continuousLoadingRef.current = false
+    setContinuousLoading(false)
+    setPage(1)
+    setTableViewMode(mode)
+  }
+
+  const handleRowHeightLimitChange = (limit: RowHeightLimit) => {
+    try { localStorage.setItem(ROW_HEIGHT_LIMIT_STORAGE_KEY, String(limit)) } catch { /* storage is optional */ }
+    setRowHeightLimit(limit)
+  }
 
   const loadRelationData = useCallback(async () => {
     const relationFields = fields.filter(field => ['link', 'lookup', 'rollup'].includes(field.field_type))
@@ -467,9 +521,28 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }, [])
 
-  const loadPatents = useCallback(async () => {
+  const loadPatents = useCallback(async (requestedPage = tableViewMode === 'continuous' ? 1 : page, append = false): Promise<boolean> => {
     const myRequestId = ++loadPatentsRequestId.current
-    setLoading(true)
+    const effectivePage = requestedPage
+    if (!append) {
+      setLoading(true)
+      patentsRef.current = []
+      continuousPageRef.current = effectivePage
+      continuousHasMoreRef.current = true
+      if (tableViewMode === 'continuous') tableWrapperRef.current?.scrollTo({ top: 0 })
+    }
+    const applyItems = (items: Patent[], total: number) => {
+      if (!append) {
+        patentsRef.current = items
+        setPatents(items, total)
+        return
+      }
+      const merged = Array.from(
+        new Map([...patentsRef.current, ...items].map(item => [item.id, item])).values(),
+      )
+      patentsRef.current = merged
+      setPatents(merged, total)
+    }
     try {
       const viewFilters: JsonObject = {}
       Object.entries(filterValues).forEach(([key, value]) => {
@@ -487,12 +560,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           if (activeViewForLoad?.layout_type === 'kanban') {
             setGroupedGroups([])
             setPatents([], 0)
-            return
+            return true
           }
           const groupFields = getViewGroupFields(activeViewForLoad!)
-          if (groupFields.length > 0 && !groupByFamily) {
+          if (groupFields.length > 0 && !groupByFamily && !append && tableViewMode === 'pagination') {
             const result = await viewApi.grouped(viewId, {
-              page,
+              page: effectivePage,
               page_size: pageSize,
               search: searchText || undefined,
               sort_by: sortField,
@@ -500,16 +573,18 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
               group_by_family: groupByFamily,
               extra_filters: viewFilters,
             })
-            if (myRequestId !== loadPatentsRequestId.current) return
+            if (myRequestId !== loadPatentsRequestId.current) return false
             setGroupedGroups(result.groups)
             setCollapsedGroupKeys(new Set(getDefaultCollapsedKeys(result.groups)))
-            setPatents(flattenGroups(result.groups), result.total)
-            return
+            applyItems(flattenGroups(result.groups), result.total)
+            return true
           }
-          setGroupedGroups([])
-          setCollapsedGroupKeys(new Set())
+          if (!append) {
+            setGroupedGroups([])
+            setCollapsedGroupKeys(new Set())
+          }
           const result = await viewApi.listPatents(viewId, {
-            page,
+            page: effectivePage,
             page_size: pageSize,
             search: searchText || undefined,
             sort_by: sortField,
@@ -517,15 +592,15 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             group_by_family: groupByFamily,
             extra_filters: viewFilters,
           })
-          if (myRequestId !== loadPatentsRequestId.current) return
-          setPatents(result.items as Patent[], result.total)
-          return
+          if (myRequestId !== loadPatentsRequestId.current) return false
+          applyItems(result.items as Patent[], result.total)
+          return true
         }
         // 视图不匹配：降级到大表直查，避免数据消失
       }
 
       const params: JsonObject = {
-        page,
+        page: effectivePage,
         page_size: pageSize,
         sort_by: sortField,
         sort_order: sortOrder,
@@ -551,15 +626,45 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       }
 
       const result = await patentApi.list(params)
-      if (myRequestId !== loadPatentsRequestId.current) return
-      setPatents(result.items, result.total)
+      if (myRequestId !== loadPatentsRequestId.current) return false
+      applyItems(result.items, result.total)
+      return true
     } catch (e) {
-      if (myRequestId !== loadPatentsRequestId.current) return
+      if (myRequestId !== loadPatentsRequestId.current) return false
       console.error('Failed to load patents:', e)
+      return false
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, viewId, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, tableViewMode, viewId, setPatents, setLoading])
+
+  const loadNextContinuousPage = useCallback(() => {
+    if (tableViewMode !== 'continuous' || continuousLoadingRef.current || !continuousHasMoreRef.current) return
+    if (patentsRef.current.length >= totalPatents) return
+
+    const nextPage = continuousPageRef.current + 1
+    continuousLoadingRef.current = true
+    setContinuousLoading(true)
+    void loadPatents(nextPage, true).then(success => {
+      if (success) {
+        continuousPageRef.current = nextPage
+        continuousHasMoreRef.current = patentsRef.current.length < totalPatents
+      } else {
+        continuousHasMoreRef.current = false
+      }
+    }).finally(() => {
+      continuousLoadingRef.current = false
+      setContinuousLoading(false)
+    })
+  }, [loadPatents, tableViewMode, totalPatents])
+
+  const handleTableScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    setActiveHeaderMenu(null)
+    if (tableViewMode !== 'continuous') return
+    const element = event.currentTarget
+    const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
+    if (remaining < 320) loadNextContinuousPage()
+  }
 
   // Browser back/forward rehydrates list state from the URL.
   useEffect(() => {
@@ -655,9 +760,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   useEffect(() => {
     if (fields.length > 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      void loadPatents()
+      void loadPatents(tableViewMode === 'continuous' ? 1 : page, false)
     }
-  }, [loadPatents, fields.length])
+  }, [loadPatents, fields.length, page, tableViewMode])
 
   useEffect(() => {
     // Reset selection and pagination when the active data scope changes.
@@ -1967,6 +2072,42 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         </div>
       )}
 
+      {(activeView?.layout_type === 'table' || !activeView) && (
+        <div className="data-grid-options-bar">
+          <label className="data-grid-option">
+            <span>查看模式</span>
+            <select
+              value={tableViewMode}
+              onChange={event => handleTableViewModeChange(event.target.value as TableViewMode)}
+              aria-label="查看模式"
+            >
+              <option value="pagination">分页模式</option>
+              <option value="continuous">连续滚动</option>
+            </select>
+          </label>
+          <label className="data-grid-option">
+            <span>行高</span>
+            <select
+              value={String(rowHeightLimit)}
+              onChange={event => {
+                const value = event.target.value
+                handleRowHeightLimitChange(value === 'auto' ? 'auto' : Number(value) as RowHeightLimit)
+              }}
+              aria-label="行高上限"
+            >
+              <option value="auto">自适应</option>
+              <option value="56">上限 56px</option>
+              <option value="72">上限 72px</option>
+              <option value="96">上限 96px</option>
+              <option value="120">上限 120px</option>
+            </select>
+          </label>
+          <span className="data-grid-option-hint">
+            {tableViewMode === 'continuous' ? '滚动到接近底部自动加载' : '每页显示 50 条'}
+          </span>
+        </div>
+      )}
+
       {Object.keys(filterValues).length > 0 && (
         <div className="filter-bar">
           <span style={{ fontSize: 11, color: '#6b7280' }}>已筛选：</span>
@@ -2010,7 +2151,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         </div>
       )}
 
-      <div className="data-grid-wrapper" onScroll={() => setActiveHeaderMenu(null)}>
+      <div ref={tableWrapperRef} className="data-grid-wrapper" onScroll={handleTableScroll}>
         {activeView?.layout_type === 'kanban' ? (
           <KanbanView
             view={activeView}
@@ -2043,8 +2184,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         ) : (
           <table className="data-grid" style={{ width: 'max-content', minWidth: '100%' }}>
             <colgroup>
-              <col style={{ width: 40 }} />
-              <col style={{ width: 70 }} />
+              <col style={{ width: CHECKBOX_COLUMN_WIDTH }} />
+              <col style={{ width: INDEX_COLUMN_WIDTH }} />
+              <col style={{ width: ACTION_COLUMN_WIDTH }} />
               {visibleFields.map(field => <col key={field.key} style={{ width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH }} />)}
             </colgroup>
             <thead>
@@ -2052,15 +2194,18 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 <th className="col-checkbox" style={{ width: 40, minWidth: 40, maxWidth: 40 }}>
                   <input type="checkbox" checked={allSelected} onChange={handleSelectAll} />
                 </th>
-                <th className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 16, background: '#f9fafb' }}>
+                <th className="col-sequence" style={{ width: INDEX_COLUMN_WIDTH, minWidth: INDEX_COLUMN_WIDTH, maxWidth: INDEX_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH, zIndex: 17, background: '#f9fafb' }}>
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>序号</span>
+                </th>
+                <th className="col-action" style={{ width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH, maxWidth: ACTION_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH + INDEX_COLUMN_WIDTH, zIndex: 16, background: '#f9fafb' }}>
                   <span style={{ fontSize: 12, color: '#6b7280', padding: '0 10px' }}>操作</span>
                 </th>
                 {visibleFields.map(field => {
                   const hasFilter = !!filterValues[field.key]
                   const isFilterable = field.filterable !== false
                   const isFrozen = frozenFields.has(field.key)
-                  // 计算冻结列的 left 偏移：checkbox(40) + 操作(70) + 前面所有冻结列宽度
-                  let leftOffset = 40 + 70
+                  // 冻结列从序号和 AI 操作列之后开始排列。
+                  let leftOffset = CHECKBOX_COLUMN_WIDTH + INDEX_COLUMN_WIDTH + ACTION_COLUMN_WIDTH
                   if (isFrozen) {
                     for (const f of visibleFields) {
                       if (f.key === field.key) break
@@ -2291,7 +2436,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       return next
                     })}
                   >
-                    <td colSpan={visibleFields.length + 2} style={{ padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                    <td colSpan={visibleFields.length + 3} style={{ padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
                       <span style={{ display: 'inline-block', width: 18, color: '#64748b' }}>{collapsedGroupKeys.has(groupHeader.id) ? '›' : '⌄'}</span>
                       {groupHeader.label}
                       <span style={{ marginLeft: 8, color: '#94a3b8', fontWeight: 400 }}>{groupHeader.count} 条</span>
@@ -2308,7 +2453,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       return next
                     })}
                   >
-                    <td colSpan={visibleFields.length + 2}>
+                    <td colSpan={visibleFields.length + 3}>
                       <span className="family-group-toggle">{familyKey && collapsedFamilyKeys.has(familyKey) ? '›' : '⌄'}</span>
                       <strong>{p.family_key || `同族 ${p.family_id}`}</strong>
                       <span className="family-group-count">{p.family_size || 1} 件独立专利</span>
@@ -2318,7 +2463,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                 {!isGroupRowCollapsed && !isFamilyRowCollapsed && (
                 <tr
                   key={p.id}
-                  className={selectedIds.includes(p.id) ? 'row-selected' : ''}
+                  className={`${selectedIds.includes(p.id) ? 'row-selected ' : ''}${rowHeightLimit === 'auto' ? '' : 'row-height-capped'}`}
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest('input') ||
                         (e.target as HTMLElement).closest('select') ||
@@ -2328,7 +2473,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                     onPatentClick(p.id)
                   }}
                   onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id })}
-                  style={{ cursor: 'pointer', background: rowBg }}
+                  style={{
+                    cursor: 'pointer',
+                    background: rowBg,
+                    ...(rowHeightLimit === 'auto' ? {} : { '--row-max-height': `${rowHeightLimit}px` } as React.CSSProperties),
+                  }}
                 >
                   <td className="col-checkbox">
                     <input
@@ -2339,7 +2488,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                     />
                     {familyBadge}
                   </td>
-                  <td className="col-action" style={{ width: 70, minWidth: 70, maxWidth: 70, position: 'sticky', left: 40, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
+                  <td
+                    className="col-sequence"
+                    style={{ width: INDEX_COLUMN_WIDTH, minWidth: INDEX_COLUMN_WIDTH, maxWidth: INDEX_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH, zIndex: 7, background: '#fff', textAlign: 'center', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {(tableViewMode === 'pagination' ? (page - 1) * pageSize : 0) + rowIdx + 1}
+                  </td>
+                  <td className="col-action" style={{ width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH, maxWidth: ACTION_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH + INDEX_COLUMN_WIDTH, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
                       <button
                         className="cell-action-btn"
@@ -2370,7 +2525,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   </td>
                   {visibleFields.map(field => {
                     const isFrozen = frozenFields.has(field.key)
-                    let leftOffset = 40 + 70
+                    const cellIsEditing = editingCell?.patentId === p.id && editingCell.fieldKey === field.key
+                    let leftOffset = CHECKBOX_COLUMN_WIDTH + INDEX_COLUMN_WIDTH + ACTION_COLUMN_WIDTH
                     if (isFrozen) {
                       for (const f of visibleFields) {
                         if (f.key === field.key) break
@@ -2382,7 +2538,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                     return (
                     <td
                       key={field.key}
-                      className={`${isFrozen ? 'col-frozen' : ''} ${field.editable ? 'cell-editable' : ''}`}
+                      className={`${isFrozen ? 'col-frozen' : ''} ${field.editable ? 'cell-editable' : ''} ${cellIsEditing ? 'cell-editing' : ''}`}
                       style={{
                         width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
                         padding: field.field_type === 'longtext' ? '8px 10px' : '6px 10px',
@@ -2402,7 +2558,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                       }}
                       onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id, fieldKey: field.key })}
                     >
-                      {renderCellContent(p, field)}
+                      <div className={`cell-value-shell${cellIsEditing ? ' cell-value-shell-editing' : ''}`}>{renderCellContent(p, field)}</div>
                     </td>
                     )
                   })}
@@ -2417,10 +2573,18 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       </div>
 
       {(activeView?.layout_type === 'table' || !activeView) && <div className="datagrid-footer">
-        <span style={{ fontSize: 12, color: '#6b7280' }}>
-          第 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, totalPatents)} 条，共 {totalPatents} 条
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {tableViewMode === 'continuous' ? (
+          <span style={{ fontSize: 12, color: '#6b7280' }}>
+            已加载 {patents.length} / 共 {totalPatents} 条
+            {continuousLoading && <span style={{ marginLeft: 8, color: '#0f766e' }}>正在加载...</span>}
+            {!continuousLoading && patents.length >= totalPatents && totalPatents > 0 && <span style={{ marginLeft: 8, color: '#94a3b8' }}>已加载全部记录</span>}
+          </span>
+        ) : (
+          <span style={{ fontSize: 12, color: '#6b7280' }}>
+            第 {totalPatents === 0 ? 0 : (page - 1) * pageSize + 1} - {Math.min(page * pageSize, totalPatents)} 条，共 {totalPatents} 条
+          </span>
+        )}
+        {tableViewMode === 'pagination' && <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <button
             className="btn btn-xs btn-secondary"
             disabled={page <= 1}
@@ -2479,7 +2643,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             />
             <span style={{ fontSize: 12, color: '#6b7280' }}>页</span>
           </div>
-        </div>
+        </div>}
       </div>}
 
       {showFieldConfig && activeView && (
