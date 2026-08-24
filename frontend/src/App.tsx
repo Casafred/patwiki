@@ -72,6 +72,7 @@ function DatabaseRouteScope({ children }: { children: ReactNode }) {
 
 function PatentDetailRoute() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { patentId, databaseId } = useParams<{ patentId: string; databaseId?: string }>()
   const parsedPatentId = Number(patentId)
 
@@ -83,8 +84,8 @@ function PatentDetailRoute() {
   return (
     <PatentDetailPage
       patentId={parsedPatentId}
-      onBack={() => navigate(databaseId ? `/db/${databaseId}/patents` : '/patents')}
-      onPatentNavigate={(id) => navigate(detailPath(id))}
+      onBack={() => navigate(`${databaseId ? `/db/${databaseId}/patents` : '/patents'}${location.search}`)}
+      onPatentNavigate={(id) => navigate(`${detailPath(id)}${location.search}`)}
     />
   )
 }
@@ -221,7 +222,7 @@ function WorkspaceApp() {
 
   const handlePatentClick = (id: number) => {
     const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
-    navigate(activeDatabaseId ? `/db/${activeDatabaseId}/patents/${id}` : `/patents/${id}`)
+    navigate(`${activeDatabaseId ? `/db/${activeDatabaseId}/patents/${id}` : `/patents/${id}`}${location.search}`)
   }
 
   const handleNavigate = (page: Page, databaseId = requestedDatabaseId ?? currentDatabaseId) => {

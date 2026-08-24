@@ -16,6 +16,7 @@ from app.services.patent_identity_service import (
     find_patents_by_identifiers,
     parse_identifier,
     ensure_patent_identifiers,
+    normalize_publication_number,
 )
 
 
@@ -59,7 +60,11 @@ def _normalize_patent_number(num: str) -> Optional[str]:
     # 日期前缀乱码过滤：排除 20061102AU2005201606A1 这种日期+专利号合并的字符串
     if _DATE_PREFIX_RE.match(num):
         return None
-    return num
+    # Relation columns are publication-number projections.  Reuse the
+    # identity normalizer so JP padding zeros and kind-code casing behave the
+    # same way as imports and cell links.  Application-like relation values
+    # remain supported by the legacy fallback for compatibility.
+    return normalize_publication_number(num) or num.upper()
 
 
 # 已知国家代码前缀，用于生成号补全（如 115000123 → CN115000123）
@@ -80,6 +85,10 @@ def _generate_lookup_variants(num: str) -> list[str]:
       - "CN115000123"（补国家码）
     """
     variants = [num]
+    # Older imports may still have JP's export padding zero in the physical
+    # Patent column even though the new canonical key removes it.
+    if num.startswith("JP") and len(num) > 3:
+        variants.append("JP0" + num[2:])
     # 去掉末尾的文献类型后缀（如 A/B/U/Y）
     for kind in sorted(_KIND_CODES, key=len, reverse=True):
         if num.endswith(kind) and len(num) > len(kind) + 5:

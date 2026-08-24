@@ -1,6 +1,7 @@
 from typing import Optional, Any
 from copy import deepcopy
 from datetime import datetime, date
+import json
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, desc, text, String
 
@@ -34,6 +35,18 @@ SYSTEM_FIELDS = {
     "created_at", "updated_at", "tags", "projects",
     "view_id",
 }
+
+SEARCH_TEXT_FIELDS = (
+    "application_number", "publication_number", "grant_number", "title",
+    "abstract", "claims", "description_full", "applicant", "inventor",
+    "assignee", "agent", "priority_number", "priority_country", "country",
+    "patent_type", "legal_status", "legal_status_details", "ipc_main",
+    "ipc_all", "cpc_main", "cpc_all", "category", "subcategory",
+    "technical_problem", "technical_effect", "technical_solution",
+    "risk_description", "risk_level", "module", "application_status",
+    "scope_description", "notes", "search_vector",
+)
+FILTER_OPERATORS = {"contains", "eq", "starts_with", "ends_with", "is_empty", "is_not_empty"}
 
 # These fields remain readable for legacy views, but structured RiskCase and
 # RiskAssessmentVersion are now the only supported write path.
@@ -74,6 +87,42 @@ def _stringify_value(v: Any) -> Optional[str]:
     if isinstance(v, bool):
         return "true" if v else "false"
     return str(v)
+
+
+def _parse_filter_condition(filter_value: Any) -> tuple[str, Any] | None:
+    """Accept both the current {operator: value} and the legacy string form."""
+    if isinstance(filter_value, dict):
+        operator = str(filter_value.get("operator") or "").strip()
+        if operator in FILTER_OPERATORS:
+            return operator, filter_value.get("value")
+        for candidate in FILTER_OPERATORS:
+            if candidate in filter_value:
+                return candidate, filter_value.get(candidate)
+        return None
+    if filter_value is None or filter_value == "":
+        return None
+    return "contains", filter_value
+
+
+def _apply_filter_expression(expression, operator: str, value: Any):
+    """Build one Excel-style predicate for a SQL column or JSON expression."""
+    text_expression = expression.cast(String)
+    if operator == "is_empty":
+        return or_(expression.is_(None), text_expression == "")
+    if operator == "is_not_empty":
+        return and_(expression.isnot(None), text_expression != "")
+    if value is None:
+        return None
+    value_text = str(value)
+    if operator == "contains":
+        return text_expression.ilike(f"%{value_text}%")
+    if operator == "starts_with":
+        return text_expression.ilike(f"{value_text}%")
+    if operator == "ends_with":
+        return text_expression.ilike(f"%{value_text}")
+    if operator == "eq":
+        return func.lower(text_expression) == value_text.strip().lower()
+    return None
 
 
 class PatentService:
@@ -128,18 +177,36 @@ class PatentService:
             joinedload(Patent.family),
         )
 
+        # The top search is intentionally broad: it is the database-level
+        # retrieval path, while column filters provide precise constraints.
+        # JSON casts cover custom and AI fields, including fields added after
+        # this service was released.
         if search:
             search_term = f"%{search}%"
-            query = query.filter(
-                or_(
-                    Patent.title.ilike(search_term),
-                    Patent.abstract.ilike(search_term),
-                    Patent.application_number.ilike(search_term),
-                    Patent.publication_number.ilike(search_term),
-                    Patent.applicant.ilike(search_term),
-                    Patent.inventor.ilike(search_term),
-                )
-            )
+            # SQLAlchemy's SQLite JSON serializer stores non-ASCII characters
+            # as \uXXXX escapes. Search both the JSON text and its serialized
+            # representation so arbitrary custom/AI field values remain
+            # searchable without a fixed field registry.
+            serialized_search = json.dumps(search, ensure_ascii=True)[1:-1]
+            json_search_term = f"%{serialized_search}%"
+            search_expressions = [
+                getattr(Patent, field).cast(String).ilike(search_term)
+                for field in SEARCH_TEXT_FIELDS
+                if hasattr(Patent, field)
+            ]
+            search_expressions.extend([
+                Patent.custom_fields.cast(String).ilike(search_term),
+                Patent.custom_fields.cast(String).ilike(json_search_term),
+                Patent.ai_fields.cast(String).ilike(search_term),
+                Patent.ai_fields.cast(String).ilike(json_search_term),
+                Patent.projects.any(Project.name.ilike(search_term)),
+                Patent.tags.any(Tag.name.ilike(search_term)),
+            ])
+            query = query.filter(or_(*search_expressions))
+
+        # Placeholder identities are relation-resolution evidence, not user
+        # facing rows.  They remain queryable from family/citation detail APIs.
+        query = query.filter(Patent.title != "待补全")
 
         # 库筛选：P0-11 新增，限定查询范围到某个库
         if database_id is not None:
@@ -179,54 +246,41 @@ class PatentService:
         if filing_date_to:
             query = query.filter(Patent.filing_date <= filing_date_to)
 
-        # 统一filters处理：支持系统字段和自定义字段
+        # 统一 filters 处理：每个字段叠加为 AND；一个字段的 custom/AI
+        # 投影为 OR。 This keeps Excel-style filters consistent for all fields.
         if filters:
             for key, filter_val in filters.items():
-                if filter_val is None or filter_val == "":
+                condition = _parse_filter_condition(filter_val)
+                if condition is None:
                     continue
+                operator, value = condition
                 if key in SYSTEM_FIELDS and hasattr(Patent, key):
-                    column = getattr(Patent, key)
-                    if isinstance(filter_val, dict):
-                        if "contains" in filter_val and filter_val["contains"]:
-                            query = query.filter(column.cast(String).ilike(f"%{filter_val['contains']}%"))
-                        elif "eq" in filter_val and filter_val["eq"] is not None:
-                            query = query.filter(column == filter_val["eq"])
-                    else:
-                        query = query.filter(column.cast(String).ilike(f"%{filter_val}%"))
+                    predicate = _apply_filter_expression(getattr(Patent, key), operator, value)
+                    if predicate is not None:
+                        query = query.filter(predicate)
                 else:
-                    # 自定义字段
-                    if isinstance(filter_val, dict):
-                        if "contains" in filter_val and filter_val["contains"]:
-                            query = query.filter(
-                                func.json_extract(Patent.custom_fields, f'$.{key}').cast(String).ilike(f"%{filter_val['contains']}%")
-                            )
-                        elif "eq" in filter_val and filter_val["eq"] is not None:
-                            query = query.filter(
-                                func.json_extract(Patent.custom_fields, f'$.{key}') == str(filter_val["eq"])
-                            )
-                    else:
+                    custom_expression = func.json_extract(Patent.custom_fields, f'$.{key}')
+                    ai_expression = func.json_extract(Patent.ai_fields, f'$.{key}')
+                    custom_predicate = _apply_filter_expression(custom_expression, operator, value)
+                    ai_predicate = _apply_filter_expression(ai_expression, operator, value)
+                    if custom_predicate is not None and ai_predicate is not None:
                         query = query.filter(
-                            func.json_extract(Patent.custom_fields, f'$.{key}').cast(String).ilike(f"%{filter_val}%")
+                            and_(custom_predicate, ai_predicate)
+                            if operator == "is_empty"
+                            else or_(custom_predicate, ai_predicate)
                         )
 
-        # 兼容旧custom_filters
+        # 兼容旧 custom_filters
         if custom_filters:
             for key, value in custom_filters.items():
-                if value is None or value == "":
+                condition = _parse_filter_condition(value)
+                if condition is None:
                     continue
-                if isinstance(value, dict):
-                    if "contains" in value and value["contains"]:
-                        query = query.filter(
-                            func.json_extract(Patent.custom_fields, f'$.{key}').cast(String).ilike(f"%{value['contains']}%")
-                        )
-                    elif "eq" in value and value["eq"] is not None:
-                        query = query.filter(
-                            func.json_extract(Patent.custom_fields, f'$.{key}') == str(value["eq"])
-                        )
-                else:
-                    query = query.filter(
-                        func.json_extract(Patent.custom_fields, f'$.{key}').cast(String).ilike(f"%{value}%")
-                    )
+                operator, filter_value = condition
+                custom_expression = func.json_extract(Patent.custom_fields, f'$.{key}')
+                predicate = _apply_filter_expression(custom_expression, operator, filter_value)
+                if predicate is not None:
+                    query = query.filter(predicate)
 
         total = query.count()
 
@@ -280,6 +334,12 @@ class PatentService:
     @staticmethod
     def create_patent(db: Session, patent_in: PatentCreate) -> Patent:
         data = patent_in.model_dump(exclude_unset=True)
+        if data.get("publication_number"):
+            from app.services.patent_identity_service import normalize_publication_number
+            normalized_publication = normalize_publication_number(data["publication_number"])
+            if not normalized_publication:
+                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码")
+            data["publication_number"] = normalized_publication
         custom_fields = data.pop("custom_fields", {}) or {}
         relation_fields = RELATION_FIELD_KEYS.intersection(custom_fields)
         if relation_fields:
@@ -340,6 +400,13 @@ class PatentService:
             update_data = dict(patent_in)
         else:
             update_data = patent_in.model_dump(exclude_unset=True)
+
+        if update_data.get("publication_number"):
+            from app.services.patent_identity_service import normalize_publication_number
+            normalized_publication = normalize_publication_number(update_data["publication_number"])
+            if not normalized_publication:
+                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码")
+            update_data["publication_number"] = normalized_publication
 
         tag_ids = update_data.pop("tag_ids", None)
         project_ids = update_data.pop("project_ids", None)

@@ -36,6 +36,12 @@ interface PatentListPageProps {
 }
 
 type SortOrder = 'asc' | 'desc'
+type FilterOperator = 'contains' | 'eq' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty'
+interface FilterCondition {
+  operator: FilterOperator
+  value?: string
+}
+type FilterState = Record<string, FilterCondition>
 type RelationCellData = { links?: LinkRecord[]; value?: JsonValue; aggregation?: string }
 type BulkTransferAction = 'move_database' | 'move_view' | 'duplicate'
 type TableViewMode = 'pagination' | 'continuous'
@@ -46,6 +52,7 @@ const ROW_HEIGHT_LIMIT_STORAGE_KEY = 'patwiki_row_height_limit'
 const CHECKBOX_COLUMN_WIDTH = 40
 const INDEX_COLUMN_WIDTH = 56
 const ACTION_COLUMN_WIDTH = 70
+const PUBLICATION_REFERENCE_RE = /(?<![A-Za-z0-9])([A-Za-z]{2}\d+[A-Za-z]{1,3}\d{0,2})(?![A-Za-z0-9])/g
 
 function readTableViewMode(): TableViewMode {
   try {
@@ -71,16 +78,79 @@ function readPageParam(params: URLSearchParams): number {
   return Number.isInteger(page) && page > 0 ? page : 1
 }
 
-function readFilterParam(params: URLSearchParams): Record<string, string> {
+const FILTER_OPERATOR_LABELS: Record<FilterOperator, string> = {
+  contains: '包含',
+  eq: '等于',
+  starts_with: '开头是',
+  ends_with: '结尾是',
+  is_empty: '为空',
+  is_not_empty: '不为空',
+}
+
+function readFilterParam(params: URLSearchParams): FilterState {
   const raw = params.get('filters')
   if (!raw) return {}
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value === 'string'))
+    const result: FilterState = {}
+    Object.entries(parsed).forEach(([key, value]) => {
+      if (typeof value === 'string' && value.trim()) {
+        // Compatibility with URLs generated before structured filters.
+        result[key] = { operator: 'contains', value }
+        return
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return
+      const candidate = value as Record<string, unknown>
+      const operator = (candidate.operator || Object.keys(candidate).find(item => item in FILTER_OPERATOR_LABELS)) as FilterOperator | undefined
+      if (!operator || !(operator in FILTER_OPERATOR_LABELS)) return
+      const candidateValue = candidate.value ?? candidate[operator]
+      result[key] = { operator, ...(typeof candidateValue === 'string' ? { value: candidateValue } : {}) }
+    })
+    return result
   } catch {
     return {}
   }
+}
+
+function filterConditionHasValue(condition?: FilterCondition): boolean {
+  if (!condition) return false
+  return condition.operator === 'is_empty' || condition.operator === 'is_not_empty' || !!condition.value?.trim()
+}
+
+function PatentReferenceText({
+  value,
+  onOpen,
+}: {
+  value: string
+  onOpen: (publicationNumber: string) => void
+}) {
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  const publicationReferencePattern = new RegExp(PUBLICATION_REFERENCE_RE.source, 'g')
+  let match: RegExpExecArray | null
+  while ((match = publicationReferencePattern.exec(value)) !== null) {
+    if (match.index > lastIndex) parts.push(value.slice(lastIndex, match.index))
+    const reference = match[1]
+    parts.push(
+      <button
+        type="button"
+        key={`${reference}-${match.index}`}
+        className="cell-action-btn"
+        title="打开此公开号对应的 PatWiki"
+        onClick={(event) => {
+          event.stopPropagation()
+          onOpen(reference)
+        }}
+        style={{ border: 0, padding: 0, background: 'transparent', color: '#2563eb', cursor: 'pointer', textDecoration: 'underline', font: 'inherit' }}
+      >
+        {reference.toUpperCase().replace(/^JP0+(?=\d)/, 'JP')}
+      </button>,
+    )
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < value.length) parts.push(value.slice(lastIndex))
+  return <>{parts.length > 0 ? parts : value}</>
 }
 
 const DEFAULT_COLUMN_WIDTH = 150
@@ -331,6 +401,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [redoStack, setRedoStack] = useState<Array<{ patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
   const [headerFilterText, setHeaderFilterText] = useState<string>('')
+  const [headerFilterOperator, setHeaderFilterOperator] = useState<FilterOperator>('contains')
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
@@ -371,7 +442,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [bulkTagIds, setBulkTagIds] = useState<number[]>([])
   const [bulkTagMode, setBulkTagMode] = useState<'add' | 'remove' | 'replace'>('add')
   const [bulkTagLoading, setBulkTagLoading] = useState(false)
-  const [filterValues, setFilterValues] = useState<Record<string, string>>(() => readFilterParam(searchParams))
+  const [filterValues, setFilterValues] = useState<FilterState>(() => readFilterParam(searchParams))
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [relationData, setRelationData] = useState<Record<string, Record<number, RelationCellData>>>({})
   const [newFieldName, setNewFieldName] = useState('')
@@ -545,8 +616,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
     try {
       const viewFilters: JsonObject = {}
-      Object.entries(filterValues).forEach(([key, value]) => {
-        if (value) viewFilters[key] = { contains: value }
+      Object.entries(filterValues).forEach(([key, condition]) => {
+        if (filterConditionHasValue(condition)) viewFilters[key] = condition as unknown as JsonValue
       })
 
       // 视图查询路径：仅当 viewId 与当前库匹配时才走视图接口。
@@ -616,10 +687,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       }
 
       const allFilters: JsonObject = {}
-      Object.entries(filterValues).forEach(([key, value]) => {
-        if (value) {
-          allFilters[key] = { contains: value }
-        }
+      Object.entries(filterValues).forEach(([key, condition]) => {
+        if (filterConditionHasValue(condition)) allFilters[key] = condition as unknown as JsonValue
       })
       if (Object.keys(allFilters).length > 0) {
         params.filters = JSON.stringify(allFilters)
@@ -1053,6 +1122,19 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     setEditingCell({ patentId, fieldKey })
   }
 
+  const handlePatentReferenceClick = useCallback(async (publicationNumber: string) => {
+    try {
+      const result = await patentApi.resolvePublicationNumber(publicationNumber)
+      if (result.found && result.patent_id) {
+        onPatentClick(result.patent_id)
+        return
+      }
+      alert(`库中未找到公开号 ${publicationNumber}`)
+    } catch (error: unknown) {
+      alert('解析专利公开号失败: ' + getErrorMessage(error))
+    }
+  }, [onPatentClick])
+
   const handleCellSave = async (patentId: number, fieldKey: string, value: JsonValue) => {
     const before = getFieldValue(patents.find(patent => patent.id === patentId) || ({} as Patent), fieldKey)
     try {
@@ -1132,10 +1214,23 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   }
 
   const handleHeaderFilterApply = (fieldKey: string) => {
-    setFilterValues(prev => ({ ...prev, [fieldKey]: headerFilterText }))
+    if (headerFilterOperator !== 'is_empty' && headerFilterOperator !== 'is_not_empty' && !headerFilterText.trim()) {
+      handleHeaderFilterClear(fieldKey)
+      return
+    }
+    setFilterValues(prev => ({
+      ...prev,
+      [fieldKey]: {
+        operator: headerFilterOperator,
+        ...(headerFilterOperator === 'is_empty' || headerFilterOperator === 'is_not_empty'
+          ? {}
+          : { value: headerFilterText.trim() }),
+      },
+    }))
     setPage(1)
     setActiveHeaderMenu(null)
     setHeaderFilterText('')
+    setHeaderFilterOperator('contains')
   }
 
   const handleHeaderFilterClear = (fieldKey: string) => {
@@ -1145,6 +1240,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       return next
     })
     setHeaderFilterText('')
+    setHeaderFilterOperator('contains')
     setPage(1)
   }
 
@@ -1720,7 +1816,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   })()
   const totalPages = Math.ceil(totalPatents / pageSize)
   const allSelected = patents.length > 0 && selectedIds.length === patents.length
-  const hasActiveFilters = Object.values(filterValues).some(v => v) || !!searchText
+  const hasActiveFilters = Object.values(filterValues).some(filterConditionHasValue) || !!searchText
 
   const pageNumbers = () => {
     const pages: (number | string)[] = []
@@ -1847,7 +1943,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {links.map(link => (
             <span key={link.id} style={{ display: 'inline-block', padding: '2px 6px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', fontSize: 12 }}>
-              {link.label}
+              <PatentReferenceText value={link.label} onOpen={(number) => void handlePatentReferenceClick(number)} />
             </span>
           ))}
         </div>
@@ -1859,20 +1955,20 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       const displayValue = formatValue(relationValue ?? null, field)
       return (
         <span style={{ color: displayValue === '-' ? '#94a3b8' : '#374151', display: 'block', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere', lineHeight: 1.5 }}>
-          {displayValue}
+          <PatentReferenceText value={displayValue} onOpen={(number) => void handlePatentReferenceClick(number)} />
         </span>
       )
     }
 
     if (field.key === 'product_id') {
       const product = products.find(item => item.id === patent.product_id)
-      return <span style={{ color: product ? '#334155' : '#94a3b8' }}>{product?.name || (patent.product_id ? `产品 #${patent.product_id}` : '-')}</span>
+      return <span style={{ color: product ? '#334155' : '#94a3b8' }}><PatentReferenceText value={product?.name || (patent.product_id ? `产品 #${patent.product_id}` : '-')} onOpen={(number) => void handlePatentReferenceClick(number)} /></span>
     }
 
     if (field.key === 'projects') {
       const linkedProjects = patent.projects || []
       return linkedProjects.length > 0
-        ? <span style={{ color: '#1d4ed8' }}>{linkedProjects.map(project => project.name || `项目 #${project.id}`).join('、')}</span>
+        ? <span style={{ color: '#1d4ed8' }}><PatentReferenceText value={linkedProjects.map(project => project.name || `项目 #${project.id}`).join('、')} onOpen={(number) => void handlePatentReferenceClick(number)} /></span>
         : <span style={{ color: '#94a3b8' }}>未关联项目</span>
     }
 
@@ -1904,7 +2000,10 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
           >
-            {String(value ?? '-')}
+            <PatentReferenceText
+              value={String(value ?? '-')}
+              onOpen={(number) => void handlePatentReferenceClick(number)}
+            />
           </div>
           {(patent.category || patent.subcategory) && (
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
@@ -1941,7 +2040,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           lineHeight: 1.5,
         }}
       >
-        {displayValue}
+        <PatentReferenceText value={displayValue} onOpen={(number) => void handlePatentReferenceClick(number)} />
       </span>
     )
   }
@@ -2111,13 +2210,13 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       {Object.keys(filterValues).length > 0 && (
         <div className="filter-bar">
           <span style={{ fontSize: 11, color: '#6b7280' }}>已筛选：</span>
-          {Object.entries(filterValues).filter(([, v]) => v).map(([key, value]) => {
-            const field = fields.find(f => f.key === key)
-            return (
-              <span key={key} className="filter-chip">
-                {field?.name || key}: {value}
-                <span className="chip-remove" onClick={() => handleHeaderFilterClear(key)}>×</span>
-              </span>
+           {Object.entries(filterValues).filter(([, condition]) => filterConditionHasValue(condition)).map(([key, condition]) => {
+             const field = fields.find(f => f.key === key)
+             return (
+               <span key={key} className="filter-chip">
+                 {field?.name || key}: {FILTER_OPERATOR_LABELS[condition.operator]}{condition.value ? ` ${condition.value}` : ''}
+                 <span className="chip-remove" onClick={() => handleHeaderFilterClear(key)}>×</span>
+               </span>
             )
           })}
         </div>
@@ -2201,7 +2300,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   <span style={{ fontSize: 12, color: '#6b7280', padding: '0 10px' }}>操作</span>
                 </th>
                 {visibleFields.map(field => {
-                  const hasFilter = !!filterValues[field.key]
+                  const hasFilter = filterConditionHasValue(filterValues[field.key])
                   const isFilterable = field.filterable !== false
                   const isFrozen = frozenFields.has(field.key)
                   // 冻结列从序号和 AI 操作列之后开始排列。
@@ -2265,7 +2364,9 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                               setHeaderFilterText('')
                             } else {
                               setActiveHeaderMenu(field.key)
-                              setHeaderFilterText(filterValues[field.key] || '')
+                              const existingFilter = filterValues[field.key]
+                              setHeaderFilterOperator(existingFilter?.operator || 'contains')
+                              setHeaderFilterText(existingFilter?.value || '')
                             }
                           }}
                           style={{
@@ -2307,12 +2408,22 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                           {isFilterable && (
                             <div style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6' }}>
                               <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 4 }}>筛选 {field.name}</div>
-                              <div style={{ display: 'flex', gap: 4 }}>
+                              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                <select
+                                  value={headerFilterOperator}
+                                  onChange={(e) => setHeaderFilterOperator(e.target.value as FilterOperator)}
+                                  style={{ padding: '4px 5px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 12, background: '#fff' }}
+                                >
+                                  {Object.entries(FILTER_OPERATOR_LABELS).map(([operator, label]) => (
+                                    <option key={operator} value={operator}>{label}</option>
+                                  ))}
+                                </select>
                                 <input
                                   type="text"
-                                  placeholder="输入关键词..."
+                                  placeholder={headerFilterOperator === 'is_empty' || headerFilterOperator === 'is_not_empty' ? '无需输入值' : '输入关键词...'}
                                   value={headerFilterText}
                                   onChange={(e) => setHeaderFilterText(e.target.value)}
+                                  disabled={headerFilterOperator === 'is_empty' || headerFilterOperator === 'is_not_empty'}
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter') handleHeaderFilterApply(field.key)
                                     if (e.key === 'Escape') { setActiveHeaderMenu(null); setHeaderFilterText('') }
@@ -2335,7 +2446,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                                   确定
                                 </button>
                               </div>
-                              {filterValues[field.key] && (
+                              {hasFilter && (
                                 <button
                                   className="btn btn-xs btn-ghost"
                                   onClick={() => handleHeaderFilterClear(field.key)}
@@ -3474,7 +3585,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           databaseId={activeDatabaseId}
           viewId={viewId}
           search={searchText}
-          filters={filterValues}
+          filters={filterValues as unknown as JsonObject}
           onClose={() => setShowExportDialog(false)}
         />
       )}
@@ -3482,7 +3593,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         <WorkFileDialog
           databaseId={activeDatabaseId}
           search={searchText}
-          filters={filterValues}
+          filters={filterValues as unknown as JsonObject}
           onClose={() => setShowWorkFileDialog(false)}
         />
       )}

@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-23（完成 G0-14 迁移安全平台与 G0-15 31 张来源表字段治理基线）
+最近更新：2026-08-24（完成主表检索/筛选、公开号规范化与跨库 Wiki 跳转基线；全局成员关系迁移仍待后续阶段）
 
 ---
 
@@ -154,6 +154,7 @@
 | 2026-08-23 | G0-13 | 完成 DeepSeek V4 Flash 接入基线：官方 OpenAI-compatible Base URL 统一为 `https://api.deepseek.com`，`v4flash` 兼容别名规范化为 `deepseek-v4-flash`；统一 LLM 客户端支持 V4 `thinking`、`reasoning_effort`、JSON Output、`reasoning_content`/`finish_reason`/`usage` 元数据、429/5xx 退避重试；AI 设置提供 DeepSeek 预设、思考模式和 1-10 并发上限；标准字段和快速抽取使用受控网络并发，数据库写入保持单 Session 串行；补充官方语义、会话边界和模型变更规则 Agent 契约及 LLM/并发回归测试。 |
 | 2026-08-23 | G0-14 | 完成 Phase 0A SQLite 迁移安全平台：新增 `MigrationRun`/`MigrationIssue` 与 `MigrationService`；当前迁移版本 `2026-08-23.0`，记录校验和、操作者、应用版本、备份、完整性检查、关键表行数和失败原因；SQLite 启用 `foreign_keys=ON`；旧容错加列迁移改为显式版本化操作；失败恢复后停止启动并可通过 `/system/migrations`、`/system/integrity` 查询；补充空库、重复执行、失败恢复和外键回归测试。 |
 | 2026-08-23 | G0-15 | 完成 Phase 0B 31 张来源表字段治理基线：新增 `FieldRegistrySnapshot`、`SourceTableDefinition`、`FieldDefinition`、`SourceFieldMapping`；从 01/02/03/10 CSV 幂等载入 31 张来源表、140 个规范字段、357 条来源映射（84 mapped、273 candidate）；导入只自动采用已批准且目标有效的映射，未知列继续保留为 `unmapped_retained`，不自动创建正式字段；新增字段治理诊断 API 和基线回归测试。 |
+| 2026-08-24 | G0-16 | 完成主表检索与身份跳转基线：详情往返保留完整 URL 查询状态；主搜索覆盖正式字段、custom/AI 字段、项目和标签；列筛选支持 contains/eq/starts_with/ends_with/is_empty/is_not_empty，多个字段 AND；导入、手工编辑、关系解析统一公开号规范化，JP 前导零归一；任意单元格候选公开号可解析到跨库同一 Wiki，未知关系目标不进入主表；新增全局索引与检索 Agent 执行契约。全量后端测试、前端 lint 和 TypeScript 待最终验收。 |
 | 2026-08-16 | G0-8 | 完成治理恢复切片：每次治理动作生成 `decision_batch_id` 并保存观察/专利字段变更前状态；新增治理批次查询、批次恢复 API、追加式 `GovernanceReversal`、后续修改冲突保护、`governance_revert` Wiki 历史、前端决策历史面板和分页。统一专利身份、六类高频视图和工作文件模板仍未完成。通过导入治理定向测试 15 项、前端 lint、TypeScript 和 compileall。 |
 | 2026-08-16 | G0-3~G0-6 | 完成待治理属性确认首版：新增 `GovernanceDecision` 追加式决策记录、四类服务层治理动作、已有字段映射与可选来源值回填、`PatentHistory(source=governance)`、同批次同来源列范围控制、稳定的决策历史 JSON 接口和 `/governance` 工作台；完整证据 CSV 默认包含已保留/已忽略观察。该记录对应首版验收时点，后续 G0-8 已补齐撤销恢复、历史面板和分页。 |
 | 2026-08-16 | G0-1~G0-3 | 完成未知导入属性的原始文件、来源行、来源列和值保留；新增 FieldObservation 和来源 Wiki 历史；提供待治理查询与 CSV 导出。更新 P0-10 过期描述，明确未知列不自动创建 CustomField。后端 `backend/tests` 39 项通过；当前前端 lint 仍需修复。 |

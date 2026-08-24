@@ -57,6 +57,11 @@ def update_cell(
         if field_key in {"has_risk", "risk_level", "risk_description"}:
             raise BadRequestException("风险兼容投影不可直接编辑，请通过风险案例追加结构化评估")
         value = req.value
+        if field_key == "publication_number" and value:
+            from app.services.patent_identity_service import normalize_publication_number
+            value = normalize_publication_number(value)
+            if not value:
+                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码")
         if field_key in ("filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date") and value:
             try:
                 value = date.fromisoformat(value)

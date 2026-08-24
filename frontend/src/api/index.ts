@@ -286,6 +286,13 @@ export const patentApi = {
     api.get('/patents', { params }),
 
   get: (id: number): Promise<Patent> => api.get(`/patents/${id}`),
+  resolvePublicationNumber: (publicationNumber: string): Promise<{
+    found: boolean
+    publication_number: string
+    patent_id?: number
+    database_id?: number | null
+    title?: string
+  }> => api.get('/patents/resolve-publication-number', { params: { publication_number: publicationNumber } }),
 
   family: (id: number): Promise<PatentFamilyResponse> => api.get(`/patents/${id}/family`),
   citations: (id: number): Promise<PatentCitationResponse> => api.get(`/patents/${id}/citations`),

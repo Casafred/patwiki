@@ -28,6 +28,7 @@ from app.services.patent_identity_service import (
     find_patents_by_identifiers,
     identifier_specs_from_values,
     normalize_identifier,
+    normalize_publication_number,
 )
 from app.services.view_service import ViewService
 
@@ -78,6 +79,16 @@ class PatentIdentityTest(unittest.TestCase):
         ).one()
         self.assertIn("CN-123456789-A1", publication.raw_values)
         self.assertEqual(publication.raw_value, "CN123456789A1")
+
+    def test_publication_number_normalization_removes_jp_padding_zero(self):
+        self.assertEqual(
+            normalize_publication_number("jp01234567a1"),
+            "JP1234567A1",
+        )
+        self.assertEqual(
+            normalize_identifier("JP01234567A1"),
+            "JP1234567A1",
+        )
 
     def test_application_and_publication_pointing_to_different_patents_are_detectable(self):
         database = PatentDatabase(name="冲突测试库")

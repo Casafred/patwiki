@@ -30,7 +30,7 @@ from app.models import (
     PatentIdentifier,
 )
 from app.core.exceptions import NotFoundException
-from app.services.patent_identity_service import list_patent_identifiers
+from app.services.patent_identity_service import list_patent_identifiers, normalize_publication_number
 from app.services.relation_service import find_existing_patent_by_number, parse_patent_numbers
 
 router = APIRouter(prefix="/patents", tags=["patents"])
@@ -101,6 +101,27 @@ def list_patents(
         "items": patents,
         "page": page,
         "page_size": page_size,
+    }
+
+
+@router.get("/resolve-publication-number")
+def resolve_publication_number(
+    publication_number: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    """Resolve a publication number to its single cross-library Wiki record."""
+    normalized = normalize_publication_number(publication_number)
+    if not normalized:
+        return {"found": False, "publication_number": publication_number}
+    patent = find_existing_patent_by_number(db, normalized)
+    if patent is None:
+        return {"found": False, "publication_number": normalized}
+    return {
+        "found": True,
+        "publication_number": normalized,
+        "patent_id": patent.id,
+        "database_id": patent.database_id,
+        "title": patent.title,
     }
 
 

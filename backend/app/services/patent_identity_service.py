@@ -23,6 +23,9 @@ OFFICIAL_IDENTIFIER_TYPES = ("application", "publication", "grant")
 _KIND_CODE_RE = re.compile(r"(?P<kind>[A-Z]{1,3}\d{0,2})$")
 _JURISDICTION_RE = re.compile(r"^(?P<jurisdiction>[A-Z]{2})(?P<body>.+)$")
 _SEPARATOR_RE = re.compile(r"[\s\-_/:.,，、;；()（）\[\]{}]+")
+_PUBLICATION_NUMBER_RE = re.compile(
+    r"^(?P<jurisdiction>[A-Z]{2})(?P<number>\d+)(?P<kind>[A-Z]{1,3}\d{0,2})$"
+)
 
 
 class PatentIdentityConflict(ValueError):
@@ -52,6 +55,34 @@ def _clean_identifier(raw_value: Any) -> str:
     return _SEPARATOR_RE.sub("", value)
 
 
+def normalize_publication_number(
+    raw_value: Any,
+    default_jurisdiction: Optional[str] = None,
+) -> str:
+    """Normalize a publication number used as the cross-record link key.
+
+    Publication numbers are deliberately stricter than the general identity
+    parser: they must contain a two-letter jurisdiction, a numeric body, and a
+    document kind code.  Some exports prefix Japanese numbers with a padding
+    zero (for example ``JP01234567A1``); that zero is removed before matching.
+    The raw spelling remains in import evidence and PatentIdentifier.raw_values.
+    """
+    normalized = _clean_identifier(raw_value)
+    if not normalized:
+        return ""
+    if normalized[:2].isdigit() and default_jurisdiction:
+        jurisdiction = _clean_identifier(default_jurisdiction)[:2]
+        if jurisdiction.isalpha():
+            normalized = jurisdiction + normalized
+    match = _PUBLICATION_NUMBER_RE.fullmatch(normalized)
+    if not match:
+        return ""
+    number = match.group("number")
+    if match.group("jurisdiction") == "JP":
+        number = number.lstrip("0") or "0"
+    return f"{match.group('jurisdiction')}{number}{match.group('kind')}"
+
+
 def _parse_parts(normalized: str, default_jurisdiction: Optional[str]) -> tuple[str, Optional[str], Optional[str]]:
     jurisdiction = None
     body = normalized
@@ -77,6 +108,9 @@ def normalize_identifier(raw_value: Any, default_jurisdiction: Optional[str] = N
     normalized = _clean_identifier(raw_value)
     if not normalized:
         return ""
+    publication = normalize_publication_number(normalized, default_jurisdiction)
+    if publication:
+        normalized = publication
     normalized, _, _ = _parse_parts(normalized, default_jurisdiction)
     # 纯短数字通常是表内序号，不能伪造为官方身份。
     if normalized.isdigit() and len(normalized) < 4:
@@ -96,6 +130,8 @@ def parse_identifier(
         raise ValueError(f"不支持的专利身份类型：{identifier_type}")
     raw = "" if raw_value is None else str(raw_value).strip()
     normalized = normalize_identifier(raw, default_jurisdiction)
+    if identifier_type == "publication":
+        normalized = normalize_publication_number(raw, default_jurisdiction) or normalized
     if not raw or not normalized:
         return None
     normalized, jurisdiction, kind_code = _parse_parts(normalized, default_jurisdiction)

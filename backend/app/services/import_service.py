@@ -11,6 +11,7 @@ from app.models import (
 )
 from app.services.field_registry import SYSTEM_FIELD_KEYS
 from app.services.relation_service import parse_patent_numbers
+from app.services.patent_identity_service import normalize_publication_number
 
 
 # 虚拟字段：不直接写入 Patent 主表，由 relation_service 处理
@@ -416,7 +417,15 @@ class ImportService:
                               "technical_problem", "technical_effect", "technical_solution",
                               "risk_description", "module", "application_status",
                               "scope_description", "notes", "legal_status_details"]:
-                data[field_key] = value
+                if field_key == "publication_number":
+                    normalized_publication = normalize_publication_number(value)
+                    if not normalized_publication:
+                        raise ValueError(
+                            f"字段 '{excel_col}' 的公开号格式无法识别：{value}（应为国别+数字+文献类型代码）"
+                        )
+                    data[field_key] = normalized_publication
+                else:
+                    data[field_key] = value
             else:
                 raise ValueError(f"未知的导入目标字段：{field_key}")
 

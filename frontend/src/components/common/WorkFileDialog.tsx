@@ -25,8 +25,14 @@ const FORMAT_EXTENSIONS: Record<string, string> = {
 function toExportFilters(filters?: JsonObject): JsonObject {
   return Object.fromEntries(
     Object.entries(filters || {})
-      .filter(([, value]) => typeof value === 'string' && value.trim())
-      .map(([key, value]) => [key, { contains: String(value) }]),
+      .filter(([, value]) => {
+        if (typeof value === 'string') return !!value.trim()
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+        const condition = value as JsonObject
+        const operator = String(condition.operator || '')
+        return operator === 'is_empty' || operator === 'is_not_empty' || !!String(condition.value || '').trim()
+      })
+      .map(([key, value]) => [key, typeof value === 'string' ? { contains: value } : value]),
   )
 }
 

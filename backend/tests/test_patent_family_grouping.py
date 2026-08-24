@@ -89,6 +89,22 @@ class PatentFamilyGroupingTest(unittest.TestCase):
         self.assertEqual(len(family_members), 2)
         self.assertEqual({patent.family_size for patent in family_members}, {2})
 
+    def test_placeholder_records_are_hidden_from_database_list(self):
+        self.db.add(Patent(
+            title="待补全",
+            publication_number="US399999999A1",
+            database_id=self.database_id,
+        ))
+        self.db.commit()
+        patents, total = PatentService.list_patents(
+            self.db,
+            database_id=self.database_id,
+            page=1,
+            page_size=20,
+        )
+        self.assertEqual(total, 3)
+        self.assertNotIn("待补全", {patent.title for patent in patents})
+
 
 if __name__ == "__main__":
     unittest.main()
