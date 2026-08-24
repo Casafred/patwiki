@@ -68,6 +68,28 @@ class ExportApiTest(unittest.TestCase):
         self.assertEqual(sheet["A1"].value, "标题")
         self.assertEqual(sheet.max_row, 3)
 
+    def test_excel_export_can_limit_to_explicit_selected_patent_ids(self):
+        selected_id = self.db.query(Patent).filter(Patent.title == "授权专利").one().id
+        response = self.client.post("/export/excel", json={
+            "database_id": self.database_id,
+            "patent_ids": [selected_id],
+            "field_keys": ["title"],
+        })
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(BytesIO(response.content))
+        rows = list(workbook["专利数据"].iter_rows(values_only=True))
+        self.assertEqual(rows, [("标题",), ("授权专利",)])
+
+    def test_empty_explicit_selection_does_not_fall_back_to_database(self):
+        response = self.client.post("/export/csv", json={
+            "database_id": self.database_id,
+            "patent_ids": [],
+            "field_keys": ["title"],
+        })
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8-sig")
+        self.assertEqual(content, "标题\r\n")
+
     def test_relation_projection_columns_are_exported_as_raw_source_values(self):
         patent = Patent(
             title="关系导出专利",

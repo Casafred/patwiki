@@ -7,6 +7,7 @@ interface ExportDialogProps {
   fields: FieldMeta[]
   databaseId?: number | null
   viewId?: number | null
+  selectedIds?: number[]
   search?: string
   filters?: JsonObject
   onClose: () => void
@@ -14,9 +15,9 @@ interface ExportDialogProps {
 
 type ExportFormat = 'excel' | 'csv'
 
-export default function ExportDialog({ fields, databaseId, viewId, search, filters, onClose }: ExportDialogProps) {
+export default function ExportDialog({ fields, databaseId, viewId, selectedIds = [], search, filters, onClose }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>('excel')
-  const [scope, setScope] = useState<'view' | 'database'>(viewId ? 'view' : 'database')
+  const [scope, setScope] = useState<'selected' | 'view' | 'database'>(selectedIds.length > 0 ? 'selected' : viewId ? 'view' : 'database')
   const [selectedKeys, setSelectedKeys] = useState<string[]>(() => fields.filter(field => field.visible !== false).map(field => field.key))
   const [groupBy, setGroupBy] = useState('')
   const [saving, setSaving] = useState(false)
@@ -44,6 +45,7 @@ export default function ExportDialog({ fields, databaseId, viewId, search, filte
       const payload: JsonObject = {
         database_id: databaseId ?? null,
         view_id: scope === 'view' ? (viewId ?? null) : null,
+        patent_ids: scope === 'selected' ? selectedIds : null,
         field_keys: selectedKeys,
         filters: (filters || {}) as unknown as JsonValue,
         search: search || null,
@@ -61,11 +63,12 @@ export default function ExportDialog({ fields, databaseId, viewId, search, filte
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-lg" onClick={event => event.stopPropagation()}>
+      <div className="modal modal-lg export-dialog" onClick={event => event.stopPropagation()}>
         <div className="modal-header">
           <h3>导出数据</h3>
           <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">×</button>
         </div>
+        <div className="modal-body">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
           <label className="form-label">格式
             <select className="form-input" value={format} onChange={event => setFormat(event.target.value as ExportFormat)}>
@@ -74,7 +77,8 @@ export default function ExportDialog({ fields, databaseId, viewId, search, filte
             </select>
           </label>
           <label className="form-label">范围
-            <select className="form-input" value={scope} onChange={event => setScope(event.target.value as 'view' | 'database')}>
+            <select className="form-input" value={scope} onChange={event => setScope(event.target.value as 'selected' | 'view' | 'database')}>
+              <option value="selected" disabled={selectedIds.length === 0}>已选 {selectedIds.length} 条</option>
               <option value="view" disabled={!viewId}>当前视图（含视图筛选）</option>
               <option value="database">当前库</option>
             </select>
@@ -97,7 +101,7 @@ export default function ExportDialog({ fields, databaseId, viewId, search, filte
             <button type="button" className="btn btn-xs btn-secondary" onClick={() => setSelectedKeys([])}>清空</button>
           </div>
         </div>
-        <div style={{ maxHeight: 300, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, padding: 10, border: '1px solid #e2e8f0', borderRadius: 6 }}>
+        <div className="export-field-list" style={{ maxHeight: 300, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
           {fields.map(field => (
             <label key={field.key} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, color: '#475569' }}>
               <input type="checkbox" checked={selectedKeys.includes(field.key)} onChange={() => toggleField(field.key)} />
@@ -105,7 +109,8 @@ export default function ExportDialog({ fields, databaseId, viewId, search, filte
             </label>
           ))}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+        </div>
+        <div className="modal-footer">
           <button type="button" className="btn btn-secondary" onClick={onClose}>取消</button>
           <button type="button" className="btn btn-primary" onClick={() => void handleExport()} disabled={saving}>{saving ? '导出中...' : '开始导出'}</button>
         </div>

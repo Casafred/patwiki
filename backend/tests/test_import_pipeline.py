@@ -40,6 +40,13 @@ class ImportPipelineTest(unittest.TestCase):
         self.assertEqual(columns, ["标题", "同族列"])
         self.assertEqual(frame.iloc[0]["同族列"], "US12304034B2 | CN209954561U")
 
+    def test_tsv_clipboard_preview_keeps_multiple_columns(self):
+        content = "公开号\t标题\t未知备注\nCN123456789A\t测试专利\t暂存信息\n".encode("utf-8")
+        frame, columns = ImportService.parse_excel(content, "clipboard.tsv")
+        self.assertEqual(columns, ["公开号", "标题", "未知备注"])
+        self.assertEqual(frame.iloc[0]["公开号"], "CN123456789A")
+        self.assertEqual(frame.iloc[0]["未知备注"], "暂存信息")
+
     def test_xlsx_preview_and_invalid_uploads_return_actionable_errors(self):
         output = BytesIO()
         pd.DataFrame({"标题": ["设备"]}).to_excel(output, index=False)

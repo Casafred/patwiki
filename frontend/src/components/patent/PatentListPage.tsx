@@ -21,6 +21,7 @@ import { getErrorMessage } from '../../lib/errors'
 import Icon from '../common/Icon'
 import GroupConfigPanel from '../views/GroupConfigPanel'
 import ViewColumnConfigPanel from '../views/ViewColumnConfigPanel'
+import ColumnConfigPanel from '../views/ColumnConfigPanel'
 import ConditionalFormatPanel from '../views/ConditionalFormatPanel'
 import KanbanView from '../views/KanbanView'
 import FormView from '../views/FormView'
@@ -405,8 +406,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
+  const [showTableSettings, setShowTableSettings] = useState(false)
   const [viewConfigNotice, setViewConfigNotice] = useState('')
-  const [columnSearch, setColumnSearch] = useState('')
   const [showBulkEdit, setShowBulkEdit] = useState(false)
   const [showBulkTag, setShowBulkTag] = useState(false)
   const [bulkTransferAction, setBulkTransferAction] = useState<BulkTransferAction | null>(null)
@@ -416,6 +417,8 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [quickAnalyzePatentIds, setQuickAnalyzePatentIds] = useState<number[]>([])
   const [showInsertAIColumn, setShowInsertAIColumn] = useState(false)
   const [insertColType, setInsertColType] = useState<'text' | 'longtext' | 'number' | 'date' | 'select' | 'boolean' | 'attachment'>('text')
+  const [insertAnchorFieldKey, setInsertAnchorFieldKey] = useState<string | null>(null)
+  const [insertSide, setInsertSide] = useState<'before' | 'after'>('after')
   const [insertColFrozen, setInsertColFrozen] = useState(false)
   const [newAIColumnName, setNewAIColumnName] = useState('')
   const [newColumnOptions, setNewColumnOptions] = useState('')
@@ -445,9 +448,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
   const [filterValues, setFilterValues] = useState<FilterState>(() => readFilterParam(searchParams))
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [relationData, setRelationData] = useState<Record<string, Record<number, RelationCellData>>>({})
-  const [newFieldName, setNewFieldName] = useState('')
-  const [newFieldType, setNewFieldType] = useState<string>('text')
-  const [newFieldOptions, setNewFieldOptions] = useState('')
   const [pageInputValue, setPageInputValue] = useState('')
   const [aiProcessingRow, setAiProcessingRow] = useState<number | null>(null)
   // AI 任务透明化：跟踪所有运行中的任务
@@ -558,6 +558,14 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         } catch (error) { console.error('Failed to read hidden fields:', error) }
       }
       setFields(fieldsData)
+      try {
+        const savedOrder = JSON.parse(localStorage.getItem('patwiki_field_order') || '[]') as unknown
+        if (Array.isArray(savedOrder)) {
+          const orderMap = new Map(savedOrder.map((key, index) => [String(key), index]))
+          fieldsData.sort((a, b) => (orderMap.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (orderMap.get(b.key) ?? Number.MAX_SAFE_INTEGER))
+          setFields([...fieldsData])
+        }
+      } catch { /* column order is optional */ }
       try {
         const savedFrozen = JSON.parse(localStorage.getItem('patwiki_frozen_fields') || 'null') as unknown
         const frozen = Array.isArray(savedFrozen) ? savedFrozen.map(String) : []
@@ -1063,32 +1071,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }
 
-  // 清理无效占位专利（title="待补全" 且号格式不合法的历史残留，如 20061102AU2005201606A1）
-  const handleCleanupPlaceholders = async () => {
-    try {
-      const dry = await patentApi.cleanupInvalidPlaceholders(true)
-      if (dry.deleted_count === 0) {
-        alert('扫描完成：未发现无效占位专利。')
-        return
-      }
-      const preview = dry.deleted_items
-        .slice(0, 10)
-        .map((it, i) => `${i + 1}. id=${it.id} | 申请号: ${it.application_number ?? '-'} | 公开号: ${it.publication_number ?? '-'}`)
-        .join('\n')
-      const more = dry.deleted_count > 10 ? `\n...（共 ${dry.deleted_count} 条，仅显示前 10 条）` : ''
-      const ok = confirm(
-        `扫描到 ${dry.deleted_count} 条无效占位专利（title="待补全" 且专利号格式不合法的历史残留）。\n\n预览：\n${preview}${more}\n\n点击"确定"立即删除这些无效记录。`
-      )
-      if (!ok) return
-      const real = await patentApi.cleanupInvalidPlaceholders(false)
-      alert(`已删除 ${real.deleted_count} 条无效占位专利。`)
-      setPage(1)
-      loadPatents()
-    } catch (error: unknown) {
-      alert(getErrorMessage(error, '清理失败'))
-    }
-  }
-
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
       setSelectedIds(patents.map(p => p.id))
@@ -1175,42 +1157,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       return next
     })
     setActiveHeaderMenu(null)
-  }
-
-  // 批量设置可见性
-  const handleSetAllVisible = (visible: boolean) => {
-    if (activeView) {
-      void saveViewColumnConfig(buildViewColumnConfig(activeView, fields).map(column => ({ ...column, visible })))
-        .catch(error => alert('视图列配置保存失败: ' + getErrorMessage(error)))
-      return
-    }
-    setFields(prev => {
-      const next = prev.map(f => ({ ...f, visible }))
-      try {
-        if (visible) {
-          localStorage.removeItem('patwiki_hidden_fields')
-        } else {
-          localStorage.setItem('patwiki_hidden_fields', JSON.stringify(prev.map(f => f.key)))
-        }
-      } catch (error) { console.error('Failed to clear hidden fields:', error) }
-      return next
-    })
-  }
-
-  // 重置为默认（所有字段按字段注册表默认可见性展示）
-  const handleResetVisibility = () => {
-    if (activeView) {
-      void saveViewColumnConfig(buildViewColumnConfig({ ...activeView, column_config: [] }, fields))
-        .catch(error => alert('视图列配置保存失败: ' + getErrorMessage(error)))
-      return
-    }
-    setFields(prev => {
-      const next = prev.map(f => ({ ...f, visible: true }))
-      try {
-        localStorage.removeItem('patwiki_hidden_fields')
-      } catch (error) { console.error('Failed to reset hidden fields:', error) }
-      return next
-    })
   }
 
   const handleHeaderFilterApply = (fieldKey: string) => {
@@ -1388,13 +1334,41 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       if (insertColType === 'select' && newColumnOptions.trim()) {
         payload.options = newColumnOptions.split('\n').map(s => s.trim()).filter(Boolean)
       }
-      await customFieldApi.create(payload)
+      const createdField = await customFieldApi.create(payload)
+      const createdKey = createdField.key || key
+      const insertIntoKeys = (currentKeys: string[]) => {
+        const next = currentKeys.filter(item => item !== createdKey)
+        const anchorIndex = insertAnchorFieldKey ? next.indexOf(insertAnchorFieldKey) : -1
+        const index = anchorIndex < 0 ? next.length : anchorIndex + (insertSide === 'after' ? 1 : 0)
+        next.splice(index, 0, createdKey)
+        return next
+      }
+
+      if (activeView) {
+        const currentConfig = buildViewColumnConfig(activeView, fields)
+        const currentKeys = currentConfig.map(column => column.key)
+        const nextKeys = insertIntoKeys(currentKeys)
+        const columnByKey = new Map(currentConfig.map(column => [column.key, column]))
+        const nextConfig = nextKeys.map((fieldKey, order) => ({
+          ...(columnByKey.get(fieldKey) || { key: fieldKey, visible: true, width: DEFAULT_COLUMN_WIDTH }),
+          order,
+        }))
+        await saveViewColumnConfig(nextConfig)
+      }
       // 记录冻结状态
       if (insertColFrozen) {
-        setFrozenFields(prev => new Set(prev).add(key))
+        setFrozenFields(prev => new Set(prev).add(createdKey))
       }
       await loadFields()
       await loadCustomFields()
+      if (!activeView) {
+        setFields(current => {
+          const nextKeys = insertIntoKeys(current.map(field => field.key))
+          const orderMap = new Map(nextKeys.map((fieldKey, index) => [fieldKey, index]))
+          try { localStorage.setItem('patwiki_field_order', JSON.stringify(nextKeys)) } catch { /* storage is optional */ }
+          return [...current].sort((a, b) => (orderMap.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (orderMap.get(b.key) ?? Number.MAX_SAFE_INTEGER))
+        })
+      }
       alert(`新列"${newAIColumnName.trim()}"已创建`)
       setShowInsertAIColumn(false)
       setNewAIColumnName('')
@@ -1409,12 +1383,25 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     }
   }
 
-  const openInsertAIDialog = (mode: typeof insertColType = 'text') => {
+  const openInsertAIDialog = (
+    mode: typeof insertColType = 'text',
+    anchorFieldKey: string | null = null,
+    side: 'before' | 'after' = 'after',
+  ) => {
     setActiveHeaderMenu(null)
+    setContextMenu(null)
     setInsertColType(mode)
+    setInsertAnchorFieldKey(anchorFieldKey)
+    setInsertSide(side)
     setNewAIColumnName('')
     setNewColumnOptions('')
     setShowInsertAIColumn(true)
+  }
+
+  const handleReorderFields = (keys: string[]) => {
+    const orderMap = new Map(keys.map((key, index) => [key, index]))
+    setFields(current => [...current].sort((a, b) => (orderMap.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (orderMap.get(b.key) ?? Number.MAX_SAFE_INTEGER)))
+    try { localStorage.setItem('patwiki_field_order', JSON.stringify(keys)) } catch { /* storage is optional */ }
   }
 
   const handleToggleFreeze = (fieldKey: string) => {
@@ -1471,34 +1458,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       alert('转换失败: ' + getErrorMessage(error))
     } finally {
       setConvertingTags(false)
-    }
-  }
-
-  const handleCreateCustomField = async () => {
-    if (!newFieldName.trim()) {
-      alert('请输入字段名称')
-      return
-    }
-    try {
-      const key = newFieldName.toLowerCase().replace(/\s+/g, '_') + '_' + Date.now().toString(36)
-      await customFieldApi.create({
-        key,
-        name: newFieldName.trim(),
-        field_type: newFieldType,
-        options: newFieldType === 'select' || newFieldType === 'multiselect'
-          ? newFieldOptions.split('\n').map(s => s.trim()).filter(Boolean)
-          : undefined,
-        is_active: true,
-        sort_order: fields.length,
-      })
-      setNewFieldName('')
-      setNewFieldType('text')
-      setNewFieldOptions('')
-      await loadFields()
-      await loadCustomFields()
-      loadPatents()
-    } catch (error: unknown) {
-      alert('创建字段失败: ' + getErrorMessage(error))
     }
   }
 
@@ -2111,18 +2070,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
             >
               <Icon name="table" /> 同族聚拢 {groupByFamily ? 'ON' : 'OFF'}
             </button>
-            <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="列管理：显示/隐藏列、冻结、新建">
+            <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列">
               <Icon name="columns" /> 列管理
             </button>
             {viewConfigNotice && <span style={{ fontSize: 12, color: '#047857' }}>{viewConfigNotice}</span>}
           </div>
-          <button
-            className="btn btn-sm btn-primary datagrid-primary-action"
-            onClick={() => openInsertAIDialog()}
-            title="新建普通列"
-          >
-            + 插入新列
-          </button>
           <button
             className="btn btn-sm btn-primary"
             onClick={() => { setQuickAnalyzePatentIds(patents.map(p => p.id)); setShowQuickAnalyze(true) }}
@@ -2135,14 +2087,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           </button>
           <button className="btn btn-sm btn-primary work-file-action" onClick={() => setShowWorkFileDialog(true)} title="按业务模板生成 Excel、Word 或 CSV 工作文件">
             <Icon name="file" /> 工作文件
-          </button>
-          <button
-            className="btn btn-sm btn-secondary datagrid-utility-action"
-            onClick={handleCleanupPlaceholders}
-            title="扫描并清理 title=待补全 且专利号格式不合法的历史残留记录（如日期+专利号合并的乱码）"
-            style={{ color: '#dc2626' }}
-          >
-            清理无效占位
           </button>
         </div>
       </div>
@@ -2172,37 +2116,12 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
       )}
 
       {(activeView?.layout_type === 'table' || !activeView) && (
-        <div className="data-grid-options-bar">
-          <label className="data-grid-option">
-            <span>查看模式</span>
-            <select
-              value={tableViewMode}
-              onChange={event => handleTableViewModeChange(event.target.value as TableViewMode)}
-              aria-label="查看模式"
-            >
-              <option value="pagination">分页模式</option>
-              <option value="continuous">连续滚动</option>
-            </select>
-          </label>
-          <label className="data-grid-option">
-            <span>行高</span>
-            <select
-              value={String(rowHeightLimit)}
-              onChange={event => {
-                const value = event.target.value
-                handleRowHeightLimitChange(value === 'auto' ? 'auto' : Number(value) as RowHeightLimit)
-              }}
-              aria-label="行高上限"
-            >
-              <option value="auto">自适应</option>
-              <option value="56">上限 56px</option>
-              <option value="72">上限 72px</option>
-              <option value="96">上限 96px</option>
-              <option value="120">上限 120px</option>
-            </select>
-          </label>
+        <div className="data-grid-options-bar data-grid-options-compact">
+          <button className="btn btn-sm btn-secondary" onClick={() => setShowTableSettings(true)} title="设置查看模式和行高">
+            <Icon name="sliders" /> 查看设置
+          </button>
           <span className="data-grid-option-hint">
-            {tableViewMode === 'continuous' ? '滚动到接近底部自动加载' : '每页显示 50 条'}
+            {tableViewMode === 'continuous' ? '连续滚动' : '分页'} · 行高 {rowHeightLimit === 'auto' ? '自适应' : `${rowHeightLimit}px`}
           </span>
         </div>
       )}
@@ -2464,11 +2383,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                             <span>{sortField === field.key && sortOrder === 'asc' ? '↓ 降序排列' : '↑ 升序排列'}</span>
                           </div>
                           <div className="menu-divider" />
-                          <div
-                            className="menu-item"
-                            onClick={() => openInsertAIDialog()}
-                          >
-                            <span style={{ color: '#2563eb' }}><Icon name="columns" /> 新建普通列</span>
+                          <div className="menu-item" onClick={() => openInsertAIDialog('text', field.key, 'before')}>
+                            <span style={{ color: '#2563eb' }}><Icon name="columns" /> 左侧插入新列</span>
+                          </div>
+                          <div className="menu-item" onClick={() => openInsertAIDialog('text', field.key, 'after')}>
+                            <span style={{ color: '#2563eb' }}><Icon name="columns" /> 右侧插入新列</span>
                           </div>
                           <div
                             className="menu-item"
@@ -2769,144 +2688,59 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
         />
       )}
 
-      {showFieldConfig && !activeView && (
-      <Modal title="列管理" onClose={() => setShowFieldConfig(false)} width={680}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* 搜索 + 批量操作 */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              type="text"
-              className="form-input"
-              placeholder="搜索列名..."
-              value={columnSearch}
-              onChange={(e) => setColumnSearch(e.target.value)}
-              style={{ flex: 1, height: 32, fontSize: 13 }}
-            />
-            <button className="btn btn-sm btn-secondary" onClick={() => handleSetAllVisible(true)}>全部显示</button>
-            <button className="btn btn-sm btn-secondary" onClick={() => handleSetAllVisible(false)}>全部隐藏</button>
-            <button className="btn btn-sm btn-secondary" onClick={handleResetVisibility}>重置</button>
-          </div>
-
-          {/* 统计 */}
-          <div style={{ fontSize: 12, color: '#6b7280' }}>
-            共 {fields.length} 列 · 可见 {fields.filter(f => f.visible !== false).length} · 隐藏 {fields.filter(f => f.visible === false).length}
-          </div>
-
-          {/* 列表（按 group 分组） */}
-          <div style={{ maxHeight: 380, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 4 }}>
-            {Object.entries(
-              fields
-                .filter(f => !columnSearch || f.name.toLowerCase().includes(columnSearch.toLowerCase()) || f.key.toLowerCase().includes(columnSearch.toLowerCase()))
-                .reduce((acc, f) => {
-                  const g = f.group_name || '其他'
-                  if (!acc[g]) acc[g] = []
-                  acc[g].push(f)
-                  return acc
-                }, {} as Record<string, typeof fields>)
-            ).map(([group, flds]) => (
-              <div key={group}>
-                <div style={{ padding: '6px 12px', background: '#f9fafb', fontSize: 11, fontWeight: 600, color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
-                  {group} ({flds.length})
-                </div>
-                {flds.map(field => {
-                  const visible = field.visible !== false
-                  const isFrozen = frozenFields.has(field.key)
-                  return (
-                    <div
-                      key={field.key}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '6px 12px',
-                        borderBottom: '1px solid #f3f4f6',
-                        background: visible ? '#fff' : '#f9fafb',
-                        opacity: visible ? 1 : 0.6,
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={visible}
-                        onChange={() => handleToggleFieldVisible(field.key)}
-                        style={{ margin: 0 }}
-                      />
-                      <span style={{ flex: 1, fontSize: 13, color: visible ? '#1f2937' : '#9ca3af' }}>
-                        {field.name}
-                      </span>
-                      <span style={{ fontSize: 10, padding: '2px 6px', background: '#eff6ff', color: '#1e40af', borderRadius: 3 }}>
-                        {field.field_type}
-                      </span>
-                      <button
-                        onClick={() => handleToggleFreeze(field.key)}
-                        title="切换冻结"
-                        style={{
-                          border: `1px solid ${isFrozen ? '#f59e0b' : '#e5e7eb'}`,
-                          background: isFrozen ? '#fef3c7' : '#fff',
-                          color: isFrozen ? '#92400e' : '#6b7280',
-                          fontSize: 11, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
-                        }}
-                      >
-                        <Icon name={isFrozen ? 'lock' : 'unlock'} size={13} />{isFrozen ? ' 冻结' : ''}
-                      </button>
-                      <button
-                        onClick={() => void handleDeleteColumnByKey(field.key)}
-                        title="从当前表格移除列"
-                        style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 14, padding: '0 4px' }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  )
-                })}
+      {showTableSettings && (
+        <Modal title="查看设置" onClose={() => setShowTableSettings(false)} width={460}>
+          <div className="table-settings-modal">
+            <section>
+              <h4>查看模式</h4>
+              <div className="table-settings-choice-grid">
+                {([
+                  ['pagination', '分页模式', '适合逐页核对和批量处理'],
+                  ['continuous', '连续滚动', '像 Excel 一样向下浏览并加载'],
+                ] as const).map(([value, label, description]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`table-settings-choice ${tableViewMode === value ? 'active' : ''}`}
+                    onClick={() => handleTableViewModeChange(value)}
+                  >
+                    <strong>{label}</strong>
+                    <span>{description}</span>
+                  </button>
+                ))}
               </div>
-            ))}
+            </section>
+            <section>
+              <h4>行高上限</h4>
+              <div className="table-settings-row-height">
+                {(['auto', 56, 72, 96, 120] as const).map(value => (
+                  <button
+                    key={String(value)}
+                    type="button"
+                    className={`btn btn-sm ${rowHeightLimit === value ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => handleRowHeightLimitChange(value)}
+                  >
+                    {value === 'auto' ? '自适应' : `${value}px`}
+                  </button>
+                ))}
+              </div>
+              <p className="table-settings-note">限制单元格展开高度，完整内容仍可在详情页查看。</p>
+            </section>
           </div>
+        </Modal>
+      )}
 
-          {/* 新建自定义字段（折叠） */}
-          <details style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
-            <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#374151' }}>新建自定义字段</summary>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8, marginTop: 8 }}>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="字段名称"
-                value={newFieldName}
-                onChange={(e) => setNewFieldName(e.target.value)}
-                style={{ height: 32, fontSize: 13 }}
-              />
-              <select
-                className="form-input"
-                value={newFieldType}
-                onChange={(e) => setNewFieldType(e.target.value)}
-                style={{ height: 32, fontSize: 13 }}
-              >
-                <option value="text">单行文本</option>
-                <option value="longtext">多行文本</option>
-                <option value="number">数字</option>
-                <option value="date">日期</option>
-                <option value="select">单选</option>
-                <option value="boolean">是/否</option>
-              </select>
-            </div>
-            {(newFieldType === 'select') && (
-              <textarea
-                className="form-input"
-                placeholder="选项（每行一个）"
-                value={newFieldOptions}
-                onChange={(e) => setNewFieldOptions(e.target.value)}
-                style={{ fontSize: 12, minHeight: 60, marginBottom: 8 }}
-              />
-            )}
-            <button className="btn btn-sm btn-primary" onClick={handleCreateCustomField}>
-              添加字段
-            </button>
-          </details>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid #e5e7eb' }}>
-            <button className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(false)}>
-              完成
-            </button>
-          </div>
-        </div>
-      </Modal>
+      {showFieldConfig && !activeView && (
+        <ColumnConfigPanel
+          open
+          fields={fields}
+          frozenFields={frozenFields}
+          onClose={() => setShowFieldConfig(false)}
+          onToggleVisible={handleToggleFieldVisible}
+          onToggleFreeze={handleToggleFreeze}
+          onRemove={fieldKey => void handleDeleteColumnByKey(fieldKey)}
+          onReorder={handleReorderFields}
+        />
       )}
 
       {showBulkEdit && (
@@ -3413,8 +3247,11 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
                   <Icon name="chart" /> 统计此列
                 </div>
                 <div className="menu-divider" />
-                <div className="menu-item" style={{ color: '#2563eb' }} onClick={() => openInsertAIDialog()}>
-                  <Icon name="columns" /> 新建普通列
+                <div className="menu-item" style={{ color: '#2563eb' }} onClick={() => openInsertAIDialog('text', field.key, 'before')}>
+                  <Icon name="columns" /> 左侧插入新列
+                </div>
+                <div className="menu-item" style={{ color: '#2563eb' }} onClick={() => openInsertAIDialog('text', field.key, 'after')}>
+                  <Icon name="columns" /> 右侧插入新列
                 </div>
                 <div className="menu-divider" />
                 <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => void handleDeleteColumnByKey(field.key)}>
@@ -3584,6 +3421,7 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           fields={fields}
           databaseId={activeDatabaseId}
           viewId={viewId}
+          selectedIds={selectedIds}
           search={searchText}
           filters={filterValues as unknown as JsonObject}
           onClose={() => setShowExportDialog(false)}

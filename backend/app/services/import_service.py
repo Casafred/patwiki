@@ -136,7 +136,7 @@ class ImportService:
     @staticmethod
     def list_sheets(file_content: bytes, filename: str) -> list[str]:
         suffix = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
-        if suffix == 'csv':
+        if suffix in {'csv', 'tsv'}:
             return []
         try:
             engine = 'xlrd' if suffix == 'xls' else 'openpyxl'
@@ -150,14 +150,24 @@ class ImportService:
         suffix = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
         if not file_content:
             raise BadRequestException("上传文件为空")
-        if suffix not in {"csv", "xls", "xlsx"}:
-            raise BadRequestException("仅支持 .xlsx、.xls 或 .csv 文件")
+        if suffix not in {"csv", "tsv", "xls", "xlsx"}:
+            raise BadRequestException("仅支持 .xlsx、.xls、.csv 或剪贴板 .tsv 文件")
         try:
-            if suffix == "csv":
+            if suffix in {"csv", "tsv"}:
                 try:
-                    df = pd.read_csv(BytesIO(file_content), dtype=str, encoding="utf-8-sig")
+                    df = pd.read_csv(
+                        BytesIO(file_content),
+                        dtype=str,
+                        encoding="utf-8-sig",
+                        sep="\t" if suffix == "tsv" else ",",
+                    )
                 except UnicodeDecodeError:
-                    df = pd.read_csv(BytesIO(file_content), dtype=str, encoding="gb18030")
+                    df = pd.read_csv(
+                        BytesIO(file_content),
+                        dtype=str,
+                        encoding="gb18030",
+                        sep="\t" if suffix == "tsv" else ",",
+                    )
             elif suffix == "xls":
                 df = pd.read_excel(BytesIO(file_content), engine="xlrd", dtype=str, sheet_name=0 if sheet_name is None else sheet_name)
             else:

@@ -129,6 +129,7 @@ class ExportService:
         *,
         database_id: Optional[int] = None,
         view_id: Optional[int] = None,
+        patent_ids: Optional[list[int]] = None,
         field_keys: Optional[list[str]] = None,
         filters: Optional[dict[str, Any]] = None,
         search: Optional[str] = None,
@@ -198,6 +199,7 @@ class ExportService:
             category=category,
             has_risk=has_risk,
             filters=merged_filters or None,
+            patent_ids=patent_ids,
             sort_by=sort_by,
             sort_order=sort_order,
         )

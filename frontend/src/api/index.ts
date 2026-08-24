@@ -424,6 +424,10 @@ export const importApi = {
     // Let the browser/Axios add the multipart boundary.
     return api.post('/import/preview', formData)
   },
+  uploadClipboard: (content: string): Promise<ImportPreview> => {
+    const file = new File([content], 'clipboard.tsv', { type: 'text/tab-separated-values' })
+    return importApi.upload(file)
+  },
 
   confirmImport: (
     importId: string,

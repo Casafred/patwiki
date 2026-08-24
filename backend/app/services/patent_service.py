@@ -154,6 +154,7 @@ class PatentService:
         page_size: int = 50,
         search: Optional[str] = None,
         database_id: Optional[int] = None,
+        patent_ids: Optional[list[int]] = None,
         product_id: Optional[int] = None,
         project_id: Optional[int] = None,
         tag_ids: Optional[list[int]] = None,
@@ -211,6 +212,13 @@ class PatentService:
         # 库筛选：P0-11 新增，限定查询范围到某个库
         if database_id is not None:
             query = query.filter(Patent.database_id == database_id)
+
+        if patent_ids is not None:
+            normalized_ids = list(dict.fromkeys(int(item) for item in patent_ids))
+            # An explicitly empty selection must export zero rows, never the
+            # entire database. This is also the guard against a UI selection
+            # bug silently becoming a full-library export.
+            query = query.filter(Patent.id.in_(normalized_ids)) if normalized_ids else query.filter(False)
 
         if product_id:
             query = query.filter(Patent.product_id == product_id)

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import type { ClipboardEvent } from 'react'
 import { importApi, databaseApi, viewApi } from '../../api'
 import { fieldService } from '../../services'
 import { useAppStore } from '../../store'
@@ -93,6 +94,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     batch_id?: number | null;
   } | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [clipboardUploading, setClipboardUploading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
 
@@ -215,6 +217,27 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setUploading(false)
     }
   }, [file])
+
+  const handleClipboardPaste = useCallback(async (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = event.clipboardData.getData('text/plain')
+    if (!text.trim()) return
+    event.preventDefault()
+    setClipboardUploading(true)
+    setError('')
+    try {
+      const nextFile = new File([text], 'clipboard.tsv', { type: 'text/tab-separated-values' })
+      setFile(nextFile)
+      const result = await importApi.uploadClipboard(text)
+      setPreview(result)
+      setSelectedSheet(null)
+      setMapping(result.suggested_mapping || {})
+      setStep('mapping')
+    } catch (pasteError: unknown) {
+      setError(getErrorMessage(pasteError, '读取剪贴板表格失败'))
+    } finally {
+      setClipboardUploading(false)
+    }
+  }, [])
 
   const handleImport = useCallback(async () => {
     if (!preview) return
@@ -457,6 +480,20 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>支持 .xlsx, .xls, .csv 格式</div>
                   </div>
                 )}
+              </div>
+
+              <div style={{ marginTop: 14, padding: 14, border: '1px solid #dbe5e1', borderRadius: 8, background: '#fbfdfc' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 5 }}>从 Excel 复制后直接粘贴</div>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>支持单列或多列，第一行作为列标题。粘贴后仍需确认字段映射，未知列会保留待治理。</div>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  placeholder="点击这里，然后粘贴 Excel 中复制的内容"
+                  onPaste={event => void handleClipboardPaste(event)}
+                  disabled={clipboardUploading}
+                  style={{ resize: 'vertical', minHeight: 72 }}
+                />
+                {clipboardUploading && <div style={{ marginTop: 6, color: '#0f766e', fontSize: 12 }}>正在读取剪贴板数据...</div>}
               </div>
 
               {preview && (preview.mapping_issues?.length || 0) > 0 && (
@@ -774,6 +811,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                 )}
                 <button className="btn btn-primary" onClick={onSuccess}>完成</button>
               </div>
+
             </div>
           )}
         </div>

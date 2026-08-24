@@ -119,7 +119,7 @@ function WorkspaceApp() {
   const {
     setProducts, setCustomFields, setTags, setProjects,
     setDatabases, setCurrentDatabaseId, currentDatabaseId,
-    setViews, setCurrentViewId, currentViewId, databases,
+    setViews, setCurrentViewId, currentViewId,
     bumpDataVersion,
   } = useAppStore()
   const routeDatabaseId = getDatabaseIdFromPath(location.pathname)
@@ -253,8 +253,6 @@ function WorkspaceApp() {
     'import-history': '导入历史',
     governance: '数据治理',
   }
-  const currentDatabase = databases.find(database => database.id === activeDatabaseId)
-
   return (
     <div className={`app-container ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <Sidebar
@@ -267,26 +265,17 @@ function WorkspaceApp() {
       <div className="main-content">
         <header className="header">
           <button className="mobile-nav-toggle" onClick={() => setSidebarOpen(true)} aria-label="打开导航" title="打开导航"><Icon name="menu" /></button>
-          <div className="header-context">
-            <div className="header-kicker">{currentDatabase?.name || 'PatWiki'}</div>
-            <h2>{pageTitles[currentPage]}</h2>
-          </div>
+          {currentPage !== 'patents' && (
+            <div className="header-context">
+              <h2>{pageTitles[currentPage]}</h2>
+            </div>
+          )}
           <div className="header-actions">
-            <button className="btn btn-primary" onClick={() => setShowImport(true)}>
-              导入数据
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={() => handleNavigate('ai-tasks')}
-            >
-              AI任务
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={() => handleNavigate('stats')}
-            >
-              数据看板
-            </button>
+            {currentPage === 'patents' && (
+              <button className="btn btn-primary header-import-button" onClick={() => setShowImport(true)} aria-label="导入数据" title="导入 Excel、CSV 或粘贴的表格数据">
+                <span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1 }}>+</span>
+              </button>
+            )}
           </div>
         </header>
         <div className="content-area">

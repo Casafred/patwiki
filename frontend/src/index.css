@@ -2449,6 +2449,106 @@ input[type="checkbox"] {
   background: #fbfefd;
 }
 
+.export-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(22, 35, 41, 0.16);
+}
+
+.export-dialog .modal-body {
+  padding: 20px 24px 24px;
+}
+
+.export-dialog .modal-footer {
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--line);
+  background: #fbfdfd;
+}
+
+.export-dialog .form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink-700);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.export-dialog .export-field-list {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdfd;
+}
+
+.table-settings-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.table-settings-modal h4 {
+  margin-bottom: 9px;
+  color: var(--ink-800);
+  font-size: 13px;
+}
+
+.table-settings-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.table-settings-choice {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: left;
+  color: var(--ink-700);
+}
+
+.table-settings-choice.active {
+  border-color: var(--brand-500);
+  background: #effaf7;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.1);
+}
+
+.table-settings-choice strong,
+.table-settings-choice span {
+  display: block;
+}
+
+.table-settings-choice strong {
+  margin-bottom: 4px;
+  color: var(--ink-900);
+  font-size: 13px;
+}
+
+.table-settings-choice span {
+  color: var(--ink-500);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.table-settings-row-height {
+  display: grid;
+  grid-template-columns: 1fr 160px;
+  gap: 12px;
+  align-items: center;
+}
+
+@media (max-width: 560px) {
+  .table-settings-choice-grid,
+  .table-settings-row-height {
+    grid-template-columns: 1fr;
+  }
+}
+
 .family-members-heading {
   display: flex;
   align-items: flex-start;

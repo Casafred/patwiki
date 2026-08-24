@@ -21,6 +21,7 @@ router = APIRouter(tags=["export"])
 class ExportRequest(BaseModel):
     database_id: Optional[int] = None
     view_id: Optional[int] = None
+    patent_ids: Optional[list[int]] = Field(default=None, max_length=200000)
     field_keys: Optional[list[str]] = Field(default=None, max_length=200)
     filters: dict[str, Any] = Field(default_factory=dict)
     search: Optional[str] = None
