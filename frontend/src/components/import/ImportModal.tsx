@@ -3,7 +3,7 @@ import type { ClipboardEvent } from 'react'
 import { importApi, databaseApi, viewApi } from '../../api'
 import { fieldService } from '../../services'
 import { useAppStore } from '../../store'
-import type { ImportPreview, FieldMapping, PatentView } from '../../types'
+import type { ImportPreview, FieldMapping, PatentView, ImportChangeReview, ImportReviewAction } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 interface ImportModalProps {
@@ -66,7 +66,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   } = useAppStore()
 
   // P0-12：新增 chooseDatabase 步骤
-  const [step, setStep] = useState<'chooseDatabase' | 'upload' | 'mapping' | 'processing' | 'complete'>(
+  const [step, setStep] = useState<'chooseDatabase' | 'upload' | 'mapping' | 'review' | 'processing' | 'complete'>(
     databases.length > 0 ? 'upload' : 'chooseDatabase'
   )
   const [file, setFile] = useState<File | null>(null)
@@ -84,7 +84,9 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [showCreateView, setShowCreateView] = useState(false)
   const [newViewName, setNewViewName] = useState('')
   const [creatingView, setCreatingView] = useState(false)
-  const [dedupeField, setDedupeField] = useState<'application_number' | 'publication_number' | 'both'>('both')
+  const [dedupeField, setDedupeField] = useState<'application_number' | 'publication_number' | 'both'>('publication_number')
+  const [reviewChanges, setReviewChanges] = useState<ImportChangeReview[]>([])
+  const [reviewActions, setReviewActions] = useState<Record<number, ImportReviewAction>>({})
   const [importResult, setImportResult] = useState<{
     total: number; created: number; updated: number; skipped: number; errors: number;
     family_links?: number; citation_links?: number;
@@ -246,6 +248,10 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setStep('chooseDatabase')
       return
     }
+    if (!preview.detected_columns.some(column => mapping[column] === 'publication_number')) {
+      setError('必须先将一列映射为公开号，申请号或授权号不能替代公开号')
+      return
+    }
     // An empty unknown mapping retains its source evidence; SKIP_COLUMN is an
     // explicit choice to omit a column from this import's governance queue.
     setImporting(true)
@@ -267,34 +273,19 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
         selectedViewId || undefined,
         selectedSheet || undefined,
       )
-      // 防御：后端返回空体或异常时 result 可能为 undefined，
-      // 若直接进入 complete 步骤会导致渲染条件不满足而白屏。
+      // The confirmation endpoint only stages source evidence. Patent rows are
+      // not changed until the review screen is explicitly applied.
       if (!result || typeof result !== 'object') {
-        setError('导入返回异常，请检查数据后重试')
+        setError('导入预审返回异常，请检查数据后重试')
         setStep('mapping')
         return
       }
       setImportResult(result)
-      setStep('complete')
-      fieldService.invalidate()
-      // Clear stale local column hiding so fields mapped by this import are visible.
-      try {
-        const importedKeys = fieldMappings
-          .map(item => item.target_field)
-          .filter(key => key && key !== SKIP_COLUMN)
-        const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
-        if (hiddenRaw) {
-          const hidden = JSON.parse(hiddenRaw) as unknown
-          if (Array.isArray(hidden)) {
-            localStorage.setItem('patwiki_hidden_fields', JSON.stringify(hidden.filter(key => !importedKeys.includes(String(key)))))
-          }
-        }
-        const previousForced = JSON.parse(localStorage.getItem('patwiki_force_visible_fields') || '[]') as unknown
-        const previousKeys = Array.isArray(previousForced) ? previousForced.map(String) : []
-        localStorage.setItem('patwiki_force_visible_fields', JSON.stringify([...new Set([...previousKeys, ...importedKeys])]))
-      } catch {
-        // Column preferences are optional and must not block a successful import.
-      }
+      if (!result.batch_id) throw new Error('预审批次未返回 batch_id')
+      const changes = await importApi.getChanges(result.batch_id, false)
+      setReviewChanges(changes.items)
+      setReviewActions(Object.fromEntries(changes.items.map(item => [item.id, item.review_action])))
+      setStep('review')
     } catch (error: unknown) {
       setError(getErrorMessage(error, '导入失败'))
       setStep('mapping')
@@ -302,6 +293,51 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       setImporting(false)
     }
   }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId, selectedSheet])
+
+  const handleApplyReviewedImport = useCallback(async () => {
+    if (!importResult?.batch_id) return
+    setImporting(true)
+    setError('')
+    setStep('processing')
+    try {
+      await importApi.reviewBatch(importResult.batch_id, {
+        items: Object.entries(reviewActions).map(([observationId, action]) => ({
+          observation_id: Number(observationId), action,
+        })),
+        reviewed_by: 'local-user',
+      })
+      const result = await importApi.applyBatch(importResult.batch_id)
+      setImportResult(result)
+      setStep('complete')
+      fieldService.invalidate()
+      try {
+        const importedKeys = Object.values(mapping).filter(key => key && key !== SKIP_COLUMN)
+        const hiddenRaw = localStorage.getItem('patwiki_hidden_fields')
+        if (hiddenRaw) {
+          const hidden = JSON.parse(hiddenRaw) as unknown
+          if (Array.isArray(hidden)) localStorage.setItem('patwiki_hidden_fields', JSON.stringify(hidden.filter(key => !importedKeys.includes(String(key)))))
+        }
+      } catch {
+        // Column preferences are optional and must not block a successful import.
+      }
+    } catch (applyError: unknown) {
+      setError(getErrorMessage(applyError, '执行导入失败'))
+      setStep('review')
+    } finally {
+      setImporting(false)
+    }
+  }, [importResult, mapping, reviewActions])
+
+  const handleRollbackImport = useCallback(async () => {
+    if (!importResult?.batch_id) return
+    try {
+      await importApi.rollbackBatch(importResult.batch_id)
+      setError('本次导入已回撤')
+      fieldService.invalidate()
+    } catch (rollbackError: unknown) {
+      setError(getErrorMessage(rollbackError, '回撤导入失败'))
+    }
+  }, [importResult])
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose()
@@ -333,6 +369,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     chooseDatabase: '选择专利库',
     upload: '上传 Excel 文件',
     mapping: '字段映射',
+    review: '审查本次导入变更',
     processing: '正在导入...',
     complete: '导入完成',
   }[step]
@@ -730,9 +767,60 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                 <button className="btn btn-secondary" onClick={() => setStep('upload')}>返回</button>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn btn-secondary" onClick={onClose}>取消</button>
-                  <button className="btn btn-primary" disabled={importing} onClick={handleImport}>
-                    {importing ? '导入中...' : `开始导入 ${preview.total_rows} 条数据`}
+                  <button className="btn btn-primary" disabled={importing || !preview.detected_columns.some(column => mapping[column] === 'publication_number')} onClick={handleImport}>
+                    {importing ? '分析中...' : `开始预审 ${preview.total_rows} 条数据`}
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 'review' && importResult?.batch_id && (
+            <div>
+              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 13, color: '#9a3412' }}>
+                预审已完成。系统不会自动覆盖已有值，请逐项选择“采用导入值”或“保留现有值”；未治理列仍会作为待治理字段保留。
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button className="btn btn-secondary" onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.difference_type === 'new' ? 'fill_empty' : 'keep_existing'])))}>全部按安全建议</button>
+                <button className="btn btn-secondary" onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.field_resolution === 'mapped' ? 'adopt' : 'keep_existing'])))}>映射字段全部采用</button>
+                <span style={{ fontSize: 12, color: '#64748b', alignSelf: 'center' }}>共 {reviewChanges.length} 个来源单元格</span>
+              </div>
+              <div style={{ maxHeight: 420, overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead><tr style={{ background: '#f8fafc' }}>
+                    <th style={{ padding: 8, textAlign: 'left' }}>公开号 / 行</th>
+                    <th style={{ padding: 8, textAlign: 'left' }}>字段</th>
+                    <th style={{ padding: 8, textAlign: 'left' }}>当前值</th>
+                    <th style={{ padding: 8, textAlign: 'left' }}>导入值</th>
+                    <th style={{ padding: 8, textAlign: 'left' }}>处理</th>
+                  </tr></thead>
+                  <tbody>{reviewChanges.map(item => {
+                    const publication = String(item.source_row_values?.['公开号'] || item.source_row_values?.publication_number || '-')
+                    const isUnknown = item.field_resolution === 'unmapped_retained'
+                    return <tr key={item.id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: 8, whiteSpace: 'nowrap' }}>{publication} / {item.source_row}</td>
+                      <td style={{ padding: 8 }}>{item.source_field_name}{item.canonical_field_key ? ` (${item.canonical_field_key})` : '（待治理）'}</td>
+                      <td style={{ padding: 8, maxWidth: 180, wordBreak: 'break-word' }}>{item.current_value || '-'}</td>
+                      <td style={{ padding: 8, maxWidth: 220, wordBreak: 'break-word' }}>{item.candidate_value || item.raw_value || '-'}</td>
+                      <td style={{ padding: 6 }}><select className="form-input" value={reviewActions[item.id] || 'keep_existing'} onChange={event => {
+                        const value = event.target.value as ImportReviewAction
+                        setReviewActions(prev => ({ ...prev, [item.id]: value }))
+                      }}>
+                        <option value="keep_existing">保留现有值</option>
+                        {!isUnknown && <option value="adopt">采用导入值</option>}
+                        {!isUnknown && <option value="fill_empty">仅填充空值</option>}
+                        <option value="ignore">忽略本单元格</option>
+                        <option value="quarantine">隔离待处理</option>
+                      </select></td>
+                    </tr>
+                  })}</tbody>
+                </table>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>
+                <button className="btn btn-secondary" onClick={() => setStep('mapping')}>返回调整映射</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-secondary" onClick={onClose}>取消</button>
+                  <button className="btn btn-primary" disabled={importing} onClick={() => void handleApplyReviewedImport()}>{importing ? '执行中...' : '确认并执行导入'}</button>
                 </div>
               </div>
             </div>
@@ -809,6 +897,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                 {(importResult.unmapped_retained || 0) > 0 && importResult.batch_id && (
                   <button className="btn btn-secondary" onClick={downloadUnmapped}>下载本批待治理字段 CSV</button>
                 )}
+                {importResult.batch_id && <button className="btn btn-secondary" onClick={() => void handleRollbackImport()}>回撤本次导入</button>}
                 <button className="btn btn-primary" onClick={onSuccess}>完成</button>
               </div>
 

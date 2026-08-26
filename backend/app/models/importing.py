@@ -39,6 +39,11 @@ class ImportBatch(Base):
     mapping_id = Column(Integer, ForeignKey("field_mappings.id"))
     mapping_config = Column(JSON)
     errors = Column(JSON)
+    # Review is intentionally persisted with the batch. It makes a staged
+    # import resumable after a browser/backend restart and records the exact
+    # options used when the source was analysed.
+    review_config = Column(JSON)
+    created_patent_ids = Column(JSON)
     # Source lineage is retained with the batch so an import can be replayed
     # and its provenance can be shown without relying on the temporary upload.
     source_table_title = Column(String(500))

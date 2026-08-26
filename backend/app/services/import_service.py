@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, Any
 from io import BytesIO
+import re
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -22,6 +23,12 @@ IMPORT_SKIP_FIELD = "__skip__"
 STANDARD_FIELD_MAPPINGS = {
     "申请号": "application_number",
     "公开号": "publication_number",
+    "公开编号": "publication_number",
+    "公开（公告）号": "publication_number",
+    "公开公告号": "publication_number",
+    "publication number": "publication_number",
+    "publication no": "publication_number",
+    "publication no.": "publication_number",
     "专利号": "grant_number",
     "授权号": "grant_number",
     "标题": "title",
@@ -215,6 +222,18 @@ class ImportService:
                 mapping[col_clean] = custom_field_by_name[col_clean]
                 continue
 
+            # Commercial patent exports use several labels for the same
+            # publication-number column. This is deliberately a narrow
+            # identity alias set; arbitrary columns still remain unmapped and
+            # are retained for later governance.
+            compact = re.sub(r"[\s_\-./:：()（）【】\[\]]", "", col_clean).lower()
+            if compact in {
+                "公开号", "公开编号", "公开公告号", "公开（公告）号".replace("（", "").replace("）", ""),
+                "publicationnumber", "publicationno",
+            }:
+                mapping[col_clean] = "publication_number"
+                continue
+
             # 3. 已批准的来源字段治理别名。只有 registry 中明确标记为
             # mapped 且目标仍是运行时字段时才自动采用；candidate 和
             # unmapped_retained 必须继续显示为待治理证据。
@@ -264,6 +283,22 @@ class ImportService:
         """
         custom_fields = {field.key: field for field in db.query(CustomField).all()}
         issues: list[dict[str, str]] = []
+        publication_columns = [
+            column for column in columns
+            if (mapping.get(column) or "").strip() == "publication_number"
+        ]
+        if not publication_columns:
+            issues.append({
+                "column": "__publication_number__",
+                "target_field": "publication_number",
+                "reason": "导入必须包含并映射公开号列；申请号或授权号不能替代公开号",
+            })
+        elif len(publication_columns) > 1:
+            issues.append({
+                "column": ", ".join(publication_columns),
+                "target_field": "publication_number",
+                "reason": "一个导入批次只能有一个公开号来源列，请先合并或取消重复映射",
+            })
         for column in columns:
             target = (mapping.get(column) or "").strip()
             if not target:

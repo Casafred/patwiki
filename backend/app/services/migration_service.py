@@ -26,7 +26,7 @@ from app.database import Base
 from app.models.system import MigrationIssue, MigrationRun
 
 
-CURRENT_MIGRATION_VERSION = "2026-08-23.0"
+CURRENT_MIGRATION_VERSION = "2026-08-26.0"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -107,6 +107,8 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("import_batches", "mapping_version", "ALTER TABLE import_batches ADD COLUMN mapping_version VARCHAR(100)"),
     _column("import_batches", "file_hash", "ALTER TABLE import_batches ADD COLUMN file_hash VARCHAR(128)"),
     _column("import_batches", "artifact_path", "ALTER TABLE import_batches ADD COLUMN artifact_path VARCHAR(1000)"),
+    _column("import_batches", "review_config", "ALTER TABLE import_batches ADD COLUMN review_config JSON"),
+    _column("import_batches", "created_patent_ids", "ALTER TABLE import_batches ADD COLUMN created_patent_ids JSON"),
     _column("patent_histories", "import_batch_id", "ALTER TABLE patent_histories ADD COLUMN import_batch_id INTEGER REFERENCES import_batches(id)"),
     _column("patent_histories", "source_table_title", "ALTER TABLE patent_histories ADD COLUMN source_table_title VARCHAR(500)"),
     _column("patent_histories", "source_row", "ALTER TABLE patent_histories ADD COLUMN source_row INTEGER"),

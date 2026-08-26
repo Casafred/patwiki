@@ -29,6 +29,13 @@ from app.services.patent_identity_service import (
     find_patents_by_identifiers,
     identifier_specs_from_values,
 )
+from app.services.import_review_service import (
+    apply_batch,
+    list_batch_changes,
+    review_batch,
+    rollback_batch,
+    stage_import,
+)
 from app.config import settings
 from app.models import (
     CustomField,
@@ -115,6 +122,27 @@ class GovernanceDecisionRequest(BaseModel):
 
 class GovernanceRevertRequest(BaseModel):
     reversed_by: str = "local-user"
+    reason: Optional[str] = None
+
+
+class ImportReviewItemRequest(BaseModel):
+    observation_id: int
+    action: Literal["adopt", "keep_existing", "fill_empty", "ignore", "quarantine"]
+
+
+class ImportReviewRequest(BaseModel):
+    items: list[ImportReviewItemRequest] = []
+    default_action: Optional[Literal["adopt", "keep_existing", "fill_empty", "ignore", "quarantine"]] = None
+    reviewed_by: str = "local-user"
+    reason: Optional[str] = None
+
+
+class ImportApplyRequest(BaseModel):
+    applied_by: str = "local-user"
+
+
+class ImportRollbackRequest(BaseModel):
+    rolled_back_by: str = "local-user"
     reason: Optional[str] = None
 
 
@@ -366,8 +394,7 @@ def _record_field_observations(
                 source_field_name=column,
             ))
     return unknown_count
-@router.post("/import/confirm")
-def confirm_import(
+def _legacy_confirm_import(
     req: ConfirmImportRequest,
     db: Session = Depends(get_db),
 ):
@@ -881,6 +908,111 @@ def confirm_import(
         ],
         "batch_id": batch.id if batch is not None else None,
     }
+
+
+@router.post("/import/confirm")
+def confirm_import(
+    req: ConfirmImportRequest,
+    db: Session = Depends(get_db),
+):
+    """Create a reviewable import batch; Patent rows are not changed here."""
+    temp_path = TEMP_DIR / f"{req.import_id}.bin"
+    if not temp_path.exists():
+        raise BadRequestException("导入会话已过期或文件不存在，请重新上传文件")
+    info = TEMP_FILES.get(req.import_id) or {
+        "path": str(temp_path),
+        "filename": "upload.xlsx",
+        "created_at": temp_path.stat().st_mtime,
+    }
+    filename = info.get("filename") or "upload.xlsx"
+    with open(temp_path, "rb") as handle:
+        content = handle.read()
+    artifact_path = info.get("artifact_path")
+    if not artifact_path or not Path(artifact_path).exists():
+        safe_filename = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in Path(filename).name)
+        artifact_path = str(SOURCE_DIR / f"{req.import_id}_{safe_filename or 'upload.xlsx'}")
+        Path(artifact_path).write_bytes(content)
+    database_id = req.database_id
+    if database_id is None:
+        from app.services.database_service import DatabaseService
+        default_db = DatabaseService.get_default_database(db)
+        if not default_db:
+            raise BadRequestException("未指定库且系统无默认库，请先创建库")
+        database_id = default_db.id
+    else:
+        from app.services.database_service import DatabaseService
+        if not DatabaseService.get_database(db, database_id):
+            raise BadRequestException(f"库不存在：{database_id}")
+    mapping = {item.source_column: (item.target_field or "").strip() for item in req.field_mappings}
+    try:
+        result = stage_import(
+            db,
+            content=content,
+            filename=filename,
+            sheet_name=req.sheet_name,
+            mapping=mapping,
+            database_id=database_id,
+            product_id=req.product_id,
+            project_id=req.project_id,
+            view_id=req.view_id,
+            source_table_title=req.source_table_title,
+            source_system=req.source_system,
+            artifact_path=artifact_path,
+        )
+        result["database_id"] = database_id
+        result["unknown_columns"] = [column for column, target in mapping.items() if not target and target != IMPORT_SKIP_FIELD]
+        return result
+    finally:
+        info = TEMP_FILES.pop(req.import_id, None)
+        if info and os.path.exists(info["path"]):
+            try:
+                os.remove(info["path"])
+            except OSError:
+                pass
+
+
+@router.get("/import/batches/{batch_id}/changes")
+def get_import_batch_changes(
+    batch_id: int,
+    only_differences: bool = Query(False),
+    limit: int = Query(2000, ge=1, le=10000),
+    db: Session = Depends(get_db),
+):
+    return list_batch_changes(db, batch_id, only_differences=only_differences, limit=limit)
+
+
+@router.post("/import/batches/{batch_id}/review")
+def review_import_batch(
+    batch_id: int,
+    req: ImportReviewRequest,
+    db: Session = Depends(get_db),
+):
+    return review_batch(
+        db,
+        batch_id,
+        items=[item.model_dump() for item in req.items],
+        default_action_name=req.default_action,
+        reviewed_by=req.reviewed_by,
+        reason=req.reason,
+    )
+
+
+@router.post("/import/batches/{batch_id}/apply")
+def apply_import_batch(
+    batch_id: int,
+    req: ImportApplyRequest,
+    db: Session = Depends(get_db),
+):
+    return apply_batch(db, batch_id, applied_by=req.applied_by)
+
+
+@router.post("/import/batches/{batch_id}/rollback")
+def rollback_import_batch(
+    batch_id: int,
+    req: ImportRollbackRequest,
+    db: Session = Depends(get_db),
+):
+    return rollback_batch(db, batch_id, rolled_back_by=req.rolled_back_by)
 
 
 @router.get("/import/batches", response_model=list[ImportBatchResponse])

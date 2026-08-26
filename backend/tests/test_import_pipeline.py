@@ -185,6 +185,20 @@ class ImportPipelineTest(unittest.TestCase):
                 )
                 self.assertEqual(result.status_code, 200, result.text)
                 body = result.json()
+                self.assertEqual(body["created"], 0)
+                self.assertEqual(body["status"], "review_required")
+                batch_id = body["batch_id"]
+                review = client.post(
+                    f"/import/batches/{batch_id}/review",
+                    json={"default_action": "adopt", "reviewed_by": "test"},
+                )
+                self.assertEqual(review.status_code, 200, review.text)
+                applied = client.post(
+                    f"/import/batches/{batch_id}/apply",
+                    json={"applied_by": "test"},
+                )
+                self.assertEqual(applied.status_code, 200, applied.text)
+                body = applied.json()
                 self.assertEqual(body["created"], 1)
                 self.assertEqual(body["citation_links"], 2)
                 imported = db.query(Patent).filter(
@@ -202,7 +216,6 @@ class ImportPipelineTest(unittest.TestCase):
                     ).count(),
                     0,
                 )
-                batch_id = body["batch_id"]
                 observations = db.query(FieldObservation).filter(
                     FieldObservation.import_batch_id == batch_id,
                     FieldObservation.source_field_name.in_(["引用专利号", "被引用专利号"]),
@@ -372,9 +385,10 @@ class ImportPipelineTest(unittest.TestCase):
             db.commit()
 
             issues = ImportService.validate_mapping(
-                ["标题", "跳过列", "公式列", "附件列", "提议列"],
+                ["标题", "公开号", "跳过列", "公式列", "附件列", "提议列"],
                 {
                     "标题": "title",
+                    "公开号": "publication_number",
                     "公式列": "cf_formula",
                     "附件列": "attachments",
                     "提议列": "cf_proposed_abc123",
@@ -404,9 +418,10 @@ class ImportPipelineTest(unittest.TestCase):
         db = Session(engine)
         try:
             issues = ImportService.validate_mapping(
-                ["标题", "优先权号", "优先权国家", "优先权日", "CPC分类号", "风险描述"],
+                ["标题", "公开号", "优先权号", "优先权国家", "优先权日", "CPC分类号", "风险描述"],
                 {
                     "标题": "title",
+                    "公开号": "publication_number",
                     "优先权号": "priority_number",
                     "优先权国家": "priority_country",
                     "优先权日": "priority_date",
@@ -498,6 +513,20 @@ class ImportPipelineTest(unittest.TestCase):
                 })
                 self.assertEqual(result.status_code, 200, result.text)
                 body = result.json()
+                self.assertEqual(body["created"], 0)
+                self.assertEqual(body["status"], "review_required")
+                batch_id = body["batch_id"]
+                review = client.post(
+                    f"/import/batches/{batch_id}/review",
+                    json={"default_action": "adopt", "reviewed_by": "test"},
+                )
+                self.assertEqual(review.status_code, 200, review.text)
+                applied = client.post(
+                    f"/import/batches/{batch_id}/apply",
+                    json={"applied_by": "test"},
+                )
+                self.assertEqual(applied.status_code, 200, applied.text)
+                body = applied.json()
                 self.assertEqual(body["created"], 1)
                 self.assertEqual(body["unmapped_retained"], 1)
 
@@ -572,12 +601,8 @@ class ImportPipelineTest(unittest.TestCase):
                     ],
                     "database_id": database.id,
                 })
-                self.assertEqual(result.status_code, 200, result.text)
-                body = result.json()
-                self.assertEqual(body["created"], 0)
-                self.assertEqual(body["retained_source_rows"], 1)
-                self.assertEqual(db.query(Patent).count(), 0)
-                self.assertEqual(db.query(ImportSourceRow).count(), 1)
+            self.assertEqual(result.status_code, 400, result.text)
+            self.assertEqual(db.query(Patent).count(), 0)
         finally:
             import_routes.TEMP_DIR = original_temp_dir
             import_routes.SOURCE_DIR = original_source_dir
@@ -618,6 +643,20 @@ class ImportPipelineTest(unittest.TestCase):
                 })
                 self.assertEqual(result.status_code, 200, result.text)
                 body = result.json()
+                self.assertEqual(body["created"], 0)
+                self.assertEqual(body["status"], "review_required")
+                batch_id = body["batch_id"]
+                review = client.post(
+                    f"/import/batches/{batch_id}/review",
+                    json={"default_action": "adopt", "reviewed_by": "test"},
+                )
+                self.assertEqual(review.status_code, 200, review.text)
+                applied = client.post(
+                    f"/import/batches/{batch_id}/apply",
+                    json={"applied_by": "test"},
+                )
+                self.assertEqual(applied.status_code, 200, applied.text)
+                body = applied.json()
                 self.assertEqual(body["created"], 1)
                 self.assertEqual(body["row_reports"][0]["status"], "created_pending_title")
                 self.assertEqual(db.query(Patent).one().title, "待补全")

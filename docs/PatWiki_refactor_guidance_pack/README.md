@@ -2,7 +2,7 @@
 
 > 2026 目标：先把 PatWiki 建成以每篇专利为锚点、覆盖专利相关全维度信息、可高效查询调用并能生成 Excel/Word 工作文件的优秀本地交互数据库。
 >
-> 文档状态：`agent-executable / v1.4 / 2026-08-15`。本包同时包含 Agent 执行协议、2026 范围基线、人工录入交互规格和长期目标架构；除明确标注“当前已具备”的能力外，均不得视为当前产品已上线功能。
+> 文档状态：`agent-executable / v1.5 / 2026-08-26`。本包同时包含 Agent 执行协议、2026 范围基线、人工录入交互规格和长期目标架构；除明确标注“当前已具备”的能力外，均不得视为当前产品已上线功能。
 
 本指导包配套的文本维护源：
 
@@ -55,7 +55,7 @@
 ## 当前边界
 
 - 当前仓库已具备 Patent/Family/Project、CustomField/ViewLocalField、导入批次、专利级历史、附件、自动化和本地 Tauri 包装。
-- 当前仓库尚未具备 V2 的 RiskCase/SearchCase/ProtectionCase、通用 AuditEvent、Field Registry、版本化数据库迁移、认证与服务端强制授权。
+- 当前仓库尚未具备完整 V2 的 RiskCase/SearchCase/ProtectionCase、通用 AuditEvent、可写责任治理版 Field Registry、版本化数据库迁移、认证与服务端强制授权；当前已有的字段治理基线和迁移安全切片不能被误认为这些长期能力全部完成。
 - 因此 L2-L5 责任数据、对外发布和 MCP 写入都必须在完成认证、授权与审计强制后才可对真实业务开放。
 
 ## P0 建议（已校正）
@@ -81,4 +81,5 @@
 - 不允许因列尚未进入 Field Registry 就丢弃导入值；未知列必须进入来源扩展/观察层，并在语义确认后再决定是否升级为正式字段。
 - 不允许只实现“能编辑”的表单而忽略草稿、保存状态、空值不覆盖、批量粘贴、失败重试和来源追溯；人工录入交互必须遵守 `26-human-data-entry-interaction-spec.md`。
 - 导入空映射默认保留来源；只有显式跳过才离开治理队列。无标题有官方号码进入待补全专利，无身份有内容进入待补身份来源行，完全空行才跳过。
+- 导入必须遵守 `preview -> confirm -> changes -> review -> apply -> rollback`；`confirm` 只建 `REVIEW_REQUIRED` 批次，不修改 Patent。缺少公开号的非空行是 `retained_source_row`，完全空行是 `skipped_empty_row`，不可把二者误报为隔离或静默丢弃。
 - AI 设置测试、实际调用和任务监控必须遵守 `28-agent-import-ai-relation-reliability-contract.md` 的统一配置和任务落库门禁。

@@ -9,6 +9,7 @@ import type {
   PatentGraphResponse, PatentFamilyResponse, PatentCitationResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
   GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
+  ImportChangeReview, ImportReviewAction,
   ProjectSolutionVersion, RiskCase,
 } from '../types'
 
@@ -459,6 +460,17 @@ export const importApi = {
     api.get('/import/batches', { params }),
 
   getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
+  getChanges: (id: number, onlyDifferences = false): Promise<{ batch_id: number; status: string; total: number; items: ImportChangeReview[] }> =>
+    api.get(`/import/batches/${id}/changes`, { params: { only_differences: onlyDifferences } }),
+  reviewBatch: (id: number, data: {
+    items?: { observation_id: number; action: ImportReviewAction }[]
+    default_action?: ImportReviewAction
+    reviewed_by?: string
+    reason?: string
+  }): Promise<{ batch_id: number; reviewed_count: number; status: string }> => api.post(`/import/batches/${id}/review`, data),
+  applyBatch: (id: number, appliedBy = 'local-user'): Promise<ImportResult> => api.post(`/import/batches/${id}/apply`, { applied_by: appliedBy }, { timeout: 600000 }),
+  rollbackBatch: (id: number, rolledBackBy = 'local-user'): Promise<{ batch_id: number; restored_value_count: number; deleted_patent_count: number }> =>
+    api.post(`/import/batches/${id}/rollback`, { rolled_back_by: rolledBackBy }),
   listUnmapped: (params: JsonObject = {}): Promise<{ total: number; offset: number; limit: number; items: GovernanceObservation[] }> =>
     api.get('/import/unmapped', { params }),
   decideObservation: (

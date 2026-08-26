@@ -42,6 +42,7 @@ class RiskLevel(str, enum.Enum):
 class ImportBatchStatus(str, enum.Enum):
     PENDING = "pending"
     PROCESSING = "processing"
+    REVIEW_REQUIRED = "review_required"
     COMPLETED = "completed"
     FAILED = "failed"
     ROLLED_BACK = "rolled_back"

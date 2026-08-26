@@ -1,7 +1,7 @@
 # 25 - PatWiki Agent 开发协议
 
 > 状态：`agent-executable / mandatory`
-> 更新：2026-08-17
+> 更新：2026-08-26
 > 本文面向执行开发任务的 Agent，不是给人阅读的背景介绍。Agent 开始任何代码、数据库、导入、详情页、表格、导出或交互改动前，必须按本文执行。
 
 ## 1. Agent 的唯一当前任务目标
@@ -86,6 +86,18 @@ Agent 不得以“用户已经看到 CSV”为理由跳过确认、回填、历�
 5. 每次新动作至少增加：单条路径、批量边界路径、原始证据保留路径、决策历史路径和失败重试路径测试；没有这些测试不能标记完成。
 
 6. 实现恢复时必须保存并校验决策批次的变更前状态。恢复只能新增 `GovernanceReversal` 和 `PatentHistory(source=governance_revert)`；若发现观察有后续决策或专利字段已被修改，必须返回可操作错误，不得增加强制覆盖开关。
+
+### 3.3 导入预审执行清单
+
+涉及文件导入、Excel 粘贴回放或批量来源更新时，Agent 必须将导入实现为可恢复的五段式闭环：
+
+1. `POST /import/preview` 解析文件、识别公开号列和建议映射；公开号列缺失时阻止继续。
+2. `POST /import/confirm` 只持久化原始附件、`ImportBatch`、`ImportSourceRow` 和 `FieldObservation`，批次状态必须为 `review_required`，此阶段不得新增、更新或删除 `Patent`、关系或正式字段值。
+3. `GET /import/batches/{id}/changes` 必须返回来源文件、表格标题、Sheet、行号、来源列、原始值、规范值、当前值、候选值、差异类型和默认动作。
+4. `POST /import/batches/{id}/review` 固化逐字段决定；没有决定的项目只能按明确的安全默认规则处理，不能由页面猜测。`apply` 之前不允许把预览数字当作已写入数字。
+5. `POST /import/batches/{id}/apply` 按决定写入并追加 Wiki 历史；`rollback` 只能对已完成批次执行，并在发生后续修改时拒绝自动覆盖。
+
+固定行状态：有公开号但无标题为 `created_pending_title`；缺少公开号但存在其他内容为 `retained_source_row`；完全空行为 `skipped_empty_row`；身份冲突、解析错误或完整性错误为 `quarantined`。Agent 不得把“缺标题/缺非核心字段”当作跳过，也不得把“缺少本行公开号”猜测成另一条专利。
 
 ## 4. 不可违反的开发规则
 

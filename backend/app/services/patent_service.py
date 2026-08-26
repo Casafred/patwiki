@@ -3,18 +3,22 @@ from copy import deepcopy
 from datetime import datetime, date
 import json
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy import func, or_, and_, desc, text, String
 
 from app.models import (
     Patent, Product, Project, Tag, CustomField,
     patent_tag, patent_project, LegalStatus, PatentType,
     PatentHistory, PatentProjectLink,
+    FieldObservation,
     ProjectRole, RiskLevel, RelationType, DocumentRole,
 )
 from app.schemas.schemas import PatentCreate, PatentUpdate
 from app.services.field_registry import (
     RELATION_FIELD_KEYS,
     SYSTEM_FIELD_KEYS,
+    get_pending_import_fields,
+    temporary_import_field_key,
     get_all_fields_meta,
 )
 from app.core.exceptions import BadRequestException
@@ -329,6 +333,41 @@ class PatentService:
 
         query = query.offset((page - 1) * page_size).limit(page_size)
         patents = query.all()
+
+        # Unknown imported columns are a visible, read-only projection. Keep
+        # them out of the canonical Patent JSON and inject only the latest
+        # retained observation into the response payload.
+        pending_fields = get_pending_import_fields(db)
+        if patents and pending_fields:
+            patent_ids = [patent.id for patent in patents]
+            pending_rows = db.query(FieldObservation).filter(
+                FieldObservation.patent_id.in_(patent_ids),
+                FieldObservation.field_resolution == "unmapped_retained",
+                FieldObservation.canonical_field_key.is_(None),
+            ).order_by(FieldObservation.id.desc()).all()
+            values_by_patent: dict[int, dict[str, str]] = {}
+            known_pending_keys = {
+                field["source_field_name"]: temporary_import_field_key(field["source_field_name"])
+                for field in pending_fields
+            }
+            for observation in pending_rows:
+                if observation.patent_id not in values_by_patent:
+                    values_by_patent[observation.patent_id] = {}
+                source_name = observation.source_field_name
+                if source_name in known_pending_keys and known_pending_keys[source_name] not in values_by_patent[observation.patent_id]:
+                    values_by_patent[observation.patent_id][known_pending_keys[source_name]] = observation.raw_value or ""
+            for patent in patents:
+                pending_values = values_by_patent.get(patent.id)
+                if pending_values:
+                    # This is a read-only projection. Marking the merged
+                    # value as committed prevents a list request from
+                    # flushing temporary import evidence back into the
+                    # canonical Patent JSON.
+                    set_committed_value(
+                        patent,
+                        "custom_fields",
+                        {**(patent.custom_fields or {}), **pending_values},
+                    )
 
         # P2-8：同族聚拢模式下，附加 family_size（当前查询范围内的族成员数，含自身）
         if group_by_family and patents:

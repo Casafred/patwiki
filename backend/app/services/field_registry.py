@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from typing import Any, Iterable, Mapping
 
 
@@ -9,6 +10,52 @@ FieldMeta = dict[str, Any]
 # 关系列是正式的只读展示字段：导入时保留原始单元格，关系实体另行解析。
 # 这些键位于 Patent.custom_fields 中，避免把来源文本误当作关系 ID。
 RELATION_FIELD_KEYS = {"family_members", "cited_patents", "citing_patents"}
+
+
+def temporary_import_field_key(source_field_name: str) -> str:
+    """Return a stable, non-canonical key for an unmapped source column."""
+    digest = hashlib.sha1(source_field_name.strip().encode("utf-8")).hexdigest()[:12]
+    return f"import_pending_{digest}"
+
+
+def get_pending_import_fields(db) -> list[FieldMeta]:
+    """Expose retained unknown columns as read-only table fields.
+
+    The source value remains in ImportSourceRow/FieldObservation. This
+    projection is only for discovery in the patent workspace and disappears
+    automatically once every observation for that source column is governed.
+    """
+    if db is None:
+        return []
+    from app.models import FieldObservation
+
+    names = [row[0] for row in db.query(FieldObservation.source_field_name).filter(
+        FieldObservation.field_resolution == "unmapped_retained",
+        FieldObservation.canonical_field_key.is_(None),
+    ).distinct().order_by(FieldObservation.source_field_name.asc()).all()]
+    return [
+        {
+            "key": temporary_import_field_key(name),
+            "name": name,
+            "field_type": "text",
+            "group_name": "待治理字段",
+            "options": None,
+            "option_labels": None,
+            "width": 220,
+            "sortable": False,
+            "filterable": False,
+            "editable": False,
+            "frozen": False,
+            "visible": True,
+            "is_system": False,
+            "is_ai": False,
+            "is_formula": False,
+            "is_temporary": True,
+            "source_field_name": name,
+            "description": "导入来源列尚未治理；请在导入治理中映射或忽略。",
+        }
+        for name in names
+    ]
 
 
 class FieldHandler:
@@ -719,4 +766,4 @@ def get_system_field_meta(key: str) -> FieldMeta | None:
 
 
 def get_all_fields_meta(db) -> list[FieldMeta]:
-    return FIELD_REGISTRY.list_fields(db)
+    return [*FIELD_REGISTRY.list_fields(db), *get_pending_import_fields(db)]

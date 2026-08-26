@@ -786,6 +786,8 @@ export interface ImportBatch {
   mapping_version?: string
   file_hash?: string
   artifact_path?: string
+  review_config?: JsonObject
+  created_patent_ids?: number[]
   started_at?: string
   completed_at?: string
   created_at: string
@@ -828,6 +830,33 @@ export interface ImportResult {
   batch_id?: number | null
   unmapped_retained?: number
   unknown_columns?: string[]
+  status?: string
+  review_count?: number
+  existing_count?: number
+  new_count?: number
+  quarantined_count?: number
+}
+
+export type ImportReviewAction = 'adopt' | 'keep_existing' | 'fill_empty' | 'ignore' | 'quarantine'
+
+export interface ImportChangeReview {
+  id: number
+  batch_id: number
+  source_row: number
+  source_row_id: number
+  patent_id?: number | null
+  source_field_name: string
+  canonical_field_key?: string | null
+  current_value?: string | null
+  candidate_value?: string | null
+  raw_value?: string | null
+  difference_type: string
+  field_resolution: string
+  review_action: ImportReviewAction
+  final_decision?: ImportReviewAction | null
+  source_table_title?: string | null
+  worksheet_name?: string | null
+  source_row_values?: JsonObject
 }
 
 export type GovernanceAction = 'retain_source' | 'ignore' | 'map_existing' | 'propose_field'

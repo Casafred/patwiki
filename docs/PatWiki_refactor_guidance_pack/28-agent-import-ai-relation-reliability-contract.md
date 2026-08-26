@@ -1,7 +1,7 @@
 # 28 - Agent 导入、数据库 AI 与专利关系可靠性契约
 
 > 状态：`agent-executable / mandatory`
-> 更新：2026-08-20
+> 更新：2026-08-26
 > 用途：修复或新增导入、AI 调用、专利详情关系维护时，Agent 必须遵守的可执行契约。本文件补充 21、24、25、26 号文档；若与用户最新确认的业务事实冲突，以用户事实为准。
 
 ## 1. 开发前置
@@ -29,6 +29,21 @@
 | 解析/身份冲突 | `quarantined` | 整行阻断；保留完整原始行、候选 Patent ID、观察值和可重试原因 |
 
 未知列不得因为没有标题、申请人、日期或其他非核心字段而阻断同一行的合法字段。
+
+### 2.1.1 导入 API 的固定阶段
+
+Agent 不得把“确认上传”实现成直接写入 Patent 的单步接口。当前实现的调用顺序固定为：
+
+```text
+POST /import/preview
+  -> POST /import/confirm        # 只创建 REVIEW_REQUIRED 批次，不修改 Patent
+  -> GET  /import/batches/{id}/changes
+  -> POST /import/batches/{id}/review
+  -> POST /import/batches/{id}/apply
+  -> POST /import/batches/{id}/rollback  # 需要时，且只能回撤已完成批次
+```
+
+`/import/confirm` 返回的是批次和差异预览，不是“导入完成”。`review` 必须能逐观察项选择 `adopt`、`keep_existing`、`fill_empty`、`ignore` 或 `quarantine`；`apply` 才能按这些决定写入当前专利。已完成批次的回撤必须检查后续修改，冲突时拒绝覆盖并返回冲突字段。任何前端按钮、快捷导入或 Agent 脚本都不得绕过这条服务层路径。
 
 ### 2.2 行处理决策
 
@@ -68,7 +83,7 @@
 
 #### 3.1.2 并发边界
 
-- `ai_batch_concurrency` 是唯一批处理并发上限，服务层必须限制为 `1..10`；不得创建无界任务、线程或请求队列。
+- `ai_batch_concurrency` 是唯一批处理并发上限，服务层必须限制为 `1..50`；默认值可以较低，但设置页和运行时必须允许最高 50。不得创建无界任务、线程或请求队列。
 - 并发工作器只能执行网络调用并返回普通 Python 数据；不得在线程之间共享 SQLAlchemy `Session`、ORM 实体或写库事务。
 - 批任务由所属后台 Session 串行写入专利字段、AI 值、任务进度和错误。单条请求失败写入该条错误，不得回滚已成功的其他条目。
 - JSON 快速抽取、标准字段批处理和设置页测试都必须经过 `llm_service.py`；任何新 AI 入口违反此边界视为阻断性问题。
@@ -163,6 +178,8 @@
 - 有公开号无标题创建 `created_pending_title`；
 - 无身份有内容进入 `retained_source_row`；完全空行才是 `skipped_empty_row`；
 - 重复导入仍保留观察、来源表、Sheet、行号和导入时间。
+- `/import/confirm` 后 Patent 内容不变；只有 review/apply 后才发生采用值变化；rollback 能回撤本批次且不覆盖后续人工修改。
+- 缺少公开号的非空行进入 `retained_source_row`，完全空行进入 `skipped_empty_row`，两者都不伪造 Patent；真正解析/身份冲突才进入 `quarantined`。
 - 关系列原始文本、FieldObservation 和关系实体同时存在；多值列分隔符可解析，缺失目标不建占位，真实 `citation_links` 与 `family_links` 统计可验证。
 
 ### AI

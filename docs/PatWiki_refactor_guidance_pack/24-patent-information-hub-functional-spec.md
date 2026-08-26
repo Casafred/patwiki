@@ -1,7 +1,7 @@
 # 24 - 专利信息中心功能规格
 
 > 状态：`business-confirmed / implementation specification`
-> 更新：2026-08-15
+> 更新：2026-08-26
 > 本文把 `23-2026-product-scope-and-business-rules.md` 的产品范围继续细化为详情页、专利身份、增量导入、Wiki 历史和高频表格视图规格。发生冲突时，业务范围仍以 23 号文档为准；人工录入的低门槛交互以 `26-human-data-entry-interaction-spec.md` 为补充约束。
 
 ## 1. 已确认结论
@@ -152,6 +152,12 @@ Agent 必须同时维护两条数据路径：
 关系原始投影是只读系统字段。普通单元格编辑、普通专利编辑和普通创建接口不得直接覆盖 `family_members`、`cited_patents`、`citing_patents`；其值只能来自可追溯的导入来源或明确的关系维护服务。结构化关系也不能写成逗号文本、JSON ID 数组或页面临时状态。
 
 ## 5. 增量导入与差异确认
+
+### 5.0 当前导入执行边界
+
+当前代码已经采用两阶段写入：`POST /import/confirm` 只产生 `REVIEW_REQUIRED` 预审批次和来源证据，`GET /import/batches/{id}/changes` 读取逐字段差异，`POST /import/batches/{id}/review` 保存用户决定，`POST /import/batches/{id}/apply` 才执行专利/关系写入，`POST /import/batches/{id}/rollback` 提供批次回撤。Agent 不得恢复单步确认即落库的实现。
+
+确认请求中未映射的列默认是 `unmapped_retained`，显式 `__skip__` 才是跳过治理队列；空单元格是不修改。缺少公开号的非空行进入 `retained_source_row`，完全空行进入 `skipped_empty_row`，真正解析或身份冲突才进入 `quarantined`。这些状态必须在 UI、API 响应和测试中保持同一含义。
 
 ### 5.1 三层数据
 

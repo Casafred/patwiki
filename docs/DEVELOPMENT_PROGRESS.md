@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-24（完成主表检索/筛选、公开号规范化与跨库 Wiki 跳转基线；全局成员关系迁移仍待后续阶段）
+最近更新：2026-08-26（完成导入预审/审查/执行/回撤闭环，补齐缺少公开号来源行的保留语义，并同步 Agent 执行契约；全局成员关系迁移仍待后续阶段）
 
 ---
 
@@ -136,6 +136,7 @@
 | G0-10 | 同族成员可导航与同族聚拢展示 | 高 | 已完成 | 2026-08-20 | 全栈 | 新增按数据库隔离的 `/patents/{id}/family` 成员接口；详情页同族成员清单和图谱节点均可打开目标专利详情；列表/保存视图支持同族组头展开收起，成员保持独立记录；补充跨库隔离、成员导航数据和聚拢元数据测试 |
 | G0-11 | 同族/引用关系双轨导入、状态识别与可导航清单 | 高 | 已完成 | 2026-08-20 | 全栈 | 正式注册 `family_members`、`cited_patents`、`citing_patents`；导入同时保留原始列、FieldObservation 和结构化关系；引用清单区分正反方向及当前库/其他库/未入库；关系读取不建占位，图谱按数据库隔离；普通编辑拒绝覆盖关系原始投影；补充导入、API、图谱、导出回归测试与 Agent 契约 |
 | G0-12 | 历史批次折叠、风险表关联投影与主表批量命令 | 高 | 已完成 | 2026-08-23 | 全栈 | 导入历史按 `import_batch_id` 默认折叠并保留字段明细；风险管控表增补产品/项目列且不覆盖用户已有列配置；批量编辑支持注册字段，批量标签保留追加/替换/移除；新增原子移库、移动视图、复制工作副本命令；AI 批量面板明确范围与目标列 |
+| G0-17 | 导入预审、逐字段决策、批次执行与回撤 | 高 | 已完成 | 2026-08-26 | 后端/前端/文档 | `/import/confirm` 只创建 `REVIEW_REQUIRED` 批次；`changes/review/apply/rollback` 固化差异确认、来源历史和可回撤写入；空映射保留、显式 `__skip__` 才跳过；无身份非空行进入 `retained_source_row`，空行进入 `skipped_empty_row`；新增回归测试和 Agent 契约。 |
 
 ---
 
@@ -151,10 +152,11 @@
 | 2026-08-20 | G0-10 | 完成同族成员导航与同族聚拢闭环：新增按当前数据库隔离的同族成员接口；详情页提供可点击同族成员清单，关系图节点提供打开详情动作；列表和保存视图按当前查询结果生成同族组头并支持展开/收起，成员仍是独立专利行；新增同族成员、跨库隔离和聚拢元数据回归测试。定向后端 6 项通过，TypeScript 检查通过。 |
 | 2026-08-20 | G0-11 | 完成同族/引用关系双轨闭环：新增正式关系字段 `family_members`、`cited_patents`、`citing_patents` 的来源别名和只读元数据；导入保留原始关系列、来源观察和导入时间，同时按公开号建立幂等同族/Citation；新增 `/patents/{id}/citations`，清单分正向/反向引用并返回 `in_database`、`other_database`、`missing_record`；同族、引用、图谱均按当前数据库隔离，读取缺失关系不创建占位；普通创建/编辑/单元格更新拒绝覆盖关系原始投影；新增完整导入、API、跨库、缺失目标和原始导出回归测试；更新 24/25/28 号 Agent 文档。定向后端 31 项通过。 |
 | 2026-08-23 | G0-12 | 完成主表高频批量操作闭环：详情历史将同一导入批次合并为可展开摘要，保留逐字段审计；风险管控 SavedView 注册 `product_id`/`projects` 只读投影，并对已存在视图采用追加式补列；新增 `bulk-move-database`、`bulk-move-view`、`bulk-duplicate`，服务层先完整校验再提交，工作副本清空官方号码并保留来源；批量编辑增补注册字段入口；AI 批量面板拆分处理范围与目标字段，列头菜单不再直接执行。新增批量命令和视图配置回归测试。 |
-| 2026-08-23 | G0-13 | 完成 DeepSeek V4 Flash 接入基线：官方 OpenAI-compatible Base URL 统一为 `https://api.deepseek.com`，`v4flash` 兼容别名规范化为 `deepseek-v4-flash`；统一 LLM 客户端支持 V4 `thinking`、`reasoning_effort`、JSON Output、`reasoning_content`/`finish_reason`/`usage` 元数据、429/5xx 退避重试；AI 设置提供 DeepSeek 预设、思考模式和 1-10 并发上限；标准字段和快速抽取使用受控网络并发，数据库写入保持单 Session 串行；补充官方语义、会话边界和模型变更规则 Agent 契约及 LLM/并发回归测试。 |
+| 2026-08-23 | G0-13 | 完成 DeepSeek V4 Flash 接入基线：官方 OpenAI-compatible Base URL 统一为 `https://api.deepseek.com`，`v4flash` 兼容别名规范化为 `deepseek-v4-flash`；统一 LLM 客户端支持 V4 `thinking`、`reasoning_effort`、JSON Output、`reasoning_content`/`finish_reason`/`usage` 元数据、429/5xx 退避重试；AI 设置提供 DeepSeek 预设、思考模式和 1-50 并发上限；标准字段和快速抽取使用受控网络并发，数据库写入保持单 Session 串行；补充官方语义、会话边界和模型变更规则 Agent 契约及 LLM/并发回归测试。 |
 | 2026-08-23 | G0-14 | 完成 Phase 0A SQLite 迁移安全平台：新增 `MigrationRun`/`MigrationIssue` 与 `MigrationService`；当前迁移版本 `2026-08-23.0`，记录校验和、操作者、应用版本、备份、完整性检查、关键表行数和失败原因；SQLite 启用 `foreign_keys=ON`；旧容错加列迁移改为显式版本化操作；失败恢复后停止启动并可通过 `/system/migrations`、`/system/integrity` 查询；补充空库、重复执行、失败恢复和外键回归测试。 |
 | 2026-08-23 | G0-15 | 完成 Phase 0B 31 张来源表字段治理基线：新增 `FieldRegistrySnapshot`、`SourceTableDefinition`、`FieldDefinition`、`SourceFieldMapping`；从 01/02/03/10 CSV 幂等载入 31 张来源表、140 个规范字段、357 条来源映射（84 mapped、273 candidate）；导入只自动采用已批准且目标有效的映射，未知列继续保留为 `unmapped_retained`，不自动创建正式字段；新增字段治理诊断 API 和基线回归测试。 |
-| 2026-08-24 | G0-16 | 完成主表检索与身份跳转基线：详情往返保留完整 URL 查询状态；主搜索覆盖正式字段、custom/AI 字段、项目和标签；列筛选支持 contains/eq/starts_with/ends_with/is_empty/is_not_empty，多个字段 AND；导入、手工编辑、关系解析统一公开号规范化，JP 前导零归一；任意单元格候选公开号可解析到跨库同一 Wiki，未知关系目标不进入主表；新增全局索引与检索 Agent 执行契约。全量后端测试、前端 lint 和 TypeScript 待最终验收。 |
+| 2026-08-24 | G0-16 | 完成主表检索与身份跳转基线：详情往返保留完整 URL 查询状态；主搜索覆盖正式字段、custom/AI 字段、项目和标签；列筛选支持 contains/eq/starts_with/ends_with/is_empty/is_not_empty，多个字段 AND；导入、手工编辑、关系解析统一公开号规范化，JP 前导零归一；任意单元格候选公开号可解析到跨库同一 Wiki，未知关系目标不进入主表；新增全局索引与检索 Agent 执行契约。全量后端测试、前端 lint 和 TypeScript 已在最终验收中通过。 |
+| 2026-08-26 | G0-17 | 完成导入预审闭环：确认上传只创建 `REVIEW_REQUIRED` 批次，差异通过 `changes` 查询，字段决定通过 `review` 固化，`apply` 才写入，`rollback` 检查后续修改后回撤；重复行、相同值、关系原文与结构化关系均保留来源历史；缺少公开号的非空行进入 `retained_source_row`，完全空行进入 `skipped_empty_row`，真正身份/解析错误才隔离；补齐 25/28/24/21/README Agent 文档契约。后端全量 98 项通过，Python compileall、ESLint、TypeScript 通过；Vite build 待授权环境最终重跑。 |
 | 2026-08-16 | G0-8 | 完成治理恢复切片：每次治理动作生成 `decision_batch_id` 并保存观察/专利字段变更前状态；新增治理批次查询、批次恢复 API、追加式 `GovernanceReversal`、后续修改冲突保护、`governance_revert` Wiki 历史、前端决策历史面板和分页。统一专利身份、六类高频视图和工作文件模板仍未完成。通过导入治理定向测试 15 项、前端 lint、TypeScript 和 compileall。 |
 | 2026-08-16 | G0-3~G0-6 | 完成待治理属性确认首版：新增 `GovernanceDecision` 追加式决策记录、四类服务层治理动作、已有字段映射与可选来源值回填、`PatentHistory(source=governance)`、同批次同来源列范围控制、稳定的决策历史 JSON 接口和 `/governance` 工作台；完整证据 CSV 默认包含已保留/已忽略观察。该记录对应首版验收时点，后续 G0-8 已补齐撤销恢复、历史面板和分页。 |
 | 2026-08-16 | G0-1~G0-3 | 完成未知导入属性的原始文件、来源行、来源列和值保留；新增 FieldObservation 和来源 Wiki 历史；提供待治理查询与 CSV 导出。更新 P0-10 过期描述，明确未知列不自动创建 CustomField。后端 `backend/tests` 39 项通过；当前前端 lint 仍需修复。 |

@@ -695,6 +695,8 @@ class ImportBatchResponse(BaseSchema):
     mapping_version: Optional[str] = None
     file_hash: Optional[str] = None
     artifact_path: Optional[str] = None
+    review_config: Optional[dict[str, Any]] = None
+    created_patent_ids: Optional[list[int]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
