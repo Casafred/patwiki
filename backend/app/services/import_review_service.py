@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException
+from app.core.time import utc_now_naive
 from app.models import (
     Citation, CustomField, FieldObservation, ImportBatch, ImportBatchStatus,
     ImportSourceRow, Patent, PatentHistory, PatentIdentifier, LegalStatus,
@@ -29,13 +30,25 @@ RELATION_FIELDS = {"family_members", "cited_patents", "citing_patents"}
 DATE_FIELDS = {"filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date"}
 
 
+def is_unmapped_target_error(reason: str | None) -> bool:
+    """Identify an explicit mapping to an unregistered field.
+
+    It is a governance warning, not a parse failure: the source cell must be
+    retained as an unmapped observation while other fields in the row remain
+    eligible for import.
+    """
+    return bool(reason and reason.startswith("未知的导入目标字段"))
+
+
 def text_value(value: Any) -> str | None:
     if value is None:
         return None
-    if hasattr(value, "value"):
-        value = value.value
     if isinstance(value, (datetime, date)):
         return value.isoformat()
+    # Do not read pandas Timestamp.value here: that is an integer nanosecond
+    # count, not the date text users expect to review and import.
+    if hasattr(value, "value"):
+        value = value.value
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, default=str)
     return str(value)
@@ -87,6 +100,8 @@ def difference_type(current: str | None, candidate: str | None) -> str:
 
 
 def default_action(observation: FieldObservation) -> str:
+    if observation.field_resolution == "quarantined" or observation.difference_type == "quarantined":
+        return "quarantine"
     if observation.field_resolution == "unmapped_retained":
         return "keep_existing"
     if observation.patent_id is None:
@@ -162,14 +177,43 @@ def add_observations(
     patent: Patent | None,
     data: dict | None,
     virtual: dict | None,
+    field_errors: dict[str, str] | None = None,
 ) -> int:
     unknown_count = 0
+    field_errors = field_errors or {}
     for index, column in enumerate(columns):
         value = source.raw_row.get(column, "")
         if not value:
             continue
         target = mapping.get(column, "").strip()
         if target == IMPORT_SKIP_FIELD:
+            continue
+        if target in field_errors:
+            # An explicit mapping to a field that is not registered is still
+            # source data, not a reason to discard the cell or quarantine the
+            # whole row. Keep it in the same governance queue as an unmapped
+            # column so it can be mapped after the import.
+            if is_unmapped_target_error(field_errors[target]):
+                unknown_count += 1
+                db.add(FieldObservation(
+                    import_batch_id=batch.id, source_row_id=source.id,
+                    patent_id=patent.id if patent else None,
+                    source_field_name=column, source_column_index=index,
+                    raw_value=value, normalized_value=value, candidate_value=value,
+                    difference_type="unknown", field_resolution="unmapped_retained",
+                    proposed_action="retain",
+                ))
+                continue
+            current = current_value(patent, target)
+            db.add(FieldObservation(
+                import_batch_id=batch.id, source_row_id=source.id,
+                patent_id=patent.id if patent else None,
+                source_field_name=column, source_column_index=index,
+                canonical_field_key=target, raw_value=value,
+                normalized_value=None, current_value=current, candidate_value=None,
+                difference_type="quarantined", field_resolution="quarantined",
+                proposed_action="quarantine",
+            ))
             continue
         if not target:
             unknown_count += 1
@@ -213,23 +257,27 @@ def stage_import(
     df, columns = ImportService.parse_excel(content, filename, sheet_name)
     validate_publication_mapping(columns, mapping)
     issues = ImportService.validate_mapping(columns, mapping, db)
-    if issues:
-        raise BadRequestException("导入已阻止：请解决字段映射问题后再导入", detail={"mapping_issues": issues})
+    blocking_issues = [issue for issue in issues if issue.get("severity", "warning") == "error"]
+    mapping_warnings = [issue for issue in issues if issue.get("severity", "warning") != "error"]
+    if blocking_issues:
+        # Keep this defensive check for callers that bypass validate_publication_mapping.
+        raise BadRequestException("导入已阻止：请先修复公开号映射", detail={"mapping_issues": blocking_issues})
     batch = ImportBatch(
         filename=filename, source_table_title=source_table_title or Path(filename).stem,
         worksheet_name=sheet_name, source_system=source_system,
         mapping_version="v2-review", file_hash=hashlib.sha256(content).hexdigest(),
         artifact_path=artifact_path, status=ImportBatchStatus.PROCESSING,
-        started_at=datetime.utcnow(), total_rows=len(df), mapping_config=mapping,
-        review_config={"database_id": database_id, "product_id": product_id,
-                       "project_id": project_id, "view_id": view_id,
-                       "source_system": source_system},
+         started_at=utc_now_naive(), total_rows=len(df), mapping_config=mapping,
+         review_config={"database_id": database_id, "product_id": product_id,
+                        "project_id": project_id, "view_id": view_id,
+                        "source_system": source_system, "mapping_warnings": mapping_warnings},
         created_patent_ids=[],
     )
     db.add(batch)
     db.flush()
     custom_cache = {field.key: field for field in db.query(CustomField).all()}
     errors: list[dict] = []
+    field_error_reports: list[dict] = []
     reports: list[dict] = []
     unknown_count = 0
     seen_publications: set[str] = set()
@@ -256,10 +304,13 @@ def stage_import(
             db.add(source)
             db.flush()
             try:
-                data, virtual = ImportService._row_to_patent_data(
+                data, virtual, field_errors = ImportService._row_to_patent_data_tolerant(
                     row_values, mapping, db, custom_fields_cache=custom_cache,
                 )
                 publication = (data.get("publication_number") or "").strip()
+                publication_error = field_errors.get("publication_number")
+                if publication_error:
+                    raise ValueError(publication_error)
                 if not publication:
                     if any(value for value in row_values.values()):
                         # The workbook still has a valid publication column, but
@@ -270,6 +321,7 @@ def stage_import(
                         retained_source_rows += 1
                         unknown_count += add_observations(
                             db, batch, source, columns, mapping, None, data, virtual,
+                            field_errors,
                         )
                         report = {
                             "row": index + 2,
@@ -297,7 +349,9 @@ def stage_import(
                     source.resolution_status = "quarantined"
                     source.resolution_reason = "规范化公开号命中多个专利，已隔离等待人工确认"
                     source.candidate_patent_ids = [item.id for item in matches]
-                    unknown_count += add_observations(db, batch, source, columns, mapping, None, data, virtual)
+                    unknown_count += add_observations(
+                        db, batch, source, columns, mapping, None, data, virtual, field_errors,
+                    )
                     report = {"row": index + 2, "status": "identity_conflict", "reason": source.resolution_reason}
                     errors.append(report)
                     reports.append(report)
@@ -316,23 +370,56 @@ def stage_import(
                     source.resolution_status = "pending_create"
                     source.resolution_reason = "公开号有效，等待审查后创建 Patent Wiki"
                     new_count += 1
-                unknown_count += add_observations(db, batch, source, columns, mapping, patent, data, virtual)
+                unknown_count += add_observations(
+                    db, batch, source, columns, mapping, patent, data, virtual, field_errors,
+                )
                 report = {"row": index + 2, "status": "existing_review" if patent else "new_review",
                           "reason": source.resolution_reason, "patent_id": patent.id if patent else None}
-                reports.append(report)
+                report_field_errors = {
+                    key: reason for key, reason in field_errors.items()
+                    if not is_unmapped_target_error(reason)
+                }
+                if report_field_errors:
+                    field_warnings = [
+                        {"row": index + 2, "status": "field_error", "field": key, "reason": reason}
+                        for key, reason in report_field_errors.items()
+                    ]
+                    reports.append({
+                        "row": index + 2,
+                        "status": "existing_review_with_field_errors" if patent else "new_review_with_field_errors",
+                        "reason": source.resolution_reason,
+                        "patent_id": patent.id if patent else None,
+                        "field_errors": field_warnings,
+                    })
+                    # The row remains eligible for valid-field updates. These
+                    # warnings are surfaced separately from row quarantine.
+                    field_error_reports.extend(field_warnings)
+                else:
+                    reports.append(report)
             except Exception as exc:
                 source.resolution_status = "quarantined"
                 source.resolution_reason = str(exc)
-                unknown_count += add_observations(db, batch, source, columns, mapping, None, None, None)
+                # Keep any successfully parsed fields in the observation set;
+                # only the identity failure quarantines the row itself.
+                try:
+                    partial_data, partial_virtual, partial_errors = ImportService._row_to_patent_data_tolerant(
+                        row_values, mapping, db, custom_fields_cache=custom_cache,
+                    )
+                except Exception:
+                    partial_data, partial_virtual, partial_errors = None, None, {}
+                unknown_count += add_observations(
+                    db, batch, source, columns, mapping, None,
+                    partial_data, partial_virtual, partial_errors,
+                )
                 report = {"row": index + 2, "status": "quarantined", "reason": str(exc)}
                 errors.append(report)
                 reports.append(report)
         batch.processed_rows = len(df)
         batch.duplicate_count = duplicate_count
-        batch.error_count = len(errors)
-        batch.errors = errors or None
+        batch.error_count = len(errors) + len(field_error_reports)
+        batch.errors = [*errors, *field_error_reports] or None
         batch.status = ImportBatchStatus.REVIEW_REQUIRED
-        batch.completed_at = datetime.utcnow()
+        batch.completed_at = utc_now_naive()
         db.commit()
     except Exception:
         db.rollback()
@@ -341,13 +428,16 @@ def stage_import(
     return {
         "batch_id": batch.id, "status": batch.status.value, "total": len(df),
         "created": 0, "updated": 0, "skipped": 0, "errors": len(errors),
+        "field_errors": len(field_error_reports),
         "review_count": sum(item.difference_type in {"new", "content", "format"} for item in staged),
         "unmapped_retained": unknown_count, "existing_count": existing_count,
         "new_count": new_count, "quarantined_count": len(errors),
         "retained_source_rows": retained_source_rows,
         "skipped_empty_rows": skipped_empty_rows,
         "unknown_columns": [key for key, value in mapping.items() if not value and value != IMPORT_SKIP_FIELD],
+        "mapping_warnings": mapping_warnings,
         "row_reports": reports, "error_details": errors,
+        "field_error_details": field_error_reports,
     }
 
 
@@ -394,10 +484,10 @@ def review_batch(db: Session, batch_id: int, *, items: Iterable[dict] = (),
             raise BadRequestException("未治理字段必须先映射到正式字段，不能直接采用")
         item.final_decision = action
         item.decided_by = actor
-        item.decided_at = datetime.utcnow()
+        item.decided_at = utc_now_naive()
         count += 1
     config = dict(batch.review_config or {})
-    config["last_review"] = {"reviewed_by": actor, "reason": reason, "reviewed_at": datetime.utcnow().isoformat()}
+    config["last_review"] = {"reviewed_by": actor, "reason": reason, "reviewed_at": utc_now_naive().isoformat()}
     batch.review_config = config
     db.commit()
     return {"batch_id": batch.id, "reviewed_count": count, "status": batch.status.value}
@@ -406,7 +496,10 @@ def review_batch(db: Session, batch_id: int, *, items: Iterable[dict] = (),
 def coerce_value(field_key: str, value: str):
     if field_key in DATE_FIELDS:
         try:
-            return date.fromisoformat(value[:10])
+            parsed = ImportService._parse_date(value)
+            if parsed is None:
+                raise ValueError(value)
+            return parsed
         except ValueError as exc:
             raise BadRequestException(f"来源值无法写入日期字段 {field_key}：{value}") from exc
     if field_key == "legal_status":
@@ -506,6 +599,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     pending_relations: list[tuple[Patent, dict]] = []
     new_by_publication: dict[str, Patent] = {}
     row_reports: list[dict] = []
+    field_error_details: list[dict] = []
     try:
         for index, _ in enumerate(df.iterrows()):
             source = rows[index] if index < len(rows) else None
@@ -535,7 +629,9 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                         "reason": source.resolution_reason or "来源行已隔离",
                     })
                     continue
-                data, virtual = ImportService._row_to_patent_data(source.raw_row, mapping, db)
+                data, virtual, parse_errors = ImportService._row_to_patent_data_tolerant(
+                    source.raw_row, mapping, db,
+                )
                 publication = (data.get("publication_number") or "").strip()
                 items = by_row.get(source.id, [])
                 actions = {item.id: item.final_decision or default_action(item) for item in items}
@@ -551,6 +647,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     created_in_batch = patent is not None and patent.id in created_ids
                 created = False
                 provisional_title = False
+                row_field_errors: list[dict] = []
                 if patent is None:
                     provisional_title = not bool(data.get("title"))
                     create_data: dict[str, Any] = {
@@ -597,7 +694,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     # entry. This is especially important for duplicate rows
                     # in one batch, where the second row reuses this Patent.
                     for item in items:
-                        if actions.get(item.id) not in {"adopt", "fill_empty"} or not item.canonical_field_key:
+                        if actions.get(item.id) not in {"adopt", "fill_empty"} or not item.canonical_field_key or not item.candidate_value:
                             continue
                         add_import_history(
                             db,
@@ -614,12 +711,42 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     for item in items:
                         key = item.canonical_field_key
                         action = actions.get(item.id)
-                        if not key or not item.candidate_value:
+                        if not key:
+                            continue
+                        if not item.candidate_value and key not in parse_errors:
                             continue
                         current = current_value(patent, key)
                         if action == "adopt" and not created_in_batch and current != item.current_value:
-                            raise ValueError(f"{key} 在审查后发生变化，请重新分析导入")
+                            detail = {
+                                "row": source.source_row,
+                                "status": "field_conflict",
+                                "field": key,
+                                "reason": f"{key} 在审查后发生变化，已保留较新的当前值",
+                                "current_value": current,
+                                "reviewed_value": item.current_value,
+                                "candidate_value": item.candidate_value,
+                            }
+                            row_field_errors.append(detail)
+                            field_error_details.append(detail)
+                            item.difference_type = "quarantined"
+                            item.field_resolution = "quarantined"
+                            item.final_decision = "quarantine"
+                            continue
                         if action in {"adopt", "fill_empty"}:
+                            if key in parse_errors or item.difference_type == "quarantined":
+                                # A malformed source cell is isolated at field
+                                # level. Other valid fields in this row still
+                                # apply and the raw value remains reviewable.
+                                detail = {
+                                    "row": source.source_row,
+                                    "status": "field_error",
+                                    "field": key,
+                                    "reason": parse_errors.get(key) or "字段已隔离，未写入正式数据",
+                                    "candidate_value": item.candidate_value or item.raw_value,
+                                }
+                                row_field_errors.append(detail)
+                                field_error_details.append(detail)
+                                continue
                             if action == "fill_empty" and current:
                                 # The value was filled by somebody else after
                                 # review. Keep that newer value and retain a
@@ -631,7 +758,22 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 )
                                 continue
                             storage_value = import_storage_value(item)
-                            old, _ = write_value(patent, key, storage_value)
+                            try:
+                                old, _ = write_value(patent, key, storage_value)
+                            except Exception as exc:
+                                detail = {
+                                    "row": source.source_row,
+                                    "status": "field_error",
+                                    "field": key,
+                                    "reason": str(exc),
+                                    "candidate_value": storage_value,
+                                }
+                                row_field_errors.append(detail)
+                                field_error_details.append(detail)
+                                item.difference_type = "quarantined"
+                                item.field_resolution = "quarantined"
+                                item.final_decision = "quarantine"
+                                continue
                             new = current_value(patent, key)
                             if text_value(old) != text_value(new):
                                 row_changes += 1
@@ -663,20 +805,26 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                 ensure_patent_identifiers(db, patent, additional_specs=identifier_specs_from_values({
                     "application": data.get("application_number"), "publication": publication,
                     "grant": data.get("grant_number")}, data.get("country")),
-                    source_system=config.get("source_system") or "import", source_timestamp=datetime.utcnow())
+                    source_system=config.get("source_system") or "import", source_timestamp=utc_now_naive())
                 source.patent_id = patent.id
                 source.resolution_status = "resolved"
-                source.resolution_reason = "import applied after review"
+                source.resolution_reason = (
+                    "import applied after review; some fields were isolated"
+                    if row_field_errors else "import applied after review"
+                )
                 for item in items:
                     item.patent_id = patent.id
                 relation_items = [item for item in items if item.canonical_field_key in RELATION_FIELDS]
                 if virtual and any(actions.get(item.id) in {"adopt", "fill_empty"} for item in relation_items):
                     pending_relations.append((patent, virtual))
-                row_reports.append({
+                applied_report = {
                     "row": source.source_row,
                     "status": "created_pending_title" if created and provisional_title else "created" if created else "updated" if patent.id in changed_ids else "reviewed",
                     "patent_id": patent.id,
-                })
+                }
+                if row_field_errors:
+                    applied_report["field_errors"] = row_field_errors
+                row_reports.append(applied_report)
             except Exception as exc:
                 source.resolution_status = "quarantined"
                 source.resolution_reason = str(exc)
@@ -690,21 +838,22 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
         batch.inserted_count = inserted
         batch.updated_count = updated
         batch.skipped_count = skipped
-        batch.error_count = len(errors)
+        batch.error_count = len(errors) + len(field_error_details)
         batch.processed_rows = batch.total_rows
-        batch.errors = errors or None
+        batch.errors = [*errors, *field_error_details] or None
         batch.created_patent_ids = created_ids
         batch.status = ImportBatchStatus.COMPLETED
-        batch.completed_at = datetime.utcnow()
+        batch.completed_at = utc_now_naive()
         db.commit()
     except Exception:
         db.rollback()
         raise
     return {"batch_id": batch.id, "status": batch.status.value, "total": batch.total_rows,
             "created": inserted, "updated": updated, "skipped": skipped, "errors": len(errors),
-            "error_details": errors, "row_reports": row_reports, "database_id": database_id,
-            "family_links": family_links, "citation_links": citation_links,
-            "unmapped_retained": db.query(FieldObservation).filter(FieldObservation.import_batch_id == batch.id, FieldObservation.field_resolution == "unmapped_retained").count()}
+             "error_details": errors, "row_reports": row_reports, "database_id": database_id,
+             "family_links": family_links, "citation_links": citation_links,
+             "field_errors": len(field_error_details), "field_error_details": field_error_details,
+             "unmapped_retained": db.query(FieldObservation).filter(FieldObservation.import_batch_id == batch.id, FieldObservation.field_resolution == "unmapped_retained").count()}
 
 
 def restore_value(patent: Patent, field_key: str, value: str | None) -> None:
@@ -764,6 +913,6 @@ def rollback_batch(db: Session, batch_id: int, *, rolled_back_by: str = "local-u
             if patent:
                 db.delete(patent)
     batch.status = ImportBatchStatus.ROLLED_BACK
-    batch.completed_at = datetime.utcnow()
+    batch.completed_at = utc_now_naive()
     db.commit()
     return {"batch_id": batch.id, "status": batch.status.value, "restored_value_count": restored, "deleted_patent_count": len(created_ids)}

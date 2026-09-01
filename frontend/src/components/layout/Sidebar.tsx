@@ -5,6 +5,50 @@ import ViewSwitcher from '../views/ViewSwitcher'
 import type { Page } from '../../App'
 import Icon from '../common/Icon'
 
+const SIDEBAR_SECTIONS_STORAGE_KEY = 'patwiki_sidebar_sections'
+const SIDEBAR_SUBSECTIONS_STORAGE_KEY = 'patwiki_sidebar_subsections'
+type SidebarSectionKey = 'workspace' | 'intelligence' | 'views' | 'products' | 'management'
+type SidebarSubsectionKey = 'analysis' | 'automation' | 'data' | 'system'
+type SidebarSections = Record<SidebarSectionKey, boolean>
+type SidebarSubsections = Record<SidebarSubsectionKey, boolean>
+
+const DEFAULT_SIDEBAR_SECTIONS: SidebarSections = {
+  workspace: true,
+  intelligence: true,
+  views: true,
+  products: true,
+  management: true,
+}
+
+const DEFAULT_SIDEBAR_SUBSECTIONS: SidebarSubsections = {
+  analysis: true,
+  automation: true,
+  data: true,
+  system: true,
+}
+
+function readSidebarSections(): SidebarSections {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SIDEBAR_SECTIONS_STORAGE_KEY) || '{}') as Partial<SidebarSections>
+    return Object.fromEntries(
+      Object.keys(DEFAULT_SIDEBAR_SECTIONS).map(key => [key, parsed[key as SidebarSectionKey] !== false]),
+    ) as SidebarSections
+  } catch {
+    return DEFAULT_SIDEBAR_SECTIONS
+  }
+}
+
+function readSidebarSubsections(): SidebarSubsections {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SIDEBAR_SUBSECTIONS_STORAGE_KEY) || '{}') as Partial<SidebarSubsections>
+    return Object.fromEntries(
+      Object.keys(DEFAULT_SIDEBAR_SUBSECTIONS).map(key => [key, parsed[key as SidebarSubsectionKey] !== false]),
+    ) as SidebarSubsections
+  } catch {
+    return DEFAULT_SIDEBAR_SUBSECTIONS
+  }
+}
+
 interface SidebarProps {
   currentPage: Page
   onNavigate: (page: Page, databaseId?: number | null) => void
@@ -23,6 +67,44 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   const [showAddDatabase, setShowAddDatabase] = useState(false)
   const [newDbName, setNewDbName] = useState('')
   const [newDbDesc, setNewDbDesc] = useState('')
+  const [expandedSections, setExpandedSections] = useState<SidebarSections>(() => readSidebarSections())
+  const [expandedSubsections, setExpandedSubsections] = useState<SidebarSubsections>(() => readSidebarSubsections())
+
+  const toggleSection = (key: SidebarSectionKey) => {
+    setExpandedSections(previous => {
+      const next = { ...previous, [key]: !previous[key] }
+      try { localStorage.setItem(SIDEBAR_SECTIONS_STORAGE_KEY, JSON.stringify(next)) } catch { /* preferences are optional */ }
+      return next
+    })
+  }
+
+  const renderSectionToggle = (key: SidebarSectionKey, label: string) => (
+    <button
+      type="button"
+      className="sidebar-section-title sidebar-section-toggle"
+      onClick={() => toggleSection(key)}
+      aria-expanded={expandedSections[key]}
+    >
+      <span>{label}</span>
+      <Icon name={expandedSections[key] ? 'chevron-down' : 'chevron-right'} size={13} />
+    </button>
+  )
+
+  const renderSubsectionToggle = (key: SidebarSubsectionKey, label: string) => (
+    <button
+      type="button"
+      className="sidebar-subsection-toggle"
+      onClick={() => setExpandedSubsections(previous => {
+        const next = { ...previous, [key]: !previous[key] }
+        try { localStorage.setItem(SIDEBAR_SUBSECTIONS_STORAGE_KEY, JSON.stringify(next)) } catch { /* preferences are optional */ }
+        return next
+      })}
+      aria-expanded={expandedSubsections[key]}
+    >
+      <span>{label}</span>
+      <Icon name={expandedSubsections[key] ? 'chevron-down' : 'chevron-right'} size={12} />
+    </button>
+  )
 
   // 打通关联：监听当前库切换，重新加载产品列表，patent_count 按当前库过滤
   const reloadProducts = useCallback(async () => {
@@ -191,49 +273,80 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
       </div>
 
       <nav className="sidebar-nav">
-        <div className="sidebar-section-title">工作台</div>
-        <button className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`} onClick={() => handleProductClick(null)} title="全部专利"><Icon name="table" /><span className="nav-label">全部专利</span></button>
-        <button className={`nav-item ${currentPage === 'stats' ? 'active' : ''}`} onClick={() => onNavigate('stats', currentDatabaseId)} title="数据看板"><Icon name="chart" /><span className="nav-label">数据看板</span></button>
-        <button className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard', currentDatabaseId)} title="可配置仪表盘"><Icon name="dashboard" /><span className="nav-label">可配置仪表盘</span></button>
+        {renderSectionToggle('workspace', '工作台')}
+        {expandedSections.workspace && <div className="sidebar-section-content">
+          <button className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`} onClick={() => handleProductClick(null)} title="全部专利"><Icon name="table" /><span className="nav-label">全部专利</span></button>
+          <button className={`nav-item ${currentPage === 'stats' ? 'active' : ''}`} onClick={() => onNavigate('stats', currentDatabaseId)} title="数据看板"><Icon name="chart" /><span className="nav-label">数据看板</span></button>
+          <button className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard', currentDatabaseId)} title="可配置仪表盘"><Icon name="dashboard" /><span className="nav-label">可配置仪表盘</span></button>
+        </div>}
 
-        <div className="sidebar-section-title">智能与自动化</div>
-        <button className={`nav-item ${currentPage === 'automation' ? 'active' : ''}`} onClick={() => onNavigate('automation', currentDatabaseId)} title="自动化规则"><Icon name="automation" /><span className="nav-label">自动化规则</span></button>
-        <button className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`} onClick={() => onNavigate('agent-analysis', currentDatabaseId)} title="智能分析"><Icon name="sparkles" /><span className="nav-label">智能分析</span></button>
-        <button className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`} onClick={() => onNavigate('ai-tasks', currentDatabaseId)} title="AI 任务"><Icon name="activity" /><span className="nav-label">AI 任务</span></button>
+        {renderSectionToggle('intelligence', '智能与自动化')}
+        {expandedSections.intelligence && <div className="sidebar-section-content">
+          <div className="sidebar-subsection">
+            {renderSubsectionToggle('analysis', '分析与任务')}
+            {expandedSubsections.analysis && <div className="sidebar-subsection-content">
+              <button className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`} onClick={() => onNavigate('agent-analysis', currentDatabaseId)} title="智能分析"><Icon name="sparkles" /><span className="nav-label">智能分析</span></button>
+              <button className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`} onClick={() => onNavigate('ai-tasks', currentDatabaseId)} title="AI 任务"><Icon name="activity" /><span className="nav-label">AI 任务</span></button>
+            </div>}
+          </div>
+          <div className="sidebar-subsection">
+            {renderSubsectionToggle('automation', '自动化')}
+            {expandedSubsections.automation && <div className="sidebar-subsection-content">
+              <button className={`nav-item ${currentPage === 'automation' ? 'active' : ''}`} onClick={() => onNavigate('automation', currentDatabaseId)} title="自动化规则"><Icon name="automation" /><span className="nav-label">自动化规则</span></button>
+            </div>}
+          </div>
+        </div>}
 
-        <ViewSwitcher onOpenView={() => onNavigate('patents', currentDatabaseId)} />
+        {renderSectionToggle('views', '视图')}
+        {expandedSections.views && <div className="sidebar-section-content"><ViewSwitcher onOpenView={() => onNavigate('patents', currentDatabaseId)} /></div>}
 
         <div className="sidebar-section-title sidebar-section-title-row">
-          <span>产品分类</span>
+          <button type="button" className="sidebar-section-toggle" onClick={() => toggleSection('products')} aria-expanded={expandedSections.products}>
+            <span>产品分类</span><Icon name={expandedSections.products ? 'chevron-down' : 'chevron-right'} size={13} />
+          </button>
           <button className="sidebar-add" onClick={() => setShowAddProduct(true)} title="新增产品">+</button>
         </div>
-        <div className="product-list">
-          {products.map((p) => (
-            <button key={p.id} className={`product-item ${currentProductId === p.id ? 'active' : ''}`} onClick={() => handleProductClick(p.id)}>
-              <span className="product-dot" />
-              <span className="product-name">{p.name}</span>
-              {p.patent_count !== undefined && <span className="product-count">{p.patent_count}</span>}
-            </button>
-          ))}
-          {products.length === 0 && <div className="sidebar-empty">暂无产品分类</div>}
-        </div>
-        {showAddProduct && (
-          <div className="sidebar-form product-form">
-            <input className="sidebar-input" placeholder="产品名称" value={newProductName} onChange={(e) => setNewProductName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddProduct()} autoFocus />
-            <div className="sidebar-form-actions">
-              <button className="sidebar-action primary" onClick={handleAddProduct}>创建</button>
-              <button className="sidebar-action" onClick={() => { setShowAddProduct(false); setNewProductName('') }}>取消</button>
-            </div>
+        {expandedSections.products && <div className="sidebar-section-content">
+          <div className="product-list">
+            {products.map((p) => (
+              <button key={p.id} className={`product-item ${currentProductId === p.id ? 'active' : ''}`} onClick={() => handleProductClick(p.id)}>
+                <span className="product-dot" />
+                <span className="product-name">{p.name}</span>
+                {p.patent_count !== undefined && <span className="product-count">{p.patent_count}</span>}
+              </button>
+            ))}
+            {products.length === 0 && <div className="sidebar-empty">暂无产品分类</div>}
           </div>
-        )}
+          {showAddProduct && (
+            <div className="sidebar-form product-form">
+              <input className="sidebar-input" placeholder="产品名称" value={newProductName} onChange={(e) => setNewProductName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddProduct()} autoFocus />
+              <div className="sidebar-form-actions">
+                <button className="sidebar-action primary" onClick={handleAddProduct}>创建</button>
+                <button className="sidebar-action" onClick={() => { setShowAddProduct(false); setNewProductName('') }}>取消</button>
+              </div>
+            </div>
+          )}
+        </div>}
 
-        <div className="sidebar-section-title">管理</div>
-        <button className={`nav-item ${currentPage === 'fields' ? 'active' : ''}`} onClick={() => onNavigate('fields', currentDatabaseId)} title="字段管理"><Icon name="columns" /><span className="nav-label">字段管理</span></button>
-        <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management', currentDatabaseId)} title="管理台"><Icon name="settings" /><span className="nav-label">管理台</span></button>
-        <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing', currentDatabaseId)} title="协作与权限"><Icon name="users" /><span className="nav-label">协作与权限</span></button>
-        <button className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`} onClick={() => onNavigate('import-history', currentDatabaseId)} title="导入历史"><Icon name="history" /><span className="nav-label">导入历史</span></button>
-        <button className={`nav-item ${currentPage === 'governance' ? 'active' : ''}`} onClick={() => onNavigate('governance', currentDatabaseId)} title="数据治理"><Icon name="history" /><span className="nav-label">数据治理</span></button>
-        <button className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings', currentDatabaseId)} title="设置"><Icon name="sliders" /><span className="nav-label">设置</span></button>
+        {renderSectionToggle('management', '管理')}
+        {expandedSections.management && <div className="sidebar-section-content">
+          <div className="sidebar-subsection">
+            {renderSubsectionToggle('data', '数据管理')}
+            {expandedSubsections.data && <div className="sidebar-subsection-content">
+              <button className={`nav-item ${currentPage === 'fields' ? 'active' : ''}`} onClick={() => onNavigate('fields', currentDatabaseId)} title="字段管理"><Icon name="columns" /><span className="nav-label">字段管理</span></button>
+              <button className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`} onClick={() => onNavigate('import-history', currentDatabaseId)} title="导入历史"><Icon name="history" /><span className="nav-label">导入历史</span></button>
+              <button className={`nav-item ${currentPage === 'governance' ? 'active' : ''}`} onClick={() => onNavigate('governance', currentDatabaseId)} title="数据治理"><Icon name="history" /><span className="nav-label">数据治理</span></button>
+            </div>}
+          </div>
+          <div className="sidebar-subsection">
+            {renderSubsectionToggle('system', '系统管理')}
+            {expandedSubsections.system && <div className="sidebar-subsection-content">
+              <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management', currentDatabaseId)} title="管理台"><Icon name="settings" /><span className="nav-label">管理台</span></button>
+              <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing', currentDatabaseId)} title="协作与权限"><Icon name="users" /><span className="nav-label">协作与权限</span></button>
+              <button className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings', currentDatabaseId)} title="设置"><Icon name="sliders" /><span className="nav-label">设置</span></button>
+            </div>}
+          </div>
+        </div>}
       </nav>
 
       <button className="sidebar-account" onClick={() => onNavigate('sharing', currentDatabaseId)} title="管理协作与权限">

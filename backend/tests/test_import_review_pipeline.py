@@ -256,6 +256,116 @@ class ImportReviewPipelineTest(unittest.TestCase):
         self.assertEqual(mapping["未来属性"], "")
         self.assertEqual(issues, [])
 
+    def test_datetime_text_is_parsed_as_date(self):
+        data, _ = ImportService._row_to_patent_data(
+            {"公开号": "CN123456789A1", "申请日": "2005-04-04 00:00:00"},
+            {"公开号": "publication_number", "申请日": "filing_date"},
+            self.db,
+        )
+        self.assertEqual(data["filing_date"].isoformat(), "2005-04-04")
+
+    def test_one_bad_field_does_not_quarantine_valid_fields_in_same_row(self):
+        with TemporaryDirectory() as temp_dir:
+            result = self._stage(
+                "公开号,标题,申请日\nCN123456789A1,有效标题,not-a-date\n",
+                {"公开号": "publication_number", "标题": "title", "申请日": "filing_date"},
+                Path(temp_dir) / "partial.csv",
+            )
+            self.assertEqual(result["quarantined_count"], 0)
+            self.assertEqual(result["field_errors"], 1)
+            self.assertEqual(result["row_reports"][0]["status"], "new_review_with_field_errors")
+
+            review_batch(self.db, result["batch_id"], default_action_name="adopt")
+            applied = apply_batch(self.db, result["batch_id"])
+            self.assertEqual(applied["created"], 1)
+            patent = self.db.query(Patent).filter(Patent.database_id == self.database.id).one()
+            self.assertEqual(patent.title, "有效标题")
+            self.assertIsNone(patent.filing_date)
+            changes = list_batch_changes(self.db, result["batch_id"])["items"]
+            date_change = next(item for item in changes if item["canonical_field_key"] == "filing_date")
+            self.assertEqual(date_change["field_resolution"], "quarantined")
+
+    def test_existing_row_field_error_still_applies_other_valid_fields(self):
+        patent = Patent(
+            database_id=self.database.id,
+            publication_number="CN223344556A1",
+            title="旧标题",
+        )
+        self.db.add(patent)
+        self.db.flush()
+        ensure_patent_identifiers(self.db, patent, source_system="test")
+        self.db.commit()
+
+        with TemporaryDirectory() as temp_dir:
+            result = self._stage(
+                "公开号,标题,申请日,备注\nCN223344556A1,导入标题,not-a-date,有效备注\n",
+                {
+                    "公开号": "publication_number",
+                    "标题": "title",
+                    "申请日": "filing_date",
+                    "备注": "notes",
+                },
+                Path(temp_dir) / "existing-partial.csv",
+            )
+            review_items = list_batch_changes(self.db, result["batch_id"])["items"]
+            review_batch(self.db, result["batch_id"], items=[
+                {"observation_id": item["id"], "action": "adopt"}
+                for item in review_items
+                if item["canonical_field_key"] in {"title", "filing_date", "notes"}
+            ])
+
+            # Simulate another edit after review. Only this reviewed field is
+            # isolated; the valid notes value must still be applied.
+            patent.title = "人工更新标题"
+            self.db.commit()
+            applied = apply_batch(self.db, result["batch_id"])
+
+            self.db.refresh(patent)
+            self.assertEqual(applied["updated"], 1)
+            self.assertEqual(applied["errors"], 0)
+            self.assertGreaterEqual(applied["field_errors"], 2)
+            self.assertEqual(patent.title, "人工更新标题")
+            self.assertEqual(patent.notes, "有效备注")
+            self.assertIsNone(patent.filing_date)
+            self.assertTrue(any(
+                item["status"] == "field_conflict" and item["field"] == "title"
+                for item in applied["field_error_details"]
+            ))
+
+    def test_unregistered_explicit_mapping_is_retained_without_blocking_valid_fields(self):
+        """A future/manual column must not make the whole row unimportable."""
+        csv_text = "公开号,标题,未来属性\nCN998877665A1,可导入标题,后续治理值\n"
+        with TemporaryDirectory() as temp_dir:
+            result = self._stage(
+                csv_text,
+                {
+                    "公开号": "publication_number",
+                    "标题": "title",
+                    "未来属性": "cf_future_not_registered",
+                },
+                Path(temp_dir) / "future-column.csv",
+            )
+            self.assertEqual(result["errors"], 0)
+            self.assertEqual(result["field_errors"], 0)
+            self.assertEqual(len(result["mapping_warnings"]), 1)
+            self.assertEqual(result["unmapped_retained"], 1)
+
+            changes = list_batch_changes(self.db, result["batch_id"])["items"]
+            title = next(item for item in changes if item["canonical_field_key"] == "title")
+            unknown = next(item for item in changes if item["source_field_name"] == "未来属性")
+            review_batch(self.db, result["batch_id"], items=[
+                {"observation_id": title["id"], "action": "adopt"},
+                {"observation_id": unknown["id"], "action": "keep_existing"},
+            ])
+            applied = apply_batch(self.db, result["batch_id"])
+
+            self.assertEqual(applied["created"], 1)
+            patent = self.db.query(Patent).filter(
+                Patent.publication_number == "CN998877665A1",
+            ).one()
+            self.assertEqual(patent.title, "可导入标题")
+            self.assertEqual(unknown["candidate_value"], "后续治理值")
+
 
 if __name__ == "__main__":
     unittest.main()

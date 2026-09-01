@@ -4,7 +4,8 @@
 """
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
+from app.database import Base
 
 from app.models import PatentDatabase, Patent, User, DatabaseMembership
 
@@ -174,68 +175,172 @@ class DatabaseService:
         if patent_count and patent_count > 0:
             if not force:
                 return False
-            # force=True：级联删除库内所有专利
-            db.query(Patent).filter(Patent.database_id == database.id).delete(
-                synchronize_session=False
+        if not force and patent_count:
+            return False
+
+        # SQLite enforces foreign keys for every application connection. Do
+        # not rely on ORM relationship cascades here: bulk deletes are used so
+        # a database can be removed even when it contains old rows created
+        # before the V2 relationships were added.
+        tables = Base.metadata.tables
+        def delete_where(table_name: str, condition) -> None:
+            table = tables.get(table_name)
+            if table is not None:
+                db.execute(table.delete().where(condition(table)))
+
+        def delete_ids(table_name: str, column_name: str, ids: set[int]) -> None:
+            if not ids:
+                return
+            table = tables.get(table_name)
+            column = table.c.get(column_name) if table is not None else None
+            if column is not None:
+                db.execute(table.delete().where(column.in_(ids)))
+
+        patent_ids = {
+            int(row[0]) for row in db.query(Patent.id).filter(
+                Patent.database_id == database.id,
+            ).all()
+        }
+        view_ids = {
+            int(row[0]) for row in db.execute(
+                tables["patent_views"].select().with_only_columns(tables["patent_views"].c.id).where(
+                    tables["patent_views"].c.database_id == database.id,
+                )
+            ).all()
+        } if "patent_views" in tables else set()
+        rule_ids = {
+            int(row[0]) for row in db.execute(
+                tables["automation_rules"].select().with_only_columns(tables["automation_rules"].c.id).where(
+                    tables["automation_rules"].c.database_id == database.id,
+                )
+            ).all()
+        } if "automation_rules" in tables else set()
+        risk_case_ids = {
+            int(row[0]) for row in db.execute(
+                tables["risk_cases"].select().with_only_columns(tables["risk_cases"].c.id).where(
+                    tables["risk_cases"].c.database_id == database.id,
+                )
+            ).all()
+        } if "risk_cases" in tables else set()
+        solution_ids = {
+            int(row[0]) for row in db.execute(
+                tables["project_solution_versions"].select().with_only_columns(tables["project_solution_versions"].c.id).where(
+                    tables["project_solution_versions"].c.database_id == database.id,
+                )
+            ).all()
+        } if "project_solution_versions" in tables else set()
+
+        # Import evidence must go before batches and patents. Batch database
+        # scope is stored in review_config for compatibility with old schema.
+        import_batch_ids: set[int] = set()
+        if "import_batches" in tables:
+            from app.models import ImportBatch
+            for batch in db.query(ImportBatch).all():
+                if (batch.review_config or {}).get("database_id") == database.id or (
+                    batch.created_patent_ids and patent_ids.intersection(set(batch.created_patent_ids))
+                ) or db.query(Patent.id).filter(
+                    Patent.id.in_(patent_ids), Patent.source_batch_id == batch.id,
+                ).first() is not None:
+                    import_batch_ids.add(batch.id)
+        if import_batch_ids:
+            # Patent.source_batch_id has no ON DELETE action in legacy schema.
+            # Detach it before removing the provenance batch.
+            db.query(Patent).filter(Patent.source_batch_id.in_(import_batch_ids)).update(
+                {Patent.source_batch_id: None}, synchronize_session=False,
             )
+        if import_batch_ids:
+            source_rows = db.execute(
+                tables["import_source_rows"].select().with_only_columns(tables["import_source_rows"].c.id).where(
+                    tables["import_source_rows"].c.import_batch_id.in_(import_batch_ids),
+                )
+            ).all() if "import_source_rows" in tables else []
+            source_row_ids = {int(row[0]) for row in source_rows}
+            observation_rows = db.execute(
+                tables["field_observations"].select().with_only_columns(tables["field_observations"].c.id).where(
+                    tables["field_observations"].c.source_row_id.in_(source_row_ids),
+                )
+            ).all() if source_row_ids and "field_observations" in tables else []
+            observation_ids = {int(row[0]) for row in observation_rows}
+            # Bulk deletes bypass ORM cascades, so remove governance decisions
+            # explicitly before deleting their referenced observations.
+            delete_ids("governance_decisions", "observation_id", observation_ids)
+            delete_ids("field_observations", "source_row_id", source_row_ids)
+            delete_ids("import_source_rows", "id", source_row_ids)
+            delete_ids("patent_histories", "import_batch_id", import_batch_ids)
+            delete_ids("import_batches", "id", import_batch_ids)
 
-        # SQLite 不强制外键级联（PRAGMA foreign_keys=OFF），且 PatentView 的
-        # backref="views" 无 cascade 配置，db.delete(database) 时 ORM 会尝试将
-        # patent_views.database_id 置 NULL，触发 NOT NULL 约束错误。
-        # 因此必须显式删除所有依赖 database_id 的子表记录。
-        from app.models.view import PatentView, ViewLocalField
-        from app.models.dashboard import Dashboard
-        from app.models.automation import AutomationRule
-        from app.models.attachment import Attachment
+        # Risk/project version children. Risk assessments can reference a
+        # solution with RESTRICT, so remove every dependent row explicitly.
+        delete_ids("risk_patent_links", "risk_case_id", risk_case_ids)
+        delete_ids("risk_solution_links", "risk_case_id", risk_case_ids)
+        delete_ids("risk_case_regions", "risk_case_id", risk_case_ids)
+        delete_ids("risk_assessment_versions", "risk_case_id", risk_case_ids)
+        delete_ids("risk_review_events", "risk_case_id", risk_case_ids)
+        delete_ids("risk_cases", "id", risk_case_ids)
+        delete_ids("risk_solution_links", "solution_version_id", solution_ids)
+        delete_ids("risk_assessment_versions", "solution_version_id", solution_ids)
+        delete_ids("project_solution_changes", "solution_version_id", solution_ids)
+        delete_ids("project_solution_regions", "solution_version_id", solution_ids)
+        delete_ids("project_solution_versions", "id", solution_ids)
 
-        # 删除视图及其本地字段（ViewLocalField 通过 ORM cascade 关联到视图）
-        view_ids = [v.id for v in db.query(PatentView.id).filter(
-            PatentView.database_id == database.id
-        ).all()]
-        if view_ids:
-            db.query(ViewLocalField).filter(
-                ViewLocalField.view_id.in_(view_ids)
-            ).delete(synchronize_session=False)
-            db.query(PatentView).filter(
-                PatentView.database_id == database.id
-            ).delete(synchronize_session=False)
+        # View and rule children.
+        delete_ids("form_share_links", "view_id", view_ids)
+        delete_ids("patent_view_field_values", "view_id", view_ids)
+        delete_ids("view_local_fields", "view_id", view_ids)
+        delete_ids("patent_views", "id", view_ids)
+        delete_ids("automation_logs", "rule_id", rule_ids)
+        delete_ids("automation_logs", "patent_id", patent_ids)
+        delete_ids("automation_rules", "id", rule_ids)
+        delete_where("patent_export_templates", lambda table: table.c.database_id == database.id)
+        delete_where("dashboards", lambda table: table.c.database_id == database.id)
+        delete_where("database_memberships", lambda table: table.c.database_id == database.id)
 
-        # 删除仪表盘
-        db.query(Dashboard).filter(
-            Dashboard.database_id == database.id
-        ).delete(synchronize_session=False)
-
-        # 删除自动化规则及其日志（bulk delete 绕过 ORM cascade，需手动删日志）
-        rule_ids = [r.id for r in db.query(AutomationRule.id).filter(
-            AutomationRule.database_id == database.id
-        ).all()]
-        if rule_ids:
-            from app.models.automation import AutomationLog
-            db.query(AutomationLog).filter(
-                AutomationLog.rule_id.in_(rule_ids)
-            ).delete(synchronize_session=False)
-            db.query(AutomationRule).filter(
-                AutomationRule.id.in_(rule_ids)
-            ).delete(synchronize_session=False)
-
-        # 删除附件文件记录及磁盘文件
-        attachments = db.query(Attachment).filter(
-            Attachment.database_id == database.id
-        ).all()
-        if attachments:
+        # Files are external to SQLite. Remove metadata after collecting the
+        # paths; a missing file is harmless, but an actual deletion error is
+        # surfaced so the transaction does not claim a complete cleanup.
+        if "attachments" in tables:
             from app.config import settings
-            for att in attachments:
-                try:
-                    file_path = settings.FILES_DIR / att.file_path
-                    if file_path.exists():
+            attachments = db.execute(tables["attachments"].select().where(
+                tables["attachments"].c.database_id == database.id,
+            )).mappings().all()
+            for attachment in attachments:
+                file_path = settings.FILES_DIR / attachment["file_path"]
+                if file_path.exists():
+                    try:
                         file_path.unlink()
-                except Exception:
-                    pass  # 文件删除失败不阻断库删除
-            db.query(Attachment).filter(
-                Attachment.database_id == database.id
-            ).delete(synchronize_session=False)
+                    except OSError as exc:
+                        raise RuntimeError(f"无法删除附件文件 {file_path}: {exc}") from exc
+            delete_where("attachments", lambda table: table.c.database_id == database.id)
 
-        db.delete(database)
+        # Patent-owned records without complete ON DELETE clauses.
+        delete_ids("patent_tags", "patent_id", patent_ids)
+        delete_ids("patent_projects", "patent_id", patent_ids)
+        delete_ids("citations", "citing_patent_id", patent_ids)
+        delete_ids("citations", "cited_patent_id", patent_ids)
+        delete_ids("ai_field_values", "patent_id", patent_ids)
+        delete_ids("patent_identifiers", "patent_id", patent_ids)
+        delete_ids("patent_histories", "patent_id", patent_ids)
+        delete_ids("patent_shares", "patent_id", patent_ids)
+        delete_ids("comments", "patent_id", patent_ids)
+        delete_ids("patent_view_field_values", "patent_id", patent_ids)
+        delete_ids("risk_patent_links", "patent_id", patent_ids)
+        if patent_ids and "cross_table_links" in tables:
+            link = tables["cross_table_links"]
+            db.execute(link.delete().where(or_(
+                and_(link.c.source_table == "patents", link.c.source_record_id.in_(patent_ids)),
+                and_(link.c.target_table == "patents", link.c.target_record_id.in_(patent_ids)),
+            )))
+        delete_ids("patents", "id", patent_ids)
+
+        # Remove any remaining rows that explicitly belong to this database.
+        for table_name in ("patent_export_templates", "dashboards", "automation_rules", "attachments", "patent_views", "database_memberships"):
+            table = tables.get(table_name)
+            if table is not None and table.c.get("database_id") is not None:
+                db.execute(table.delete().where(table.c.database_id == database.id))
+
+        db.execute(tables["patent_databases"].delete().where(
+            tables["patent_databases"].c.id == database.id,
+        ))
         db.commit()
         return True
 

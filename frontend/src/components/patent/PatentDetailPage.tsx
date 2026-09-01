@@ -22,6 +22,7 @@ import type {
   PatentCitationItem,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { formatApiDate, formatApiDateTime, formatApiTime } from '../../lib/date'
 import PatentShareDialog from './PatentShareDialog'
 import PatentGraph from './PatentGraph'
 import CommentPanel from './CommentPanel'
@@ -292,9 +293,9 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate }:
             {patent.grant_number && <span>授权号 {patent.grant_number}</span>}
           </div>
           <div className="detail-meta">
-            {patent.created_at && <span>创建于 {new Date(patent.created_at).toLocaleString('zh-CN')}</span>}
+            {patent.created_at && <span>创建于 {formatApiDateTime(patent.created_at)}</span>}
             {patent.updated_at && patent.updated_at !== patent.created_at && (
-              <span> · 最后修改于 {new Date(patent.updated_at).toLocaleString('zh-CN')}</span>
+                <span> · 最后修改于 {formatApiDateTime(patent.updated_at)}</span>
             )}
             {history.length > 0 && (
               <span> · 共 {history.length} 次修改</span>
@@ -431,7 +432,7 @@ const FIELD_SOURCE_LABELS: Record<string, string> = {
 }
 
 function formatDateTime(value?: string | null): string {
-  return value ? new Date(value).toLocaleString('zh-CN') : '-'
+  return formatApiDateTime(value)
 }
 
 function IdentityTab({ patent, identifiers, fieldSources, identityConflicts, loading }: {
@@ -680,19 +681,19 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
       <Field label="申请日">
         {editing ? (
           <input type="date" className="form-input" value={formData.filing_date || ''} onChange={e => updateField('filing_date', e.target.value)} />
-        ) : <div className="field-value">{patent.filing_date ? new Date(patent.filing_date).toLocaleDateString('zh-CN') : '-'}</div>}
+          ) : <div className="field-value">{formatApiDate(patent.filing_date)}</div>}
       </Field>
 
       <Field label="公开日">
         {editing ? (
           <input type="date" className="form-input" value={formData.publication_date || ''} onChange={e => updateField('publication_date', e.target.value)} />
-        ) : <div className="field-value">{patent.publication_date ? new Date(patent.publication_date).toLocaleDateString('zh-CN') : '-'}</div>}
+          ) : <div className="field-value">{formatApiDate(patent.publication_date)}</div>}
       </Field>
 
       <Field label="授权日">
         {editing ? (
           <input type="date" className="form-input" value={formData.grant_date || ''} onChange={e => updateField('grant_date', e.target.value)} />
-        ) : <div className="field-value">{patent.grant_date ? new Date(patent.grant_date).toLocaleDateString('zh-CN') : '-'}</div>}
+          ) : <div className="field-value">{formatApiDate(patent.grant_date)}</div>}
       </Field>
 
       <Field label="法律状态">
@@ -756,7 +757,7 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
       <Field label="优先权日">
         {editing ? (
           <input type="date" className="form-input" value={formData.priority_date || ''} onChange={e => updateField('priority_date', e.target.value)} />
-        ) : <div className="field-value">{patent.priority_date ? new Date(patent.priority_date).toLocaleDateString('zh-CN') : '-'}</div>}
+          ) : <div className="field-value">{formatApiDate(patent.priority_date)}</div>}
       </Field>
 
       <Field label="所属产品">
@@ -1454,7 +1455,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
   const groups: Record<string, HistoryItem[]> = {}
   const importItemsByKey = new Map<string, Extract<HistoryItem, { kind: 'import_batch' }>>()
   filtered.forEach(h => {
-    const day = h.created_at ? new Date(h.created_at).toLocaleDateString('zh-CN') : '未知日期'
+      const day = h.created_at ? formatApiDate(h.created_at) : '未知日期'
     if (!groups[day]) groups[day] = []
     if (h.source !== 'import') {
       groups[day].push({ kind: 'entry', history: h })
@@ -1515,8 +1516,8 @@ function HistoryTab({ patent, history, loading, onReload }: {
             当此专利的任何字段被修改时（手动编辑、批量更新、AI 处理、导入），修改记录会自动写入此处。
           </div>
           <div style={{ marginTop: 12, fontSize: 12, color: '#94a3b8' }}>
-            <div>创建时间：{patent.created_at ? new Date(patent.created_at).toLocaleString('zh-CN') : '-'}</div>
-            <div style={{ marginTop: 2 }}>最后修改：{patent.updated_at ? new Date(patent.updated_at).toLocaleString('zh-CN') : '-'}</div>
+            <div>创建时间：{formatApiDateTime(patent.created_at)}</div>
+            <div style={{ marginTop: 2 }}>最后修改：{formatApiDateTime(patent.updated_at)}</div>
           </div>
         </div>
       ) : (
@@ -1575,7 +1576,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
 
   function renderHistoryEntry(h: PatentHistory) {
                   const src = SOURCE_LABELS[h.source] || { label: h.source, color: '#475569', bg: '#e2e8f0' }
-                  const time = h.created_at ? new Date(h.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
+                    const time = h.created_at ? formatApiTime(h.created_at) : ''
                   return (
                     <div key={h.id} style={{
                       display: 'flex', gap: 12, padding: 12,

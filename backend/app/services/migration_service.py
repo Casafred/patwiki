@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import settings
 from app.database import Base
 from app.models.system import MigrationIssue, MigrationRun
+from app.core.time import utc_now_naive
 
 
 CURRENT_MIGRATION_VERSION = "2026-08-26.0"
@@ -232,7 +233,7 @@ def _backup_database(bind: Engine, backup_dir: Path, version: str) -> Path | Non
     if source_path is None or not source_path.exists() or source_path.stat().st_size == 0:
         return None
     backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
+    stamp = utc_now_naive().strftime("%Y%m%dT%H%M%S%fZ")
     backup_path = backup_dir / f"patwiki-migration-{version}-{stamp}.db"
     bind.dispose()
     source = sqlite3.connect(str(source_path))
@@ -302,7 +303,7 @@ def _record_restored_failure(
             integrity_before=integrity_before,
             table_counts_before=counts_before,
             error=error,
-            completed_at=datetime.utcnow(),
+            completed_at=utc_now_naive(),
         )
         db.add(run)
         db.flush()
@@ -423,7 +424,7 @@ def run_pending_migrations(
             run.integrity_after = integrity_after
             run.table_counts_before = counts_before
             run.table_counts_after = counts_after
-            run.completed_at = datetime.utcnow()
+            run.completed_at = utc_now_naive()
             db.commit()
         finally:
             db.close()

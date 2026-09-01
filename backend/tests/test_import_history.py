@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.imports import router
 from app.database import Base, get_db
-from app.models import ImportBatch, ImportBatchStatus
+from app.models import ImportBatch, ImportBatchStatus, PatentDatabase
 
 
 class ImportHistoryApiTest(unittest.TestCase):
@@ -58,6 +58,24 @@ class ImportHistoryApiTest(unittest.TestCase):
     def test_rejects_unknown_status(self):
         response = self.client.get("/import/batches", params={"status": "unknown"})
         self.assertEqual(response.status_code, 400)
+
+    def test_filters_history_by_database(self):
+        first = PatentDatabase(name="库一", code="db-one")
+        second = PatentDatabase(name="库二", code="db-two")
+        self.db.add_all([first, second])
+        self.db.flush()
+        self.batch.review_config = {"database_id": first.id}
+        other = ImportBatch(
+            filename="other.xlsx",
+            status=ImportBatchStatus.COMPLETED,
+            review_config={"database_id": second.id},
+        )
+        self.db.add(other)
+        self.db.commit()
+
+        response = self.client.get("/import/batches", params={"database_id": first.id})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["filename"] for item in response.json()], ["patents.xlsx"])
 
 
 if __name__ == "__main__":

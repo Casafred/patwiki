@@ -31,8 +31,15 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
     const anchor = document.createElement('a')
     anchor.href = url
     anchor.download = `patwiki_export_${new Date().toISOString().slice(0, 10)}.${extension}`
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
     anchor.click()
-    window.URL.revokeObjectURL(url)
+    // Chromium may start reading the object URL after click returns. Revoke it
+    // on the next task so the downloaded workbook is not truncated/empty.
+    window.setTimeout(() => {
+      window.URL.revokeObjectURL(url)
+      anchor.remove()
+    }, 1000)
   }
 
   const handleExport = async () => {

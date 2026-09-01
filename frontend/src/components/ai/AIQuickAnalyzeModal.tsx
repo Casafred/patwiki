@@ -18,6 +18,7 @@ interface AIQuickAnalyzeModalProps {
   patentIds: number[]
   fields: FieldMeta[]
   customFields: CustomField[]
+  initialInputFields?: string[]
   onClose: () => void
   onStarted: (task: AITask) => void
 }
@@ -45,6 +46,7 @@ export default function AIQuickAnalyzeModal({
   patentIds,
   fields,
   customFields,
+  initialInputFields,
   onClose,
   onStarted,
 }: AIQuickAnalyzeModalProps) {
@@ -52,7 +54,7 @@ export default function AIQuickAnalyzeModal({
   const [selectedTemplateKeys, setSelectedTemplateKeys] = useState<Set<string>>(new Set())
   // 默认选中标题和摘要作为输入列
   const [selectedInputs, setSelectedInputs] = useState<Set<string>>(
-    () => new Set(['title', 'abstract'].filter(k => fields.some(f => f.key === k)))
+    () => new Set((initialInputFields?.length ? initialInputFields : ['title', 'abstract']).filter(k => fields.some(f => f.key === k)))
   )
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT)
   const [rangeMode, setRangeMode] = useState<'all' | 'range'>('all')

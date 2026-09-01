@@ -603,10 +603,11 @@ input, select, textarea {
 .import-summary-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
   margin-bottom: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--line);
   box-shadow: var(--shadow-soft);
 }
 
@@ -645,10 +646,45 @@ input, select, textarea {
   box-shadow: var(--shadow-soft);
 }
 
-.import-history-table { min-width: 900px; }
+.import-history-table { min-width: 960px; }
+.import-history-table thead th { height: 42px; padding: 0 14px; background: #f8fbfb; color: var(--ink-500); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.import-history-table tbody td { height: 60px; padding: 10px 14px; border-top: 1px solid #edf2f2; color: var(--ink-700); vertical-align: middle; white-space: nowrap; }
+.import-history-table tbody tr:hover { background: #fbfefe; }
+.import-history-table tbody tr.is-expanded { background: #f7fbfb; }
+.import-history-expand-col { width: 42px; min-width: 42px; padding: 0 6px !important; text-align: center !important; }
+.import-history-expand-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-500); }
+.import-history-expand-button:hover { border-color: var(--line); background: #fff; color: var(--teal-700); }
+.import-history-detail-row:hover { background: #fff !important; }
+.import-history-detail-row > td { height: auto !important; padding: 0 14px 14px 56px !important; border-top: 0 !important; white-space: normal !important; }
+.import-history-detail { padding: 14px 16px; border: 1px solid var(--line); border-radius: 7px; background: #fbfdfd; }
+.import-history-detail-heading { display: flex; align-items: baseline; gap: 9px; margin-bottom: 12px; color: var(--ink-800); font-size: 12px; }
+.import-history-detail-heading span { color: var(--ink-500); font-size: 11px; }
+.import-history-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.import-history-detail-grid > div { min-width: 0; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 5px; background: #fff; }
+.import-history-detail-grid span, .import-history-detail-grid strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-history-detail-grid span { color: var(--ink-500); font-size: 10px; }
+.import-history-detail-grid strong { margin-top: 4px; color: var(--ink-800); font-size: 11px; font-weight: 600; }
+.import-history-detail-errors { margin-top: 10px; padding: 8px 10px; border-left: 3px solid #d59d3f; background: #fffbeb; color: #8a5b18; font-size: 11px; }
+@media (max-width: 760px) {
+  .import-history-detail-row > td { padding-left: 14px !important; }
+  .import-history-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .import-file-cell { max-width: 300px; }
 .import-file-cell strong, .import-file-cell span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .import-file-cell span { margin-top: 4px; color: var(--ink-500); font-size: 11px; }
+
+.datagrid-tool-menu-wrap { position: relative; flex: 0 0 auto; }
+.datagrid-tool-trigger { min-width: 112px; justify-content: center; }
+.datagrid-tool-menu { position: absolute; top: calc(100% + 7px); right: 0; z-index: 80; width: 210px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: #fff; box-shadow: 0 12px 28px rgba(22, 35, 41, 0.16); }
+.datagrid-tool-menu-heading { padding: 7px 9px 6px; border-bottom: 1px solid #edf2f2; color: var(--ink-500); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
+.datagrid-tool-menu .menu-item { width: 100%; min-height: 32px; justify-content: flex-start; padding: 7px 9px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-800); font-size: 12px; text-align: left; }
+.datagrid-tool-menu .menu-item:hover { background: #f0f8f7; color: var(--teal-700); }
+.datagrid-tool-menu .menu-item:disabled { cursor: not-allowed; opacity: .4; }
+.datagrid-tool-menu .menu-item.is-active { background: #eefaf7; color: var(--teal-700); font-weight: 650; }
+.datagrid-tool-menu .menu-item-ai { color: #2456a6; }
+.datagrid-tool-menu .menu-item-primary { color: var(--teal-700); font-weight: 650; }
+.datagrid-tool-row { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.datagrid-tool-menu .menu-divider { height: 1px; margin: 4px 0; background: #edf2f2; }
 
 .sharing-shell > .page-header,
 .settings-shell > .page-header,
@@ -1034,6 +1070,35 @@ input, select, textarea {
 
 .data-grid tr.row-selected td {
   background: #eff6ff;
+}
+
+/* Keep long text readable without letting one record push all other rows
+   below the fold. The full value remains available in the detail page. */
+.data-grid tr.row-height-capped .cell-value-shell:not(.cell-value-shell-editing) {
+  max-height: var(--row-max-height, 72px);
+  overflow: hidden;
+}
+
+/* Spreadsheet-style active-cell crosshair. Use a quiet tint so it remains
+   useful alongside selected rows and conditional formatting. */
+.data-grid tr.crosshair-row td {
+  background: #f7fbfb;
+}
+
+.data-grid td.crosshair-column-cell,
+.data-grid th.crosshair-column-header {
+  background: #eef7f6;
+}
+
+.data-grid td.crosshair-cell {
+  position: relative;
+  z-index: 8;
+  box-shadow: inset 0 0 0 2px var(--teal-600);
+}
+
+.data-grid tr.row-selected.crosshair-row td,
+.data-grid tr.row-selected td.crosshair-column-cell {
+  background: #e8f4f2;
 }
 
 .data-grid td .cell-content {
@@ -3682,6 +3747,7 @@ body {
 .sidebar-collapsed .sidebar-brand > div:not(.brand-mark),
 .sidebar-collapsed .sidebar-database,
 .sidebar-collapsed .sidebar-section-title,
+.sidebar-collapsed .sidebar-subsection,
 .sidebar-collapsed .view-switcher,
 .sidebar-collapsed .product-list,
 .sidebar-collapsed .sidebar-account .account-info,
@@ -3871,6 +3937,12 @@ body {
 .sidebar-section-title {
   padding: 13px 10px 6px;
 }
+
+.sidebar-subsection { margin: 2px 0 5px; }
+.sidebar-subsection-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 6px 12px 5px 22px; border: 0; background: transparent; color: #759092; font-size: 11px; text-align: left; }
+.sidebar-subsection-toggle:hover { color: #c7e7e2; }
+.sidebar-subsection-content { padding-left: 8px; border-left: 1px solid #29464a; margin-left: 20px; }
+.sidebar-subsection-content .nav-item { padding-top: 7px; padding-bottom: 7px; }
 
 .nav-item {
   width: 100%;
@@ -4677,6 +4749,9 @@ body {
   .sidebar-open.sidebar-collapsed .sidebar-brand > div:not(.brand-mark),
   .sidebar-open.sidebar-collapsed .sidebar-database,
   .sidebar-open.sidebar-collapsed .sidebar-section-title,
+  .sidebar-open.sidebar-collapsed .sidebar-subsection,
+  .sidebar-open.sidebar-collapsed .sidebar-subsection-toggle,
+  .sidebar-open.sidebar-collapsed .sidebar-subsection-content,
   .sidebar-open.sidebar-collapsed .view-switcher,
   .sidebar-open.sidebar-collapsed .product-list,
   .sidebar-open.sidebar-collapsed .sidebar-form,
@@ -5140,6 +5215,10 @@ body {
     padding-left: 0;
     border-left: 0;
   }
+
+  .datagrid-tool-menu { right: auto; left: 0; }
+
+  .import-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   .datagrid-utility-action {
     width: 100%;

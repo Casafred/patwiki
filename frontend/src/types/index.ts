@@ -801,7 +801,7 @@ export interface ImportPreview {
   suggested_mapping: Record<string, string>
   unmapped_columns?: string[]
   unmapped_count?: number
-  mapping_issues?: { column: string; target_field?: string; reason: string }[]
+  mapping_issues?: { column: string; target_field?: string; reason: string; severity?: 'error' | 'warning' }[]
   available_fields?: FieldMeta[]
   sheets?: string[]
   selected_sheet?: string | null
@@ -835,6 +835,9 @@ export interface ImportResult {
   existing_count?: number
   new_count?: number
   quarantined_count?: number
+  mapping_warnings?: { column: string; target_field?: string; reason: string; severity?: 'warning' }[]
+  retained_source_rows?: number
+  skipped_empty_rows?: number
 }
 
 export type ImportReviewAction = 'adopt' | 'keep_existing' | 'fill_empty' | 'ignore' | 'quarantine'

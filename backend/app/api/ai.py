@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import json
 import hashlib
-from datetime import datetime
 
 from app.database import get_db, SessionLocal
 from app.schemas.schemas import AIProcessRequest, AITaskResponse, QuickAnalyzeRequest
@@ -11,6 +10,7 @@ from app.models import AITask, Patent, AIFieldValue, CustomField
 from app.models.enums import CustomFieldType
 from app.config import settings
 from app.core.exceptions import BadRequestException, NotFoundException
+from app.core.time import utc_now_naive
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -76,7 +76,7 @@ async def start_ai_process(
         task.processed_items = task.total_items
         task.failed_count = task.total_items
         task.errors = [{"stage": "prepare", "error": f"AI field '{req.field_key}' not found"}]
-        task.completed_at = datetime.now()
+        task.completed_at = utc_now_naive()
         db.commit()
         db.refresh(task)
         return task
@@ -98,7 +98,7 @@ async def start_ai_process(
                     *(_task_errors(task_row) or []),
                     {"stage": "background", "error": str(exc)},
                 ]
-                task_row.completed_at = datetime.now()
+                task_row.completed_at = utc_now_naive()
                 db.commit()
         finally:
             db.close()
@@ -292,7 +292,7 @@ async def quick_analyze(
         task.status = "failed"
         task.failed_count = task.total_items
         task.errors = [{"stage": "prepare", "error": str(exc)}]
-        task.completed_at = datetime.now()
+        task.completed_at = utc_now_naive()
         db.commit()
         db.refresh(task)
         return task
@@ -315,7 +315,7 @@ async def quick_analyze(
                     *(_task_errors(task_row) or []),
                     {"stage": "background", "error": str(exc)},
                 ]
-                task_row.completed_at = datetime.now()
+                task_row.completed_at = utc_now_naive()
                 task_row.failed_count = max(task_row.failed_count or 0, task_row.total_items or 0)
                 db.commit()
         finally:

@@ -7,6 +7,7 @@ import {
 import { useAppStore } from '../../store'
 import type { AutomationLog, AutomationRule, FieldMeta, JsonObject } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { formatApiDateTime } from '../../lib/date'
 
 type TriggerType = 'manual' | 'record_created' | 'record_imported' | 'field_changed' | 'schedule'
 type ActionType = 'set_field' | 'send_notification'
@@ -127,13 +128,13 @@ export default function AutomationPage() {
           const action = rule.action_config[0] || {}
           return <div className={`automation-rule ${rule.is_enabled ? '' : 'is-disabled'}`} key={rule.id}>
             <div className="automation-rule-main"><div><h3>{rule.name}</h3><p>{triggerLabels[valueText(trigger.type) as TriggerType] || valueText(trigger.type, '未配置')} · {valueText(action.type, '未配置')}</p></div><span className={`rule-status ${rule.is_enabled ? 'enabled' : 'disabled'}`}>{rule.is_enabled ? '已启用' : '已停用'}</span></div>
-            <div className="automation-rule-meta"><span>成功 {rule.execution_count}</span><span>失败 {rule.failure_count}</span><span>{rule.last_executed_at ? new Date(rule.last_executed_at).toLocaleString() : '尚未执行'}</span></div>
+              <div className="automation-rule-meta"><span>成功 {rule.execution_count}</span><span>失败 {rule.failure_count}</span><span>{rule.last_executed_at ? formatApiDateTime(rule.last_executed_at) : '尚未执行'}</span></div>
             <div className="automation-actions"><button className="btn btn-secondary" onClick={() => void toggle(rule)}>{rule.is_enabled ? '停用' : '启用'}</button><button className="btn btn-secondary" disabled={!rule.is_enabled || busy} onClick={() => void execute(rule)}>执行一次</button><button className="btn btn-danger" onClick={() => void remove(rule)}>删除</button></div>
           </div>
         })}
         {rules.length === 0 && <div className="empty-state">当前库还没有自动化规则。</div>}
       </div>
-      <section className="automation-log-panel"><div className="section-heading"><h3>执行记录</h3><span>最近 80 条</span></div><div className="automation-log-list">{logs.map(log => <div className="automation-log-row" key={log.id}><span className={`log-status ${log.status}`}>{log.status}</span><span>规则 #{log.rule_id}</span><span>专利 #{log.patent_id ?? '-'}</span><span>{log.error_message || valueText(log.details?.actions, '已处理')}</span><time>{log.executed_at ? new Date(log.executed_at).toLocaleString() : '-'}</time></div>)}{logs.length === 0 && <div className="empty-state">暂无执行记录。</div>}</div></section>
+      <section className="automation-log-panel"><div className="section-heading"><h3>执行记录</h3><span>最近 80 条</span></div><div className="automation-log-list">{logs.map(log => <div className="automation-log-row" key={log.id}><span className={`log-status ${log.status}`}>{log.status}</span><span>规则 #{log.rule_id}</span><span>专利 #{log.patent_id ?? '-'}</span><span>{log.error_message || valueText(log.details?.actions, '已处理')}</span><time>{log.executed_at ? formatApiDateTime(log.executed_at) : '-'}</time></div>)}{logs.length === 0 && <div className="empty-state">暂无执行记录。</div>}</div></section>
     </div>
   )
 }

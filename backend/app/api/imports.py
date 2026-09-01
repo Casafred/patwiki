@@ -31,6 +31,7 @@ from app.services.patent_identity_service import (
 )
 from app.services.import_review_service import (
     apply_batch,
+    is_unmapped_target_error,
     list_batch_changes,
     review_batch,
     rollback_batch,
@@ -49,6 +50,7 @@ from app.models import (
     PatentHistory,
 )
 from app.core.exceptions import BadRequestException, NotFoundException
+from app.core.time import utc_now_naive
 
 router = APIRouter(tags=["import"])
 
@@ -221,10 +223,13 @@ def _apply_patent_update(patent: Patent, data: dict):
 def _text_value(value):
     if value is None:
         return None
+    # Pandas Timestamp has a ``value`` attribute containing nanoseconds. Check
+    # date-like values before that compatibility branch or Excel dates become
+    # opaque integers and cannot be parsed back as calendar dates.
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
     if hasattr(value, "value"):
         value = value.value
-    if isinstance(value, (datetime,)):
-        return value.isoformat()
     if hasattr(value, "isoformat") and not isinstance(value, str):
         try:
             return value.isoformat()
@@ -308,8 +313,10 @@ def _record_field_observations(
     before_values: dict[str, str | None],
     resolution_status: str,
     final_decision: str | None = None,
+    field_errors: dict[str, str] | None = None,
 ) -> int:
     virtual = virtual or {}
+    field_errors = field_errors or {}
     unknown_count = 0
     raw_row = _raw_row_dict(row_dict)
     for column_index, column in enumerate(columns):
@@ -318,6 +325,39 @@ def _record_field_observations(
             continue
         target = (mapping.get(column) or "").strip()
         if target == IMPORT_SKIP_FIELD:
+            continue
+        if target in field_errors:
+            if is_unmapped_target_error(field_errors[target]):
+                unknown_count += 1
+                db.add(FieldObservation(
+                    import_batch_id=batch.id,
+                    source_row_id=source_row.id,
+                    patent_id=patent.id if patent else None,
+                    source_field_name=column,
+                    source_column_index=column_index,
+                    raw_value=raw_value,
+                    normalized_value=raw_value,
+                    candidate_value=raw_value,
+                    difference_type="unknown",
+                    field_resolution="unmapped_retained",
+                    proposed_action="retain",
+                ))
+                continue
+            db.add(FieldObservation(
+                import_batch_id=batch.id,
+                source_row_id=source_row.id,
+                patent_id=patent.id if patent else None,
+                source_field_name=column,
+                source_column_index=column_index,
+                canonical_field_key=target,
+                raw_value=raw_value,
+                normalized_value=None,
+                current_value=before_values.get(target) or _current_value(patent, target),
+                candidate_value=None,
+                difference_type="quarantined",
+                field_resolution="quarantined",
+                proposed_action="quarantine",
+            ))
             continue
         if not target:
             unknown_count += 1
@@ -453,6 +493,7 @@ def _legacy_confirm_import(
     family_links = 0
     citation_links = 0
     identity_conflicts = 0
+    field_error_reports: list[dict] = []
     identity_index_report: dict = {"indexed": 0, "conflicts": []}
     BATCH_SIZE = 500
     batch: ImportBatch | None = None
@@ -469,17 +510,33 @@ def _legacy_confirm_import(
             file_hash=file_hash,
             artifact_path=str(artifact_path),
             status=ImportBatchStatus.PROCESSING,
-            started_at=datetime.utcnow(),
+            started_at=utc_now_naive(),
         )
         db.add(batch)
         db.flush()
 
         df, columns = ImportService.parse_excel(content, filename, req.sheet_name)
         mapping_issues = ImportService.validate_mapping(columns, mapping, db)
-        if mapping_issues:
+        blocking_mapping_issues = [
+            issue for issue in mapping_issues
+            if issue.get("severity", "warning") == "error"
+        ]
+        mapping_warnings = [
+            issue for issue in mapping_issues
+            if issue.get("severity", "warning") != "error"
+        ]
+        if blocking_mapping_issues:
             raise BadRequestException("导入已阻止：请解决所有字段映射问题后再导入", detail={
-                "mapping_issues": mapping_issues,
+                "mapping_issues": blocking_mapping_issues,
             })
+        batch.review_config = {
+            "database_id": database_id,
+            "product_id": req.product_id,
+            "project_id": req.project_id,
+            "view_id": req.view_id,
+            "source_system": req.source_system,
+            "mapping_warnings": mapping_warnings,
+        }
         total_rows = len(df)
         batch.total_rows = total_rows
         print(f"[PatWiki] 开始导入 {total_rows} 条数据...", flush=True)
@@ -508,9 +565,11 @@ def _legacy_confirm_import(
             db.flush()
             source_rows[idx] = source_row
             try:
-                patent_data, virtual = ImportService._row_to_patent_data(
+                patent_data, virtual, field_errors = ImportService._row_to_patent_data_tolerant(
                     row_dict, mapping, db, custom_fields_cache=custom_fields_cache
                 )
+                if field_errors.get("publication_number"):
+                    raise ValueError(field_errors["publication_number"])
                 patent_data["database_id"] = database_id
                 # P0-14：支持导入到指定视图
                 if req.view_id:
@@ -536,7 +595,12 @@ def _legacy_confirm_import(
                         country,
                     ),
                     "row_num": idx + 2,
+                    "field_errors": field_errors,
                 })
+                field_error_reports.extend(
+                    {"row": idx + 2, "status": "field_error", "field": key, "reason": reason}
+                    for key, reason in field_errors.items()
+                )
             except Exception as e:
                 source_row.resolution_status = "quarantined"
                 source_row.resolution_reason = str(e)
@@ -617,7 +681,7 @@ def _legacy_confirm_import(
                 unmapped_retained += _record_field_observations(
                     db, batch, source_row, source_row.raw_row, columns, mapping,
                     None, rd["patent_data"], rd["virtual"], {},
-                    "quarantined", "identity_conflict",
+                    "quarantined", "identity_conflict", rd.get("field_errors"),
                 )
                 row_reports.append({
                     "row": rd["row_num"],
@@ -650,6 +714,7 @@ def _legacy_confirm_import(
                             unmapped_retained += _record_field_observations(
                                 db, batch, source_row, source_row.raw_row, columns, mapping,
                                 None, patent_data, virtual, {}, "unmapped_retained", "retained",
+                                rd.get("field_errors"),
                             )
                             retained_source_rows += 1
                             row_reports.append({
@@ -759,14 +824,14 @@ def _legacy_confirm_import(
                                 current_patent,
                                 additional_specs=rd["identity_specs"],
                                 source_system=req.source_system or "import",
-                                source_timestamp=datetime.utcnow(),
+                                source_timestamp=utc_now_naive(),
                             )
                             source_row.patent_id = current_patent.id
                             source_row.resolution_status = "resolved"
                             unknown_in_row = _record_field_observations(
                                 db, batch, source_row, source_row.raw_row, columns, mapping,
                                 current_patent, patent_data, virtual, before_values,
-                                "resolved", adoption_decision,
+                                "resolved", adoption_decision, rd.get("field_errors"),
                             )
                             unmapped_retained += unknown_in_row
                             source_row.resolution_reason = (
@@ -788,7 +853,7 @@ def _legacy_confirm_import(
                             unmapped_retained += _record_field_observations(
                                 db, batch, source_row, source_row.raw_row, columns, mapping,
                                 None, patent_data, virtual, before_values,
-                                "unmapped_retained", "retained",
+                                "unmapped_retained", "retained", rd.get("field_errors"),
                             )
 
                 if (i + 1) % BATCH_SIZE == 0:
@@ -816,6 +881,7 @@ def _legacy_confirm_import(
                 unmapped_retained += _record_field_observations(
                     db, batch, source_row, source_row.raw_row, columns, mapping,
                     None, rd["patent_data"], rd["virtual"], {}, "quarantined", "quarantined",
+                    rd.get("field_errors"),
                 )
                 report = {"row": rd["row_num"], "status": "error_database", "reason": str(e)}
                 errors.append(report)
@@ -858,11 +924,14 @@ def _legacy_confirm_import(
             batch.updated_count = updated
             batch.skipped_count = skipped
             batch.duplicate_count = duplicates_count
-            batch.error_count = error_count
-            batch.errors = [report for report in row_reports if report["status"] != "created"] or None
+            batch.error_count = error_count + len(field_error_reports)
+            batch.errors = [
+                *[report for report in row_reports if report["status"] != "created"],
+                *field_error_reports,
+            ] or None
             batch.mapping_config = mapping
             batch.status = ImportBatchStatus.COMPLETED
-            batch.completed_at = datetime.utcnow()
+            batch.completed_at = utc_now_naive()
             db.add(batch)
             db.commit()
     except Exception as exc:
@@ -875,7 +944,7 @@ def _legacy_confirm_import(
             batch.processed_rows = min(batch.total_rows or 0, inserted + updated + skipped + error_count)
             batch.error_count = max(error_count, 1)
             batch.errors = [*errors[:19], {"error": str(exc)}]
-            batch.completed_at = datetime.utcnow()
+            batch.completed_at = utc_now_naive()
             db.add(batch)
             db.commit()
         raise
@@ -902,6 +971,8 @@ def _legacy_confirm_import(
         "identity_index": identity_index_report,
         "unmapped_retained": unmapped_retained,
         "retained_source_rows": retained_source_rows,
+        "field_errors": field_error_reports,
+        "mapping_warnings": mapping_warnings,
         "unknown_columns": [
             column for column in columns
             if not mapping.get(column) and mapping.get(column) != IMPORT_SKIP_FIELD
@@ -1018,6 +1089,7 @@ def rollback_import_batch(
 @router.get("/import/batches", response_model=list[ImportBatchResponse])
 def list_import_batches(
     status: Optional[str] = None,
+    database_id: Optional[int] = None,
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
@@ -1027,6 +1099,11 @@ def list_import_batches(
             query = query.filter(ImportBatch.status == ImportBatchStatus(status))
         except ValueError as exc:
             raise BadRequestException(f"不支持的导入状态：{status}") from exc
+    if database_id is not None:
+        # ImportBatch deliberately keeps database scope in review_config so
+        # older databases remain schema-compatible. Filter at the API
+        # boundary so the history screen never mixes libraries.
+        query = query.filter(func.json_extract(ImportBatch.review_config, "$.database_id") == database_id)
     return query.order_by(ImportBatch.created_at.desc(), ImportBatch.id.desc()).limit(limit).all()
 
 
@@ -1222,7 +1299,7 @@ def decide_import_observation(
         target.final_decision = final_decision
         target.proposed_action = req.action
         target.decided_by = req.decided_by.strip() or "local-user"
-        target.decided_at = datetime.utcnow()
+        target.decided_at = utc_now_naive()
 
         if req.action == "map_existing" and target.patent_id and target.normalized_value:
             if patent:

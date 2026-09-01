@@ -2,7 +2,6 @@ import json
 import hashlib
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from typing import Optional, Any
 from sqlalchemy.orm import Session
 
@@ -10,6 +9,7 @@ from app.models import (
     Patent, AITask, AIFieldValue, CustomField,
 )
 from app.config import settings
+from app.core.time import utc_now_naive
 
 
 class AIFieldEngine:
@@ -293,12 +293,12 @@ class AIFieldEngine:
             task.errors = [{"stage": "prepare", "error": f"Field '{field_key}' not found"}]
             task.failed_count = task.total_items or 0
             task.processed_items = task.total_items or 0
-            task.completed_at = datetime.now()
+            task.completed_at = utc_now_naive()
             self.db.commit()
             return
 
         task.status = "processing"
-        task.started_at = datetime.now()
+        task.started_at = utc_now_naive()
         self.db.commit()
 
         success = 0
@@ -370,7 +370,7 @@ class AIFieldEngine:
         task.request_content = request_samples if request_samples else None
         task.response_content = response_samples if response_samples else None
         task.status = "completed" if failed == 0 else ("completed_with_errors" if success > 0 else "failed")
-        task.completed_at = datetime.now()
+        task.completed_at = utc_now_naive()
         self.db.commit()
 
     # ------------------------------------------------------------------
@@ -494,7 +494,7 @@ class AIFieldEngine:
             return
 
         task.status = "processing"
-        task.started_at = datetime.now()
+        task.started_at = utc_now_naive()
         self.db.commit()
 
         success = 0
@@ -574,5 +574,5 @@ class AIFieldEngine:
         task.request_content = request_samples if request_samples else None
         task.response_content = response_samples if response_samples else None
         task.status = "completed" if failed == 0 else ("completed_with_errors" if success > 0 else "failed")
-        task.completed_at = datetime.now()
+        task.completed_at = utc_now_naive()
         self.db.commit()

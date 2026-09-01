@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { fieldApi, importApi } from '../../api'
 import type { FieldMeta, GovernanceAction, GovernanceDecision, GovernanceObservation } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { formatApiDateTime } from '../../lib/date'
 
 const ACTION_LABELS: Record<GovernanceAction, string> = {
   retain_source: '保留来源',
@@ -26,9 +27,7 @@ function compact(value?: string | null) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
+  return formatApiDateTime(value)
 }
 
 export default function ImportGovernancePage() {

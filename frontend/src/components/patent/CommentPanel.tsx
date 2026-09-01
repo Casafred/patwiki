@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { commentApi } from '../../api'
 import type { CommentRecord } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { formatApiDateTime } from '../../lib/date'
 
 interface CommentPanelProps {
   patentId: number
@@ -9,7 +10,7 @@ interface CommentPanelProps {
 }
 
 function formatTime(value?: string | null): string {
-  return value ? new Date(value).toLocaleString('zh-CN') : '刚刚'
+  return value ? formatApiDateTime(value) : '刚刚'
 }
 
 function CommentItem({

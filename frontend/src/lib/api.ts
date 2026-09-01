@@ -28,6 +28,18 @@ api.interceptors.response.use(
         return api.request(config)
       }
     }
+    // Download endpoints intentionally use responseType=blob. FastAPI error
+    // responses therefore arrive as a Blob too, which used to hide the real
+    // validation message behind a generic export failure.
+    const responseData = error.response?.data
+    if (responseData instanceof Blob) {
+      try {
+        const text = await responseData.text()
+        if (text) error.response.data = JSON.parse(text)
+      } catch {
+        // Keep the original Blob when it is a non-JSON response.
+      }
+    }
     console.error('API Error:', error)
     return Promise.reject(error)
   }

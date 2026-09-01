@@ -16,6 +16,7 @@ from app.models import PatentExportTemplate
 from app.services.field_registry import RELATION_FIELD_KEYS, get_all_fields_meta
 from app.services.patent_service import PatentService
 from app.services.view_service import ViewService
+from app.core.time import utc_now_naive
 
 
 MAX_EXPORT_ROWS = 200_000
@@ -306,7 +307,7 @@ class ExportService:
                     "视图 ID": context.get("view_id") or "",
                     "筛选条件": context.get("filters") or {},
                     "搜索条件": context.get("search") or "",
-                    "导出时间": datetime.now().isoformat(timespec="seconds"),
+                    "导出时间": utc_now_naive().isoformat(timespec="seconds"),
                 }.items()
             ])
             info.to_excel(writer, index=False, sheet_name="导出说明", startrow=len(metadata) + 3)
@@ -335,7 +336,7 @@ class ExportService:
         title = document.add_heading(context.get("template_name") or "PatWiki 专利工作文件", level=1)
         title.paragraph_format.space_after = Pt(6)
         document.add_paragraph(
-            f"导出时间：{datetime.now().isoformat(timespec='seconds')}；"
+            f"导出时间：{utc_now_naive().isoformat(timespec='seconds')}；"
             f"数据库 ID：{context.get('database_id') or '-'}；"
             f"模板版本：{context.get('template_version') or '临时导出'}"
         )

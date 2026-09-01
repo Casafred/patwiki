@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { aiApi } from '../../api'
 import type { AITask, AITaskRequestSample, AITaskResponseSample, CustomField } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { parseApiDate } from '../../lib/date'
 
 export default function AITaskMonitor() {
   const [tasks, setTasks] = useState<AITask[]>([])
@@ -96,19 +97,20 @@ export default function AITaskMonitor() {
 
   const formatTime = (time?: string) => {
     if (!time) return '-'
-    return new Date(time).toLocaleString('zh-CN', {
+    const parsed = parseApiDate(time)
+    return parsed ? parsed.toLocaleString('zh-CN', {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-    })
+    }) : time
   }
 
   const getDuration = (task: AITask) => {
     if (!task.started_at) return '-'
-    const start = new Date(task.started_at).getTime()
-    const end = task.completed_at ? new Date(task.completed_at).getTime() : now
+    const start = parseApiDate(task.started_at)?.getTime() ?? now
+    const end = task.completed_at ? (parseApiDate(task.completed_at)?.getTime() ?? now) : now
     const sec = Math.floor((end - start) / 1000)
     if (sec < 60) return `${sec}秒`
     return `${Math.floor(sec / 60)}分${sec % 60}秒`

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { patentShareApi } from '../../api'
 import type { PublicPatent, PublicPatentShare } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { formatApiDate } from '../../lib/date'
 
 interface PublicPatentSharePageProps {
   token: string
@@ -18,7 +19,7 @@ const typeLabels: Record<string, string> = {
 }
 
 function readableDate(value?: string | null): string {
-  return value ? new Date(value).toLocaleDateString('zh-CN') : '-'
+  return formatApiDate(value)
 }
 
 function readableValue(value?: string | null): string {

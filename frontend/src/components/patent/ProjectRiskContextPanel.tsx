@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { projectRiskService } from '../../services'
 import type { Patent, Project, ProjectSolutionVersion, RiskCase } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { formatApiDateTime } from '../../lib/date'
 
 const STAGES = ['TR1', 'TR2', 'TR3', 'TR4', 'TR5']
 
@@ -97,7 +98,7 @@ function parseRegions(value: string) {
 }
 
 function dateTime(value?: string | null) {
-  return value ? new Date(value).toLocaleString('zh-CN') : '-'
+    return formatApiDateTime(value)
 }
 
 export default function ProjectRiskContextPanel({ patent, projects }: Props) {

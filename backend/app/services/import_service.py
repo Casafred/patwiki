@@ -274,12 +274,15 @@ class ImportService:
 
     @staticmethod
     def validate_mapping(columns: list[str], mapping: dict[str, str], db: Session) -> list[dict[str, str]]:
-        """Return every *blocking* mapping problem before any row can be written.
+        """Return mapping diagnostics before any row can be written.
 
         空目标允许导入继续进行；其原始单元格值仍会留存在导入证据中。
         ``__skip__`` 是用户明确的跳过标记：原始整行保留，但该列不进入
         待治理观察清单。
-        任何未注册的字段都必须被阻止，避免未经治理进入正式数据模型。
+
+        这个方法保留所有字段问题，供预览和治理界面展示。只有公开号身份
+        缺失或重复映射属于批次级阻断；不存在的自定义字段、公式字段和附件
+        字段属于字段级警告，不能阻止同一行的其他合法字段继续导入。
         """
         custom_fields = {field.key: field for field in db.query(CustomField).all()}
         issues: list[dict[str, str]] = []
@@ -292,12 +295,14 @@ class ImportService:
                 "column": "__publication_number__",
                 "target_field": "publication_number",
                 "reason": "导入必须包含并映射公开号列；申请号或授权号不能替代公开号",
+                "severity": "error",
             })
         elif len(publication_columns) > 1:
             issues.append({
                 "column": ", ".join(publication_columns),
                 "target_field": "publication_number",
                 "reason": "一个导入批次只能有一个公开号来源列，请先合并或取消重复映射",
+                "severity": "error",
             })
         for column in columns:
             target = (mapping.get(column) or "").strip()
@@ -308,17 +313,17 @@ class ImportService:
                 # 用户明确跳过本列。
                 continue
             if target in IMPORT_BLOCKED_FIELDS:
-                issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入"})
+                issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入", "severity": "warning"})
                 continue
             if target in VIRTUAL_FIELDS or target in SYSTEM_FIELD_KEYS:
                 continue
             custom_field = custom_fields.get(target)
             if not custom_field:
-                issues.append({"column": column, "target_field": target, "reason": "目标字段不存在"})
+                issues.append({"column": column, "target_field": target, "reason": "目标字段不存在；原始值将保留在待治理记录中", "severity": "warning"})
             elif custom_field.field_type == CustomFieldType.FORMULA:
-                issues.append({"column": column, "target_field": target, "reason": "公式字段由系统计算，不能导入"})
+                issues.append({"column": column, "target_field": target, "reason": "公式字段由系统计算，不能导入；原始值将保留在待治理记录中", "severity": "warning"})
             elif custom_field.field_type == CustomFieldType.ATTACHMENT:
-                issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入"})
+                issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入；原始值将保留在待治理记录中", "severity": "warning"})
         return issues
 
     @staticmethod
@@ -330,11 +335,23 @@ class ImportService:
                 return value.date()
             if isinstance(value, str):
                 value = value.strip()
-                for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日", "%Y%m%d"]:
+                # Excel exports commonly arrive as text even when the source
+                # cell is a date. Accept the time portion and ISO variants,
+                # while still returning a date-only value to the ORM.
+                for fmt in [
+                    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+                    "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M",
+                    "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
+                    "%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d",
+                    "%Y年%m月%d日", "%Y%m%d",
+                ]:
                     try:
                         return datetime.strptime(value, fmt).date()
                     except ValueError:
                         continue
+                # fromisoformat also handles timezone-bearing ISO strings
+                # emitted by some commercial patent databases.
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
         except Exception:
             pass
         return None
@@ -387,6 +404,26 @@ class ImportService:
             - patent_data: 可直接用于创建/更新 Patent
             - virtual_data: {"family_numbers": [...], "cited_numbers": [...], "citing_numbers": [...]}
         """
+        data, virtual, field_errors = ImportService._row_to_patent_data_tolerant(
+            row, mapping, db, custom_fields_cache=custom_fields_cache,
+        )
+        if field_errors:
+            raise ValueError(next(iter(field_errors.values())))
+        return data, virtual
+
+    @staticmethod
+    def _row_to_patent_data_tolerant(
+        row: dict,
+        mapping: dict,
+        db: Session,
+        custom_fields_cache: dict | None = None,
+    ) -> tuple[dict, dict, dict[str, str]]:
+        """Parse columns independently so one bad cell cannot discard a row.
+
+        The returned errors are keyed by canonical field where possible. The
+        staged import records them as field-level quarantines; valid fields in
+        the same row remain available for review and application.
+        """
         data: dict[str, Any] = {}
         custom: dict[str, Any] = {}
         virtual: dict[str, list[str]] = {
@@ -394,6 +431,7 @@ class ImportService:
             "cited_numbers": [],
             "citing_numbers": [],
         }
+        field_errors: dict[str, str] = {}
 
         if custom_fields_cache is None:
             all_custom_fields = {cf.key: cf for cf in db.query(CustomField).all()}
@@ -411,71 +449,74 @@ class ImportService:
             if value == "":
                 continue
 
-            # 虚拟字段：解析专利号列表，不写入 Patent 主表
-            if field_key == "family_members":
-                virtual["family_numbers"] = list(dict.fromkeys([
-                    *virtual["family_numbers"], *parse_patent_numbers(value),
-                ]))
-                custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
-                continue
-            if field_key == "cited_patents":
-                virtual["cited_numbers"] = list(dict.fromkeys([
-                    *virtual["cited_numbers"], *parse_patent_numbers(value),
-                ]))
-                custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
-                continue
-            if field_key == "citing_patents":
-                virtual["citing_numbers"] = list(dict.fromkeys([
-                    *virtual["citing_numbers"], *parse_patent_numbers(value),
-                ]))
-                custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
-                continue
+            try:
+                # 虚拟字段：解析专利号列表，不写入 Patent 主表
+                if field_key == "family_members":
+                    virtual["family_numbers"] = list(dict.fromkeys([
+                        *virtual["family_numbers"], *parse_patent_numbers(value),
+                    ]))
+                    custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
+                    continue
+                if field_key == "cited_patents":
+                    virtual["cited_numbers"] = list(dict.fromkeys([
+                        *virtual["cited_numbers"], *parse_patent_numbers(value),
+                    ]))
+                    custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
+                    continue
+                if field_key == "citing_patents":
+                    virtual["citing_numbers"] = list(dict.fromkeys([
+                        *virtual["citing_numbers"], *parse_patent_numbers(value),
+                    ]))
+                    custom[field_key] = _append_relation_raw_value(custom.get(field_key), raw_value)
+                    continue
 
-            # 自定义字段
-            if field_key in all_custom_fields:
-                if all_custom_fields[field_key].field_type in (CustomFieldType.FORMULA, CustomFieldType.ATTACHMENT):
-                    raise ValueError(f"字段 '{field_key}' 不支持从 Excel 写入")
-                custom[field_key] = value
-                continue
+                # 自定义字段
+                if field_key in all_custom_fields:
+                    if all_custom_fields[field_key].field_type in (CustomFieldType.FORMULA, CustomFieldType.ATTACHMENT):
+                        raise ValueError(f"字段 '{field_key}' 不支持从 Excel 写入")
+                    custom[field_key] = value
+                    continue
 
-            # 系统字段类型转换
-            if field_key in ["filing_date", "publication_date", "grant_date",
-                           "priority_date", "legal_status_date"]:
-                parsed = ImportService._parse_date(value)
-                if not parsed:
-                    raise ValueError(f"字段 '{excel_col}' 的日期值无法识别：{value}")
-                data[field_key] = parsed
-            elif field_key == "has_risk":
-                data[field_key] = ImportService._parse_bool(value)
-            elif field_key == "legal_status":
-                data[field_key] = ImportService._map_legal_status(value)
-            elif field_key == "patent_type":
-                data[field_key] = ImportService._map_patent_type(value)
-            elif field_key == "risk_level":
-                data[field_key] = ImportService._map_risk_level(value)
-            elif field_key == "country":
-                data[field_key] = value.upper() if value else "CN"
-            elif field_key in ["title", "abstract", "claims", "applicant", "inventor",
-                              "assignee", "agent", "application_number", "publication_number",
-                              "grant_number", "ipc_main", "ipc_all", "cpc_main", "cpc_all",
-                              "priority_number", "priority_country", "category", "subcategory",
-                              "technical_problem", "technical_effect", "technical_solution",
-                              "risk_description", "module", "application_status",
-                              "scope_description", "notes", "legal_status_details"]:
-                if field_key == "publication_number":
-                    normalized_publication = normalize_publication_number(value)
-                    if not normalized_publication:
-                        raise ValueError(
-                            f"字段 '{excel_col}' 的公开号格式无法识别：{value}（应为国别+数字+文献类型代码）"
-                        )
-                    data[field_key] = normalized_publication
+                # 系统字段类型转换
+                if field_key in ["filing_date", "publication_date", "grant_date",
+                               "priority_date", "legal_status_date"]:
+                    parsed = ImportService._parse_date(value)
+                    if not parsed:
+                        raise ValueError(f"字段 '{excel_col}' 的日期值无法识别：{value}")
+                    data[field_key] = parsed
+                elif field_key == "has_risk":
+                    data[field_key] = ImportService._parse_bool(value)
+                elif field_key == "legal_status":
+                    data[field_key] = ImportService._map_legal_status(value)
+                elif field_key == "patent_type":
+                    data[field_key] = ImportService._map_patent_type(value)
+                elif field_key == "risk_level":
+                    data[field_key] = ImportService._map_risk_level(value)
+                elif field_key == "country":
+                    data[field_key] = value.upper() if value else "CN"
+                elif field_key in ["title", "abstract", "claims", "applicant", "inventor",
+                                  "assignee", "agent", "application_number", "publication_number",
+                                  "grant_number", "ipc_main", "ipc_all", "cpc_main", "cpc_all",
+                                  "priority_number", "priority_country", "category", "subcategory",
+                                  "technical_problem", "technical_effect", "technical_solution",
+                                  "risk_description", "module", "application_status",
+                                  "scope_description", "notes", "legal_status_details"]:
+                    if field_key == "publication_number":
+                        normalized_publication = normalize_publication_number(value)
+                        if not normalized_publication:
+                            raise ValueError(
+                                f"字段 '{excel_col}' 的公开号格式无法识别：{value}（应为国别+数字+文献类型代码）"
+                            )
+                        data[field_key] = normalized_publication
+                    else:
+                        data[field_key] = value
                 else:
-                    data[field_key] = value
-            else:
-                raise ValueError(f"未知的导入目标字段：{field_key}")
+                    raise ValueError(f"未知的导入目标字段：{field_key}")
+            except (TypeError, ValueError) as exc:
+                field_errors[field_key] = str(exc)
 
         data["custom_fields"] = custom
-        return data, virtual
+        return data, virtual, field_errors
 
 
 def _append_relation_raw_value(existing: Any, value: str) -> str:

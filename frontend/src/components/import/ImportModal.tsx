@@ -3,7 +3,7 @@ import type { ClipboardEvent } from 'react'
 import { importApi, databaseApi, viewApi } from '../../api'
 import { fieldService } from '../../services'
 import { useAppStore } from '../../store'
-import type { ImportPreview, FieldMapping, PatentView, ImportChangeReview, ImportReviewAction } from '../../types'
+import type { ImportPreview, FieldMapping, PatentView, ImportChangeReview, ImportReviewAction, ImportResult } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 interface ImportModalProps {
@@ -87,14 +87,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [dedupeField, setDedupeField] = useState<'application_number' | 'publication_number' | 'both'>('publication_number')
   const [reviewChanges, setReviewChanges] = useState<ImportChangeReview[]>([])
   const [reviewActions, setReviewActions] = useState<Record<number, ImportReviewAction>>({})
-  const [importResult, setImportResult] = useState<{
-    total: number; created: number; updated: number; skipped: number; errors: number;
-    family_links?: number; citation_links?: number;
-    error_details?: { row: number; status?: string; reason?: string; error?: string; patent_id?: number }[]
-    row_reports?: { row: number; status: string; reason: string; patent_id?: number }[]
-    unmapped_retained?: number; retained_source_rows?: number; unknown_columns?: string[];
-    batch_id?: number | null;
-  } | null>(null)
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [uploading, setUploading] = useState(false)
   const [clipboardUploading, setClipboardUploading] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -358,8 +351,13 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       const anchor = document.createElement('a')
       anchor.href = url
       anchor.download = `patwiki-import-${importResult.batch_id}-unmapped.csv`
+      anchor.style.display = 'none'
+      document.body.appendChild(anchor)
       anchor.click()
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => {
+        URL.revokeObjectURL(url)
+        anchor.remove()
+      }, 1000)
     } catch (downloadError: unknown) {
       setError(getErrorMessage(downloadError, '下载待治理字段失败'))
     }
@@ -534,8 +532,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               </div>
 
               {preview && (preview.mapping_issues?.length || 0) > 0 && (
-                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 12 }}>
-                  {preview.mapping_issues?.map(issue => <div key={issue.column}>{issue.column}: {issue.reason}</div>)}
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 12 }}>
+                  {preview.mapping_issues?.map(issue => <div key={`${issue.column}-${issue.target_field || ''}`}>{issue.column}: {issue.reason}</div>)}
                 </div>
               )}
 
@@ -777,9 +775,15 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
 
           {step === 'review' && importResult?.batch_id && (
             <div>
-              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 13, color: '#9a3412' }}>
-                预审已完成。系统不会自动覆盖已有值，请逐项选择“采用导入值”或“保留现有值”；未治理列仍会作为待治理字段保留。
-              </div>
+               <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 13, color: '#9a3412' }}>
+                 预审已完成。系统不会自动覆盖已有值，请逐项选择“采用导入值”或“保留现有值”；未治理列仍会作为待治理字段保留。
+               </div>
+               {(importResult.mapping_warnings?.length || 0) > 0 && (
+                 <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 12, color: '#92400e' }}>
+                   <strong>字段映射提醒：</strong>以下问题不会阻止其他合法字段导入，原始值已保留在待治理记录中。
+                   {importResult.mapping_warnings?.map(issue => <div key={`${issue.column}-${issue.target_field || ''}`}>{issue.column}: {issue.reason}</div>)}
+                 </div>
+               )}
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 <button className="btn btn-secondary" onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.difference_type === 'new' ? 'fill_empty' : 'keep_existing'])))}>全部按安全建议</button>
                 <button className="btn btn-secondary" onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.field_resolution === 'mapped' ? 'adopt' : 'keep_existing'])))}>映射字段全部采用</button>
