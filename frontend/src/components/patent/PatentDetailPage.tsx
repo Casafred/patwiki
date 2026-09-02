@@ -28,17 +28,19 @@ import PatentGraph from './PatentGraph'
 import CommentPanel from './CommentPanel'
 import AttachmentField from '../common/AttachmentField'
 import ProjectRiskContextPanel from './ProjectRiskContextPanel'
+import Icon from '../common/Icon'
 
 interface PatentDetailPageProps {
   patentId: number
   onBack: () => void
   onPatentNavigate?: (patentId: number) => void
+  onOpenSidebar?: () => void
 }
 
 type Tab = 'basic' | 'identity' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'history' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
-export default function PatentDetailPage({ patentId, onBack, onPatentNavigate }: PatentDetailPageProps) {
+export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, onOpenSidebar }: PatentDetailPageProps) {
   const [patent, setPatent] = useState<Patent | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -282,6 +284,17 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate }:
       <div className="detail-page">
       {/* 顶部导航 */}
       <div className="detail-header">
+        {onOpenSidebar && (
+          <button
+            type="button"
+            className="mobile-nav-toggle detail-mobile-nav-toggle"
+            onClick={onOpenSidebar}
+            aria-label="打开导航"
+            title="打开导航"
+          >
+            <Icon name="menu" />
+          </button>
+        )}
         <button className="btn btn-ghost detail-back" onClick={onBack}>‹ 返回专利列表</button>
         <div className="detail-identity">
           <h2>

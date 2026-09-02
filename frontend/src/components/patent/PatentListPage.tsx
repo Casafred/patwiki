@@ -35,6 +35,8 @@ import AIQuickAnalyzeModal from '../ai/AIQuickAnalyzeModal'
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
   viewId?: number | null
+  onOpenImport?: () => void
+  onOpenSidebar?: () => void
 }
 
 type SortOrder = 'asc' | 'desc'
@@ -366,7 +368,7 @@ function LinkFieldEditor({ patentId, field, currentLinks, onChanged, onCancel }:
   )
 }
 
-export default function PatentListPage({ onPatentClick, viewId = null }: PatentListPageProps) {
+export default function PatentListPage({ onPatentClick, viewId = null, onOpenImport, onOpenSidebar }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading, databases, products,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
@@ -2183,6 +2185,17 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f3f4f6' }}>
       <div className="datagrid-toolbar">
         <div className="datagrid-toolbar-heading">
+          {onOpenSidebar && (
+            <button
+              type="button"
+              className="mobile-nav-toggle patent-mobile-nav-toggle"
+              onClick={onOpenSidebar}
+              aria-label="打开导航"
+              title="打开导航"
+            >
+              <Icon name="menu" />
+            </button>
+          )}
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#111827' }}>
             {activeView?.name || '专利列表'}
           </h2>
@@ -2191,6 +2204,17 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           </span>
         </div>
         <div className="datagrid-toolbar-actions">
+          {onOpenImport && (
+            <button
+              type="button"
+              className="btn btn-primary datagrid-import-button"
+              onClick={onOpenImport}
+              aria-label="导入数据"
+              title="导入 Excel、CSV 或粘贴的表格数据"
+            >
+              <Icon name="plus" size={17} />
+            </button>
+          )}
           <div className="search-suggest-wrap">
             <form className="datagrid-search-form" onSubmit={handleSearch}>
               <input
@@ -2231,6 +2255,41 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           >
             清除筛选
           </button>
+          <div className="datagrid-view-actions">
+            {activeView && activeView.layout_type === 'table' && (
+              <>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${getViewGroupFields(activeView).length > 0 ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setShowGroupConfig(true)}
+                  title="按字段分组并折叠展示"
+                >
+                  <Icon name="table" size={14} /> 分组
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${activeView.conditional_formatting?.length ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setShowConditionalConfig(true)}
+                  title="按条件突出显示单元格"
+                >
+                  <Icon name="filter" size={14} /> 条件格式
+                </button>
+                {getViewGroupFields(activeView).length > 0 && (
+                  <span className="view-tools-summary">
+                    已按 {getViewGroupFields(activeView).map(item => fields.find(field => field.key === item.field)?.name || item.field).join(' / ')} 分组
+                  </span>
+                )}
+              </>
+            )}
+            {(activeView?.layout_type === 'table' || !activeView) && (
+              <button type="button" className="btn btn-sm btn-secondary datagrid-view-settings-button" onClick={() => setShowTableSettings(true)} title="设置查看模式和行高">
+                <Icon name="sliders" size={14} /> 查看设置
+                <span className="datagrid-view-settings-hint">
+                  {tableViewMode === 'continuous' ? '连续' : '分页'} · {rowHeightLimit === 'auto' ? '自适应' : `${rowHeightLimit}px`}
+                </span>
+              </button>
+            )}
+          </div>
           <div className="datagrid-tool-menu-wrap" ref={tableToolsRef}>
             <button
               type="button"
@@ -2261,41 +2320,6 @@ export default function PatentListPage({ onPatentClick, viewId = null }: PatentL
           {viewConfigNotice && <span style={{ fontSize: 12, color: '#047857' }}>{viewConfigNotice}</span>}
         </div>
       </div>
-
-      {activeView && activeView.layout_type === 'table' && (
-        <div className="view-tools-bar">
-          <button
-            className={`btn btn-sm ${getViewGroupFields(activeView).length > 0 ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setShowGroupConfig(true)}
-            title="按字段分组并折叠展示"
-          >
-            分组设置
-          </button>
-          <button
-            className={`btn btn-sm ${activeView.conditional_formatting?.length ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setShowConditionalConfig(true)}
-            title="按条件突出显示单元格"
-          >
-            条件格式
-          </button>
-          {getViewGroupFields(activeView).length > 0 && (
-            <span className="view-tools-summary">
-              已按 {getViewGroupFields(activeView).map(item => fields.find(field => field.key === item.field)?.name || item.field).join(' / ')} 分组
-            </span>
-          )}
-        </div>
-      )}
-
-      {(activeView?.layout_type === 'table' || !activeView) && (
-        <div className="data-grid-options-bar data-grid-options-compact">
-          <button className="btn btn-sm btn-secondary" onClick={() => setShowTableSettings(true)} title="设置查看模式和行高">
-            <Icon name="sliders" /> 查看设置
-          </button>
-          <span className="data-grid-option-hint">
-            {tableViewMode === 'continuous' ? '连续滚动' : '分页'} · 行高 {rowHeightLimit === 'auto' ? '自适应' : `${rowHeightLimit}px`}
-          </span>
-        </div>
-      )}
 
       {Object.keys(filterValues).length > 0 && (
         <div className="filter-bar">

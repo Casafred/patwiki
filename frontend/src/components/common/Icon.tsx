@@ -3,7 +3,7 @@ import type { ReactNode, SVGProps } from 'react'
 export type IconName =
   | 'activity' | 'automation' | 'chart' | 'check' | 'chevron-down' | 'chevron-left' | 'chevron-right' | 'chevron-up'
   | 'columns' | 'copy' | 'dashboard' | 'download' | 'file' | 'filter' | 'history' | 'lock' | 'menu'
-  | 'play' | 'refresh' | 'settings' | 'sliders' | 'sparkles' | 'table' | 'tag' | 'trash'
+  | 'play' | 'plus' | 'refresh' | 'settings' | 'sliders' | 'sparkles' | 'table' | 'tag' | 'trash'
   | 'undo' | 'unlock' | 'redo' | 'users' | 'x'
 
 const paths: Record<IconName, ReactNode> = {
@@ -25,6 +25,7 @@ const paths: Record<IconName, ReactNode> = {
   lock: <path d="M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v10H6z" />,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   play: <path d="m9 6 9 6-9 6z" />,
+  plus: <path d="M12 5v14M5 12h14" />,
   refresh: <path d="M20 11a8 8 0 0 0-14.7-4L3 10m0 0V5m0 5h5M4 13a8 8 0 0 0 14.7 4L21 14m0 0v5m0-5h-5" />,
   settings: <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0-5v3m0 14v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1" />,
   sliders: <path d="M4 6h10m4 0h2M4 12h3m4 0h9M4 18h10m4 0h2M14 4v4M7 10v4M14 16v4" />,

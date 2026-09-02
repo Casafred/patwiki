@@ -70,7 +70,7 @@ function DatabaseRouteScope({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-function PatentDetailRoute() {
+function PatentDetailRoute({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const navigate = useNavigate()
   const location = useLocation()
   const { patentId, databaseId } = useParams<{ patentId: string; databaseId?: string }>()
@@ -86,6 +86,7 @@ function PatentDetailRoute() {
       patentId={parsedPatentId}
       onBack={() => navigate(`${databaseId ? `/db/${databaseId}/patents` : '/patents'}${location.search}`)}
       onPatentNavigate={(id) => navigate(`${detailPath(id)}${location.search}`)}
+      onOpenSidebar={onOpenSidebar}
     />
   )
 }
@@ -263,26 +264,19 @@ function WorkspaceApp() {
       />
       <button className="sidebar-scrim" aria-label="关闭导航" onClick={() => setSidebarOpen(false)} />
       <div className="main-content">
-        <header className="header">
-          <button className="mobile-nav-toggle" onClick={() => setSidebarOpen(true)} aria-label="打开导航" title="打开导航"><Icon name="menu" /></button>
-          {currentPage !== 'patents' && (
+        {currentPage !== 'patents' && (
+          <header className="header">
+            <button className="mobile-nav-toggle" onClick={() => setSidebarOpen(true)} aria-label="打开导航" title="打开导航"><Icon name="menu" /></button>
             <div className="header-context">
               <h2>{pageTitles[currentPage]}</h2>
             </div>
-          )}
-          <div className="header-actions">
-            {currentPage === 'patents' && (
-              <button className="btn btn-primary header-import-button" onClick={() => setShowImport(true)} aria-label="导入数据" title="导入 Excel、CSV 或粘贴的表格数据">
-                <span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1 }}>+</span>
-              </button>
-            )}
-          </div>
-        </header>
+          </header>
+        )}
         <div className="content-area">
           <Routes>
             <Route index element={<Navigate to={currentDatabaseId ? `/db/${currentDatabaseId}/patents` : '/patents'} replace />} />
-            <Route path="db/:databaseId/patents" element={<DatabaseRouteScope><PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} /></DatabaseRouteScope>} />
-            <Route path="db/:databaseId/patents/:patentId" element={<DatabaseRouteScope><PatentDetailRoute /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/patents" element={<DatabaseRouteScope><PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} onOpenImport={() => setShowImport(true)} onOpenSidebar={() => setSidebarOpen(true)} /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/patents/:patentId" element={<DatabaseRouteScope><PatentDetailRoute onOpenSidebar={() => setSidebarOpen(true)} /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/stats" element={<DatabaseRouteScope><StatsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/dashboard" element={<DatabaseRouteScope><DashboardPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/automation" element={<DatabaseRouteScope><AutomationPage /></DatabaseRouteScope>} />
@@ -294,8 +288,8 @@ function WorkspaceApp() {
             <Route path="db/:databaseId/governance" element={<DatabaseRouteScope><ImportGovernancePage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/ai-tasks" element={<DatabaseRouteScope><AITaskMonitor /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/agent-analysis" element={<DatabaseRouteScope><AgentAnalysisPage /></DatabaseRouteScope>} />
-            <Route path="patents" element={<PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} />} />
-            <Route path="patents/:patentId" element={<PatentDetailRoute />} />
+            <Route path="patents" element={<PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} onOpenImport={() => setShowImport(true)} onOpenSidebar={() => setSidebarOpen(true)} />} />
+            <Route path="patents/:patentId" element={<PatentDetailRoute onOpenSidebar={() => setSidebarOpen(true)} />} />
             <Route path="stats" element={<StatsPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="automation" element={<AutomationPage />} />
