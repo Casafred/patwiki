@@ -164,7 +164,15 @@ def delete_database(
         raise BadRequestException(
             f"库中仍有 {patent_count} 条专利，无法直接删除。请先清空专利，或使用 force=true 级联删除（将一并删除所有专利）。"
         )
-    ok = DatabaseService.delete_database(db, database, force=force)
+    try:
+        ok = DatabaseService.delete_database(db, database, force=force)
+    except Exception as exc:
+        # Keep failed destructive operations atomic and give the UI a useful
+        # message instead of leaving the user with a generic network error.
+        db.rollback()
+        import logging
+        logging.getLogger(__name__).exception("Failed to delete database %s", database_id)
+        raise BadRequestException(f"删除库失败：{exc}") from exc
     if not ok:
         raise BadRequestException("删除失败（可能为默认库或发生异常）")
     return {"success": True, "force": force, "deleted_patent_count": patent_count or 0}

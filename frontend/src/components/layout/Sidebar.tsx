@@ -3,6 +3,7 @@ import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 import ViewSwitcher from '../views/ViewSwitcher'
 import type { Page } from '../../App'
+import type { PatentDatabase } from '../../types'
 import Icon from '../common/Icon'
 
 const SIDEBAR_SECTIONS_STORAGE_KEY = 'patwiki_sidebar_sections'
@@ -69,6 +70,8 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   const [newDbDesc, setNewDbDesc] = useState('')
   const [expandedSections, setExpandedSections] = useState<SidebarSections>(() => readSidebarSections())
   const [expandedSubsections, setExpandedSubsections] = useState<SidebarSubsections>(() => readSidebarSubsections())
+  const [pendingDeleteDatabase, setPendingDeleteDatabase] = useState<PatentDatabase | null>(null)
+  const [deletingDatabase, setDeletingDatabase] = useState(false)
 
   const toggleSection = (key: SidebarSectionKey) => {
     setExpandedSections(previous => {
@@ -175,7 +178,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   }
 
   // 整库删除：级联删除库内所有专利后删库（默认库不可删）
-  const handleDeleteDatabase = async () => {
+  const requestDeleteDatabase = () => {
     if (currentDatabaseId === null || currentDatabaseId === undefined) {
       alert('请先选择要删除的库')
       return
@@ -189,11 +192,13 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
       alert('默认数据库不可删除')
       return
     }
-    const count = db.patent_count ?? 0
-    const msg = count > 0
-      ? `确定要删除库「${db.name}」吗？\n\n该库包含 ${count} 条专利，将一并删除，此操作不可恢复！`
-      : `确定要删除空库「${db.name}」吗？此操作不可恢复。`
-    if (!confirm(msg)) return
+    setPendingDeleteDatabase(db)
+  }
+
+  const handleDeleteDatabase = async () => {
+    const db = pendingDeleteDatabase
+    if (!db || deletingDatabase) return
+    setDeletingDatabase(true)
     try {
       await databaseApi.delete(db.id, true)
       const refreshed = await databaseApi.list()
@@ -209,7 +214,10 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
       const detail = e && typeof e === 'object' && 'response' in e
         ? (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail
         : undefined
-      alert(detail || '删除库失败')
+      alert(typeof detail === 'string' ? detail : '删除库失败，请检查后端日志后重试')
+    } finally {
+      setDeletingDatabase(false)
+      setPendingDeleteDatabase(null)
     }
   }
 
@@ -266,7 +274,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
           <div className="sidebar-inline-actions">
             <button className="sidebar-link" onClick={() => setShowAddDatabase(true)}>+ 新建专利库</button>
             {currentDatabaseId !== null && databases.find(d => d.id === currentDatabaseId && !d.is_default) && (
-              <button className="sidebar-link danger" onClick={handleDeleteDatabase} title="删除当前库及库内专利">删除</button>
+              <button className="sidebar-link danger" onClick={requestDeleteDatabase} title="删除当前库及库内专利">删除</button>
             )}
           </div>
         )}
@@ -359,6 +367,28 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         </div>
         <span className="account-arrow">›</span>
       </button>
+      {pendingDeleteDatabase && (
+        <div className="modal-overlay" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !deletingDatabase) setPendingDeleteDatabase(null)
+        }}>
+          <div className="modal sidebar-delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-db-title">
+            <div className="modal-header">
+              <h2 id="delete-db-title">删除专利库</h2>
+              <button type="button" className="modal-close" onClick={() => setPendingDeleteDatabase(null)} disabled={deletingDatabase} aria-label="关闭">×</button>
+            </div>
+            <div className="modal-body">
+              <p>确定删除「{pendingDeleteDatabase.name}」吗？</p>
+              <p className="text-muted">库内 {pendingDeleteDatabase.patent_count ?? 0} 条专利及其关联数据将一并删除，操作不可恢复。</p>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn-secondary" onClick={() => setPendingDeleteDatabase(null)} disabled={deletingDatabase}>取消</button>
+              <button type="button" className="btn-danger" onClick={() => void handleDeleteDatabase()} disabled={deletingDatabase}>
+                {deletingDatabase ? '删除中...' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }

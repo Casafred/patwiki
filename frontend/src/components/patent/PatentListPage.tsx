@@ -67,6 +67,30 @@ interface TablePositionSnapshot {
   savedAt: number
 }
 
+interface TableDataSnapshot {
+  items: Patent[]
+  total: number
+  continuousPage: number
+  hasMore: boolean
+  savedAt: number
+}
+
+// Keep a small in-memory cache for the current browser session. Returning from
+// a Wiki detail page should render the previous result immediately instead of
+// replaying every page that was loaded before navigation.
+const tableDataCache = new Map<string, TableDataSnapshot>()
+const TABLE_DATA_CACHE_LIMIT = 8
+
+function saveTableDataSnapshot(key: string, snapshot: TableDataSnapshot) {
+  tableDataCache.delete(key)
+  tableDataCache.set(key, snapshot)
+  while (tableDataCache.size > TABLE_DATA_CACHE_LIMIT) {
+    const oldestKey = tableDataCache.keys().next().value
+    if (!oldestKey) break
+    tableDataCache.delete(oldestKey)
+  }
+}
+
 function readTableViewMode(): TableViewMode {
   try {
     return localStorage.getItem(TABLE_VIEW_MODE_STORAGE_KEY) === 'continuous' ? 'continuous' : 'pagination'
@@ -517,6 +541,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     sortOrder,
     groupByFamily,
     mode: tableViewMode,
+    page: tableViewMode === 'pagination' ? page : null,
   })}`
 
   const readTablePosition = useCallback((): TablePositionSnapshot | null => {
@@ -681,28 +706,43 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     requestedPage = tableViewMode === 'continuous' ? 1 : page,
     append = false,
     requestedPageSize = pageSize,
+    preserveVisible = false,
   ): Promise<boolean> => {
     const myRequestId = ++loadPatentsRequestId.current
     const effectivePage = requestedPage
     if (!append) {
-      setLoading(true)
-      patentsRef.current = []
-      continuousPageRef.current = effectivePage
-      continuousHasMoreRef.current = true
-      if (tableViewMode === 'continuous') tableWrapperRef.current?.scrollTo({ top: 0 })
+      if (!preserveVisible) setLoading(true)
+      if (!preserveVisible) patentsRef.current = []
+      if (!preserveVisible) {
+        continuousPageRef.current = effectivePage
+        continuousHasMoreRef.current = true
+        if (tableViewMode === 'continuous') tableWrapperRef.current?.scrollTo({ top: 0 })
+      }
     }
     const applyItems = (items: Patent[], total: number) => {
       totalPatentsRef.current = total
-      if (!append) {
+      if (!append && !preserveVisible) {
         patentsRef.current = items
         setPatents(items, total)
+        saveTableDataSnapshot(tableScopeKey, {
+          items,
+          total,
+          continuousPage: continuousPageRef.current,
+          hasMore: items.length < total,
+          savedAt: Date.now(),
+        })
         return
       }
-      const merged = Array.from(
-        new Map([...patentsRef.current, ...items].map(item => [item.id, item])).values(),
-      )
+      const merged = Array.from(new Map([...patentsRef.current, ...items].map(item => [item.id, item])).values())
       patentsRef.current = merged
       setPatents(merged, total)
+      saveTableDataSnapshot(tableScopeKey, {
+        items: merged,
+        total,
+        continuousPage: continuousPageRef.current,
+        hasMore: merged.length < total,
+        savedAt: Date.now(),
+      })
     }
     try {
       const viewFilters: JsonObject = {}
@@ -795,7 +835,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, tableViewMode, viewId, setPatents, setLoading])
+  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, tableViewMode, viewId, tableScopeKey, setPatents, setLoading])
 
   const loadNextContinuousPage = useCallback(() => {
     if (tableViewMode !== 'continuous' || continuousLoadingRef.current || !continuousHasMoreRef.current) return
@@ -961,6 +1001,37 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
   useEffect(() => {
     if (fields.length > 0) {
+      const cached = tableDataCache.get(tableScopeKey)
+      const position = readTablePosition()
+      if (cached) {
+        patentsRef.current = cached.items
+        totalPatentsRef.current = cached.total
+        continuousPageRef.current = cached.continuousPage
+        continuousHasMoreRef.current = cached.hasMore
+        restoredScopeRef.current = tableScopeKey
+        // The store update is intentionally synchronous with the cache hit so
+        // the table never flashes an empty loading state after detail->back.
+        setPatents(cached.items, cached.total)
+        window.requestAnimationFrame(() => {
+          const element = tableWrapperRef.current
+          if (!element || !position) return
+          element.scrollLeft = position.scrollLeft
+          element.scrollTop = position.scrollTop
+        })
+        // Refresh only the loaded window and keep cached rows visible while it
+        // is in flight. A fresh cache is already the latest list response.
+        if (tableViewMode === 'pagination' && Date.now() - cached.savedAt > 15000) {
+          window.setTimeout(() => {
+            void loadPatents(
+              page,
+              false,
+              Math.min(cached.items.length || pageSize, 1000),
+              true,
+            )
+          }, 0)
+        }
+        return
+      }
       if (tableViewMode === 'continuous') {
         if (restoredScopeRef.current === tableScopeKey) return
         restoredScopeRef.current = tableScopeKey
@@ -969,7 +1040,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         void restoreContinuousPosition(readTablePosition())
         return
       }
-      const snapshot = readTablePosition()
+      const snapshot = position
       // Loading the external table source also updates the loading and patent stores.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadPatents(page, false).then(success => {
@@ -982,7 +1053,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         })
       })
     }
-  }, [fields.length, loadPatents, page, readTablePosition, restoreContinuousPosition, tableScopeKey, tableViewMode])
+  }, [fields.length, loadPatents, page, pageSize, readTablePosition, restoreContinuousPosition, setPatents, tableScopeKey, tableViewMode])
 
   useEffect(() => {
     // Reset selection and pagination when the active data scope changes.

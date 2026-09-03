@@ -324,6 +324,13 @@ class DatabaseService:
         delete_ids("comments", "patent_id", patent_ids)
         delete_ids("patent_view_field_values", "patent_id", patent_ids)
         delete_ids("risk_patent_links", "patent_id", patent_ids)
+        # duplicate_of is a self-reference without ON DELETE SET NULL. A
+        # patent in another database may still point at a deleted patent;
+        # preserve that external record while removing the dangling link.
+        if patent_ids:
+            db.query(Patent).filter(Patent.duplicate_of.in_(patent_ids)).update(
+                {Patent.duplicate_of: None}, synchronize_session=False,
+            )
         if patent_ids and "cross_table_links" in tables:
             link = tables["cross_table_links"]
             db.execute(link.delete().where(or_(

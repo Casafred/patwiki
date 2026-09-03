@@ -90,6 +90,31 @@ class DatabaseServiceTest(unittest.TestCase):
         self.assertEqual(self.db.query(FieldObservation).filter_by(import_batch_id=batch_id).count(), 0)
         self.assertEqual(self.db.query(PatentHistory).filter_by(import_batch_id=batch_id).count(), 0)
 
+    def test_force_delete_detaches_duplicate_patent_in_another_database(self):
+        target_db = PatentDatabase(name="目标库", code="DELETE_TARGET")
+        other_db = PatentDatabase(name="其他库", code="DELETE_OTHER")
+        self.db.add_all([target_db, other_db])
+        self.db.flush()
+        deleted_patent = Patent(database_id=target_db.id, title="待删除专利")
+        self.db.add(deleted_patent)
+        self.db.flush()
+        external_patent = Patent(
+            database_id=other_db.id,
+            title="其他库中的副本",
+            is_duplicate=True,
+            duplicate_of=deleted_patent.id,
+        )
+        self.db.add(external_patent)
+        self.db.commit()
+        deleted_patent_id = deleted_patent.id
+        external_patent_id = external_patent.id
+
+        self.assertTrue(DatabaseService.delete_database(self.db, target_db, force=True))
+
+        self.assertIsNone(self.db.query(Patent).filter_by(id=deleted_patent_id).first())
+        surviving = self.db.query(Patent).filter_by(id=external_patent_id).one()
+        self.assertIsNone(surviving.duplicate_of)
+
 
 if __name__ == "__main__":
     unittest.main()
