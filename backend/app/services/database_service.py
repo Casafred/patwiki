@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, inspect, or_, text
 from app.database import Base
 
-from app.models import PatentDatabase, Patent, User, DatabaseMembership
+from app.models import (
+    PatentDatabase, Patent, User, DatabaseMembership,
+    PatentDatabaseMembership, PatentHistory,
+)
 
 
 class DatabaseService:
@@ -172,7 +175,13 @@ class DatabaseService:
         if database.is_default:
             return False
         target_database_id = database.id
-        patent_count = db.query(func.count(Patent.id)).filter(Patent.database_id == target_database_id).scalar()
+        patent_count = db.query(func.count(Patent.id)).filter(or_(
+            Patent.database_id == target_database_id,
+            db.query(PatentDatabaseMembership.id).filter(
+                PatentDatabaseMembership.patent_id == Patent.id,
+                PatentDatabaseMembership.database_id == target_database_id,
+            ).exists(),
+        )).scalar()
         if patent_count and patent_count > 0:
             if not force:
                 return False
@@ -197,11 +206,30 @@ class DatabaseService:
             if column is not None:
                 db.execute(table.delete().where(column.in_(ids)))
 
-        patent_ids = {
+        target_patent_ids = {
             int(row[0]) for row in db.query(Patent.id).filter(
                 Patent.database_id == database.id,
             ).all()
         }
+        target_patent_ids.update(int(row[0]) for row in db.query(
+            PatentDatabaseMembership.patent_id,
+        ).filter(PatentDatabaseMembership.database_id == database.id).all())
+        shared_patent_ids = {
+            int(row[0]) for row in db.query(PatentDatabaseMembership.patent_id).filter(
+                PatentDatabaseMembership.patent_id.in_(target_patent_ids),
+                PatentDatabaseMembership.database_id != database.id,
+            ).distinct().all()
+        } if target_patent_ids else set()
+        patent_ids = target_patent_ids - shared_patent_ids
+        for patent_id in shared_patent_ids:
+            patent = db.query(Patent).filter(Patent.id == patent_id).first()
+            if patent and patent.database_id == database.id:
+                replacement = db.query(PatentDatabaseMembership.database_id).filter(
+                    PatentDatabaseMembership.patent_id == patent_id,
+                    PatentDatabaseMembership.database_id != database.id,
+                ).order_by(PatentDatabaseMembership.database_id).first()
+                if replacement:
+                    patent.database_id = int(replacement[0])
         view_ids = {
             int(row[0]) for row in db.execute(
                 tables["patent_views"].select().with_only_columns(tables["patent_views"].c.id).where(
@@ -236,12 +264,21 @@ class DatabaseService:
         import_batch_ids: set[int] = set()
         if "import_batches" in tables:
             from app.models import ImportBatch
+            shared_history_batch_ids = {
+                int(row[0]) for row in db.query(PatentHistory.import_batch_id).filter(
+                    PatentHistory.import_batch_id.isnot(None),
+                    PatentHistory.patent_id.in_(shared_patent_ids),
+                ).distinct().all()
+            } if shared_patent_ids else set()
             for batch in db.query(ImportBatch).all():
-                if (batch.review_config or {}).get("database_id") == database.id or (
+                database_scoped_batch = (batch.review_config or {}).get("database_id") == database.id
+                batch_has_shared_history = batch.id in shared_history_batch_ids
+                if (database_scoped_batch and not batch_has_shared_history) or (
+                    not batch_has_shared_history and
                     batch.created_patent_ids and patent_ids.intersection(set(batch.created_patent_ids))
-                ) or db.query(Patent.id).filter(
+                ) or (not batch_has_shared_history and db.query(Patent.id).filter(
                     Patent.id.in_(patent_ids), Patent.source_batch_id == batch.id,
-                ).first() is not None:
+                ).first() is not None):
                     import_batch_ids.add(batch.id)
         if import_batch_ids:
             # Patent.source_batch_id has no ON DELETE action in legacy schema.
@@ -269,6 +306,13 @@ class DatabaseService:
             delete_ids("import_source_rows", "id", source_row_ids)
             delete_ids("patent_histories", "import_batch_id", import_batch_ids)
             delete_ids("import_batches", "id", import_batch_ids)
+
+        # Remove only this database's visibility links. Shared canonical
+        # records are intentionally left untouched.
+        delete_where(
+            "patent_database_memberships",
+            lambda table: table.c.database_id == database.id,
+        )
 
         # Risk/project version children. Risk assessments can reference a
         # solution with RESTRICT, so remove every dependent row explicitly.
@@ -418,7 +462,13 @@ class DatabaseService:
 
     @staticmethod
     def refresh_patent_count(db: Session, database_id: int) -> int:
-        count = db.query(func.count(Patent.id)).filter(Patent.database_id == database_id).scalar()
+        count = db.query(func.count(Patent.id)).filter(or_(
+            Patent.database_id == database_id,
+            db.query(PatentDatabaseMembership.id).filter(
+                PatentDatabaseMembership.patent_id == Patent.id,
+                PatentDatabaseMembership.database_id == database_id,
+            ).exists(),
+        )).scalar()
         database = db.query(PatentDatabase).filter(PatentDatabase.id == database_id).first()
         if database:
             database.patent_count = count or 0

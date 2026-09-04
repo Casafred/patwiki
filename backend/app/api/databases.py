@@ -7,11 +7,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app.database import get_db
 from app.services.database_service import DatabaseService
 from app.services.view_service import ViewService
-from app.models import User
+from app.models import User, PatentDatabaseMembership
 from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(prefix="/databases", tags=["database"])
@@ -159,7 +160,13 @@ def delete_database(
     # 先查专利数，给前端更友好的提示
     from app.models import Patent as PatentModel
     from sqlalchemy import func as _func
-    patent_count = db.query(_func.count(PatentModel.id)).filter(PatentModel.database_id == database_id).scalar()
+    patent_count = db.query(_func.count(PatentModel.id)).filter(or_(
+        PatentModel.database_id == database_id,
+        db.query(PatentDatabaseMembership.id).filter(
+            PatentDatabaseMembership.patent_id == PatentModel.id,
+            PatentDatabaseMembership.database_id == database_id,
+        ).exists(),
+    )).scalar()
     if patent_count and patent_count > 0 and not force:
         raise BadRequestException(
             f"库中仍有 {patent_count} 条专利，无法直接删除。请先清空专利，或使用 force=true 级联删除（将一并删除所有专利）。"

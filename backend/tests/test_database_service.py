@@ -12,6 +12,7 @@ from app.models import (
     ImportSourceRow,
     Patent,
     PatentDatabase,
+    PatentDatabaseMembership,
     PatentHistory,
     PatentView,
 )
@@ -114,6 +115,31 @@ class DatabaseServiceTest(unittest.TestCase):
         self.assertIsNone(self.db.query(Patent).filter_by(id=deleted_patent_id).first())
         surviving = self.db.query(Patent).filter_by(id=external_patent_id).one()
         self.assertIsNone(surviving.duplicate_of)
+
+    def test_force_delete_shared_wiki_keeps_default_database_record(self):
+        default_db = PatentDatabase(name="默认库", code="SHARED_DEFAULT", is_default=True)
+        imported_db = PatentDatabase(name="导入库", code="SHARED_IMPORT")
+        self.db.add_all([default_db, imported_db])
+        self.db.flush()
+        shared = Patent(database_id=default_db.id, title="共享 Wiki")
+        self.db.add(shared)
+        self.db.flush()
+        self.db.add_all([
+            PatentDatabaseMembership(patent_id=shared.id, database_id=default_db.id),
+            PatentDatabaseMembership(patent_id=shared.id, database_id=imported_db.id),
+        ])
+        self.db.commit()
+        imported_database_id = imported_db.id
+
+        self.assertTrue(DatabaseService.delete_database(self.db, imported_db, force=True))
+        self.assertIsNotNone(self.db.query(Patent).filter_by(id=shared.id).first())
+        self.assertIsNotNone(self.db.query(PatentDatabase).filter_by(id=default_db.id).first())
+        self.assertIsNotNone(self.db.query(PatentDatabaseMembership).filter_by(
+            patent_id=shared.id, database_id=default_db.id,
+        ).first())
+        self.assertIsNone(self.db.query(PatentDatabaseMembership).filter_by(
+            patent_id=shared.id, database_id=imported_database_id,
+        ).first())
 
     def test_force_delete_cleans_legacy_physical_database_child_table(self):
         database = PatentDatabase(name="旧表删除库", code="DELETE_LEGACY")

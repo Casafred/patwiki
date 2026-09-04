@@ -60,6 +60,7 @@ def _ensure_master_views():
 
     db = SessionLocal()
     try:
+        _backfill_database_memberships(db)
         for database in DatabaseService.list_databases(db, include_archived=True):
             if not ViewService.get_department_master_view(db, database.id):
                 ViewService.create_view(
@@ -74,3 +75,27 @@ def _ensure_master_views():
                 )
     finally:
         db.close()
+
+
+def _backfill_database_memberships(db):
+    """Backfill the multi-database visibility projection once at startup."""
+    from app.models import Patent, PatentDatabaseMembership
+
+    rows = db.query(Patent.id, Patent.database_id).filter(Patent.database_id.isnot(None)).all()
+    if not rows:
+        return
+    existing = {
+        (patent_id, database_id)
+        for patent_id, database_id in db.query(
+            PatentDatabaseMembership.patent_id,
+            PatentDatabaseMembership.database_id,
+        ).all()
+    }
+    additions = [
+        PatentDatabaseMembership(patent_id=patent_id, database_id=database_id)
+        for patent_id, database_id in rows
+        if (patent_id, database_id) not in existing
+    ]
+    if additions:
+        db.add_all(additions)
+        db.commit()

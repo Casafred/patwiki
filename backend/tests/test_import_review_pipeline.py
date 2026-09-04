@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models import Citation, ImportBatchStatus, ImportSourceRow, Patent, PatentDatabase, PatentHistory
+from app.models import (
+    Citation, ImportBatchStatus, ImportSourceRow, Patent, PatentDatabase,
+    PatentDatabaseMembership, PatentHistory,
+)
 from app.services.import_service import ImportService
 from app.services.field_registry import get_all_fields_meta
 from app.services.import_review_service import (
@@ -18,6 +21,7 @@ from app.services.import_review_service import (
     stage_import,
 )
 from app.services.patent_identity_service import ensure_patent_identifiers
+from app.services.patent_service import PatentService
 
 
 class ImportReviewPipelineTest(unittest.TestCase):
@@ -86,6 +90,55 @@ class ImportReviewPipelineTest(unittest.TestCase):
             self.assertEqual(applied["created"], 0)
             self.assertEqual(applied["errors"], 0)
             self.assertEqual(self.db.query(Patent).count(), 0)
+
+    def test_taiwan_publication_number_and_excel_datetime_are_accepted(self):
+        with TemporaryDirectory() as temp_dir:
+            result = self._stage(
+                "公开号,申请日,标题\nTWI658905B,2005-04-04 00:00:00,台湾专利\n",
+                {"公开号": "publication_number", "申请日": "filing_date", "标题": "title"},
+                Path(temp_dir) / "taiwan.csv",
+            )
+            self.assertEqual(result["quarantined_count"], 0)
+            review_batch(self.db, result["batch_id"], default_action_name="adopt")
+            applied = apply_batch(self.db, result["batch_id"])
+            self.assertEqual(applied["created"], 1)
+            patent = self.db.query(Patent).one()
+            self.assertEqual(patent.publication_number, "TWI658905B")
+            self.assertEqual(str(patent.filing_date), "2005-04-04")
+
+    def test_existing_global_wiki_is_visible_in_new_import_database(self):
+        other_database = PatentDatabase(name="第二库")
+        patent = Patent(
+            database_id=self.database.id,
+            publication_number="CN123456789A1",
+            title="全局 Wiki",
+        )
+        self.db.add_all([other_database, patent])
+        self.db.flush()
+        ensure_patent_identifiers(self.db, patent, source_system="test")
+        self.db.commit()
+        with TemporaryDirectory() as temp_dir:
+            artifact = Path(temp_dir) / "existing.csv"
+            artifact.write_text("公开号,标题\nCN123456789A1,全局 Wiki\n", encoding="utf-8-sig")
+            result = stage_import(
+                self.db,
+                content=artifact.read_bytes(),
+                filename="existing.csv",
+                sheet_name=None,
+                mapping={"公开号": "publication_number", "标题": "title"},
+                database_id=other_database.id,
+                artifact_path=str(artifact),
+            )
+            review_batch(self.db, result["batch_id"], default_action_name="adopt")
+            apply_batch(self.db, result["batch_id"])
+        self.assertTrue(self.db.query(PatentDatabaseMembership).filter_by(
+            patent_id=patent.id, database_id=other_database.id,
+        ).first())
+        visible, total = PatentService.list_patents(
+            self.db, database_id=other_database.id, page_size=50,
+        )
+        self.assertEqual(total, 1)
+        self.assertEqual([item.id for item in visible], [patent.id])
 
     def test_stage_does_not_change_existing_and_review_controls_apply_and_rollback(self):
         patent = Patent(

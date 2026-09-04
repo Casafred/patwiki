@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models import Patent, PatentIdentifier
@@ -21,10 +22,10 @@ from app.models import Patent, PatentIdentifier
 
 OFFICIAL_IDENTIFIER_TYPES = ("application", "publication", "grant")
 _KIND_CODE_RE = re.compile(r"(?P<kind>[A-Z]{1,3}\d{0,2})$")
-_JURISDICTION_RE = re.compile(r"^(?P<jurisdiction>[A-Z]{2})(?P<body>.+)$")
+_JURISDICTION_RE = re.compile(r"^(?P<jurisdiction>[A-Z]{2,3})(?P<body>.+)$")
 _SEPARATOR_RE = re.compile(r"[\s\-_/:.,，、;；()（）\[\]{}]+")
 _PUBLICATION_NUMBER_RE = re.compile(
-    r"^(?P<jurisdiction>[A-Z]{2})(?P<number>\d+)(?P<kind>[A-Z]{1,3}\d{0,2})$"
+    r"^(?P<jurisdiction>[A-Z]{2,3})(?P<number>\d+)(?P<kind>[A-Z]{1,3}\d{0,2})$"
 )
 
 
@@ -190,6 +191,92 @@ def find_patents_by_identifiers(db: Session, specs: Iterable[IdentifierSpec]) ->
     if not patent_ids:
         return []
     return db.query(Patent).filter(Patent.id.in_(sorted(patent_ids))).order_by(Patent.id).all()
+
+
+def find_patents_by_identifier_specs_bulk(
+    db: Session,
+    specs_by_row: dict[int, Iterable[IdentifierSpec]],
+) -> dict[int, list[Patent]]:
+    """Resolve many import rows with one bounded identity-index query.
+
+    Import review used to execute one query per identifier per row.  Besides
+    being slow for ordinary spreadsheets, that made a large review appear
+    frozen before the user could inspect it.  The identity index is global,
+    so all matching is done in one batch and results are grouped in memory.
+    """
+    normalized_specs: dict[tuple[str, str, Optional[str], str], set[int]] = {}
+    for row_index, specs in specs_by_row.items():
+        for spec in specs:
+            key = (
+                spec.identifier_namespace,
+                spec.identifier_type,
+                spec.jurisdiction_code,
+                spec.normalized_value,
+            )
+            normalized_specs.setdefault(key, set()).add(row_index)
+    if not normalized_specs:
+        return {}
+
+    values = list({key[3] for key in normalized_specs})
+    matches_by_row: dict[int, set[int]] = {}
+    for offset in range(0, len(values), 500):
+        chunk = values[offset:offset + 500]
+        identifiers = db.query(PatentIdentifier).filter(
+            PatentIdentifier.normalized_value.in_(chunk),
+        ).all()
+        for identifier in identifiers:
+            key = (
+                identifier.identifier_namespace,
+                identifier.identifier_type,
+                identifier.jurisdiction_code,
+                identifier.normalized_value,
+            )
+            for row_index in normalized_specs.get(key, set()):
+                matches_by_row.setdefault(row_index, set()).add(identifier.patent_id)
+
+    # Older databases can have no PatentIdentifier rows yet. Resolve those
+    # records from the canonical number columns in one bounded query instead
+    # of running the historical full-table backfill during every import.
+    field_by_type = {
+        "application": Patent.application_number,
+        "publication": Patent.publication_number,
+        "grant": Patent.grant_number,
+    }
+    legacy_candidates: list[Patent] = []
+    for offset in range(0, len(values), 500):
+        chunk = values[offset:offset + 500]
+        legacy_candidates.extend(db.query(Patent).filter(or_(*[
+            column.in_(chunk) for column in field_by_type.values()
+        ])).all())
+    for patent in legacy_candidates:
+        for identifier_type, column in field_by_type.items():
+            raw_value = getattr(patent, column.key, None)
+            spec = parse_identifier(raw_value, identifier_type, patent.country)
+            if not spec:
+                continue
+            key = (
+                spec.identifier_namespace,
+                spec.identifier_type,
+                spec.jurisdiction_code,
+                spec.normalized_value,
+            )
+            for row_index in normalized_specs.get(key, set()):
+                matches_by_row.setdefault(row_index, set()).add(patent.id)
+
+    patent_ids = sorted({patent_id for ids in matches_by_row.values() for patent_id in ids})
+    if not patent_ids:
+        return {}
+    patents_by_id = {
+        patent.id: patent
+        for offset in range(0, len(patent_ids), 500)
+        for patent in db.query(Patent).filter(
+            Patent.id.in_(patent_ids[offset:offset + 500]),
+        ).all()
+    }
+    return {
+        row_index: [patents_by_id[patent_id] for patent_id in sorted(patent_ids_for_row) if patent_id in patents_by_id]
+        for row_index, patent_ids_for_row in matches_by_row.items()
+    }
 
 
 def _add_raw_value(identifier: PatentIdentifier, raw_value: str) -> None:

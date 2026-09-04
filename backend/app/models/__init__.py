@@ -54,6 +54,7 @@ from app.models.formula import FormulaDependency
 
 # 库（P0-8 新增）
 from app.models.database import PatentDatabase
+from app.models.database_membership import PatentDatabaseMembership
 
 # 专利主表+同族+引用
 from app.models.patent import Patent, PatentFamily, Citation
@@ -124,6 +125,7 @@ __all__ = [
     "CustomField", "CrossTableLink", "FormulaDependency",
     # database
     "PatentDatabase",
+    "PatentDatabaseMembership",
     # patent
     "Patent", "PatentFamily", "Citation", "PatentIdentifier", "PatentExportTemplate",
     "ProjectSolutionVersion", "ProjectSolutionChange", "ProjectSolutionRegion",

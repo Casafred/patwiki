@@ -22,6 +22,7 @@ from app.services.field_registry import (
     get_all_fields_meta,
 )
 from app.core.exceptions import BadRequestException
+from app.services.patent_database_scope import in_database
 
 
 SYSTEM_FIELDS = {
@@ -215,7 +216,7 @@ class PatentService:
 
         # 库筛选：P0-11 新增，限定查询范围到某个库
         if database_id is not None:
-            query = query.filter(Patent.database_id == database_id)
+            query = query.filter(in_database(database_id))
 
         if patent_ids is not None:
             normalized_ids = list(dict.fromkeys(int(item) for item in patent_ids))
@@ -1032,7 +1033,7 @@ class PatentService:
         # 基础过滤条件：按库 / 产品过滤
         def _apply_filter(q):
             if database_id is not None:
-                q = q.filter(Patent.database_id == database_id)
+                q = q.filter(in_database(database_id))
             if product_id is not None:
                 q = q.filter(Patent.product_id == product_id)
             return q

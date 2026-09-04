@@ -29,5 +29,10 @@ class PatentDatabase(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     patents = relationship("Patent", back_populates="database")
+    patent_memberships = relationship(
+        "PatentDatabaseMembership",
+        back_populates="database",
+        cascade="all, delete-orphan",
+    )
     memberships = relationship("DatabaseMembership", back_populates="database", cascade="all, delete-orphan")
     owner = relationship("User", foreign_keys=[owner_id])

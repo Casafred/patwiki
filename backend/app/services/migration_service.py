@@ -27,7 +27,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-08-26.0"
+CURRENT_MIGRATION_VERSION = "2026-09-04.0"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",

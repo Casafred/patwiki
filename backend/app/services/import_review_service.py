@@ -7,22 +7,23 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.core.time import utc_now_naive
 from app.models import (
     Citation, CustomField, FieldObservation, ImportBatch, ImportBatchStatus,
-    ImportSourceRow, Patent, PatentHistory, PatentIdentifier, LegalStatus,
+    ImportSourceRow, Patent, PatentDatabase, PatentHistory, PatentIdentifier, LegalStatus,
     PatentType, RiskLevel,
 )
 from app.services.field_registry import SYSTEM_FIELD_KEYS
 from app.services.import_service import ImportService, IMPORT_SKIP_FIELD
 from app.services.patent_identity_service import (
-    backfill_patent_identifiers, ensure_patent_identifiers, find_patents_by_identifiers,
+    ensure_patent_identifiers, find_patents_by_identifier_specs_bulk,
     identifier_specs_from_values,
 )
+from app.models.database_membership import PatentDatabaseMembership
 
 REVIEW_ACTIONS = {"adopt", "keep_existing", "fill_empty", "ignore", "quarantine"}
 PROTECTED_FIELDS = {"has_risk", "risk_level", "risk_description"}
@@ -287,26 +288,42 @@ def stage_import(
     retained_source_rows = 0
     skipped_empty_rows = 0
     try:
-        # Matching must also work for databases created before the identity
-        # index existed. Only run the full backfill when at least one Patent
-        # still lacks an index row; normal imports then stay cheap.
-        missing_identifier = db.query(Patent).filter(~db.query(PatentIdentifier).filter(
-            PatentIdentifier.patent_id == Patent.id,
-        ).exists()).first()
-        if missing_identifier is not None:
-            backfill_patent_identifiers(db)
+        identity_specs_by_row: dict[int, list] = {}
+        parsed_rows: dict[int, tuple[dict, dict, dict]] = {}
+        staged_sources: list[ImportSourceRow] = []
+        # Parse once and resolve identities in one bounded query. Reusing the
+        # parsed values also removes a second conversion pass per source row.
+        for index, (_, row) in enumerate(df.iterrows()):
+            parsed_row = raw_row(row.to_dict())
+            source = ImportSourceRow(
+                import_batch_id=batch.id,
+                source_row=index + 2,
+                raw_row=parsed_row,
+                row_hash=row_hash(parsed_row),
+            )
+            staged_sources.append(source)
+            parsed = ImportService._row_to_patent_data_tolerant(
+                parsed_row, mapping, db, custom_fields_cache=custom_cache,
+            )
+            parsed_rows[index] = parsed
+            data, _, _ = parsed
+            publication = (data.get("publication_number") or "").strip()
+            specs = [spec for spec in identifier_specs_from_values(
+                {"publication": publication}, data.get("country"),
+            ) if spec.identifier_type == "publication"]
+            if specs:
+                identity_specs_by_row[index] = specs
+        # One flush assigns all source-row ids for observation foreign keys.
+        # The previous per-row flush made review latency grow linearly with
+        # SQLite round trips.
+        db.add_all(staged_sources)
+        db.flush()
+        bulk_matches = find_patents_by_identifier_specs_bulk(db, identity_specs_by_row)
         for index, (_, row) in enumerate(df.iterrows()):
             row_values = raw_row(row.to_dict())
-            source = ImportSourceRow(
-                import_batch_id=batch.id, source_row=index + 2,
-                raw_row=row_values, row_hash=row_hash(row_values),
-            )
-            db.add(source)
-            db.flush()
+            source = staged_sources[index]
             try:
-                data, virtual, field_errors = ImportService._row_to_patent_data_tolerant(
-                    row_values, mapping, db, custom_fields_cache=custom_cache,
-                )
+                data, virtual, field_errors = parsed_rows[index]
                 publication = (data.get("publication_number") or "").strip()
                 publication_error = field_errors.get("publication_number")
                 if publication_error:
@@ -344,7 +361,7 @@ def stage_import(
                 ) if spec.identifier_type == "publication"]
                 if not specs:
                     raise ValueError(f"公开号格式无法识别：{publication}")
-                matches = find_patents_by_identifiers(db, specs)
+                matches = bulk_matches.get(index, [])
                 if len(matches) > 1:
                     source.resolution_status = "quarantined"
                     source.resolution_reason = "规范化公开号命中多个专利，已隔离等待人工确认"
@@ -592,7 +609,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     for item in staged:
         by_row.setdefault(item.source_row_id, []).append(item)
     actor = applied_by.strip() or "local-user"
-    inserted = updated = skipped = 0
+    inserted = updated = unchanged = 0
     errors: list[dict] = []
     created_ids: list[int] = []
     changed_ids: set[int] = set()
@@ -600,6 +617,11 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     new_by_publication: dict[str, Patent] = {}
     row_reports: list[dict] = []
     field_error_details: list[dict] = []
+    target_membership_patent_ids = {
+        int(row[0]) for row in db.query(PatentDatabaseMembership.patent_id).filter(
+            PatentDatabaseMembership.database_id == database_id,
+        ).all()
+    }
     try:
         for index, _ in enumerate(df.iterrows()):
             source = rows[index] if index < len(rows) else None
@@ -641,9 +663,10 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                 patent = db.query(Patent).filter(Patent.id == source.patent_id).first() if source.patent_id else None
                 created_in_batch = False
                 if patent is None:
-                    specs = [spec for spec in identifier_specs_from_values({"publication": publication}, data.get("country")) if spec.identifier_type == "publication"]
-                    matches = find_patents_by_identifiers(db, specs)
-                    patent = matches[0] if matches else new_by_publication.get(publication)
+                    # Staging already resolved every valid identity. Pending
+                    # rows are new at apply time; only reuse a patent created
+                    # earlier in this same batch, with no per-row DB lookup.
+                    patent = new_by_publication.get(publication)
                     created_in_batch = patent is not None and patent.id in created_ids
                 created = False
                 provisional_title = False
@@ -796,7 +819,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                         updated += 1
                         changed_ids.add(patent.id)
                     else:
-                        skipped += 1
+                        unchanged += 1
                 if config.get("project_id"):
                     from app.services.patent_service import PatentService
                     PatentService.set_patent_projects(
@@ -807,6 +830,12 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     "grant": data.get("grant_number")}, data.get("country")),
                     source_system=config.get("source_system") or "import", source_timestamp=utc_now_naive())
                 source.patent_id = patent.id
+                if patent.id not in target_membership_patent_ids:
+                    db.add(PatentDatabaseMembership(
+                        patent_id=patent.id,
+                        database_id=database_id,
+                    ))
+                    target_membership_patent_ids.add(patent.id)
                 source.resolution_status = "resolved"
                 source.resolution_reason = (
                     "import applied after review; some fields were isolated"
@@ -837,19 +866,33 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
             citation_links += result["citation_links"]
         batch.inserted_count = inserted
         batch.updated_count = updated
-        batch.skipped_count = skipped
+        batch.skipped_count = unchanged
         batch.error_count = len(errors) + len(field_error_details)
         batch.processed_rows = batch.total_rows
         batch.errors = [*errors, *field_error_details] or None
         batch.created_patent_ids = created_ids
         batch.status = ImportBatchStatus.COMPLETED
         batch.completed_at = utc_now_naive()
+        target_database = db.query(PatentDatabase).filter(
+            PatentDatabase.id == database_id,
+        ).first()
+        if target_database:
+            target_database.patent_count = db.query(func.count(Patent.id)).filter(or_(
+                Patent.database_id == database_id,
+                db.query(PatentDatabaseMembership.id).filter(
+                    PatentDatabaseMembership.patent_id == Patent.id,
+                    PatentDatabaseMembership.database_id == database_id,
+                ).exists(),
+            )).scalar() or 0
         db.commit()
     except Exception:
         db.rollback()
         raise
     return {"batch_id": batch.id, "status": batch.status.value, "total": batch.total_rows,
-            "created": inserted, "updated": updated, "skipped": skipped, "errors": len(errors),
+            "created": inserted, "updated": updated, "unchanged": unchanged,
+            # Kept for API compatibility. The UI should show this as
+            # "unchanged after review", never as an import failure.
+            "skipped": unchanged, "errors": len(errors),
              "error_details": errors, "row_reports": row_reports, "database_id": database_id,
              "family_links": family_links, "citation_links": citation_links,
              "field_errors": len(field_error_details), "field_error_details": field_error_details,
