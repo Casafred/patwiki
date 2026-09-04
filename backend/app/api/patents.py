@@ -31,7 +31,11 @@ from app.models import (
 )
 from app.core.exceptions import NotFoundException
 from app.services.patent_identity_service import list_patent_identifiers, normalize_publication_number
-from app.services.relation_service import find_existing_patent_by_number, parse_patent_numbers
+from app.services.relation_service import (
+    find_existing_patent_by_number,
+    parse_patent_numbers,
+    rebuild_database_families,
+)
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -1047,6 +1051,15 @@ def rebuild_family_relations(
         "errors": errors[:20],
         "error_count": len(errors),
     }
+
+
+@router.post("/families/rebuild")
+def rebuild_families_for_database(
+    database_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db),
+):
+    """按原始同族关系列重建指定库的表格聚拢关系。"""
+    return rebuild_database_families(db, database_id)
 
 
 @router.get("/{patent_id}/history")

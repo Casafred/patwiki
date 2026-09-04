@@ -5,6 +5,7 @@ import { getErrorMessage } from '../../lib/errors'
 
 interface WorkFileDialogProps {
   databaseId?: number | null
+  selectedIds?: number[]
   search?: string
   filters?: JsonObject
   onClose: () => void
@@ -43,16 +44,25 @@ function download(blob: Blob, template: PatentExportTemplate) {
   const safeName = template.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'patwiki_work_file'
   anchor.href = url
   anchor.download = `${safeName}_v${template.version}.${extension}`
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
   anchor.click()
-  window.setTimeout(() => window.URL.revokeObjectURL(url), 0)
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(url)
+    anchor.remove()
+  }, 2000)
 }
 
-export default function WorkFileDialog({ databaseId, search, filters, onClose }: WorkFileDialogProps) {
+export default function WorkFileDialog({ databaseId, selectedIds = [], search, filters, onClose }: WorkFileDialogProps) {
   const [templates, setTemplates] = useState<PatentExportTemplate[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [scope, setScope] = useState<'selected' | 'filtered' | 'database'>(
+    selectedIds.length > 0 ? 'selected' : (search?.trim() || Object.keys(filters || {}).length > 0) ? 'filtered' : 'database',
+  )
   const selectedTemplate = useMemo(
     () => templates.find(template => template.id === selectedId) || null,
     [selectedId, templates],
@@ -83,12 +93,14 @@ export default function WorkFileDialog({ databaseId, search, filters, onClose }:
     if (!selectedTemplate || downloadingId !== null) return
     setDownloadingId(selectedTemplate.id)
     setError('')
+    setSuccess('')
     try {
       const payload: JsonObject = {
         database_id: databaseId ?? null,
         template_id: selectedTemplate.id,
-        search: search?.trim() || null,
-        filters: toExportFilters(filters) as unknown as JsonValue,
+        patent_ids: scope === 'selected' ? selectedIds : null,
+        search: scope === 'database' ? null : search?.trim() || null,
+        filters: (scope === 'database' ? {} : toExportFilters(filters)) as unknown as JsonValue,
       }
       const blob = selectedTemplate.output_format === 'word'
         ? await exportApi.word(payload)
@@ -96,7 +108,7 @@ export default function WorkFileDialog({ databaseId, search, filters, onClose }:
           ? await exportApi.csv(payload)
           : await exportApi.excel(payload)
       download(blob, selectedTemplate)
-      onClose()
+      setSuccess(`已开始下载 ${selectedTemplate.name}，文件会出现在浏览器下载列表中。`)
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, '工作文件生成失败'))
     } finally {
@@ -157,11 +169,20 @@ export default function WorkFileDialog({ databaseId, search, filters, onClose }:
                       <div><dt>关联视图</dt><dd>{selectedTemplate.view_id ? `视图 #${selectedTemplate.view_id}` : '当前数据库'}</dd></div>
                       <div><dt>当前条件</dt><dd>{search?.trim() || Object.keys(filters || {}).length > 0 ? '叠加当前搜索/筛选' : '使用模板默认条件'}</dd></div>
                     </dl>
+                    <label className="work-file-scope">
+                      <span>数据范围</span>
+                      <select value={scope} onChange={event => setScope(event.target.value as 'selected' | 'filtered' | 'database')}>
+                        <option value="selected" disabled={selectedIds.length === 0}>已选 {selectedIds.length} 条专利</option>
+                        <option value="filtered">当前搜索和筛选</option>
+                        <option value="database">整个专利库</option>
+                      </select>
+                    </label>
                     <div className="work-file-note">导出结果不会创建第二份专利数据。Excel 会附带“导出说明”页，Word 会附带模板版本和字段来源说明。</div>
                   </>
                 )}
               </div>
             </div>
+            {success && <div className="work-file-success">{success}</div>}
             <div className="work-file-actions">
               <button type="button" className="btn btn-secondary" onClick={onClose}>取消</button>
               <button type="button" className="btn btn-primary" onClick={() => void handleDownload()} disabled={!selectedTemplate || downloadingId !== null}>

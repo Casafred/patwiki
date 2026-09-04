@@ -115,6 +115,26 @@ class DatabaseServiceTest(unittest.TestCase):
         surviving = self.db.query(Patent).filter_by(id=external_patent_id).one()
         self.assertIsNone(surviving.duplicate_of)
 
+    def test_force_delete_cleans_legacy_physical_database_child_table(self):
+        database = PatentDatabase(name="旧表删除库", code="DELETE_LEGACY")
+        self.db.add(database)
+        self.db.commit()
+        database_id = database.id
+        self.db.execute(text(
+            "CREATE TABLE legacy_database_child ("
+            "id INTEGER PRIMARY KEY, "
+            "database_id INTEGER NOT NULL REFERENCES patent_databases(id)"
+            ")"
+        ))
+        self.db.execute(text(
+            "INSERT INTO legacy_database_child (database_id) VALUES (:database_id)"
+        ), {"database_id": database_id})
+        self.db.commit()
+
+        self.assertTrue(DatabaseService.delete_database(self.db, database, force=True))
+        self.assertEqual(self.db.execute(text("SELECT COUNT(*) FROM legacy_database_child")).scalar(), 0)
+        self.assertIsNone(self.db.query(PatentDatabase).filter_by(id=database_id).first())
+
 
 if __name__ == "__main__":
     unittest.main()

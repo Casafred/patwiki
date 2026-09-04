@@ -44,6 +44,7 @@ export const patentService = {
   resolvePublicationNumber: (...args: Parameters<typeof patentApi.resolvePublicationNumber>) => patentApi.resolvePublicationNumber(...args),
   family: (id: number) => patentApi.family(id),
   citations: (id: number) => patentApi.citations(id),
+  rebuildFamilies: (...args: Parameters<typeof patentApi.rebuildFamilies>) => patentApi.rebuildFamilies(...args),
   update: (...args: Parameters<typeof patentApi.update>) => patentApi.update(...args),
   listProjects: (id: number) => patentApi.listProjects(id),
   replaceProjects: (...args: Parameters<typeof patentApi.replaceProjects>) => patentApi.replaceProjects(...args),

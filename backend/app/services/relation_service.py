@@ -374,6 +374,96 @@ def process_family_members(
     return {"family_id": family.id, "members_created": members_created, "members_linked": members_linked}
 
 
+def rebuild_database_families(db: Session, database_id: int) -> dict:
+    """从历史导入保留的同族列重建当前库的同族聚拢关系。
+
+    早期导入为了避免制造大量待补全记录，只保存了 ``family_members``
+    原始值。这一重建只连接当前库中已经存在的专利，不产生新的占位记录。
+    """
+    patents = db.query(Patent).filter(Patent.database_id == database_id).all()
+    by_number: dict[str, set[int]] = {}
+    patent_by_id = {patent.id: patent for patent in patents if patent.id is not None}
+
+    for patent in patents:
+        if patent.id is None:
+            continue
+        for value in (patent.publication_number, patent.application_number, patent.grant_number):
+            normalized = _normalize_patent_number(value or "")
+            if normalized:
+                by_number.setdefault(normalized, set()).add(patent.id)
+
+    parent = {patent_id: patent_id for patent_id in patent_by_id}
+
+    def find(item: int) -> int:
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    existing_groups: dict[int, list[int]] = {}
+    for patent in patents:
+        if patent.id is not None and patent.family_id is not None:
+            existing_groups.setdefault(patent.family_id, []).append(patent.id)
+    for member_ids in existing_groups.values():
+        for member_id in member_ids[1:]:
+            union(member_ids[0], member_id)
+
+    relation_matches = 0
+    for patent in patents:
+        if patent.id is None:
+            continue
+        fields = patent.custom_fields or {}
+        for raw_value in (
+            fields.get("family_members"), fields.get("family_patents"),
+            fields.get("family_publication_numbers"), fields.get("同族专利号"),
+            fields.get("同族公开号"),
+        ):
+            for number in parse_patent_numbers(raw_value or ""):
+                for member_id in by_number.get(number, set()):
+                    if member_id != patent.id:
+                        union(patent.id, member_id)
+                        relation_matches += 1
+
+    components: dict[int, list[int]] = {}
+    for patent_id in parent:
+        components.setdefault(find(patent_id), []).append(patent_id)
+
+    grouped_patent_ids: set[int] = set()
+    family_count = 0
+    for member_ids in components.values():
+        if len(member_ids) < 2:
+            continue
+        members = [patent_by_id[item] for item in member_ids]
+        family = _get_or_create_family_by_ids(
+            db,
+            member_ids,
+            [member.publication_number or member.application_number or "" for member in members],
+        )
+        for member in members:
+            member.family_id = family.id
+            grouped_patent_ids.add(member.id)
+        family_count += 1
+
+    # Avoid misleading one-row family badges after historical data changes.
+    for patent in patents:
+        if patent.id not in grouped_patent_ids:
+            patent.family_id = None
+
+    db.commit()
+    return {
+        "database_id": database_id,
+        "patent_count": len(patents),
+        "family_count": family_count,
+        "grouped_patent_count": len(grouped_patent_ids),
+        "relation_matches": relation_matches,
+    }
+
+
 def process_citations(
     db: Session,
     current_patent: Patent,

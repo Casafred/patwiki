@@ -4,7 +4,7 @@
 """
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, inspect, or_, text
 from app.database import Base
 
 from app.models import PatentDatabase, Patent, User, DatabaseMembership
@@ -171,7 +171,8 @@ class DatabaseService:
         # 不允许删除默认库
         if database.is_default:
             return False
-        patent_count = db.query(func.count(Patent.id)).filter(Patent.database_id == database.id).scalar()
+        target_database_id = database.id
+        patent_count = db.query(func.count(Patent.id)).filter(Patent.database_id == target_database_id).scalar()
         if patent_count and patent_count > 0:
             if not force:
                 return False
@@ -345,10 +346,74 @@ class DatabaseService:
             if table is not None and table.c.get("database_id") is not None:
                 db.execute(table.delete().where(table.c.database_id == database.id))
 
-        db.execute(tables["patent_databases"].delete().where(
-            tables["patent_databases"].c.id == database.id,
-        ))
-        db.commit()
+        # Old packaged databases can contain tables from a former release that
+        # are not registered in the current SQLAlchemy metadata.  SQLite still
+        # enforces their foreign keys, which used to make the final database
+        # delete fail despite the explicit cleanup above.  Remove only rows
+        # directly scoped to this database from those physical child tables.
+        if db.get_bind().dialect.name == "sqlite":
+            # Inspect through the session connection.  With SQLite StaticPool,
+            # inspecting via the Engine can check out the same DBAPI connection
+            # and roll back this in-progress cleanup transaction on return.
+            inspector = inspect(db.connection())
+            for table_name in inspector.get_table_names():
+                # Current mapped tables have already been deleted in dependency
+                # order above.  Re-running their raw DELETE can bypass that
+                # order and violate a patent-level foreign key.
+                if table_name == "patent_databases" or table_name in tables:
+                    continue
+                for foreign_key in inspector.get_foreign_keys(table_name):
+                    if foreign_key.get("referred_table") != "patent_databases":
+                        continue
+                    safe_table = '"' + table_name.replace('"', '""') + '"'
+                    for column_name in foreign_key.get("constrained_columns") or []:
+                        safe_column = '"' + column_name.replace('"', '""') + '"'
+                        db.execute(
+                            text(f"DELETE FROM {safe_table} WHERE {safe_column} = :database_id"),
+                            {"database_id": database.id},
+                        )
+
+        if db.get_bind().dialect.name == "sqlite":
+            # Finish cleanup first.  Some historical packaged databases keep
+            # relationship objects loaded while Core bulk deletes run. Build
+            # the physical foreign-key list before opening the raw sweep: an
+            # SQLAlchemy metadata query issued after a DBAPI cursor starts a
+            # transaction can roll that raw transaction back on SQLite.
+            # Foreign-key enforcement is disabled only for this already-
+            # scoped final sweep, then restored immediately.
+            db.commit()
+            connection = db.connection()
+            inspector = inspect(connection)
+            direct_database_foreign_keys: list[tuple[str, str]] = []
+            for table_name in inspector.get_table_names():
+                if table_name == "patent_databases":
+                    continue
+                for foreign_key in inspector.get_foreign_keys(table_name):
+                    if foreign_key.get("referred_table") != "patent_databases":
+                        continue
+                    for column_name in foreign_key.get("constrained_columns") or []:
+                        direct_database_foreign_keys.append((table_name, column_name))
+            try:
+                cursor = connection.connection.cursor()
+                cursor.execute("PRAGMA foreign_keys = OFF")
+                for table_name, column_name in direct_database_foreign_keys:
+                    safe_table = '"' + table_name.replace('"', '""') + '"'
+                    safe_column = '"' + column_name.replace('"', '""') + '"'
+                    cursor.execute(
+                        f"DELETE FROM {safe_table} WHERE {safe_column} = ?",
+                        (target_database_id,),
+                    )
+                cursor.execute("DELETE FROM patent_databases WHERE id = ?", (target_database_id,))
+                connection.commit()
+                cursor.execute("PRAGMA foreign_keys = ON")
+            finally:
+                cursor.close()
+            db.expire_all()
+        else:
+            db.execute(tables["patent_databases"].delete().where(
+                tables["patent_databases"].c.id == target_database_id,
+            ))
+            db.commit()
         return True
 
     @staticmethod

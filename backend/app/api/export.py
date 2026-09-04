@@ -112,6 +112,10 @@ def list_export_templates(
     database_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
+    # Existing libraries predate work-file templates.  Lazily backfill the
+    # built-ins so opening the dialog is useful without requiring a migration.
+    if database_id is not None:
+        ExportService.ensure_default_templates(db, database_id)
     query = db.query(PatentExportTemplate)
     if database_id is not None:
         query = query.filter(PatentExportTemplate.database_id == database_id)

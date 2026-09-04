@@ -374,6 +374,36 @@ input, select, textarea {
   font-size: 12px;
 }
 
+.work-file-success {
+  margin: 12px 20px 0;
+  padding: 9px 11px;
+  border: 1px solid #a7ddd2;
+  border-radius: 6px;
+  background: #eefaf7;
+  color: #0f665d;
+  font-size: 12px;
+}
+
+.work-file-scope {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  color: var(--ink-700);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.work-file-scope select {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink-800);
+}
+
 .work-file-loading,
 .work-file-empty {
   min-height: 180px;
@@ -536,6 +566,7 @@ input, select, textarea {
 /* Shared workspace pages: a consistent, dense surface for every sidebar tool. */
 .page-container {
   width: min(1360px, 100%);
+  margin: 0 auto;
   padding: 20px;
 }
 
@@ -760,7 +791,9 @@ input, select, textarea {
 .management-page,
 .automation-page,
 .dashboard-page {
-  padding: 20px !important;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 28px 32px 48px !important;
 }
 
 .management-tabs,
@@ -2549,6 +2582,22 @@ input[type="checkbox"] {
   border-radius: 8px;
   background: #fbfdfd;
 }
+
+.sidebar-delete-modal {
+  width: min(460px, calc(100vw - 32px));
+  max-width: 460px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 20px 55px rgba(22, 35, 41, 0.2);
+}
+
+.sidebar-delete-modal .modal-header { padding: 18px 22px; background: #fbfdfd; }
+.sidebar-delete-modal .modal-body { padding: 22px; }
+.sidebar-delete-modal .modal-body p { margin: 0 0 10px; color: var(--ink-800); }
+.sidebar-delete-modal .modal-body .text-muted { margin-bottom: 0; line-height: 1.65; color: var(--ink-500); font-size: 12px; }
+.sidebar-delete-modal .modal-footer { padding: 14px 22px 18px; background: #fbfdfd; border-top-color: var(--line); }
+.sidebar-delete-modal .btn-danger { border-color: #bd3a3a; background: #bd3a3a; color: #fff; }
+.sidebar-delete-modal .btn-danger:hover { border-color: #a32d2d; background: #a32d2d; }
 
 .table-settings-modal {
   display: flex;

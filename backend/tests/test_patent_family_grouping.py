@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models import Patent, PatentDatabase, PatentFamily
 from app.services.patent_service import PatentService
+from app.services.relation_service import rebuild_database_families
 
 
 class PatentFamilyGroupingTest(unittest.TestCase):
@@ -104,6 +105,34 @@ class PatentFamilyGroupingTest(unittest.TestCase):
         )
         self.assertEqual(total, 3)
         self.assertNotIn("待补全", {patent.title for patent in patents})
+
+    def test_rebuild_uses_historical_family_source_columns_without_placeholders(self):
+        first = Patent(
+            title="历史同族成员 A",
+            publication_number="CN400000001A",
+            database_id=self.database_id,
+            custom_fields={"family_members": "US400000001A"},
+        )
+        second = Patent(
+            title="历史同族成员 B",
+            publication_number="US400000001A",
+            database_id=self.database_id,
+            custom_fields={"family_members": "CN400000001A; WO999999999A1"},
+        )
+        self.db.add_all([first, second])
+        self.db.commit()
+
+        result = rebuild_database_families(self.db, self.database_id)
+        self.assertGreaterEqual(result["family_count"], 2)
+        self.assertIsNotNone(first.family_id)
+        self.assertEqual(first.family_id, second.family_id)
+        self.assertEqual(
+            self.db.query(Patent).filter(
+                Patent.database_id == self.database_id,
+                Patent.title == "待补全",
+            ).count(),
+            0,
+        )
 
 
 if __name__ == "__main__":

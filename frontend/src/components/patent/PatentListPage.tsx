@@ -1238,6 +1238,21 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
   const handleExport = () => setShowExportDialog(true)
 
+  const handleFamilyGrouping = async () => {
+    const nextValue = !groupByFamily
+    setShowTableTools(false)
+    if (nextValue && activeDatabaseId) {
+      try {
+        const result = await patentApi.rebuildFamilies(activeDatabaseId)
+        setViewConfigNotice(`已重建 ${result.family_count} 个同族组，覆盖 ${result.grouped_patent_count} 件专利`)
+      } catch (error: unknown) {
+        setViewConfigNotice(getErrorMessage(error, '同族关系重建失败'))
+      }
+    }
+    setGroupByFamily(nextValue)
+    setPage(1)
+  }
+
   // 批量删除选中的专利
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return
@@ -2379,7 +2394,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                   <button className="menu-item" onClick={() => { void handleUndo(); setShowTableTools(false) }} disabled={undoStack.length === 0} title="撤回最近一次单元格编辑"><Icon name="undo" /> 撤回</button>
                   <button className="menu-item" onClick={() => { void handleRedo(); setShowTableTools(false) }} disabled={redoStack.length === 0} title="重做最近一次单元格编辑"><Icon name="redo" /> 重做</button>
                 </div>
-                <button className={`menu-item ${groupByFamily ? 'is-active' : ''}`} onClick={() => { setGroupByFamily(!groupByFamily); setPage(1); setShowTableTools(false) }} title="把同族专利聚拢显示"><Icon name="table" /> 同族聚拢 {groupByFamily ? '已开启' : '已关闭'}</button>
+                <button className={`menu-item ${groupByFamily ? 'is-active' : ''}`} onClick={() => void handleFamilyGrouping()} title="把同族专利聚拢显示"><Icon name="table" /> 同族聚拢 {groupByFamily ? '已开启' : '已关闭'}</button>
                 <button className="menu-item" onClick={() => { setShowFieldConfig(true); setShowTableTools(false) }} title="管理显示字段、顺序和冻结列"><Icon name="columns" /> 列管理</button>
                 <div className="menu-divider" />
                 <button className="menu-item menu-item-ai" onClick={() => { setQuickAnalyzePatentIds(patents.map(p => p.id)); setShowQuickAnalyze(true); setShowTableTools(false) }} title="对当前已加载专利执行 AI 快速分析"><Icon name="sparkles" /> AI 快速分析</button>
@@ -3703,6 +3718,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       {showWorkFileDialog && (
         <WorkFileDialog
           databaseId={activeDatabaseId}
+          selectedIds={selectedIds}
           search={searchText}
           filters={filterValues as unknown as JsonObject}
           onClose={() => setShowWorkFileDialog(false)}

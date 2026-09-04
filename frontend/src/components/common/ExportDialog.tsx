@@ -21,6 +21,8 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
   const [selectedKeys, setSelectedKeys] = useState<string[]>(() => fields.filter(field => field.visible !== false).map(field => field.key))
   const [groupBy, setGroupBy] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
 
   const toggleField = (key: string) => {
     setSelectedKeys(current => current.includes(key) ? current.filter(item => item !== key) : [...current, key])
@@ -34,20 +36,20 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
     anchor.style.display = 'none'
     document.body.appendChild(anchor)
     anchor.click()
-    // Chromium may start reading the object URL after click returns. Revoke it
-    // on the next task so the downloaded workbook is not truncated/empty.
     window.setTimeout(() => {
       window.URL.revokeObjectURL(url)
       anchor.remove()
-    }, 1000)
+    }, 2000)
   }
 
   const handleExport = async () => {
     if (selectedKeys.length === 0) {
-      alert('请至少选择一个字段')
+      setError('请至少选择一个字段')
       return
     }
     setSaving(true)
+    setError('')
+    setSuccess('')
     try {
       const payload: JsonObject = {
         database_id: databaseId ?? null,
@@ -60,9 +62,9 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
       }
       const blob = format === 'excel' ? await exportApi.excel(payload) : await exportApi.csv(payload)
       download(blob, format === 'excel' ? 'xlsx' : 'csv')
-      onClose()
+      setSuccess(`已开始下载 patwiki_export_${new Date().toISOString().slice(0, 10)}.${format === 'excel' ? 'xlsx' : 'csv'}，请在浏览器下载列表查看。`)
     } catch (error: unknown) {
-      alert(getErrorMessage(error, '导出失败'))
+      setError(getErrorMessage(error, '导出失败'))
     } finally {
       setSaving(false)
     }
@@ -76,6 +78,8 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
           <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">×</button>
         </div>
         <div className="modal-body">
+        {error && <div className="work-file-error">{error}</div>}
+        {success && <div className="work-file-success">{success}</div>}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
           <label className="form-label">格式
             <select className="form-input" value={format} onChange={event => setFormat(event.target.value as ExportFormat)}>

@@ -297,6 +297,13 @@ export const patentApi = {
 
   family: (id: number): Promise<PatentFamilyResponse> => api.get(`/patents/${id}/family`),
   citations: (id: number): Promise<PatentCitationResponse> => api.get(`/patents/${id}/citations`),
+  rebuildFamilies: (databaseId: number): Promise<{
+    database_id: number
+    patent_count: number
+    family_count: number
+    grouped_patent_count: number
+    relation_matches: number
+  }> => api.post('/patents/families/rebuild', null, { params: { database_id: databaseId } }),
 
   identifiers: (id: number): Promise<PatentIdentifier[]> => api.get(`/patents/${id}/identifiers`),
 
