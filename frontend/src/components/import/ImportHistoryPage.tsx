@@ -79,7 +79,7 @@ export default function ImportHistoryPage() {
       <div className="page-header workspace-page-header">
         <div>
           <h2 className="page-title">导入历史</h2>
-          <p className="page-subtitle">{currentDatabaseName ? `当前库：${currentDatabaseName} · ` : ''}查看每次导入的处理结果与失败行数</p>
+          <p className="page-subtitle">{currentDatabaseName ? `当前库：${currentDatabaseName} · ` : ''}查看每次导入的处理结果与异常行数</p>
         </div>
         <div className="workspace-page-actions">
           <select className="form-input" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
@@ -119,7 +119,7 @@ export default function ImportHistoryPage() {
                 <th>总行数</th>
                 <th>新增</th>
                 <th>更新</th>
-                <th>跳过</th>
+                <th>未变更</th>
                 <th>错误</th>
                 <th>开始时间</th>
                 <th>完成时间</th>

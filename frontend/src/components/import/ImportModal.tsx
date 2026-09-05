@@ -55,6 +55,29 @@ const SYSTEM_FIELD_LABELS: Record<string, string> = {
 
 const SKIP_COLUMN = '__skip__'
 
+const IMPORT_REPORT_LABELS: Record<string, string> = {
+  quarantined: '待处理',
+  retained_source_row: '待补身份',
+  skipped_empty_row: '空行未导入',
+  skipped_duplicate: '未变更',
+  created_pending_title: '已建档待补信息',
+  error_identity: '标识识别失败',
+  apply_error: '导入失败',
+  error_database: '数据库错误',
+}
+
+function isActionableImportReport(status?: string) {
+  return !['created', 'updated', 'reviewed'].includes((status || 'error').toLowerCase())
+}
+
+function importReportReason(report: { status?: string; reason?: string; error?: string }) {
+  if (report.reason || report.error) return report.reason || report.error
+  if (report.status === 'created_pending_title') return '已创建专利 Wiki，待补充标题等著录信息'
+  if (report.status === 'retained_source_row') return '来源行已保留，待补充可识别的公开号或申请号'
+  if (report.status === 'skipped_empty_row') return '该行没有可导入的字段值'
+  return '请在导入治理中检查该行字段'
+}
+
 export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const {
     currentDatabaseId,
@@ -92,6 +115,14 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [clipboardUploading, setClipboardUploading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
+
+  const unchangedCount = importResult?.unchanged ?? importResult?.skipped ?? 0
+  const importIssueReports = importResult
+    ? [
+        ...(importResult.row_reports || importResult.error_details || []),
+        ...(importResult.field_error_details || []),
+      ].filter(report => isActionableImportReport(report.status))
+    : []
 
   const selectFile = (nextFile: File) => {
     setFile(nextFile)
@@ -851,8 +882,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   <div style={{ fontSize: 12, color: '#64748b' }}>更新（字段级合并）</div>
                 </div>
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: '#64748b' }}>{importResult.skipped}</div>
-                  <div style={{ fontSize: 12, color: '#64748b' }}>跳过</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: '#64748b' }}>{unchangedCount}</div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>未变化（已审查）</div>
                 </div>
                 {importResult.family_links !== undefined && importResult.family_links > 0 && (
                   <div style={{ textAlign: 'center' }}>
@@ -885,13 +916,13 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                   </div>
                 )}
               </div>
-              {(importResult.row_reports || importResult.error_details || []).filter(report => report.status !== 'created').length > 0 && (
+              {importIssueReports.length > 0 && (
                 <div style={{ textAlign: 'left', maxHeight: 220, overflowY: 'auto', marginBottom: 20, border: '1px solid #e2e8f0', borderRadius: 6 }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead><tr style={{ background: '#f8fafc' }}><th style={{ padding: 8, textAlign: 'left' }}>行号</th><th style={{ padding: 8, textAlign: 'left' }}>结果</th><th style={{ padding: 8, textAlign: 'left' }}>原因</th></tr></thead>
+                    <thead><tr style={{ background: '#f8fafc' }}><th style={{ padding: 8, textAlign: 'left' }}>行号</th><th style={{ padding: 8, textAlign: 'left' }}>处理结果</th><th style={{ padding: 8, textAlign: 'left' }}>说明</th></tr></thead>
                     <tbody>
-                      {(importResult.row_reports || importResult.error_details || []).filter(report => report.status !== 'created').map((report, index) => (
-                        <tr key={`${report.row}-${index}`} style={{ borderTop: '1px solid #f1f5f9' }}><td style={{ padding: 8 }}>{report.row}</td><td style={{ padding: 8 }}>{report.status || '错误'}</td><td style={{ padding: 8 }}>{report.reason || ('error' in report ? report.error : undefined) || '未知原因'}</td></tr>
+                      {importIssueReports.map((report, index) => (
+                        <tr key={`${report.row}-${report.status}-${index}`} style={{ borderTop: '1px solid #f1f5f9' }}><td style={{ padding: 8 }}>{report.row}</td><td style={{ padding: 8 }}>{IMPORT_REPORT_LABELS[report.status || ''] || report.status || '待检查'}</td><td style={{ padding: 8 }}>{importReportReason(report)}</td></tr>
                       ))}
                     </tbody>
                   </table>

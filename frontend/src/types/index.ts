@@ -820,9 +820,14 @@ export interface ImportResult {
   created: number
   updated: number
   skipped: number
+  // `skipped` is retained for older API responses. Reviewed imports use
+  // `unchanged` for rows whose fields did not need a change.
+  unchanged?: number
   errors: number
   error_details?: { row: number; status?: string; reason?: string; error?: string; patent_id?: number }[]
-  row_reports?: { row: number; status: string; reason: string; patent_id?: number }[]
+  row_reports?: { row: number; status: string; reason?: string; patent_id?: number }[]
+  field_errors?: number
+  field_error_details?: { row: number; status?: string; reason?: string; error?: string; patent_id?: number }[]
   // P0-10：关系入库统计
   database_id?: number
   family_links?: number
