@@ -88,3 +88,20 @@ class ObservationDecisionRequest(BaseModel):
 class WatchEventUpdate(BaseModel):
     status: str = "acknowledged"
     acknowledged_by: str = "local-user"
+
+
+class SyncUpdatePreviewRequest(BaseModel):
+    connector_id: int
+    database_id: int
+    patent_ids: list[int] = Field(min_length=1, max_length=500)
+    fields: list[str] | None = None
+
+
+class SyncUpdateItemChoice(BaseModel):
+    item_id: int
+    fields: list[str] = Field(default_factory=list)
+
+
+class SyncUpdateConfirmRequest(BaseModel):
+    selected_items: list[SyncUpdateItemChoice] = Field(default_factory=list)
+    confirmed_by: str = "local-user"

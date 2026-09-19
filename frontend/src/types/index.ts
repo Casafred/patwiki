@@ -1126,9 +1126,17 @@ export interface SyncConnector {
   provider_type: string
   endpoint?: string | null
   capabilities: JsonObject
+  mcp_catalog: JsonObject
+  mcp_catalog_updated_at?: string | null
   enabled: boolean
   created_at?: string | null
   updated_at?: string | null
+}
+
+export interface McpToolInfo {
+  name: string
+  description?: string
+  inputSchema?: JsonObject
 }
 
 export interface SyncSubscription {
@@ -1209,6 +1217,38 @@ export interface WatchEvent {
   acknowledged_by?: string | null
   acknowledged_at?: string | null
   occurred_at?: string | null
+}
+
+export interface SyncUpdateItem {
+  id: number
+  batch_id: number
+  patent_id?: number | null
+  external_record_id?: string | null
+  sync_record_id?: number | null
+  external_snapshot_id?: number | null
+  status: string
+  current_fields: JsonObject
+  candidate_fields: JsonObject
+  changed_fields: string[]
+  selected_fields: string[]
+  error_code?: string | null
+  error_message?: string | null
+  created_at?: string | null
+}
+
+export interface SyncUpdateBatch {
+  id: number
+  connector_id?: number | null
+  database_id?: number | null
+  sync_run_id?: number | null
+  status: string
+  requested_patent_ids: number[]
+  selected_fields: string[]
+  expires_at?: string | null
+  confirmed_at?: string | null
+  confirmed_by?: string | null
+  created_at?: string | null
+  items: SyncUpdateItem[]
 }
 
 export interface CommentRecord {

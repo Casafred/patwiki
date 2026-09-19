@@ -12,7 +12,9 @@ from app.integrations.contracts import (
     PatentConnector,
 )
 from app.integrations.rest_json import RestJsonConnector
-from app.integrations.mcp_readonly import McpReadonlyConnector
+from app.integrations.mcp_readonly import McpReadonlyConnector, McpTransportReadonlyConnector
+from app.integrations.mcp_transport import McpTransport
+from app.integrations.himmpat import HimmPatMcpAdapter
 from app.integrations.registry import get_connector
 
 __all__ = [
@@ -27,5 +29,8 @@ __all__ = [
     "PatentConnector",
     "RestJsonConnector",
     "McpReadonlyConnector",
+    "McpTransportReadonlyConnector",
+    "McpTransport",
+    "HimmPatMcpAdapter",
     "get_connector",
 ]

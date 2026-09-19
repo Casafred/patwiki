@@ -152,4 +152,8 @@ export const syncService = {
   runs: (subscriptionId?: number | null) => syncApi.runs(subscriptionId),
   observations: (decision?: string) => syncApi.observations(decision),
   decideObservation: (...args: Parameters<typeof syncApi.decideObservation>) => syncApi.decideObservation(...args),
+  previewUpdate: (...args: Parameters<typeof syncApi.previewUpdate>) => syncApi.previewUpdate(...args),
+  getUpdateBatch: (batchId: number) => syncApi.getUpdateBatch(batchId),
+  confirmUpdate: (...args: Parameters<typeof syncApi.confirmUpdate>) => syncApi.confirmUpdate(...args),
+  cancelUpdate: (batchId: number) => syncApi.cancelUpdate(batchId),
 }

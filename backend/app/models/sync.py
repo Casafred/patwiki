@@ -22,6 +22,8 @@ class ConnectorDefinition(Base):
     endpoint = Column(String(1000))
     capabilities_json = Column(JSON, nullable=False, default=dict)
     config_json = Column(JSON, nullable=False, default=dict)
+    mcp_catalog_json = Column(JSON, nullable=False, default=dict)
+    mcp_catalog_updated_at = Column(DateTime)
     enabled = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -272,3 +274,55 @@ class SyncLease(Base):
     expires_at = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class SyncUpdateBatch(Base):
+    """A preview/confirmation transaction for explicit external overwrites."""
+    __tablename__ = "sync_update_batches"
+    __table_args__ = (Index("ix_sync_update_batches_status_created", "status", "created_at"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    connector_id = Column(Integer, ForeignKey("connector_definitions.id", ondelete="SET NULL"), nullable=True, index=True)
+    database_id = Column(Integer, ForeignKey("patent_databases.id", ondelete="SET NULL"), nullable=True, index=True)
+    sync_run_id = Column(Integer, ForeignKey("sync_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(String(30), nullable=False, default="preview", index=True)
+    requested_patent_ids = Column(JSON, nullable=False, default=list)
+    selected_fields = Column(JSON, nullable=False, default=list)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    confirmed_at = Column(DateTime)
+    confirmed_by = Column(String(100))
+    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
+
+    connector = relationship("ConnectorDefinition")
+    database = relationship("PatentDatabase")
+    run = relationship("SyncRun")
+    items = relationship("SyncUpdateItem", back_populates="batch", cascade="all, delete-orphan", order_by="SyncUpdateItem.id")
+
+
+class SyncUpdateItem(Base):
+    """Provider result and field-level choices for one Patent in a batch."""
+    __tablename__ = "sync_update_items"
+    __table_args__ = (
+        Index("ix_sync_update_items_batch_status", "batch_id", "status"),
+        Index("ix_sync_update_items_patent", "patent_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("sync_update_batches.id", ondelete="CASCADE"), nullable=False, index=True)
+    patent_id = Column(Integer, ForeignKey("patents.id", ondelete="SET NULL"), nullable=True, index=True)
+    external_record_id = Column(String(500))
+    sync_record_id = Column(Integer, ForeignKey("sync_records.id", ondelete="SET NULL"), nullable=True, index=True)
+    external_snapshot_id = Column(Integer, ForeignKey("external_snapshots.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    current_fields = Column(JSON, nullable=False, default=dict)
+    candidate_fields = Column(JSON, nullable=False, default=dict)
+    changed_fields = Column(JSON, nullable=False, default=list)
+    selected_fields = Column(JSON, nullable=False, default=list)
+    error_code = Column(String(100))
+    error_message = Column(Text)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
+
+    batch = relationship("SyncUpdateBatch", back_populates="items")
+    patent = relationship("Patent")
+    sync_record = relationship("SyncRecord")
+    snapshot = relationship("ExternalSnapshot")

@@ -8,7 +8,7 @@ import type {
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
   PatentGraphResponse, PatentFamilyResponse, PatentCitationResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
-  SyncConnector, SyncSubscription, SyncRun, ExternalObservation, LegalStatusEvent, WatchEvent,
+  SyncConnector, SyncSubscription, SyncRun, ExternalObservation, LegalStatusEvent, WatchEvent, SyncUpdateBatch,
   GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
   ImportChangeReview, ImportReviewAction,
   ProjectSolutionVersion, RiskCase,
@@ -269,7 +269,20 @@ export const automationApi = {
 
 export const syncApi = {
   connectors: (): Promise<{ items: SyncConnector[] }> => api.get('/sync/connectors'),
+  createConnector: (data: {
+    code: string
+    name: string
+    transport: string
+    provider_type: string
+    endpoint?: string
+    capabilities_json?: JsonObject
+    config_json?: JsonObject
+    enabled?: boolean
+  }): Promise<SyncConnector> => api.post('/sync/connectors', data),
   testConnector: (id: number): Promise<{ status: string; message: string; latency_ms?: number | null }> => api.post(`/sync/connectors/${id}/test`),
+  discoverConnector: (id: number): Promise<JsonObject> => api.post(`/sync/connectors/${id}/discover`),
+  connectorCredentials: (id: number): Promise<{ items: JsonObject[] }> => api.get(`/sync/connectors/${id}/credentials`),
+  addConnectorCredential: (id: number, data: { credential_ref: string; credential_type?: string; label?: string }): Promise<JsonObject> => api.post(`/sync/connectors/${id}/credentials`, data),
   queries: (databaseId?: number | null): Promise<{ items: JsonObject[] }> => api.get('/sync/queries', { params: { database_id: databaseId ?? undefined } }),
   createSubscription: (data: {
     database_id: number
@@ -287,6 +300,10 @@ export const syncApi = {
   decideObservation: (id: number, decision: 'accepted' | 'rejected', decidedBy = 'local-user'): Promise<ExternalObservation> => api.post(`/sync/observations/${id}/decision`, { decision, decided_by: decidedBy }),
   legalEvents: (patentId: number): Promise<{ items: LegalStatusEvent[] }> => api.get(`/sync/patents/${patentId}/legal-events`),
   watchEvents: (databaseId?: number | null): Promise<{ items: WatchEvent[] }> => api.get('/sync/watch-events', { params: { database_id: databaseId ?? undefined, limit: 100 } }),
+  previewUpdate: (data: { connector_id: number; database_id: number; patent_ids: number[]; fields?: string[] }): Promise<SyncUpdateBatch> => api.post('/sync/updates/preview', data),
+  getUpdateBatch: (batchId: number): Promise<SyncUpdateBatch> => api.get(`/sync/updates/${batchId}`),
+  confirmUpdate: (batchId: number, selectedItems: { item_id: number; fields: string[] }[], confirmedBy = 'local-user'): Promise<SyncUpdateBatch> => api.post(`/sync/updates/${batchId}/confirm`, { selected_items: selectedItems, confirmed_by: confirmedBy }),
+  cancelUpdate: (batchId: number): Promise<SyncUpdateBatch> => api.post(`/sync/updates/${batchId}/cancel`),
 }
 
 export const commentApi = {

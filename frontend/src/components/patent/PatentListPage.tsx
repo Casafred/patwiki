@@ -10,12 +10,14 @@ import {
   relationService as linkApi,
   searchService as searchApi,
   tagService as tagApi,
+  syncService as syncApi,
 } from '../../services'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
   ViewGroupField, ViewColumnConfig, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget, SearchSuggestion,
   Tag,
+  SyncConnector, SyncUpdateBatch,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDate, parseApiDate } from '../../lib/date'
@@ -55,7 +57,7 @@ const TABLE_VIEW_MODE_STORAGE_KEY = 'patwiki_table_view_mode'
 const ROW_HEIGHT_LIMIT_STORAGE_KEY = 'patwiki_row_height_limit'
 const CHECKBOX_COLUMN_WIDTH = 40
 const INDEX_COLUMN_WIDTH = 56
-const ACTION_COLUMN_WIDTH = 70
+const ACTION_COLUMN_WIDTH = 98
 const PUBLICATION_REFERENCE_RE = /(?<![A-Za-z0-9])([A-Za-z]{2}\d+[A-Za-z]{1,3}\d{0,2})(?![A-Za-z0-9])/g
 const TABLE_POSITION_STORAGE_PREFIX = 'patwiki_table_position:'
 
@@ -534,6 +536,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [showWorkFileDialog, setShowWorkFileDialog] = useState(false)
+  const [showSyncUpdate, setShowSyncUpdate] = useState(false)
+  const [syncUpdatePatentIds, setSyncUpdatePatentIds] = useState<number[]>([])
+  const [syncUpdateConnectors, setSyncUpdateConnectors] = useState<SyncConnector[]>([])
+  const [syncUpdateConnectorId, setSyncUpdateConnectorId] = useState<number | null>(null)
+  const [syncUpdateBatch, setSyncUpdateBatch] = useState<SyncUpdateBatch | null>(null)
+  const [syncUpdateFields, setSyncUpdateFields] = useState<Record<number, string[]>>({})
+  const [syncUpdateLoading, setSyncUpdateLoading] = useState(false)
 
   // 用于丢弃快速翻页/切库时旧请求的响应：每次发起 loadPatents 自增，
   // 返回时若 ID 不等于最新值，说明已有更新请求在路上，直接丢弃结果。
@@ -1540,6 +1549,85 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setShowQuickAnalyze(true)
   }
 
+  const openSyncUpdate = async (patentIds: number[]) => {
+    if (!activeDatabaseId || patentIds.length === 0) return
+    setSyncUpdatePatentIds(patentIds)
+    setSyncUpdateBatch(null)
+    setSyncUpdateFields({})
+    setShowSyncUpdate(true)
+    setSyncUpdateLoading(true)
+    try {
+      const result = await syncApi.connectors()
+      const available = result.items.filter(connector => connector.enabled && connector.capabilities.fetch_patent !== false)
+      setSyncUpdateConnectors(available)
+      setSyncUpdateConnectorId(previous => previous && available.some(item => item.id === previous) ? previous : (available[0]?.id ?? null))
+    } catch (error: unknown) {
+      setShowSyncUpdate(false)
+      alert('加载外部数据连接器失败: ' + getErrorMessage(error))
+    } finally {
+      setSyncUpdateLoading(false)
+    }
+  }
+
+  const previewSyncUpdate = async () => {
+    if (!activeDatabaseId || !syncUpdateConnectorId) return
+    setSyncUpdateLoading(true)
+    try {
+      const result = await syncApi.previewUpdate({
+        connector_id: syncUpdateConnectorId,
+        database_id: activeDatabaseId,
+        patent_ids: syncUpdatePatentIds,
+      })
+      setSyncUpdateBatch(result)
+      setSyncUpdateFields(Object.fromEntries(result.items.map(item => [item.id, item.selected_fields || []])))
+    } catch (error: unknown) {
+      alert('生成外部更新预览失败: ' + getErrorMessage(error))
+    } finally {
+      setSyncUpdateLoading(false)
+    }
+  }
+
+  const confirmSyncUpdate = async () => {
+    if (!syncUpdateBatch) return
+    const choices = syncUpdateBatch.items
+      .filter(item => ['ready', 'no_change'].includes(item.status))
+      .map(item => ({ item_id: item.id, fields: syncUpdateFields[item.id] || [] }))
+    const count = choices.filter(item => item.fields.length > 0).length
+    if (count === 0) {
+      alert('请至少选择一条有变化的字段')
+      return
+    }
+    if (!window.confirm(`确认覆盖 ${count} 条专利的外部字段吗？确认后将写入主记录，并保留修改历史。`)) return
+    setSyncUpdateLoading(true)
+    try {
+      await syncApi.confirmUpdate(syncUpdateBatch.id, choices)
+      alert(`已覆盖更新 ${count} 条专利`)
+      setShowSyncUpdate(false)
+      setSyncUpdateBatch(null)
+      clearSelection()
+      await loadPatents()
+    } catch (error: unknown) {
+      alert('确认外部更新失败: ' + getErrorMessage(error))
+    } finally {
+      setSyncUpdateLoading(false)
+    }
+  }
+
+  const cancelSyncUpdate = async () => {
+    if (syncUpdateBatch) {
+      try { await syncApi.cancelUpdate(syncUpdateBatch.id) } catch { /* preview may already be expired */ }
+    }
+    setShowSyncUpdate(false)
+    setSyncUpdateBatch(null)
+  }
+
+  const toggleSyncUpdateField = (itemId: number, fieldKey: string) => {
+    setSyncUpdateFields(previous => {
+      const current = previous[itemId] || []
+      return { ...previous, [itemId]: current.includes(fieldKey) ? current.filter(key => key !== fieldKey) : [...current, fieldKey] }
+    })
+  }
+
   const handleCellQuickAI = (patentId: number, fieldKey: string) => {
     // Capture both the record and source column at invocation time. Later
     // selection changes in the table must not change an already opened task.
@@ -2474,6 +2562,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </span>
           <div className="selection-actions">
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)}>批量编辑</button>
+            <button className="btn btn-xs btn-primary" onClick={() => void openSyncUpdate(selectedIds)} title="从外部数据源预览并确认覆盖更新">
+              <Icon name="refresh" size={13} /> 外部更新
+            </button>
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)}>批量打标签</button>
             <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_view')}>移动到视图</button>
             <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_database')}>移库</button>
@@ -2876,6 +2967,27 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                         title="AI快速分析"
                       >
                         <Icon name={aiProcessingRow === p.id ? 'refresh' : 'sparkles'} size={14} />
+                      </button>
+                      <button
+                        className="cell-action-btn"
+                        onClick={(e) => { e.stopPropagation(); void openSyncUpdate([p.id]) }}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          border: '1px solid #bbf7d0',
+                          background: '#f0fdf4',
+                          color: '#15803d',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 0,
+                        }}
+                        title="外部更新：预览并确认覆盖"
+                      >
+                        <Icon name="refresh" size={14} />
                       </button>
                     </div>
                   </td>
@@ -3289,6 +3401,89 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           onClose={() => setShowQuickAnalyze(false)}
           onStarted={handleQuickAnalyzeStarted}
         />
+      )}
+
+      {showSyncUpdate && (
+        <Modal
+          title={syncUpdateBatch ? `外部更新预览 · ${syncUpdatePatentIds.length} 条` : `选择外部数据源 · ${syncUpdatePatentIds.length} 条`}
+          width={760}
+          onClose={() => { if (!syncUpdateLoading) void cancelSyncUpdate() }}
+        >
+          {syncUpdateLoading && !syncUpdateBatch ? (
+            <div style={{ padding: 36, textAlign: 'center', color: '#64748b' }}>加载连接器中...</div>
+          ) : !syncUpdateBatch ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ padding: '10px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, color: '#166534', fontSize: 12, lineHeight: 1.6 }}>
+                先从外部数据源读取并生成差异预览。此步骤不会修改本地专利，也不会新增专利；确认后才会覆盖你勾选的字段。
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#475569', marginBottom: 5 }}>数据源</label>
+                {syncUpdateConnectors.length === 0 ? (
+                  <div style={{ padding: 10, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', borderRadius: 6, fontSize: 12 }}>
+                    没有可用的外部连接器，请先在设置中配置并启用连接器。
+                  </div>
+                ) : (
+                  <select className="form-input" value={syncUpdateConnectorId ?? ''} onChange={event => setSyncUpdateConnectorId(Number(event.target.value) || null)}>
+                    {syncUpdateConnectors.map(connector => <option key={connector.id} value={connector.id}>{connector.name} · {connector.provider_type}</option>)}
+                  </select>
+                )}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button className="btn btn-secondary" onClick={() => void cancelSyncUpdate()}>取消</button>
+                <button className="btn btn-primary" onClick={() => void previewSyncUpdate()} disabled={!syncUpdateConnectorId || syncUpdateConnectors.length === 0}>生成预览</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 11px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12, color: '#475569' }}>
+                <span>预览有效期至 {syncUpdateBatch.expires_at ? new Date(syncUpdateBatch.expires_at).toLocaleString() : '-'}</span>
+                <span>可确认 {syncUpdateBatch.items.filter(item => item.status === 'ready').length} 条</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '55vh', overflowY: 'auto' }}>
+                {syncUpdateBatch.items.map(item => {
+                  const patent = patents.find(row => row.id === item.patent_id)
+                  const canUpdate = item.status === 'ready' || item.status === 'no_change'
+                  const selected = syncUpdateFields[item.id] || []
+                  return (
+                    <div key={item.id} style={{ border: `1px solid ${canUpdate ? '#e2e8f0' : '#fecaca'}`, borderRadius: 6, padding: '10px 12px', background: canUpdate ? '#fff' : '#fff7f7' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: canUpdate && item.changed_fields.length > 0 ? 8 : 0 }}>
+                        <strong style={{ fontSize: 12, color: '#334155' }}>{patent?.title || `专利 ${item.patent_id ?? '-'}`}</strong>
+                        <span style={{ fontSize: 11, color: canUpdate ? '#15803d' : '#b91c1c' }}>
+                          {item.status === 'ready' ? '有可覆盖变化' : item.status === 'no_change' ? '无字段变化' : item.error_message || '无法匹配外部记录'}
+                        </span>
+                      </div>
+                      {canUpdate && item.changed_fields.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                          {item.changed_fields.map(fieldKey => {
+                            const checked = selected.includes(fieldKey)
+                            const field = fields.find(candidate => candidate.key === fieldKey)
+                            return (
+                              <label key={fieldKey} style={{ display: 'grid', gridTemplateColumns: '18px 110px minmax(0, 1fr)', gap: 6, alignItems: 'start', fontSize: 12, cursor: 'pointer' }}>
+                                <input type="checkbox" checked={checked} onChange={() => toggleSyncUpdateField(item.id, fieldKey)} />
+                                <span style={{ color: '#475569', fontWeight: 600 }}>{field?.name || fieldKey}</span>
+                                <span style={{ minWidth: 0, color: '#64748b', lineHeight: 1.45, wordBreak: 'break-word' }}>
+                                  <span style={{ color: '#94a3b8' }}>旧值：</span>{String(item.current_fields[fieldKey] ?? '-')}
+                                  <br />
+                                  <span style={{ color: '#15803d' }}>新值：</span>{String(item.candidate_fields[fieldKey] ?? '-')}
+                                </span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button className="btn btn-secondary" onClick={() => void cancelSyncUpdate()} disabled={syncUpdateLoading}>取消</button>
+                <button className="btn btn-primary" onClick={() => void confirmSyncUpdate()} disabled={syncUpdateLoading}>
+                  确认覆盖 {Object.values(syncUpdateFields).filter(values => values.length > 0).length} 条
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
       )}
 
       {showInsertAIColumn && (

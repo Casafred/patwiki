@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import get_db
 from app.integrations.contracts import ProviderIdentifier
+from app.integrations.credentials import CredentialStoreError, validate_credential_ref
 from app.models import (
     ConnectorCredential,
     ConnectorDefinition,
@@ -16,6 +17,7 @@ from app.models import (
     SavedPatentQuery,
     SyncRun,
     SyncSubscription,
+    SyncUpdateBatch,
     WatchEvent,
 )
 from app.schemas.sync import (
@@ -30,8 +32,11 @@ from app.schemas.sync import (
     SubscriptionCreate,
     SubscriptionUpdate,
     WatchEventUpdate,
+    SyncUpdatePreviewRequest,
+    SyncUpdateConfirmRequest,
 )
 from app.services.sync_service import SyncService
+from app.services.sync_update_service import SyncUpdateService
 from app.integrations.registry import get_connector
 
 
@@ -52,6 +57,80 @@ def _require_connector(db: Session, connector_id: int) -> ConnectorDefinition:
     return connector
 
 
+@router.post("/updates/preview")
+def preview_explicit_update(body: SyncUpdatePreviewRequest, db: Session = Depends(get_db)):
+    _require_database(db, body.database_id)
+    connector = _require_connector(db, body.connector_id)
+    if not connector.enabled:
+        raise BadRequestException("连接器已停用")
+    try:
+        batch = SyncUpdateService.preview(db, connector, body.database_id, body.patent_ids, body.fields)
+    except BadRequestException:
+        raise
+    except Exception as exc:
+        raise BadRequestException(f"生成外部更新预览失败：{exc}") from exc
+    return SyncUpdateService._batch_dict(batch)
+
+
+@router.get("/updates/{batch_id}")
+def get_explicit_update(batch_id: int, db: Session = Depends(get_db)):
+    batch = db.get(SyncUpdateBatch, batch_id)
+    if not batch:
+        raise NotFoundException("外部更新批次不存在")
+    return SyncUpdateService._batch_dict(batch)
+
+
+@router.post("/updates/{batch_id}/confirm")
+def confirm_explicit_update(batch_id: int, body: SyncUpdateConfirmRequest, db: Session = Depends(get_db)):
+    from app.models import SyncUpdateBatch
+    batch = db.get(SyncUpdateBatch, batch_id)
+    if not batch:
+        raise NotFoundException("外部更新批次不存在")
+    try:
+        result = SyncUpdateService.confirm(db, batch, [item.model_dump() for item in body.selected_items], body.confirmed_by)
+    except BadRequestException:
+        raise
+    except Exception as exc:
+        raise BadRequestException(f"确认外部更新失败：{exc}") from exc
+    return SyncUpdateService._batch_dict(result)
+
+
+@router.post("/updates/{batch_id}/cancel")
+def cancel_explicit_update(batch_id: int, db: Session = Depends(get_db)):
+    from app.models import SyncUpdateBatch
+    batch = db.get(SyncUpdateBatch, batch_id)
+    if not batch:
+        raise NotFoundException("外部更新批次不存在")
+    return SyncUpdateService._batch_dict(SyncUpdateService.cancel(db, batch))
+
+
+def _validate_connector_config(values: dict) -> None:
+    config = values.get("config_json") or {}
+    auth = config.get("auth") or {}
+    reference = auth.get("credential_ref") or config.get("credential_ref")
+    if reference:
+        try:
+            validate_credential_ref(str(reference))
+        except CredentialStoreError as exc:
+            raise BadRequestException(str(exc)) from exc
+    sensitive_keys = {"authorization", "api_key", "apikey", "access_token", "refresh_token", "password", "cookie", "secret", "token", "client_secret"}
+
+    def contains_inline_secret(value: object, parent_key: str = "") -> bool:
+        key = parent_key.casefold().replace("-", "_")
+        if key in sensitive_keys and key != "credential_ref":
+            return True
+        if isinstance(value, dict):
+            return any(contains_inline_secret(item, str(name)) for name, item in value.items())
+        if isinstance(value, list):
+            return any(contains_inline_secret(item, parent_key) for item in value)
+        return False
+
+    if contains_inline_secret(config):
+        raise BadRequestException("连接器配置禁止保存明文凭证，请使用 env:// 或 keyring:// 引用")
+    if values.get("transport") == "mcp" and not values.get("provider_type"):
+        raise BadRequestException("MCP 连接器必须指定 provider_type")
+
+
 @router.get("/connectors")
 def list_connectors(db: Session = Depends(get_db)):
     return {"items": [SyncService.connector_dict(item) for item in db.query(ConnectorDefinition).order_by(ConnectorDefinition.id).all()]}
@@ -61,14 +140,18 @@ def list_connectors(db: Session = Depends(get_db)):
 def create_connector(body: ConnectorCreate, db: Session = Depends(get_db)):
     if db.query(ConnectorDefinition).filter(ConnectorDefinition.code == body.code).first():
         raise BadRequestException("连接器 code 已存在")
-    connector = SyncService.create_or_update_connector(db, body.model_dump())
+    values = body.model_dump()
+    _validate_connector_config(values)
+    connector = SyncService.create_or_update_connector(db, values)
     return SyncService.connector_dict(connector)
 
 
 @router.patch("/connectors/{connector_id}")
 def update_connector(connector_id: int, body: ConnectorUpdate, db: Session = Depends(get_db)):
     connector = _require_connector(db, connector_id)
-    connector = SyncService.create_or_update_connector(db, body.model_dump(exclude_unset=True), connector)
+    values = body.model_dump(exclude_unset=True)
+    _validate_connector_config(values)
+    connector = SyncService.create_or_update_connector(db, values, connector)
     return SyncService.connector_dict(connector)
 
 
@@ -89,9 +172,61 @@ def test_connector(connector_id: int, db: Session = Depends(get_db)):
     return {"status": health.status, "message": health.message, "latency_ms": health.latency_ms}
 
 
+@router.post("/connectors/{connector_id}/discover")
+def discover_connector_tools(connector_id: int, db: Session = Depends(get_db)):
+    """Explicitly discover MCP tools; this may make a billable provider call."""
+    connector = _require_connector(db, connector_id)
+    runtime_connector = None
+    try:
+        runtime_connector = get_connector(connector)
+        discover = getattr(runtime_connector, "discover_tools", None)
+        if not callable(discover):
+            raise BadRequestException("该连接器不支持 MCP 工具发现")
+        catalog = discover()
+        connector.mcp_catalog_json = catalog
+        from app.core.time import utc_now_naive
+        connector.mcp_catalog_updated_at = utc_now_naive()
+        db.commit()
+        db.refresh(connector)
+        return {
+            **catalog,
+            "connector_id": connector.id,
+            "updated_at": connector.mcp_catalog_updated_at.isoformat() if connector.mcp_catalog_updated_at else None,
+        }
+    except BadRequestException:
+        raise
+    except Exception as exc:
+        raise BadRequestException(f"MCP 工具发现失败：{exc}") from exc
+    finally:
+        if runtime_connector is not None:
+            close = getattr(runtime_connector, "close", None)
+            if callable(close):
+                close()
+
+
+@router.get("/connectors/{connector_id}/credentials")
+def list_connector_credentials(connector_id: int, db: Session = Depends(get_db)):
+    connector = _require_connector(db, connector_id)
+    return {"items": [
+        {
+            "id": item.id,
+            "connector_id": connector.id,
+            "credential_type": item.credential_type,
+            "label": item.label,
+            "configured": True,
+            "credential_ref": item.credential_ref,
+        }
+        for item in connector.credentials
+    ]}
+
+
 @router.post("/connectors/{connector_id}/credentials")
 def add_connector_credential(connector_id: int, body: CredentialCreate, db: Session = Depends(get_db)):
     _require_connector(db, connector_id)
+    try:
+        validate_credential_ref(body.credential_ref)
+    except CredentialStoreError as exc:
+        raise BadRequestException(str(exc)) from exc
     credential = ConnectorCredential(connector_id=connector_id, **body.model_dump())
     db.add(credential)
     db.commit()

@@ -133,6 +133,7 @@ def apply_legal_events(
     record: ProviderPatentRecord,
     database_id: int,
     subscription_id: int | None,
+    apply_current_status: bool = True,
 ) -> int:
     applied = 0
     for event in record.legal_events:
@@ -168,7 +169,7 @@ def apply_legal_events(
                 payload_json={"event_code": event.event_code, "status": event.status, "event_date": event.event_date.isoformat()},
             ))
         applied += 1
-    if record.legal_events:
+    if apply_current_status and record.legal_events:
         latest = max(record.legal_events, key=lambda item: item.event_date)
         mapped_status = LEGAL_STATUS_MAP.get(latest.status, "unknown")
         current_status = patent.legal_status.value if hasattr(patent.legal_status, "value") else patent.legal_status
@@ -183,6 +184,40 @@ def apply_legal_events(
             ))
             patent.legal_status = LegalStatus(mapped_status)
             patent.legal_status_date = latest.event_date
+    # A provider may return a current legal state without a dated event. Keep
+    # the current projection accurate, but do not invent an event timestamp.
+    current_provider_status = record.fields.get("legal_status")
+    if not apply_current_status:
+        return applied
+    mapped_provider_status = LEGAL_STATUS_MAP.get(str(current_provider_status), "unknown")
+    if current_provider_status and mapped_provider_status != "unknown":
+        current_status = patent.legal_status.value if hasattr(patent.legal_status, "value") else patent.legal_status
+        if current_status != mapped_provider_status:
+            db.add(PatentHistory(
+                patent_id=patent.id,
+                field_key="legal_status",
+                old_value=current_status,
+                new_value=mapped_provider_status,
+                source="external_sync",
+                changed_by="sync-engine",
+            ))
+            patent.legal_status = LegalStatus(mapped_provider_status)
+            dedupe_key = hash_payload({
+                "patent": patent.id,
+                "type": "legal_status_changed",
+                "status": mapped_provider_status,
+                "provider": run.connector_id,
+            })
+            if not db.query(WatchEvent).filter(WatchEvent.dedupe_key == dedupe_key).first():
+                db.add(WatchEvent(
+                    database_id=database_id,
+                    patent_id=patent.id,
+                    sync_subscription_id=subscription_id,
+                    event_type="legal_status_changed",
+                    severity="important",
+                    dedupe_key=dedupe_key,
+                    payload_json={"status": mapped_provider_status, "source": "provider_current_state"},
+                ))
     return applied
 
 

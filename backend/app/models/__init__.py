@@ -120,6 +120,8 @@ from app.models.sync import (
     WatchEvent,
     SyncDeadLetter,
     SyncLease,
+    SyncUpdateBatch,
+    SyncUpdateItem,
 )
 
 
@@ -170,5 +172,5 @@ __all__ = [
     "ConnectorDefinition", "ConnectorCredential", "SavedPatentQuery",
     "SyncSubscription", "SyncCursor", "SyncRun", "ExternalSnapshot",
     "SyncRecord", "ExternalFactObservation", "LegalStatusEvent", "WatchEvent",
-    "SyncDeadLetter", "SyncLease",
+    "SyncDeadLetter", "SyncLease", "SyncUpdateBatch", "SyncUpdateItem",
 ]

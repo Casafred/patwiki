@@ -52,6 +52,8 @@ class SyncService:
             "provider_type": connector.provider_type,
             "endpoint": connector.endpoint,
             "capabilities": connector.capabilities_json or {},
+            "mcp_catalog": connector.mcp_catalog_json or {},
+            "mcp_catalog_updated_at": connector.mcp_catalog_updated_at.isoformat() if connector.mcp_catalog_updated_at else None,
             "enabled": connector.enabled,
             "created_at": connector.created_at.isoformat() if connector.created_at else None,
             "updated_at": connector.updated_at.isoformat() if connector.updated_at else None,

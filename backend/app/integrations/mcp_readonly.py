@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+import json
 from typing import Any, Callable, Mapping, Protocol
 
 from app.integrations.contracts import (
@@ -143,3 +144,31 @@ class McpReadonlyConnector(PatentConnector):
             return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
         except ValueError as exc:
             raise ConnectorError("MCP 水位日期无法解析", error_code="invalid_date") from exc
+
+
+class McpTransportReadonlyConnector(McpReadonlyConnector):
+    """Generic MCP connector for providers returning PatWiki's standard shape.
+
+    Provider-specific field mappings still belong in a dedicated adapter. This
+    class is useful when a vendor already returns ``external_record_id``,
+    ``identifiers`` and ``fields`` in the shared contract shape.
+    """
+
+    def __init__(self, transport: Any, *, service_name: str, **kwargs: Any):
+        self.transport = transport
+        self.service_name = service_name
+        super().__init__(self._call_transport, **kwargs)
+
+    def _call_transport(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        result = self.transport.call_tool(self.service_name, tool_name, arguments)
+        if isinstance(result, Mapping) and isinstance(result.get("content"), list):
+            text = next((item.get("text") for item in result["content"] if isinstance(item, Mapping) and item.get("type") == "text"), None)
+            if text:
+                try:
+                    return json.loads(text) if isinstance(text, str) else text
+                except (TypeError, json.JSONDecodeError) as exc:
+                    raise ConnectorError("标准 MCP 文本结果不是有效 JSON", error_code="invalid_mcp_payload") from exc
+        return result
+
+    def close(self) -> None:
+        self.transport.close()
