@@ -1,5 +1,5 @@
 from app.database import SessionLocal, init_db
-from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase, PatentExportTemplate
+from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase, PatentExportTemplate, ConnectorDefinition
 from app.services.view_service import ViewService
 from app.services.field_governance_service import seed_registry_baseline
 
@@ -57,6 +57,17 @@ def init_default_data():
             )
             db.add(default_db)
             db.flush()
+
+        if not db.query(ConnectorDefinition).filter(ConnectorDefinition.code == "demo").first():
+            db.add(ConnectorDefinition(
+                code="demo",
+                name="本地演示连接器",
+                transport="api",
+                provider_type="demo",
+                capabilities_json={"search": True, "fetch_patent": True, "legal_events": True, "cursor_pagination": True},
+                config_json={"version": "demo-v1", "records": []},
+                enabled=True,
+            ))
 
         for database in db.query(PatentDatabase).filter(PatentDatabase.is_archived == False).all():
             views = ViewService.ensure_default_business_views(db, database.id)

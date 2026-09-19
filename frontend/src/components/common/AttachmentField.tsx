@@ -94,7 +94,24 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value 
       <div className="attachment-list">
         {attachments.map(attachment => (
           <div className="attachment-item" key={attachment.attachment_id}>
-            <span className="attachment-name" title={attachment.filename}>{attachment.filename}</span>
+            <div className="attachment-media">
+              {attachment.is_image || attachment.mime_type.startsWith('image/') ? (
+                <button
+                  type="button"
+                  className="attachment-thumbnail-button"
+                  title={`预览 ${attachment.filename}`}
+                  onClick={() => void openFile(attachment, true)}
+                >
+                  <img
+                    className="attachment-thumbnail"
+                    src={resolveUrl(attachment.preview_url)}
+                    alt={attachment.filename}
+                    loading="lazy"
+                  />
+                </button>
+              ) : null}
+              <span className="attachment-name" title={attachment.filename}>{attachment.filename}</span>
+            </div>
             <span className="attachment-size">{formatSize(attachment.file_size)}</span>
             <button type="button" className="attachment-action" onClick={() => void openFile(attachment, true)}>预览</button>
             <button type="button" className="attachment-action" onClick={() => void openFile(attachment, false)}>下载</button>

@@ -8,6 +8,7 @@ import type {
   AgentAnalysisResult, LinkRecord, LinkTarget, RelationBatchItem, PatentShare, PublicPatentShare, SearchSuggestion,
   PatentGraphResponse, PatentFamilyResponse, PatentCitationResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
+  SyncConnector, SyncSubscription, SyncRun, ExternalObservation, LegalStatusEvent, WatchEvent,
   GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
   ImportChangeReview, ImportReviewAction,
   ProjectSolutionVersion, RiskCase,
@@ -264,6 +265,28 @@ export const automationApi = {
     api.get('/automation/logs', { params: { database_id: databaseId ?? undefined, limit: 80 } }),
   scheduleTick: (databaseId?: number | null): Promise<JsonObject> =>
     api.post('/automation/schedule/tick', undefined, { params: { database_id: databaseId ?? undefined } }),
+}
+
+export const syncApi = {
+  connectors: (): Promise<{ items: SyncConnector[] }> => api.get('/sync/connectors'),
+  testConnector: (id: number): Promise<{ status: string; message: string; latency_ms?: number | null }> => api.post(`/sync/connectors/${id}/test`),
+  queries: (databaseId?: number | null): Promise<{ items: JsonObject[] }> => api.get('/sync/queries', { params: { database_id: databaseId ?? undefined } }),
+  createSubscription: (data: {
+    database_id: number
+    connector_id: number
+    name: string
+    scope_json?: JsonObject
+    schedule_json?: JsonObject
+    review_policy?: string
+    enabled?: boolean
+  }): Promise<SyncSubscription> => api.post('/sync/subscriptions', data),
+  subscriptions: (databaseId?: number | null): Promise<{ items: SyncSubscription[] }> => api.get('/sync/subscriptions', { params: { database_id: databaseId ?? undefined } }),
+  runSubscription: (id: number, maxPages = 100): Promise<SyncRun> => api.post(`/sync/subscriptions/${id}/run`, { trigger: 'manual', max_pages: maxPages }),
+  runs: (subscriptionId?: number | null): Promise<{ items: SyncRun[] }> => api.get('/sync/runs', { params: { subscription_id: subscriptionId ?? undefined, limit: 50 } }),
+  observations: (decision = 'pending_review'): Promise<{ items: ExternalObservation[] }> => api.get('/sync/observations', { params: { decision, limit: 100 } }),
+  decideObservation: (id: number, decision: 'accepted' | 'rejected', decidedBy = 'local-user'): Promise<ExternalObservation> => api.post(`/sync/observations/${id}/decision`, { decision, decided_by: decidedBy }),
+  legalEvents: (patentId: number): Promise<{ items: LegalStatusEvent[] }> => api.get(`/sync/patents/${patentId}/legal-events`),
+  watchEvents: (databaseId?: number | null): Promise<{ items: WatchEvent[] }> => api.get('/sync/watch-events', { params: { database_id: databaseId ?? undefined, limit: 100 } }),
 }
 
 export const commentApi = {

@@ -13,6 +13,7 @@ import {
   searchApi,
   tagApi,
   viewApi,
+  syncApi,
 } from '../api'
 import type { FieldMeta, JsonObject } from '../types'
 
@@ -140,4 +141,15 @@ export const automationService = {
   executeRule: (...args: Parameters<typeof automationApi.executeRule>) => automationApi.executeRule(...args),
   logs: (...args: Parameters<typeof automationApi.logs>) => automationApi.logs(...args),
   scheduleTick: (...args: Parameters<typeof automationApi.scheduleTick>) => automationApi.scheduleTick(...args),
+}
+
+export const syncService = {
+  connectors: () => syncApi.connectors(),
+  testConnector: (id: number) => syncApi.testConnector(id),
+  createSubscription: (...args: Parameters<typeof syncApi.createSubscription>) => syncApi.createSubscription(...args),
+  subscriptions: (databaseId?: number | null) => syncApi.subscriptions(databaseId),
+  runSubscription: (...args: Parameters<typeof syncApi.runSubscription>) => syncApi.runSubscription(...args),
+  runs: (subscriptionId?: number | null) => syncApi.runs(subscriptionId),
+  observations: (decision?: string) => syncApi.observations(decision),
+  decideObservation: (...args: Parameters<typeof syncApi.decideObservation>) => syncApi.decideObservation(...args),
 }

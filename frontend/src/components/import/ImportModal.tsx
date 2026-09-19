@@ -51,6 +51,7 @@ const SYSTEM_FIELD_LABELS: Record<string, string> = {
   family_members: '同族专利',
   cited_patents: '引用专利',
   citing_patents: '被引用专利',
+  attachments: '嵌入图片/附件',
 }
 
 const SKIP_COLUMN = '__skip__'
@@ -625,6 +626,11 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                     将跳过 {skippedCount} 列
                   </span>
                 )}
+                {(preview.embedded_image_count || 0) > 0 && (
+                  <span style={{ color: '#047857', marginLeft: 8, fontWeight: 600 }}>
+                    检测到 {preview.embedded_image_count} 张嵌入图片，确认后写入附件字段
+                  </span>
+                )}
               </div>
 
               <div style={{ maxHeight: 350, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6, marginBottom: 16 }}>
@@ -642,6 +648,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                       const isVirtual = ['family_members', 'cited_patents', 'citing_patents'].includes(mappedKey)
                       const isGovernancePending = !mappedKey
                       const isSkipped = mappedKey === SKIP_COLUMN
+                      const embeddedImages = (preview.embedded_images || []).filter(image => image.source_field_name === col)
                       return (
                         <tr key={col} style={{ borderTop: '1px solid #f1f5f9', opacity: isSkipped ? 0.6 : 1 }}>
                           <td style={{ padding: '8px 12px', fontWeight: 500 }}>{col}</td>
@@ -675,6 +682,11 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                             {isVirtual && (
                               <span style={{ display: 'inline-block', marginLeft: 6, padding: '1px 6px', fontSize: 10, background: '#e0e7ff', color: '#3730a3', borderRadius: 3 }}>
                                 关系入库
+                              </span>
+                            )}
+                            {embeddedImages.length > 0 && (
+                              <span style={{ display: 'inline-block', marginLeft: 6, padding: '1px 6px', fontSize: 10, background: '#dcfce7', color: '#166534', borderRadius: 3 }}>
+                                {embeddedImages.length} 张图片
                               </span>
                             )}
                             {isSkipped && (

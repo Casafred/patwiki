@@ -59,6 +59,23 @@ const ACTION_COLUMN_WIDTH = 70
 const PUBLICATION_REFERENCE_RE = /(?<![A-Za-z0-9])([A-Za-z]{2}\d+[A-Za-z]{1,3}\d{0,2})(?![A-Za-z0-9])/g
 const TABLE_POSITION_STORAGE_PREFIX = 'patwiki_table_position:'
 
+function safeHttpUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+function isImageUrl(value: string): boolean {
+  try {
+    return /\.(?:png|jpe?g|gif|webp|bmp|svg)(?:$|[?#])/i.test(new URL(value).pathname + new URL(value).search)
+  } catch {
+    return false
+  }
+}
+
 interface TablePositionSnapshot {
   page: number
   continuousPage: number
@@ -2157,6 +2174,34 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
     if (field.field_type === 'attachment') {
       return <AttachmentField patentId={patent.id} databaseId={activeDatabaseId} fieldKey={field.key} value={value} />
+    }
+
+    if (field.field_type === 'url') {
+      const url = safeHttpUrl(String(value ?? '').trim())
+      if (!url) return <span style={{ color: '#94a3b8', fontSize: 12 }}>{value ? String(value) : '-'}</span>
+      if (isImageUrl(url)) {
+        return (
+          <a href={url} target="_blank" rel="noreferrer noopener" onClick={event => event.stopPropagation()} title={url}>
+            <img
+              src={url}
+              alt={field.name}
+              loading="lazy"
+              style={{ display: 'block', width: 64, height: 48, objectFit: 'contain', border: '1px solid #e2e8f0', borderRadius: 4, background: '#f8fafc' }}
+            />
+          </a>
+        )
+      }
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={event => event.stopPropagation()}
+          style={{ color: '#2563eb', display: 'block', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.5 }}
+        >
+          {url}
+        </a>
+      )
     }
 
     if (field.field_type === 'link') {

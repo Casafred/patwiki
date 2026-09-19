@@ -27,8 +27,10 @@ async def _automation_scheduler():
         db = SessionLocal()
         try:
             AutomationEngine.run_scheduled(db)
+            from app.services.sync_service import SyncService
+            SyncService.run_due_subscriptions(db)
         except Exception:
-            logger.exception("automation schedule tick failed")
+            logger.exception("automation or external sync schedule tick failed")
         finally:
             db.close()
 

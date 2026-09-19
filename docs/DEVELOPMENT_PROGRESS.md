@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-08-26（完成导入预审/审查/执行/回撤闭环，补齐缺少公开号来源行的保留语义，并同步 Agent 执行契约；全局成员关系迁移仍待后续阶段）
+最近更新：2026-09-19（完成外部专利数据同步 Phase 1，并加入配置驱动 REST/JSON Connector、凭证引用、固定 fixture 契约测试和只读 MCP Adapter 插槽；真实供应商仍需按许可和字段映射配置验收）
 
 ---
 
@@ -144,6 +144,8 @@
 
 | 日期 | 任务ID | 变更内容 |
 |------|--------|---------|
+| 2026-09-19 | G1-1 | 完成外部专利数据同步 Phase 1：新增 Connector/同步模型、版本化迁移 `2026-09-19.2`、Provider-neutral Connector 契约和 Demo Connector；新增手动/定时订阅执行、游标、租约、幂等、原始快照、外部事实观察、法律状态事件、WatchEvent、失败运行记录和身份冲突候选持久化；新增 `/sync` API 与外部同步工作区；默认初始化空配置 Demo Connector，不写入模拟专利；通过后端全量 114 项、Python compileall、前端 lint、TypeScript、Vite build 和 `git diff --check`。真实数据商 API/MCP 仍需在 Phase 2 按 Connector 契约接入并完成凭证/许可配置。 |
+| 2026-09-19 | G1-2 | 新增配置驱动 `rest_json` / `generic_json` Connector：支持请求模板、响应路径映射、分页游标、标准身份/字段/法律事件映射、`Retry-After` 和可重试错误；新增 `env://` / `keyring://` 凭证引用解析，SQLite 仅保存引用；新增固定 HTTP fixture 和只读 MCP Adapter 契约测试。 |
 | 2026-08-17 | G0-7 | 完成统一专利身份与工作文件基础闭环：新增 `PatentIdentifier`、号码规范化/原始别名、历史身份回填、导入行联合身份匹配和跨 Patent 身份冲突隔离；新增专利身份查询 API；为每个数据库幂等创建六类高频业务 SavedView；新增 `PatentExportTemplate` 及 Excel/Word/CSV 模板 CRUD 和导出字段血缘；补充前端类型/API、身份/模板/视图/导出回归测试。全量后端 46 项通过。 |
 | 2026-08-19 | G0-7a | 完成专利详情身份链与来源追溯闭环：修正身份子路由顺序；详情页展示三类号码投影、PatentIdentifier 原始别名/规范化值/法域/kind code/来源时间；字段来源显示最近来源表和来源行；身份冲突持久化候选 Patent ID，提供 `/identity-conflicts` 查询并从详情跳转治理工作台；治理工作台支持 `patent_id` 筛选。身份与导入相关后端 22 项、前端 lint 通过。 |
 | 2026-08-19 | G0-7b | 完成高频视图与工作文件前端闭环：补充六类 SavedView 快捷入口、工作文件模板选择/预览/下载弹窗，沿用模板字段、视图、版本和导出血缘；当前搜索和临时筛选作为附加条件传入；通过模板 API 回归、ESLint、TypeScript 和 Vite build。 |

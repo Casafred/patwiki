@@ -3101,6 +3101,30 @@ input[type="checkbox"] {
   font-size: 11px;
 }
 
+.attachment-media {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.attachment-thumbnail-button {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  padding: 2px;
+  border: 1px solid #dbeafe;
+  border-radius: 4px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.attachment-thumbnail {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
 .attachment-name {
   overflow: hidden;
   color: #1d4ed8;

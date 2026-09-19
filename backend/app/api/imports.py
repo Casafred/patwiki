@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.database import get_db, SessionLocal, engine
 from app.schemas.schemas import ImportBatchResponse, StatsResponse
 from app.services.import_service import IMPORT_SKIP_FIELD, ImportService
+from app.services.excel_image_service import extract_embedded_images
 from app.services.patent_service import PatentService
 from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
 from app.services.merge_service import merge_patent_data, _is_empty
@@ -161,7 +162,14 @@ async def preview_import(
     if selected_sheet and sheets and selected_sheet not in sheets:
         raise BadRequestException(f"Sheet 不存在：{selected_sheet}")
     df, columns = ImportService.parse_excel(content, filename, selected_sheet)
+    embedded_images = extract_embedded_images(content, filename, selected_sheet, columns)
     suggested_mapping, mapping_issues = ImportService.suggest_mapping(columns, db)
+    embedded_image_columns = {
+        image.source_field_name for image in embedded_images if image.source_field_name
+    }
+    for column in embedded_image_columns:
+        if not suggested_mapping.get(column):
+            suggested_mapping[column] = "attachments"
 
     preview_rows_list = []
     for _, row in df.head(3).iterrows():
@@ -204,6 +212,8 @@ async def preview_import(
         "default_database_id": default_db.id if default_db else None,
         "sheets": sheets,
         "selected_sheet": selected_sheet,
+        "embedded_image_count": len(embedded_images),
+        "embedded_images": [image.metadata(include_hash=False) for image in embedded_images],
     }
 
 

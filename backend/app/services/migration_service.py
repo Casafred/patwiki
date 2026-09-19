@@ -27,7 +27,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-04.0"
+CURRENT_MIGRATION_VERSION = "2026-09-19.2"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -128,6 +128,17 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("governance_decisions", "patent_value_before", "ALTER TABLE governance_decisions ADD COLUMN patent_value_before TEXT"),
     _column("governance_decisions", "patent_value_after", "ALTER TABLE governance_decisions ADD COLUMN patent_value_after TEXT"),
     _column("governance_decisions", "patent_value_changed", "ALTER TABLE governance_decisions ADD COLUMN patent_value_changed BOOLEAN DEFAULT 0"),
+    _column("attachments", "source_type", "ALTER TABLE attachments ADD COLUMN source_type VARCHAR(40) DEFAULT 'manual_upload'"),
+    _column("attachments", "import_batch_id", "ALTER TABLE attachments ADD COLUMN import_batch_id INTEGER REFERENCES import_batches(id)"),
+    _column("attachments", "source_sheet", "ALTER TABLE attachments ADD COLUMN source_sheet VARCHAR(200)"),
+    _column("attachments", "source_cell", "ALTER TABLE attachments ADD COLUMN source_cell VARCHAR(30)"),
+    _column("attachments", "source_row", "ALTER TABLE attachments ADD COLUMN source_row INTEGER"),
+    _column("attachments", "source_column", "ALTER TABLE attachments ADD COLUMN source_column INTEGER"),
+    _column("attachments", "source_url", "ALTER TABLE attachments ADD COLUMN source_url VARCHAR(2000)"),
+    _column("attachments", "sha256", "ALTER TABLE attachments ADD COLUMN sha256 VARCHAR(64)"),
+    _column("attachments", "width", "ALTER TABLE attachments ADD COLUMN width INTEGER"),
+    _column("attachments", "height", "ALTER TABLE attachments ADD COLUMN height INTEGER"),
+    _column("sync_records", "identity_candidate_patent_ids", "ALTER TABLE sync_records ADD COLUMN identity_candidate_patent_ids JSON"),
     _index("patents", "ix_patents_database_id", "database_id"),
     _index("patent_databases", "ix_patent_databases_owner_id", "owner_id"),
     _index("patent_histories", "ix_patent_histories_source_view_id", "source_view_id"),
@@ -144,6 +155,9 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _index("governance_decisions", "ix_governance_decisions_decision_batch_id", "decision_batch_id"),
     _index("governance_decisions", "ix_governance_decisions_patent_id", "patent_id"),
     _index("governance_reversals", "ix_governance_reversals_decision_batch_id", "decision_batch_id"),
+    _index("attachments", "ix_attachments_import_batch_id", "import_batch_id"),
+    _index("attachments", "ix_attachments_source_type", "source_type"),
+    _index("attachments", "ix_attachments_sha256", "sha256"),
 )
 
 

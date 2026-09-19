@@ -106,6 +106,21 @@ from app.models.field_governance import (
     FieldDefinition,
     SourceFieldMapping,
 )
+from app.models.sync import (
+    ConnectorDefinition,
+    ConnectorCredential,
+    SavedPatentQuery,
+    SyncSubscription,
+    SyncCursor,
+    SyncRun,
+    ExternalSnapshot,
+    SyncRecord,
+    ExternalFactObservation,
+    LegalStatusEvent,
+    WatchEvent,
+    SyncDeadLetter,
+    SyncLease,
+)
 
 
 __all__ = [
@@ -152,4 +167,8 @@ __all__ = [
     "MigrationRun", "MigrationIssue",
     "FieldRegistrySnapshot", "SourceTableDefinition",
     "FieldDefinition", "SourceFieldMapping",
+    "ConnectorDefinition", "ConnectorCredential", "SavedPatentQuery",
+    "SyncSubscription", "SyncCursor", "SyncRun", "ExternalSnapshot",
+    "SyncRecord", "ExternalFactObservation", "LegalStatusEvent", "WatchEvent",
+    "SyncDeadLetter", "SyncLease",
 ]

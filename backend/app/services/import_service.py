@@ -17,7 +17,9 @@ from app.services.patent_identity_service import normalize_publication_number
 
 # 虚拟字段：不直接写入 Patent 主表，由 relation_service 处理
 VIRTUAL_FIELDS = {"family_members", "cited_patents", "citing_patents"}
-IMPORT_BLOCKED_FIELDS = {"attachments"}
+# Attachment fields are accepted only when the source contains embedded image
+# objects.  ``validate_mapping`` keeps the warning for non-image sources.
+IMPORT_IMAGE_FIELDS = {"attachments"}
 IMPORT_SKIP_FIELD = "__skip__"
 
 STANDARD_FIELD_MAPPINGS = {
@@ -273,7 +275,13 @@ class ImportService:
         return mapping, mapping_issues
 
     @staticmethod
-    def validate_mapping(columns: list[str], mapping: dict[str, str], db: Session) -> list[dict[str, str]]:
+    def validate_mapping(
+        columns: list[str],
+        mapping: dict[str, str],
+        db: Session,
+        *,
+        embedded_image_columns: set[str] | None = None,
+    ) -> list[dict[str, str]]:
         """Return mapping diagnostics before any row can be written.
 
         空目标允许导入继续进行；其原始单元格值仍会留存在导入证据中。
@@ -312,8 +320,8 @@ class ImportService:
             if target == IMPORT_SKIP_FIELD:
                 # 用户明确跳过本列。
                 continue
-            if target in IMPORT_BLOCKED_FIELDS:
-                issues.append({"column": column, "target_field": target, "reason": "附件字段需要上传实际文件，不能从 Excel 单元格写入", "severity": "warning"})
+            if target in IMPORT_IMAGE_FIELDS and column not in (embedded_image_columns or set()):
+                issues.append({"column": column, "target_field": target, "reason": "附件字段需要 Excel 嵌入图片或实际文件；当前来源列未检测到嵌入图片", "severity": "warning"})
                 continue
             if target in VIRTUAL_FIELDS or target in SYSTEM_FIELD_KEYS:
                 continue
@@ -471,6 +479,11 @@ class ImportService:
                     continue
 
                 # 自定义字段
+                # Embedded image bytes are handled separately by the staged
+                # import service.  Never serialize them into Patent JSON.
+                if field_key == "attachments":
+                    continue
+
                 if field_key in all_custom_fields:
                     if all_custom_fields[field_key].field_type in (CustomFieldType.FORMULA, CustomFieldType.ATTACHMENT):
                         raise ValueError(f"字段 '{field_key}' 不支持从 Excel 写入")

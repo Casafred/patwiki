@@ -805,6 +805,18 @@ export interface ImportPreview {
   available_fields?: FieldMeta[]
   sheets?: string[]
   selected_sheet?: string | null
+  embedded_image_count?: number
+  embedded_images?: {
+    sheet_name: string
+    source_row: number
+    source_column: number
+    source_cell: string
+    source_field_name: string
+    filename: string
+    mime_type: string
+    width?: number | null
+    height?: number | null
+  }[]
   // P0-11：返回库列表供选择
   databases?: PatentDatabase[]
   default_database_id?: number | null
@@ -843,6 +855,8 @@ export interface ImportResult {
   mapping_warnings?: { column: string; target_field?: string; reason: string; severity?: 'warning' }[]
   retained_source_rows?: number
   skipped_empty_rows?: number
+  embedded_image_count?: number
+  imported_image_count?: number
 }
 
 export type ImportReviewAction = 'adopt' | 'keep_existing' | 'fill_empty' | 'ignore' | 'quarantine'
@@ -854,6 +868,7 @@ export interface ImportChangeReview {
   source_row_id: number
   patent_id?: number | null
   source_field_name: string
+  source_column_index?: number | null
   canonical_field_key?: string | null
   current_value?: string | null
   candidate_value?: string | null
@@ -1033,6 +1048,17 @@ export interface AttachmentMeta {
   uploaded_at?: string | null
   download_url: string
   preview_url: string
+  source_type?: string
+  import_batch_id?: number | null
+  source_sheet?: string | null
+  source_cell?: string | null
+  source_row?: number | null
+  source_column?: number | null
+  source_url?: string | null
+  sha256?: string | null
+  width?: number | null
+  height?: number | null
+  is_image?: boolean
 }
 
 export type DashboardCardType = 'metric' | 'bar' | 'pie' | 'line' | 'progress' | 'table'
@@ -1090,6 +1116,99 @@ export interface AutomationLog {
   error_message?: string | null
   details: JsonObject
   executed_at?: string | null
+}
+
+export interface SyncConnector {
+  id: number
+  code: string
+  name: string
+  transport: string
+  provider_type: string
+  endpoint?: string | null
+  capabilities: JsonObject
+  enabled: boolean
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface SyncSubscription {
+  id: number
+  database_id: number
+  connector_id: number
+  saved_query_id?: number | null
+  name: string
+  mode: string
+  scope: JsonObject
+  schedule: JsonObject
+  review_policy: string
+  enabled: boolean
+  next_run_at?: string | null
+  last_run_at?: string | null
+  last_status?: string | null
+}
+
+export interface SyncRun {
+  id: number
+  subscription_id?: number | null
+  connector_id: number
+  database_id?: number | null
+  trigger: string
+  status: string
+  cursor_before?: string | null
+  cursor_after?: string | null
+  counts: JsonObject
+  error_code?: string | null
+  error_message?: string | null
+  retry_count: number
+  started_at?: string | null
+  finished_at?: string | null
+  created_at?: string | null
+}
+
+export interface ExternalObservation {
+  id: number
+  sync_run_id: number
+  sync_record_id: number
+  patent_id?: number | null
+  canonical_field_key: string
+  raw_value?: string | null
+  normalized_value?: string | null
+  current_value?: string | null
+  candidate_value?: string | null
+  confidence: string
+  decision: string
+  decision_reason?: string | null
+  decided_by?: string | null
+  decided_at?: string | null
+  created_at?: string | null
+}
+
+export interface LegalStatusEvent {
+  id: number
+  patent_id: number
+  connector_id: number
+  provider_event_id: string
+  jurisdiction_code?: string | null
+  event_code: string
+  event_date: string
+  status: string
+  raw_description?: string | null
+  created_at?: string | null
+}
+
+export interface WatchEvent {
+  id: number
+  database_id: number
+  patent_id?: number | null
+  sync_subscription_id?: number | null
+  event_type: string
+  severity: string
+  dedupe_key: string
+  payload: JsonObject
+  status: string
+  acknowledged_by?: string | null
+  acknowledged_at?: string | null
+  occurred_at?: string | null
 }
 
 export interface CommentRecord {

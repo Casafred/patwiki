@@ -10,6 +10,7 @@ import SharingPage from './components/settings/SharingPage'
 import AgentAnalysisPage from './components/analytics/AgentAnalysisPage'
 import DashboardPage from './components/analytics/DashboardPage'
 import AutomationPage from './components/settings/AutomationPage'
+import ExternalSyncPage from './components/settings/ExternalSyncPage'
 import ImportModal from './components/import/ImportModal'
 import ImportHistoryPage from './components/import/ImportHistoryPage'
 import ImportGovernancePage from './components/import/ImportGovernancePage'
@@ -22,13 +23,14 @@ import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } 
 import { useAppStore } from './store'
 import './index.css'
 
-export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history' | 'governance'
+export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'external-sync' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history' | 'governance'
 
 const pageSegments: Record<Page, string> = {
   patents: 'patents',
   stats: 'stats',
   dashboard: 'dashboard',
   automation: 'automation',
+  'external-sync': 'external-sync',
   settings: 'settings',
   fields: 'fields',
   management: 'management',
@@ -245,6 +247,7 @@ function WorkspaceApp() {
     stats: '数据看板',
     dashboard: '可配置仪表盘',
     automation: '自动化规则',
+    'external-sync': '外部数据同步',
     settings: '系统设置',
     fields: '字段管理',
     management: '管理台',
@@ -280,6 +283,7 @@ function WorkspaceApp() {
             <Route path="db/:databaseId/stats" element={<DatabaseRouteScope><StatsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/dashboard" element={<DatabaseRouteScope><DashboardPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/automation" element={<DatabaseRouteScope><AutomationPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/external-sync" element={<DatabaseRouteScope><ExternalSyncPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/settings" element={<DatabaseRouteScope><SettingsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/fields" element={<DatabaseRouteScope><FieldSettingsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/management" element={<DatabaseRouteScope><ManagementPage /></DatabaseRouteScope>} />
@@ -293,6 +297,7 @@ function WorkspaceApp() {
             <Route path="stats" element={<StatsPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="automation" element={<AutomationPage />} />
+            <Route path="external-sync" element={<ExternalSyncPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="fields" element={<FieldSettingsPage />} />
             <Route path="management" element={<ManagementPage />} />

@@ -16,9 +16,12 @@ from app.models import (
     Citation, CustomField, FieldObservation, ImportBatch, ImportBatchStatus,
     ImportSourceRow, Patent, PatentDatabase, PatentHistory, PatentIdentifier, LegalStatus,
     PatentType, RiskLevel,
+    Attachment,
 )
 from app.services.field_registry import SYSTEM_FIELD_KEYS
 from app.services.import_service import ImportService, IMPORT_SKIP_FIELD
+from app.services.excel_image_service import ExcelImage, extract_embedded_images
+from app.services.attachment_service import AttachmentService
 from app.services.patent_identity_service import (
     ensure_patent_identifiers, find_patents_by_identifier_specs_bulk,
     identifier_specs_from_values,
@@ -105,6 +108,10 @@ def default_action(observation: FieldObservation) -> str:
         return "quarantine"
     if observation.field_resolution == "unmapped_retained":
         return "keep_existing"
+    # Attachments are append-only source artifacts.  A content difference is
+    # a new file to add, not a replacement of the existing projection.
+    if observation.canonical_field_key == "attachments" and observation.difference_type in {"new", "content"}:
+        return "adopt"
     if observation.patent_id is None:
         return "adopt"
     if observation.difference_type == "new":
@@ -179,16 +186,43 @@ def add_observations(
     data: dict | None,
     virtual: dict | None,
     field_errors: dict[str, str] | None = None,
+    embedded_images: list[ExcelImage] | None = None,
 ) -> int:
     unknown_count = 0
     field_errors = field_errors or {}
+    embedded_images = embedded_images or []
     for index, column in enumerate(columns):
         value = source.raw_row.get(column, "")
+        column_images = [image for image in embedded_images if image.source_column == index]
         if not value:
-            continue
+            # An embedded image is a value even when the Excel cell itself is
+            # blank.  It participates in the same review decision as text.
+            if not column_images:
+                continue
         target = mapping.get(column, "").strip()
         if target == IMPORT_SKIP_FIELD:
             continue
+        if column_images:
+            image_names = ", ".join(image.filename for image in column_images)
+            marker = f"[嵌入图片] {image_names}"
+            if target == "attachments":
+                value = marker
+                current = current_value(patent, target)
+                diff = "quarantined" if source.resolution_status == "quarantined" else difference_type(current, image_names)
+                item = FieldObservation(
+                    import_batch_id=batch.id, source_row_id=source.id,
+                    patent_id=patent.id if patent else None,
+                    source_field_name=column, source_column_index=index,
+                    canonical_field_key="attachments", raw_value=marker,
+                    normalized_value=image_names, current_value=current,
+                    candidate_value=image_names, difference_type=diff,
+                    field_resolution="quarantined" if source.resolution_status == "quarantined" else "mapped",
+                )
+                item.proposed_action = default_action(item)
+                db.add(item)
+                continue
+            if not value:
+                continue
         if target in field_errors:
             # An explicit mapping to a field that is not registered is still
             # source data, not a reason to discard the cell or quarantine the
@@ -256,8 +290,17 @@ def stage_import(
     artifact_path: str | None = None,
 ) -> dict:
     df, columns = ImportService.parse_excel(content, filename, sheet_name)
+    embedded_images = extract_embedded_images(content, filename, sheet_name, columns)
+    embedded_image_columns = {
+        image.source_field_name for image in embedded_images if image.source_field_name
+    }
+    embedded_images_by_row: dict[int, list[ExcelImage]] = {}
+    for image in embedded_images:
+        embedded_images_by_row.setdefault(image.source_row, []).append(image)
     validate_publication_mapping(columns, mapping)
-    issues = ImportService.validate_mapping(columns, mapping, db)
+    issues = ImportService.validate_mapping(
+        columns, mapping, db, embedded_image_columns=embedded_image_columns,
+    )
     blocking_issues = [issue for issue in issues if issue.get("severity", "warning") == "error"]
     mapping_warnings = [issue for issue in issues if issue.get("severity", "warning") != "error"]
     if blocking_issues:
@@ -329,7 +372,7 @@ def stage_import(
                 if publication_error:
                     raise ValueError(publication_error)
                 if not publication:
-                    if any(value for value in row_values.values()):
+                    if any(value for value in row_values.values()) or embedded_images_by_row.get(index + 2):
                         # The workbook still has a valid publication column, but
                         # this row has no identity. Preserve it as replayable
                         # source evidence instead of treating it as a bad row.
@@ -339,6 +382,7 @@ def stage_import(
                         unknown_count += add_observations(
                             db, batch, source, columns, mapping, None, data, virtual,
                             field_errors,
+                            [image for image in embedded_images if image.source_row == source.source_row],
                         )
                         report = {
                             "row": index + 2,
@@ -368,6 +412,7 @@ def stage_import(
                     source.candidate_patent_ids = [item.id for item in matches]
                     unknown_count += add_observations(
                         db, batch, source, columns, mapping, None, data, virtual, field_errors,
+                        [image for image in embedded_images if image.source_row == source.source_row],
                     )
                     report = {"row": index + 2, "status": "identity_conflict", "reason": source.resolution_reason}
                     errors.append(report)
@@ -389,6 +434,7 @@ def stage_import(
                     new_count += 1
                 unknown_count += add_observations(
                     db, batch, source, columns, mapping, patent, data, virtual, field_errors,
+                    [image for image in embedded_images if image.source_row == source.source_row],
                 )
                 report = {"row": index + 2, "status": "existing_review" if patent else "new_review",
                           "reason": source.resolution_reason, "patent_id": patent.id if patent else None}
@@ -427,6 +473,7 @@ def stage_import(
                 unknown_count += add_observations(
                     db, batch, source, columns, mapping, None,
                     partial_data, partial_virtual, partial_errors,
+                    [image for image in embedded_images if image.source_row == source.source_row],
                 )
                 report = {"row": index + 2, "status": "quarantined", "reason": str(exc)}
                 errors.append(report)
@@ -455,6 +502,8 @@ def stage_import(
         "mapping_warnings": mapping_warnings,
         "row_reports": reports, "error_details": errors,
         "field_error_details": field_error_reports,
+        "embedded_image_count": len(embedded_images),
+        "embedded_image_columns": sorted(embedded_image_columns),
     }
 
 
@@ -590,6 +639,78 @@ def add_import_history(
     ))
 
 
+def apply_embedded_images(
+    db: Session,
+    *,
+    patent: Patent,
+    images: list[ExcelImage],
+    items: list[FieldObservation],
+    actions: dict[int, str],
+    batch: ImportBatch,
+    source: ImportSourceRow,
+    actor: str,
+) -> int:
+    """Attach reviewed Excel images and update the JSON projection."""
+    attachment_items = [
+        item for item in items
+        if item.canonical_field_key == "attachments" and item.source_column_index is not None
+    ]
+    if not attachment_items:
+        return 0
+    images_by_column: dict[int, list[ExcelImage]] = {}
+    for image in images:
+        images_by_column.setdefault(image.source_column, []).append(image)
+    imported_count = 0
+    current_projection = list((patent.custom_fields or {}).get("attachments") or [])
+    for item in attachment_items:
+        selected = images_by_column.get(item.source_column_index, [])
+        action = actions.get(item.id)
+        if not selected:
+            continue
+        old_projection = list(current_projection)
+        if action in {"adopt", "fill_empty"}:
+            if action == "fill_empty" and current_projection:
+                add_import_history(
+                    db, patent=patent, item=item, batch=batch, source=source,
+                    old_value=current_projection, new_value=current_projection, actor=actor,
+                )
+                continue
+            for image in selected:
+                metadata = AttachmentService.create_from_bytes(
+                    db,
+                    int((batch.review_config or {}).get("database_id")),
+                    patent.id,
+                    "attachments",
+                    image.filename,
+                    image.content,
+                    image.mime_type,
+                    uploaded_by=actor,
+                    source_type="excel_embedded",
+                    import_batch_id=batch.id,
+                    source_sheet=image.sheet_name,
+                    source_cell=image.source_cell,
+                    source_row=image.source_row,
+                    source_column=image.source_column,
+                    width=image.width,
+                    height=image.height,
+                    commit=False,
+                    update_projection=False,
+                )
+                current_projection.append(metadata)
+                imported_count += 1
+            patent.custom_fields = {**(patent.custom_fields or {}), "attachments": current_projection}
+            add_import_history(
+                db, patent=patent, item=item, batch=batch, source=source,
+                old_value=old_projection, new_value=current_projection, actor=actor,
+            )
+        else:
+            add_import_history(
+                db, patent=patent, item=item, batch=batch, source=source,
+                old_value=old_projection, new_value=old_projection, actor=actor,
+            )
+    return imported_count
+
+
 def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -> dict:
     batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
     if not batch:
@@ -601,7 +722,14 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     if not database_id or not batch.artifact_path or not Path(batch.artifact_path).is_file():
         raise BadRequestException("导入批次缺少目标专利库或原始文件")
     mapping = dict(batch.mapping_config or {})
-    df, _ = ImportService.parse_excel(Path(batch.artifact_path).read_bytes(), batch.filename, batch.worksheet_name)
+    artifact_content = Path(batch.artifact_path).read_bytes()
+    df, _ = ImportService.parse_excel(artifact_content, batch.filename, batch.worksheet_name)
+    embedded_images = extract_embedded_images(
+        artifact_content, batch.filename, batch.worksheet_name, list(df.columns),
+    )
+    embedded_images_by_row: dict[int, list[ExcelImage]] = {}
+    for image in embedded_images:
+        embedded_images_by_row.setdefault(image.source_row, []).append(image)
     staged = observations(db, batch_id)
     rows = source_rows(db, batch_id)
     source_by_id = {row.id: row for row in rows}
@@ -617,6 +745,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     new_by_publication: dict[str, Patent] = {}
     row_reports: list[dict] = []
     field_error_details: list[dict] = []
+    imported_image_count = 0
     target_membership_patent_ids = {
         int(row[0]) for row in db.query(PatentDatabaseMembership.patent_id).filter(
             PatentDatabaseMembership.database_id == database_id,
@@ -719,6 +848,8 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     for item in items:
                         if actions.get(item.id) not in {"adopt", "fill_empty"} or not item.canonical_field_key or not item.candidate_value:
                             continue
+                        if item.canonical_field_key == "attachments":
+                            continue
                         add_import_history(
                             db,
                             patent=patent,
@@ -729,12 +860,24 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                             new_value=import_storage_value(item),
                             actor=actor,
                         )
+                    imported_image_count += apply_embedded_images(
+                        db,
+                        patent=patent,
+                        images=embedded_images_by_row.get(source.source_row, []),
+                        items=items,
+                        actions=actions,
+                        batch=batch,
+                        source=source,
+                        actor=actor,
+                    )
                 else:
                     row_changes = 0
                     for item in items:
                         key = item.canonical_field_key
                         action = actions.get(item.id)
                         if not key:
+                            continue
+                        if key == "attachments":
                             continue
                         if not item.candidate_value and key not in parse_errors:
                             continue
@@ -815,7 +958,17 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 source=source, old_value=current,
                                 new_value=current, actor=actor,
                             )
-                    if row_changes:
+                    attachments_added = apply_embedded_images(
+                        db,
+                        patent=patent,
+                        images=embedded_images_by_row.get(source.source_row, []),
+                        items=items,
+                        actions=actions,
+                        batch=batch,
+                        source=source,
+                        actor=actor,
+                    )
+                    if row_changes or attachments_added:
                         updated += 1
                         changed_ids.add(patent.id)
                     else:
@@ -896,10 +1049,22 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
              "error_details": errors, "row_reports": row_reports, "database_id": database_id,
              "family_links": family_links, "citation_links": citation_links,
              "field_errors": len(field_error_details), "field_error_details": field_error_details,
-             "unmapped_retained": db.query(FieldObservation).filter(FieldObservation.import_batch_id == batch.id, FieldObservation.field_resolution == "unmapped_retained").count()}
+             "unmapped_retained": db.query(FieldObservation).filter(FieldObservation.import_batch_id == batch.id, FieldObservation.field_resolution == "unmapped_retained").count(),
+             "embedded_image_count": len(embedded_images), "imported_image_count": imported_image_count}
 
 
 def restore_value(patent: Patent, field_key: str, value: str | None) -> None:
+    if field_key == "attachments":
+        custom = dict(patent.custom_fields or {})
+        if value is None:
+            custom.pop(field_key, None)
+        else:
+            try:
+                custom[field_key] = json.loads(value)
+            except (TypeError, json.JSONDecodeError):
+                custom[field_key] = []
+        patent.custom_fields = custom
+        return
     if value is None and field_key not in SYSTEM_FIELD_KEYS:
         custom = dict(patent.custom_fields or {})
         custom.pop(field_key, None)
@@ -949,6 +1114,16 @@ def rollback_batch(db: Session, batch_id: int, *, rolled_back_by: str = "local-u
             source_row=item.source_row, source_field_name=item.source_field_name,
         ))
         restored += 1
+    imported_attachments = db.query(Attachment).filter(
+        Attachment.import_batch_id == batch.id,
+    ).all()
+    attachment_paths = []
+    for attachment in imported_attachments:
+        try:
+            attachment_paths.append(AttachmentService.path(attachment))
+        except ValueError:
+            pass
+        db.delete(attachment)
     if created_ids:
         db.query(Citation).filter(or_(Citation.citing_patent_id.in_(created_ids), Citation.cited_patent_id.in_(created_ids))).delete(synchronize_session=False)
         for patent_id in created_ids:
@@ -958,4 +1133,7 @@ def rollback_batch(db: Session, batch_id: int, *, rolled_back_by: str = "local-u
     batch.status = ImportBatchStatus.ROLLED_BACK
     batch.completed_at = utc_now_naive()
     db.commit()
+    for path in attachment_paths:
+        if path.exists():
+            path.unlink()
     return {"batch_id": batch.id, "status": batch.status.value, "restored_value_count": restored, "deleted_patent_count": len(created_ids)}
