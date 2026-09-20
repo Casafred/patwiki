@@ -72,7 +72,7 @@ def init_default_data():
         # The default profile is usable immediately for exact/keyword fallback.
         # An embedding provider is intentionally not created without a user-owned credential reference.
         if not db.query(SemanticSearchProfile).filter(SemanticSearchProfile.name == "默认混合检索").first():
-            db.add(SemanticSearchProfile(name="默认混合检索", is_default=True, retrieval_mode="hybrid", vector_backend="zvec"))
+            db.add(SemanticSearchProfile(name="默认混合检索", is_default=True, retrieval_mode="hybrid", vector_backend="zvec", chunk_strategy_version="claims-description-v1"))
 
         for database in db.query(PatentDatabase).filter(PatentDatabase.is_archived == False).all():
             views = ViewService.ensure_default_business_views(db, database.id)

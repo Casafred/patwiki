@@ -88,8 +88,13 @@ class SemanticSearchService:
                         if close:
                             close()
                     # Scope is applied again below through authoritative SQLite rehydration.
-                    vector_matches = {item["patent_id"]: item for item in matches}
-                    vector_ids = list(vector_matches)
+                    best_matches: dict[int, dict] = {}
+                    for item in matches:
+                        patent_id = item["patent_id"]
+                        if patent_id not in best_matches or item.get("score", 0) > best_matches[patent_id].get("score", 0):
+                            best_matches[patent_id] = item
+                    vector_matches = best_matches
+                    vector_ids = [item["patent_id"] for item in sorted(best_matches.values(), key=lambda value: (-value.get("score", 0), value["patent_id"]))]
                 except SemanticError as exc:
                     degraded.append(exc.code)
             timings["vector"] = int((time.perf_counter() - vector_started) * 1000)

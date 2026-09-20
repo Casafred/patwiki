@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-09-20（完成语义检索 Phase 1，并开始 Phase 3 Rerank：新增可替换 Rerank Provider、候选重排、精确号码保护和失败降级；全文分块、管理界面和离线质量门禁仍未实施）
+最近更新：2026-09-20（完成语义检索基础设施与 Rerank 链路，并开始 Phase 4 全文分块：新增权利要求/说明书确定性 chunk、稳定 ID、增量清理和专利级聚合；管理界面和离线质量门禁仍未实施）
 
 ---
 
@@ -146,6 +146,7 @@
 |------|--------|---------|
 | 2026-09-20 | 语义检索 Phase 1 | 实现 Provider/Profile/Index/Job/Outbox/SearchLog 数据模型、可恢复迁移、`/semantic-search` API、OpenAI-compatible Embedding Provider、Zvec 0.7.0 与 JSON 后备 VectorStore、摘要文档构建、异步重建/激活、CRUD outbox、Exact + Keyword + Dense + RRF 查询和 SQLite 二次回填；列表主表新增关键词/混合/语义切换及降级提示。Provider/Profile API 支持受控更新、`env://`/`keyring://` 凭证引用及按 Profile 健康检查；活动索引的兼容配置禁止原地改写。Zvec 在 Windows Python 3.13 上完成创建、写入、查询、删除 PoC；Rerank、全文分块、供应商管理界面和离线质量阈值仍按 `18` 后续阶段实施。 |
 | 2026-09-20 | 语义检索 Rerank Phase 3 起步 | 新增 `RerankProvider` 契约、OpenAI-compatible rerank 适配器、Profile 的 rerank provider/model/enabled/top_n 配置及 `2026-09-20.2` 迁移；RRF 候选先经 SQLite 权限回填后才发送重排，非法响应整批回退，精确号码再次固定置顶，并返回 rerank 分数和降级原因。全文分块、完整供应商管理界面、离线质量阈值和成本指标仍未实施。 |
+| 2026-09-20 | 语义检索全文分块 Phase 4 起步 | 新增 `claims-description-v1` 确定性分块策略：保留专利摘要，同时按权利要求编号和说明书段落生成 chunk；chunk 保存稳定文档 ID、父文档、类型、序号、策略版本和 hash；全量重建、增量更新、字段清空和删除均同步维护 chunk 状态，查询按 patent_id 聚合 dense 结果；保留旧摘要 Zvec ID 兼容。完整管理界面、离线质量阈值和稀疏/BM25 后端仍未实施。 |
 | 2026-09-20 | 语义检索设计 | 新增 `18-语义检索与向量索引开发规范.md`，明确 SQLite 权威源、Zvec 可替换后端、Embedding/Rerank Provider、索引版本、outbox 增量任务、Exact + BM25 + Dense + RRF + Rerank 流程、权限双检、降级恢复、真实中文专利评测和分阶段验收。 |
 | 2026-09-19 | G1-1 | 完成外部专利数据同步 Phase 1：新增 Connector/同步模型、版本化迁移 `2026-09-19.2`、Provider-neutral Connector 契约和 Demo Connector；新增手动/定时订阅执行、游标、租约、幂等、原始快照、外部事实观察、法律状态事件、WatchEvent、失败运行记录和身份冲突候选持久化；新增 `/sync` API 与外部同步工作区；默认初始化空配置 Demo Connector，不写入模拟专利；通过后端全量 114 项、Python compileall、前端 lint、TypeScript、Vite build 和 `git diff --check`。真实数据商 API/MCP 仍需在 Phase 2 按 Connector 契约接入并完成凭证/许可配置。 |
 | 2026-09-19 | G1-2 | 新增配置驱动 `rest_json` / `generic_json` Connector：支持请求模板、响应路径映射、分页游标、标准身份/字段/法律事件映射、`Retry-After` 和可重试错误；新增 `env://` / `keyring://` 凭证引用解析，SQLite 仅保存引用；新增固定 HTTP fixture 和只读 MCP Adapter 契约测试。 |

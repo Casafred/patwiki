@@ -17,6 +17,7 @@ from app.services.semantic_job_service import SemanticJobService
 from app.services.semantic_search_service import SemanticSearchService
 from app.search.contracts import VectorDocument
 from app.search.providers.openai_embedding import resolve_credential
+from app.search.document_builder import SemanticDocumentBuilder
 from app.search.vector.zvec_store import ZvecVectorStore
 
 
@@ -143,3 +144,20 @@ class SemanticSearchTest(unittest.TestCase):
                 self.assertEqual(len(store.dense_search([0.9, 0.1, 0.0], 10)), 1)
             finally:
                 store.close()
+
+    def test_claims_and_description_are_chunked_with_stable_metadata(self):
+        patent = self.db.query(Patent).filter(Patent.id == 1).one()
+        patent.claims = "1. 一种电池结构，包括隔热层。\n2. 根据权利要求1所述的电池结构，还包括传感器。"
+        patent.description_full = "背景技术。\n\n本发明提供一种用于阻断热失控传播的结构。"
+        documents = SemanticDocumentBuilder.build_documents(patent, chunk_strategy_version="claims-description-v1", max_chars=200)
+        self.assertEqual(documents[0].metadata["document_type"], "patent_summary")
+        chunks = documents[1:]
+        self.assertEqual([item.metadata["document_type"] for item in chunks], ["patent_claims", "patent_claims", "patent_description"])
+        self.assertEqual(chunks[0].document_id, "1:patent_claims:0")
+        self.assertEqual(chunks[1].document_id, "1:patent_claims:1")
+        self.assertEqual(chunks[2].document_id, "1:patent_description:0")
+        self.assertTrue(all(item.metadata["parent_document_id"] == "1:patent_summary:0" for item in chunks))
+
+    def test_zvec_storage_keeps_legacy_summary_key_and_separates_chunks(self):
+        self.assertEqual(ZvecVectorStore._storage_id("1:patent_summary:0"), "p1_summary_0")
+        self.assertEqual(ZvecVectorStore._storage_id("1:patent_claims:0"), "p1_patent_claims_0")

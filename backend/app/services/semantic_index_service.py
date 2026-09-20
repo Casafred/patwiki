@@ -115,15 +115,19 @@ class SemanticIndexService:
             job.total_items = len(patents)
             store = open_vector_store(profile.vector_backend, Path(index.path), profile.embedding_dimensions)
             for patent in patents:
-                document = SemanticDocumentBuilder.build_summary(patent, profile.indexed_field_allowlist or [])
-                vector = provider.embed_documents([document.text])[0]
-                store.upsert([VectorDocument(document.document_id, patent.id, document.text, vector, document.metadata)])
-                state = db.query(SemanticDocumentState).filter_by(profile_id=profile.id, index_version=index.index_version, document_id=document.document_id).first()
-                if not state:
-                    state = SemanticDocumentState(profile_id=profile.id, index_version=index.index_version, patent_id=patent.id,
-                        document_type="patent_summary", document_id=document.document_id, content_hash=document.content_hash)
-                    db.add(state)
-                state.indexed_hash, state.status, state.last_indexed_at = document.content_hash, "indexed", datetime.utcnow()
+                documents = SemanticDocumentBuilder.build_documents(
+                    patent, profile.indexed_field_allowlist or [],
+                    chunk_strategy_version=profile.chunk_strategy_version,
+                )
+                vectors = provider.embed_documents([document.text for document in documents])
+                store.upsert([VectorDocument(document.document_id, patent.id, document.text, vector, document.metadata) for document, vector in zip(documents, vectors)])
+                for document in documents:
+                    state = db.query(SemanticDocumentState).filter_by(profile_id=profile.id, index_version=index.index_version, document_id=document.document_id).first()
+                    if not state:
+                        state = SemanticDocumentState(profile_id=profile.id, index_version=index.index_version, patent_id=patent.id,
+                            document_type=document.metadata["document_type"], document_id=document.document_id, content_hash=document.content_hash)
+                        db.add(state)
+                    state.content_hash, state.indexed_hash, state.status, state.chunk_count, state.last_indexed_at = document.content_hash, document.content_hash, "indexed", 1, datetime.utcnow()
                 job.processed_items += 1
             index.document_count, index.patent_count, index.status, index.completed_at = store.count(), len(patents), "validating", datetime.utcnow()
             index.manifest_hash = hashlib.sha256(index.index_version.encode()).hexdigest()
@@ -181,9 +185,11 @@ class SemanticIndexService:
         else:
             # Membership is gone after a delete. Document state is the durable proof
             # that a projection contains this Patent and must be cleaned up.
-            relevant = [index for index in indexes if db.query(SemanticDocumentState).filter_by(
-                profile_id=index.profile_id, index_version=index.index_version,
-                document_id=f"{item.patent_id}:patent_summary:0",
+            relevant = [index for index in indexes if db.query(SemanticDocumentState).filter(
+                SemanticDocumentState.profile_id == index.profile_id,
+                SemanticDocumentState.index_version == index.index_version,
+                SemanticDocumentState.patent_id == item.patent_id,
+                SemanticDocumentState.status != "deleted",
             ).first()]
         if not relevant:
             return False
@@ -191,29 +197,41 @@ class SemanticIndexService:
             profile = db.get(SemanticSearchProfile, index.profile_id)
             if not profile:
                 continue
-            document_id = f"{item.patent_id}:patent_summary:0"
             store = None
             try:
                 store = open_vector_store(profile.vector_backend, Path(index.path), profile.embedding_dimensions)
                 if item.operation == "delete" or not patent:
-                    store.delete([document_id])
+                    states = db.query(SemanticDocumentState).filter_by(profile_id=profile.id, index_version=index.index_version, patent_id=item.patent_id).all()
+                    store.delete([state.document_id for state in states])
                     index.document_count = store.count()
-                    state = db.query(SemanticDocumentState).filter_by(profile_id=profile.id, index_version=index.index_version, document_id=document_id).first()
-                    if state:
+                    for state in states:
                         state.status = "deleted"
                     continue
                 provider = cls._provider(db, profile)
-                document = SemanticDocumentBuilder.build_summary(patent, profile.indexed_field_allowlist or [])
-                state = db.query(SemanticDocumentState).filter_by(profile_id=profile.id, index_version=index.index_version, document_id=document.document_id).first()
-                if state and state.indexed_hash == document.content_hash:
-                    continue
-                store.upsert([VectorDocument(document.document_id, patent.id, document.text, provider.embed_documents([document.text])[0], document.metadata)])
+                documents = SemanticDocumentBuilder.build_documents(
+                    patent, profile.indexed_field_allowlist or [],
+                    chunk_strategy_version=profile.chunk_strategy_version,
+                )
+                current_ids = {document.document_id for document in documents}
+                stale_states = db.query(SemanticDocumentState).filter(
+                    SemanticDocumentState.profile_id == profile.id,
+                    SemanticDocumentState.index_version == index.index_version,
+                    SemanticDocumentState.patent_id == patent.id,
+                    ~SemanticDocumentState.document_id.in_(current_ids),
+                ).all()
+                store.delete([state.document_id for state in stale_states])
+                vectors = provider.embed_documents([document.text for document in documents])
+                store.upsert([VectorDocument(document.document_id, patent.id, document.text, vector, document.metadata) for document, vector in zip(documents, vectors)])
                 index.document_count = store.count()
-                if not state:
-                    state = SemanticDocumentState(profile_id=profile.id, index_version=index.index_version, patent_id=patent.id,
-                        document_type="patent_summary", document_id=document.document_id, content_hash=document.content_hash)
-                    db.add(state)
-                state.content_hash, state.indexed_hash, state.status, state.last_indexed_at = document.content_hash, document.content_hash, "indexed", datetime.utcnow()
+                for state in stale_states:
+                    state.status = "deleted"
+                for document in documents:
+                    state = db.query(SemanticDocumentState).filter_by(profile_id=profile.id, index_version=index.index_version, document_id=document.document_id).first()
+                    if not state:
+                        state = SemanticDocumentState(profile_id=profile.id, index_version=index.index_version, patent_id=patent.id,
+                            document_type=document.metadata["document_type"], document_id=document.document_id, content_hash=document.content_hash)
+                        db.add(state)
+                    state.content_hash, state.indexed_hash, state.status, state.chunk_count, state.last_indexed_at = document.content_hash, document.content_hash, "indexed", 1, datetime.utcnow()
             finally:
                 close = getattr(store, "close", None)
                 if close:
