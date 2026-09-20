@@ -29,6 +29,8 @@ async def _automation_scheduler():
             AutomationEngine.run_scheduled(db)
             from app.services.sync_service import SyncService
             SyncService.run_due_subscriptions(db)
+            from app.services.semantic_job_service import SemanticJobService
+            SemanticJobService.run_due(db)
         except Exception:
             logger.exception("automation or external sync schedule tick failed")
         finally:

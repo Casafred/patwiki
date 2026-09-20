@@ -416,6 +416,8 @@ class PatentService:
         db.flush()
         from app.services.patent_identity_service import ensure_patent_identifiers
         ensure_patent_identifiers(db, patent, source_system="manual")
+        from app.services.semantic_index_service import SemanticIndexService
+        SemanticIndexService.enqueue_patent(db, patent.id, "record_created")
         db.commit()
         db.refresh(patent)
         from app.services.formula_service import FormulaService
@@ -538,6 +540,9 @@ class PatentService:
         # 批量插入历史记录
         for h in history_entries:
             db.add(h)
+        if changed_fields:
+            from app.services.semantic_index_service import SemanticIndexService
+            SemanticIndexService.enqueue_patent(db, patent.id, "field_changed")
         if commit:
             db.commit()
             db.refresh(patent)
@@ -1024,6 +1029,8 @@ class PatentService:
         patent = db.query(Patent).filter(Patent.id == patent_id).first()
         if not patent:
             return False
+        from app.services.semantic_index_service import SemanticIndexService
+        SemanticIndexService.enqueue_delete(db, patent.id)
         db.delete(patent)
         db.commit()
         return True

@@ -5085,6 +5085,29 @@ body {
   font-size: 13px;
 }
 
+.semantic-search-mode {
+  display: inline-flex;
+  margin-bottom: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.semantic-search-mode button {
+  min-width: 48px;
+  border: 0;
+  border-right: 1px solid var(--line-soft);
+  background: var(--surface, #fff);
+  color: var(--ink-500);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 22px;
+}
+
+.semantic-search-mode button:last-child { border-right: 0; }
+.semantic-search-mode button.active { background: #eaf2ff; color: #1d4ed8; font-weight: 600; }
+.semantic-search-notice { color: var(--ink-500); font-size: 11px; white-space: nowrap; }
+
 .datagrid-import-button {
   width: 32px;
   height: 32px;

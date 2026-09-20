@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-09-19（完成外部专利数据同步 Phase 1，并加入配置驱动 REST/JSON Connector、凭证引用、固定 fixture 契约测试和只读 MCP Adapter 插槽；真实供应商仍需按许可和字段映射配置验收）
+最近更新：2026-09-20（完成语义检索 Phase 1：Zvec 本地索引 PoC、可替换 VectorStore、OpenAI-compatible Embedding 配置、异步重建任务、outbox、精确/关键词/向量混合查询和列表页模式切换；Rerank 与全文分块仍未实施）
 
 ---
 
@@ -144,6 +144,8 @@
 
 | 日期 | 任务ID | 变更内容 |
 |------|--------|---------|
+| 2026-09-20 | 语义检索 Phase 1 | 实现 Provider/Profile/Index/Job/Outbox/SearchLog 数据模型、可恢复迁移、`/semantic-search` API、OpenAI-compatible Embedding Provider、Zvec 0.7.0 与 JSON 后备 VectorStore、摘要文档构建、异步重建/激活、CRUD outbox、Exact + Keyword + Dense + RRF 查询和 SQLite 二次回填；列表主表新增关键词/混合/语义切换及降级提示。Provider/Profile API 支持受控更新、`env://`/`keyring://` 凭证引用及按 Profile 健康检查；活动索引的兼容配置禁止原地改写。Zvec 在 Windows Python 3.13 上完成创建、写入、查询、删除 PoC；Rerank、全文分块、供应商管理界面和离线质量阈值仍按 `18` 后续阶段实施。 |
+| 2026-09-20 | 语义检索设计 | 新增 `18-语义检索与向量索引开发规范.md`，明确 SQLite 权威源、Zvec 可替换后端、Embedding/Rerank Provider、索引版本、outbox 增量任务、Exact + BM25 + Dense + RRF + Rerank 流程、权限双检、降级恢复、真实中文专利评测和分阶段验收。 |
 | 2026-09-19 | G1-1 | 完成外部专利数据同步 Phase 1：新增 Connector/同步模型、版本化迁移 `2026-09-19.2`、Provider-neutral Connector 契约和 Demo Connector；新增手动/定时订阅执行、游标、租约、幂等、原始快照、外部事实观察、法律状态事件、WatchEvent、失败运行记录和身份冲突候选持久化；新增 `/sync` API 与外部同步工作区；默认初始化空配置 Demo Connector，不写入模拟专利；通过后端全量 114 项、Python compileall、前端 lint、TypeScript、Vite build 和 `git diff --check`。真实数据商 API/MCP 仍需在 Phase 2 按 Connector 契约接入并完成凭证/许可配置。 |
 | 2026-09-19 | G1-2 | 新增配置驱动 `rest_json` / `generic_json` Connector：支持请求模板、响应路径映射、分页游标、标准身份/字段/法律事件映射、`Retry-After` 和可重试错误；新增 `env://` / `keyring://` 凭证引用解析，SQLite 仅保存引用；新增固定 HTTP fixture 和只读 MCP Adapter 契约测试。 |
 | 2026-08-17 | G0-7 | 完成统一专利身份与工作文件基础闭环：新增 `PatentIdentifier`、号码规范化/原始别名、历史身份回填、导入行联合身份匹配和跨 Patent 身份冲突隔离；新增专利身份查询 API；为每个数据库幂等创建六类高频业务 SavedView；新增 `PatentExportTemplate` 及 Excel/Word/CSV 模板 CRUD 和导出字段血缘；补充前端类型/API、身份/模板/视图/导出回归测试。全量后端 46 项通过。 |

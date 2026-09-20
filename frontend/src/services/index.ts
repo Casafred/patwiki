@@ -14,6 +14,7 @@ import {
   tagApi,
   viewApi,
   syncApi,
+  semanticSearchApi,
 } from '../api'
 import type { FieldMeta, JsonObject } from '../types'
 
@@ -141,6 +142,10 @@ export const automationService = {
   executeRule: (...args: Parameters<typeof automationApi.executeRule>) => automationApi.executeRule(...args),
   logs: (...args: Parameters<typeof automationApi.logs>) => automationApi.logs(...args),
   scheduleTick: (...args: Parameters<typeof automationApi.scheduleTick>) => automationApi.scheduleTick(...args),
+}
+
+export const semanticSearchService = {
+  query: (...args: Parameters<typeof semanticSearchApi.query>) => semanticSearchApi.query(...args),
 }
 
 export const syncService = {

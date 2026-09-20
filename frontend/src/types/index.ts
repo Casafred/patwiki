@@ -859,6 +859,31 @@ export interface ImportResult {
   imported_image_count?: number
 }
 
+export type SemanticSearchMode = 'keyword' | 'semantic' | 'hybrid'
+
+export interface SemanticSearchResult {
+  patent: Patent
+  scores: {
+    exact: boolean
+    keyword_rank?: number | null
+    vector_rank?: number | null
+    fusion_score?: number | null
+  }
+  matches: { document_type: string; snippet: string }[]
+}
+
+export interface SemanticSearchResponse {
+  items: SemanticSearchResult[]
+  meta: {
+    mode: SemanticSearchMode
+    profile_id?: number | null
+    index_version?: string | null
+    degraded: boolean
+    degraded_reasons: string[]
+    latency_ms: Record<string, number>
+  }
+}
+
 export type ImportReviewAction = 'adopt' | 'keep_existing' | 'fill_empty' | 'ignore' | 'quarantine'
 
 export interface ImportChangeReview {

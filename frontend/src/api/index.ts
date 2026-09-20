@@ -12,6 +12,7 @@ import type {
   GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
   ImportChangeReview, ImportReviewAction,
   ProjectSolutionVersion, RiskCase,
+  SemanticSearchMode, SemanticSearchResponse,
 } from '../types'
 
 export const fieldApi = {
@@ -265,6 +266,11 @@ export const automationApi = {
     api.get('/automation/logs', { params: { database_id: databaseId ?? undefined, limit: 80 } }),
   scheduleTick: (databaseId?: number | null): Promise<JsonObject> =>
     api.post('/automation/schedule/tick', undefined, { params: { database_id: databaseId ?? undefined } }),
+}
+
+export const semanticSearchApi = {
+  query: (data: { query: string; database_id?: number | null; mode?: SemanticSearchMode; top_k?: number; include_explain?: boolean }): Promise<SemanticSearchResponse> =>
+    api.post('/semantic-search/query', data),
 }
 
 export const syncApi = {

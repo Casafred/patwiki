@@ -123,6 +123,15 @@ from app.models.sync import (
     SyncUpdateBatch,
     SyncUpdateItem,
 )
+from app.models.semantic_search import (
+    SemanticProviderDefinition,
+    SemanticSearchProfile,
+    SemanticIndex,
+    SemanticIndexJob,
+    SemanticDocumentState,
+    SemanticIndexOutbox,
+    SemanticSearchLog,
+)
 
 
 __all__ = [
@@ -173,4 +182,6 @@ __all__ = [
     "SyncSubscription", "SyncCursor", "SyncRun", "ExternalSnapshot",
     "SyncRecord", "ExternalFactObservation", "LegalStatusEvent", "WatchEvent",
     "SyncDeadLetter", "SyncLease", "SyncUpdateBatch", "SyncUpdateItem",
+    "SemanticProviderDefinition", "SemanticSearchProfile", "SemanticIndex", "SemanticIndexJob",
+    "SemanticDocumentState", "SemanticIndexOutbox", "SemanticSearchLog",
 ]

@@ -11,6 +11,7 @@ import {
   searchService as searchApi,
   tagService as tagApi,
   syncService as syncApi,
+  semanticSearchService,
 } from '../../services'
 import { useAppStore } from '../../store'
 import type {
@@ -18,6 +19,7 @@ import type {
   ViewGroupField, ViewColumnConfig, ConditionalFormatRule, JsonObject, JsonValue, LinkRecord, LinkTarget, SearchSuggestion,
   Tag,
   SyncConnector, SyncUpdateBatch,
+  SemanticSearchMode,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDate, parseApiDate } from '../../lib/date'
@@ -447,6 +449,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [continuousLoading, setContinuousLoading] = useState(false)
   const [searchText, setSearchText] = useState(() => searchParams.get('q') || '')
   const [searchInputText, setSearchInputText] = useState(() => searchParams.get('q') || '')
+  const [searchMode, setSearchMode] = useState<SemanticSearchMode>(() => {
+    const mode = searchParams.get('search_mode')
+    return mode === 'keyword' || mode === 'semantic' || mode === 'hybrid' ? mode : 'hybrid'
+  })
+  const [semanticNotice, setSemanticNotice] = useState('')
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([])
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [sortField, setSortField] = useState<string>(() => searchParams.get('sort') || 'filing_date')
@@ -562,6 +569,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     viewId: viewId ?? null,
     productId: currentProductId ?? null,
     search: searchText.trim(),
+    searchMode,
     filters: filterValues,
     sortField,
     sortOrder,
@@ -776,6 +784,24 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         if (filterConditionHasValue(condition)) viewFilters[key] = condition as unknown as JsonValue
       })
 
+      if (searchText && searchMode !== 'keyword' && viewId === null) {
+        const semanticResult = await semanticSearchService.query({
+          query: searchText,
+          database_id: activeDatabaseId ?? undefined,
+          mode: searchMode,
+          top_k: requestedPageSize,
+          include_explain: false,
+        })
+        if (myRequestId !== loadPatentsRequestId.current) return false
+        setSemanticNotice(semanticResult.meta.degraded
+          ? '语义服务暂不可用，当前显示关键词结果'
+          : `当前为${searchMode === 'hybrid' ? '混合检索' : '语义检索'}结果`)
+        applyItems(semanticResult.items.map(item => item.patent), semanticResult.items.length)
+        return true
+      }
+      if (searchMode !== 'keyword' && viewId !== null) setSemanticNotice('当前视图使用关键词筛选；语义检索请切换至主表')
+      else setSemanticNotice('')
+
       // 视图查询路径：仅当 viewId 与当前库匹配时才走视图接口。
       // 若视图尚未加载完成（views 为旧库数据）或 viewId 与当前库不一致，
       // 不再清空表格——而是降级走大表直查，避免“切库/翻页后数据消失”。
@@ -861,7 +887,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, tableViewMode, viewId, tableScopeKey, setPatents, setLoading])
+  }, [page, pageSize, searchText, searchMode, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, tableViewMode, viewId, tableScopeKey, setPatents, setLoading])
 
   const loadNextContinuousPage = useCallback(() => {
     if (tableViewMode !== 'continuous' || continuousLoadingRef.current || !continuousHasMoreRef.current) return
@@ -947,6 +973,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setPage(readPageParam(params))
     setSearchText(params.get('q') || '')
     setSearchInputText(params.get('q') || '')
+    const mode = params.get('search_mode')
+    setSearchMode(mode === 'keyword' || mode === 'semantic' || mode === 'hybrid' ? mode : 'hybrid')
     setSortField(params.get('sort') || 'filing_date')
     setSortOrder(params.get('order') === 'asc' ? 'asc' : 'desc')
     setFilterValues(readFilterParam(params))
@@ -962,13 +990,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setOrDelete('view', viewId === null ? null : String(viewId))
     setOrDelete('product', currentProductId === null ? null : String(currentProductId))
     setOrDelete('q', searchText.trim() || null)
+    setOrDelete('search_mode', searchMode === 'hybrid' ? null : searchMode)
     setOrDelete('page', page > 1 ? String(page) : null)
     setOrDelete('sort', sortField !== 'filing_date' ? sortField : null)
     setOrDelete('order', sortOrder !== 'desc' ? sortOrder : null)
     setOrDelete('family', groupByFamily ? '1' : null)
     setOrDelete('filters', Object.keys(filterValues).length > 0 ? JSON.stringify(filterValues) : null)
     if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
-  }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, page, searchParams, searchParamsString, searchText, setSearchParams, sortField, sortOrder, viewId])
+  }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, page, searchParams, searchParamsString, searchText, searchMode, setSearchParams, sortField, sortOrder, viewId])
 
   const saveViewColumnConfig = useCallback(async (columnConfig: ViewColumnConfig[]) => {
     if (!activeView) return
@@ -2435,6 +2464,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             </button>
           )}
           <div className="search-suggest-wrap">
+            <div className="semantic-search-mode" role="group" aria-label="检索模式">
+              {([['keyword', '关键词'], ['hybrid', '混合'], ['semantic', '语义']] as const).map(([mode, label]) => (
+                <button key={mode} type="button" className={searchMode === mode ? 'active' : ''} onClick={() => { setSearchMode(mode); setPage(1) }}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <form className="datagrid-search-form" onSubmit={handleSearch}>
               <input
                 type="text"
@@ -2467,6 +2503,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </div>
             )}
           </div>
+          {semanticNotice && <span className="semantic-search-notice">{semanticNotice}</span>}
           <button
             className={`btn btn-sm ${hasActiveFilters ? 'btn-primary' : 'btn-secondary'} datagrid-clear-filters`}
             onClick={handleClearAllFilters}

@@ -1,5 +1,5 @@
 from app.database import SessionLocal, init_db
-from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase, PatentExportTemplate, ConnectorDefinition
+from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase, PatentExportTemplate, ConnectorDefinition, SemanticSearchProfile
 from app.services.view_service import ViewService
 from app.services.field_governance_service import seed_registry_baseline
 
@@ -68,6 +68,11 @@ def init_default_data():
                 config_json={"version": "demo-v1", "records": []},
                 enabled=True,
             ))
+
+        # The default profile is usable immediately for exact/keyword fallback.
+        # An embedding provider is intentionally not created without a user-owned credential reference.
+        if not db.query(SemanticSearchProfile).filter(SemanticSearchProfile.name == "默认混合检索").first():
+            db.add(SemanticSearchProfile(name="默认混合检索", is_default=True, retrieval_mode="hybrid", vector_backend="zvec"))
 
         for database in db.query(PatentDatabase).filter(PatentDatabase.is_archived == False).all():
             views = ViewService.ensure_default_business_views(db, database.id)
