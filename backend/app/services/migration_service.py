@@ -27,7 +27,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-20.1"
+CURRENT_MIGRATION_VERSION = "2026-09-20.2"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -141,6 +141,10 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("sync_records", "identity_candidate_patent_ids", "ALTER TABLE sync_records ADD COLUMN identity_candidate_patent_ids JSON"),
     _column("connector_definitions", "mcp_catalog_json", "ALTER TABLE connector_definitions ADD COLUMN mcp_catalog_json JSON"),
     _column("connector_definitions", "mcp_catalog_updated_at", "ALTER TABLE connector_definitions ADD COLUMN mcp_catalog_updated_at DATETIME"),
+    _column("semantic_search_profiles", "rerank_provider_id", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_provider_id INTEGER REFERENCES semantic_provider_definitions(id)"),
+    _column("semantic_search_profiles", "rerank_model", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_model VARCHAR(200)"),
+    _column("semantic_search_profiles", "rerank_enabled", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_enabled BOOLEAN DEFAULT 0 NOT NULL"),
+    _column("semantic_search_profiles", "rerank_top_n", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_top_n INTEGER DEFAULT 20 NOT NULL"),
     _index("patents", "ix_patents_database_id", "database_id"),
     _index("patent_databases", "ix_patent_databases_owner_id", "owner_id"),
     _index("patent_histories", "ix_patent_histories_source_view_id", "source_view_id"),

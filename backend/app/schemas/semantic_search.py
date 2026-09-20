@@ -27,6 +27,10 @@ class SemanticProfileCreate(BaseModel):
     embedding_provider_id: int | None = None
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int | None = None
+    rerank_provider_id: int | None = None
+    rerank_model: str | None = None
+    rerank_enabled: bool = False
+    rerank_top_n: int = Field(default=20, ge=1, le=100)
     vector_backend: str = "zvec"
     retrieval_mode: str = "hybrid"
     is_default: bool = False
@@ -40,6 +44,10 @@ class SemanticProfileUpdate(BaseModel):
     embedding_provider_id: int | None = None
     embedding_model: str | None = Field(default=None, min_length=1, max_length=200)
     embedding_dimensions: int | None = Field(default=None, ge=1)
+    rerank_provider_id: int | None = None
+    rerank_model: str | None = Field(default=None, min_length=1, max_length=200)
+    rerank_enabled: bool | None = None
+    rerank_top_n: int | None = Field(default=None, ge=1, le=100)
     vector_backend: str | None = None
     retrieval_mode: str | None = None
     indexed_field_allowlist: list[str] | None = None

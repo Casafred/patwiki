@@ -8,7 +8,8 @@ from sqlalchemy import String, or_
 from sqlalchemy.orm import Session
 
 from app.models import Patent, PatentIdentifier, SemanticIndex, SemanticSearchLog, SemanticSearchProfile
-from app.search.contracts import SemanticError
+from app.search.contracts import RerankDocument, SemanticError
+from app.search.document_builder import SemanticDocumentBuilder
 from app.search.fusion import weighted_rrf
 from app.search.providers.openai_embedding import OpenAICompatibleEmbeddingProvider
 from app.search.vector import open_vector_store
@@ -111,6 +112,32 @@ class SemanticSearchService:
         # Authoritative rehydration is the second scope check; the index never owns visibility.
         rows = cls._base_query(db, database_id).filter(Patent.id.in_(candidate_ids)).all() if candidate_ids else []
         by_id = {row.id: row for row in rows}
+        rerank_scores: dict[int, float] = {}
+        reranked = False
+        if profile and profile.rerank_enabled and candidate_ids:
+            try:
+                rerank_documents = []
+                for patent_id in candidate_ids:
+                    patent = by_id.get(patent_id)
+                    if not patent:
+                        continue
+                    document = SemanticDocumentBuilder.build_summary(patent, profile.remote_field_allowlist or profile.indexed_field_allowlist or [])
+                    rerank_documents.append(RerankDocument(document.document_id, patent_id, document.text))
+                rerank_provider = SemanticIndexService._rerank_provider(db, profile)
+                rerank_results = rerank_provider.rerank(text, rerank_documents, min(profile.rerank_top_n, len(rerank_documents)))
+                rerank_ids = [item.patent_id for item in rerank_results]
+                if len(set(rerank_ids)) != len(rerank_ids) or any(patent_id not in by_id for patent_id in rerank_ids):
+                    raise SemanticError("SEMANTIC_RERANK_INVALID_RESPONSE", "Rerank provider returned an unknown patent")
+                rerank_scores = {item.patent_id: item.score for item in rerank_results}
+                remaining = [patent_id for patent_id in candidate_ids if patent_id not in rerank_ids]
+                candidate_ids = rerank_ids + remaining
+                exact_set = set(exact_ids)
+                candidate_ids = [patent_id for patent_id in candidate_ids if patent_id in exact_set] + [
+                    patent_id for patent_id in candidate_ids if patent_id not in exact_set
+                ]
+                reranked = True
+            except SemanticError as exc:
+                degraded.append(exc.code)
         results = []
         for patent_id in candidate_ids:
             patent = by_id.get(patent_id)
@@ -120,7 +147,8 @@ class SemanticSearchService:
                 "application_number": patent.application_number, "grant_number": patent.grant_number, "abstract": patent.abstract,
                 "applicant": patent.applicant, "legal_status": str(patent.legal_status.value if hasattr(patent.legal_status, "value") else patent.legal_status)},
                 "scores": {"exact": patent_id in exact_ids, "keyword_rank": keyword_ids.index(patent_id) + 1 if patent_id in keyword_ids else None,
-                    "vector_rank": vector_ids.index(patent_id) + 1 if patent_id in vector_ids else None}, "matches": []}
+                    "vector_rank": vector_ids.index(patent_id) + 1 if patent_id in vector_ids else None,
+                    "rerank_score": rerank_scores.get(patent_id)}, "matches": []}
             if include_explain:
                 item["scores"]["fusion_score"] = weighted_rrf([(1000.0, exact_ids), ((profile.keyword_weight if profile else 1), keyword_ids), ((profile.vector_weight if profile else 1), vector_ids)], profile.rrf_k if profile else 60).get(patent_id, 0)
                 if patent_id in vector_matches:
@@ -134,4 +162,4 @@ class SemanticSearchService:
             degraded_reasons=degraded, candidate_count=len(candidate_ids), result_count=len(results), latency_ms=timings))
         db.commit()
         return {"items": results, "meta": {"mode": mode, "profile_id": profile.id if profile else None,
-            "index_version": index.index_version if index else None, "degraded": bool(degraded), "degraded_reasons": degraded, "latency_ms": timings}}
+            "index_version": index.index_version if index else None, "reranked": reranked, "degraded": bool(degraded), "degraded_reasons": degraded, "latency_ms": timings}}

@@ -13,6 +13,7 @@ from app.models import Patent, PatentDatabaseMembership, SemanticDocumentState, 
 from app.search.contracts import SemanticError, VectorDocument
 from app.search.document_builder import SemanticDocumentBuilder
 from app.search.providers.openai_embedding import OpenAICompatibleEmbeddingProvider
+from app.search.providers.openai_rerank import OpenAICompatibleRerankProvider
 from app.search.vector import open_vector_store
 from app.services.patent_database_scope import in_database
 
@@ -22,7 +23,7 @@ class SemanticIndexService:
     def profile_dict(profile: SemanticSearchProfile) -> dict:
         return {key: getattr(profile, key) for key in (
             "id", "name", "is_default", "enabled", "vector_backend", "embedding_provider_id",
-            "embedding_model", "embedding_dimensions", "retrieval_mode", "keyword_weight", "vector_weight",
+            "embedding_model", "embedding_dimensions", "rerank_provider_id", "rerank_model", "rerank_enabled", "rerank_top_n", "retrieval_mode", "keyword_weight", "vector_weight",
             "rrf_k", "keyword_candidate_count", "vector_candidate_count", "result_top_k", "template_version",
             "chunk_strategy_version", "distance_metric", "indexed_field_allowlist", "remote_field_allowlist",
         )}
@@ -72,6 +73,16 @@ class SemanticIndexService:
             raise SemanticError("SEMANTIC_PROVIDER_DISABLED", "Unsupported embedding provider configuration")
         return OpenAICompatibleEmbeddingProvider(endpoint=provider.endpoint, credential_ref=provider.credential_ref,
             model=profile.embedding_model, dimensions=profile.embedding_dimensions)
+
+    @staticmethod
+    def _rerank_provider(db: Session, profile: SemanticSearchProfile):
+        provider = db.get(SemanticProviderDefinition, profile.rerank_provider_id) if profile.rerank_provider_id else None
+        if not provider or not provider.enabled:
+            raise SemanticError("SEMANTIC_RERANK_DISABLED", "No enabled rerank provider is configured for this profile")
+        if provider.provider_kind != "rerank" or provider.provider_type != "openai_compatible_rerank":
+            raise SemanticError("SEMANTIC_RERANK_DISABLED", "Unsupported rerank provider configuration")
+        return OpenAICompatibleRerankProvider(endpoint=provider.endpoint, credential_ref=provider.credential_ref,
+            model=profile.rerank_model or "rerank-default", timeout_seconds=float((provider.config_json or {}).get("timeout_seconds", 20)))
 
     @classmethod
     def enqueue_rebuild(cls, db: Session, profile: SemanticSearchProfile, database_id: int | None = None) -> SemanticIndexJob:

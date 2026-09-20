@@ -37,8 +37,16 @@ def list_profiles(db: Session = Depends(get_db)):
 
 @router.post("/profiles")
 def create_profile(body: SemanticProfileCreate, db: Session = Depends(get_db)):
-    if body.embedding_provider_id and not db.get(SemanticProviderDefinition, body.embedding_provider_id):
-        raise NotFoundException("Semantic provider", body.embedding_provider_id)
+    if body.embedding_provider_id:
+        provider = db.get(SemanticProviderDefinition, body.embedding_provider_id)
+        if not provider or provider.provider_kind != "embedding":
+            raise NotFoundException("Embedding provider", body.embedding_provider_id)
+    if body.rerank_provider_id:
+        provider = db.get(SemanticProviderDefinition, body.rerank_provider_id)
+        if not provider or provider.provider_kind != "rerank":
+            raise NotFoundException("Rerank provider", body.rerank_provider_id)
+    if body.rerank_enabled and not body.rerank_provider_id:
+        raise AppException("SEMANTIC_RERANK_DISABLED", "A rerank provider is required when rerank is enabled")
     if body.vector_backend not in {"zvec", "json_local"}:
         raise AppException("SEMANTIC_BACKEND_UNAVAILABLE", "Unsupported semantic vector backend")
     if body.retrieval_mode not in {"keyword", "semantic", "hybrid"}:
@@ -58,8 +66,16 @@ def update_profile(profile_id: int, body: SemanticProfileUpdate, db: Session = D
     if not row:
         raise NotFoundException("Semantic profile", profile_id)
     changes = body.model_dump(exclude_unset=True)
-    if changes.get("embedding_provider_id") and not db.get(SemanticProviderDefinition, changes["embedding_provider_id"]):
-        raise NotFoundException("Semantic provider", changes["embedding_provider_id"])
+    if changes.get("embedding_provider_id"):
+        provider = db.get(SemanticProviderDefinition, changes["embedding_provider_id"])
+        if not provider or provider.provider_kind != "embedding":
+            raise NotFoundException("Embedding provider", changes["embedding_provider_id"])
+    if changes.get("rerank_provider_id"):
+        provider = db.get(SemanticProviderDefinition, changes["rerank_provider_id"])
+        if not provider or provider.provider_kind != "rerank":
+            raise NotFoundException("Rerank provider", changes["rerank_provider_id"])
+    if changes.get("rerank_enabled") and not changes.get("rerank_provider_id", row.rerank_provider_id):
+        raise AppException("SEMANTIC_RERANK_DISABLED", "A rerank provider is required when rerank is enabled")
     if changes.get("vector_backend") and changes["vector_backend"] not in {"zvec", "json_local"}:
         raise AppException("SEMANTIC_BACKEND_UNAVAILABLE", "Unsupported semantic vector backend")
     if changes.get("retrieval_mode") and changes["retrieval_mode"] not in {"keyword", "semantic", "hybrid"}:
@@ -84,8 +100,9 @@ def list_providers(db: Session = Depends(get_db)):
 
 @router.post("/providers")
 def create_provider(body: SemanticProviderCreate, db: Session = Depends(get_db)):
-    if body.provider_kind != "embedding" or body.provider_type != "openai_compatible":
-        raise AppException("VALIDATION_ERROR", "Only OpenAI-compatible embedding providers are supported in Phase 1")
+    valid_types = {"embedding": {"openai_compatible"}, "rerank": {"openai_compatible_rerank"}}
+    if body.provider_type not in valid_types.get(body.provider_kind, set()):
+        raise AppException("VALIDATION_ERROR", "Unsupported semantic provider kind or type")
     if body.credential_ref and not body.credential_ref.startswith(("env://", "keyring://")):
         raise AppException("VALIDATION_ERROR", "credential_ref must use env:// or keyring://")
     row = SemanticProviderDefinition(**body.model_dump())

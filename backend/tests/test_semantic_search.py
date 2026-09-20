@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Patent, SemanticIndexOutbox, SemanticSearchProfile
+from app.models import Patent, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
 from app.services.semantic_index_service import SemanticIndexService
 from app.services.semantic_job_service import SemanticJobService
 from app.services.semantic_search_service import SemanticSearchService
@@ -80,6 +81,53 @@ class SemanticSearchTest(unittest.TestCase):
         self.assertEqual(item.status, "retry_wait")
         self.assertEqual(item.attempt_count, 1)
         self.assertIsNotNone(item.next_retry_at)
+
+    def test_rerank_reorders_authorized_candidates(self):
+        provider = SemanticProviderDefinition(
+            name="test-rerank", provider_kind="rerank", provider_type="openai_compatible_rerank",
+            endpoint="https://rerank.test/v1/rerank", credential_ref="env://PATWIKI_TEST_RERANK_KEY",
+        )
+        self.db.add(provider)
+        self.db.flush()
+        self.profile.rerank_provider_id = provider.id
+        self.profile.rerank_model = "rerank-test"
+        self.profile.rerank_enabled = True
+        self.db.commit()
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"results": [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.1}]}
+
+        with patch.dict(os.environ, {"PATWIKI_TEST_RERANK_KEY": "secret"}), patch("httpx.post", return_value=FakeResponse()):
+            result = SemanticSearchService.query(self.db, text="结构", database_id=None, mode="keyword", top_k=10, profile_id=self.profile.id)
+        self.assertTrue(result["meta"]["reranked"])
+        self.assertEqual(result["items"][0]["patent"]["publication_number"], "CN987654321A1")
+        self.assertEqual(result["items"][0]["scores"]["rerank_score"], 0.9)
+
+    def test_exact_identifier_remains_first_after_rerank(self):
+        provider = SemanticProviderDefinition(
+            name="test-rerank-exact", provider_kind="rerank", provider_type="openai_compatible_rerank",
+            endpoint="https://rerank.test/v1/rerank", credential_ref="env://PATWIKI_TEST_RERANK_KEY",
+        )
+        self.db.add(provider)
+        self.db.flush()
+        self.profile.rerank_provider_id, self.profile.rerank_model, self.profile.rerank_enabled = provider.id, "rerank-test", True
+        self.db.commit()
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"results": [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.1}]}
+
+        with patch.dict(os.environ, {"PATWIKI_TEST_RERANK_KEY": "secret"}), patch("httpx.post", return_value=FakeResponse()):
+            result = SemanticSearchService.query(self.db, text="CN123456789A1", database_id=None, mode="keyword", top_k=10, profile_id=self.profile.id)
+        self.assertTrue(result["items"][0]["scores"]["exact"])
+        self.assertEqual(result["items"][0]["patent"]["publication_number"], "CN123456789A1")
 
     def test_zvec_store_persists_and_queries_vectors(self):
         with tempfile.TemporaryDirectory() as root:

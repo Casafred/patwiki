@@ -33,6 +33,25 @@ class EmbeddingProvider(Protocol):
     def embed_query(self, text: str) -> list[float]: ...
 
 
+@dataclass(frozen=True)
+class RerankDocument:
+    document_id: str
+    patent_id: int
+    text: str
+
+
+@dataclass(frozen=True)
+class RerankResult:
+    document_id: str
+    patent_id: int
+    score: float
+    rank: int
+
+
+class RerankProvider(Protocol):
+    def rerank(self, query: str, documents: list[RerankDocument], top_n: int) -> list[RerankResult]: ...
+
+
 class VectorStore(Protocol):
     def upsert(self, documents: list[VectorDocument]) -> None: ...
     def delete(self, document_ids: list[str]) -> None: ...
