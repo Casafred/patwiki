@@ -31,6 +31,8 @@ class SemanticProfileCreate(BaseModel):
     rerank_model: str | None = None
     rerank_enabled: bool = False
     rerank_top_n: int = Field(default=20, ge=1, le=100)
+    quality_gate_enabled: bool = False
+    quality_thresholds: dict[str, float] = Field(default_factory=dict)
     vector_backend: str = "zvec"
     retrieval_mode: str = "hybrid"
     is_default: bool = False
@@ -48,6 +50,8 @@ class SemanticProfileUpdate(BaseModel):
     rerank_model: str | None = Field(default=None, min_length=1, max_length=200)
     rerank_enabled: bool | None = None
     rerank_top_n: int | None = Field(default=None, ge=1, le=100)
+    quality_gate_enabled: bool | None = None
+    quality_thresholds: dict[str, float] | None = None
     vector_backend: str | None = None
     retrieval_mode: str | None = None
     indexed_field_allowlist: list[str] | None = None
@@ -74,3 +78,39 @@ class SemanticQueryRequest(BaseModel):
 class SemanticRebuildRequest(BaseModel):
     profile_id: int
     database_id: int | None = None
+
+
+class SemanticEvaluationDatasetCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    version: str = Field(min_length=1, max_length=60)
+    description: str | None = None
+
+
+class SemanticEvaluationCaseCreate(BaseModel):
+    case_key: str = Field(min_length=1, max_length=100)
+    query: str = Field(min_length=1, max_length=2000)
+    database_id: int | None = None
+    relevant_patent_ids: list[int] = Field(min_length=1)
+    notes: str | None = None
+
+
+class SemanticEvaluationCaseUpdate(BaseModel):
+    case_key: str | None = Field(default=None, min_length=1, max_length=100)
+    query: str | None = Field(default=None, min_length=1, max_length=2000)
+    database_id: int | None = None
+    relevant_patent_ids: list[int] | None = Field(default=None, min_length=1)
+    notes: str | None = None
+    enabled: bool | None = None
+
+
+class SemanticEvaluationRunRequest(BaseModel):
+    dataset_id: int
+    profile_id: int
+    mode: str = "hybrid"
+    top_k: int = Field(default=10, ge=1, le=100)
+    index_id: int | None = None
+
+
+class SemanticProviderTestRequest(BaseModel):
+    profile_id: int | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=200)

@@ -146,6 +146,29 @@ export const automationService = {
 
 export const semanticSearchService = {
   query: (...args: Parameters<typeof semanticSearchApi.query>) => semanticSearchApi.query(...args),
+  profiles: () => semanticSearchApi.profiles(),
+  createProfile: (...args: Parameters<typeof semanticSearchApi.createProfile>) => semanticSearchApi.createProfile(...args),
+  updateProfile: (...args: Parameters<typeof semanticSearchApi.updateProfile>) => semanticSearchApi.updateProfile(...args),
+  providers: () => semanticSearchApi.providers(),
+  createProvider: (...args: Parameters<typeof semanticSearchApi.createProvider>) => semanticSearchApi.createProvider(...args),
+  updateProvider: (...args: Parameters<typeof semanticSearchApi.updateProvider>) => semanticSearchApi.updateProvider(...args),
+  testProvider: (...args: Parameters<typeof semanticSearchApi.testProvider>) => semanticSearchApi.testProvider(...args),
+  profileHealth: (id: number) => semanticSearchApi.profileHealth(id),
+  indexes: () => semanticSearchApi.indexes(),
+  rebuild: (...args: Parameters<typeof semanticSearchApi.rebuild>) => semanticSearchApi.rebuild(...args),
+  activate: (id: number) => semanticSearchApi.activate(id),
+  jobs: () => semanticSearchApi.jobs(),
+  job: (id: number) => semanticSearchApi.job(id),
+  retryJob: (id: number) => semanticSearchApi.retryJob(id),
+  status: () => semanticSearchApi.status(),
+  datasets: () => semanticSearchApi.datasets(),
+  createDataset: (...args: Parameters<typeof semanticSearchApi.createDataset>) => semanticSearchApi.createDataset(...args),
+  cases: (datasetId: number) => semanticSearchApi.cases(datasetId),
+  createCase: (...args: Parameters<typeof semanticSearchApi.createCase>) => semanticSearchApi.createCase(...args),
+  updateCase: (...args: Parameters<typeof semanticSearchApi.updateCase>) => semanticSearchApi.updateCase(...args),
+  deleteCase: (id: number) => semanticSearchApi.deleteCase(id),
+  runs: () => semanticSearchApi.runs(),
+  runEvaluation: (...args: Parameters<typeof semanticSearchApi.runEvaluation>) => semanticSearchApi.runEvaluation(...args),
 }
 
 export const syncService = {

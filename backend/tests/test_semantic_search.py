@@ -4,6 +4,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import os
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,13 +12,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Patent, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
+from app.models import Patent, SemanticEvaluationCase, SemanticEvaluationDataset, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
 from app.services.semantic_index_service import SemanticIndexService
 from app.services.semantic_job_service import SemanticJobService
+from app.services.semantic_evaluation_service import SemanticEvaluationService
 from app.services.semantic_search_service import SemanticSearchService
 from app.search.contracts import VectorDocument
 from app.search.providers.openai_embedding import resolve_credential
 from app.search.document_builder import SemanticDocumentBuilder
+from app.search.sparse import search as sparse_search
 from app.search.vector.zvec_store import ZvecVectorStore
 
 
@@ -82,6 +85,25 @@ class SemanticSearchTest(unittest.TestCase):
         self.assertEqual(item.status, "retry_wait")
         self.assertEqual(item.attempt_count, 1)
         self.assertIsNotNone(item.next_retry_at)
+
+    def test_rebuild_failure_is_retryable_and_manual_retry_resets_attempt_window(self):
+        job = SemanticIndexService.enqueue_rebuild(self.db, self.profile)
+        SemanticJobService.run_due(self.db)
+        failed = self.db.get(SemanticIndexJob, job.id)
+        self.assertEqual(failed.status, "retry_wait")
+        self.assertEqual(failed.attempt_count, 1)
+        retried = SemanticIndexService.retry_job(self.db, failed)
+        self.assertEqual(retried.status, "pending")
+        self.assertEqual(retried.attempt_count, 0)
+
+    def test_expired_job_lease_enters_dead_letter_after_max_attempts(self):
+        job = SemanticIndexService.enqueue_rebuild(self.db, self.profile)
+        row = self.db.get(SemanticIndexJob, job.id)
+        row.status, row.attempt_count, row.max_attempts = "running", 3, 3
+        row.lease_expires_at = datetime.utcnow()
+        self.db.commit()
+        SemanticJobService.run_due(self.db)
+        self.assertEqual(self.db.get(SemanticIndexJob, job.id).status, "dead_letter")
 
     def test_rerank_reorders_authorized_candidates(self):
         provider = SemanticProviderDefinition(
@@ -161,3 +183,37 @@ class SemanticSearchTest(unittest.TestCase):
     def test_zvec_storage_keeps_legacy_summary_key_and_separates_chunks(self):
         self.assertEqual(ZvecVectorStore._storage_id("1:patent_summary:0"), "p1_summary_0")
         self.assertEqual(ZvecVectorStore._storage_id("1:patent_claims:0"), "p1_patent_claims_0")
+
+    def test_sqlite_fts5_bm25_projection_tracks_patent_updates(self):
+        patent = Patent(title="Battery insulation structure", abstract="thermal barrier")
+        self.db.add(patent)
+        self.db.commit()
+        self.assertIn(patent.id, sparse_search(self.db, "battery", 10))
+        patent.title = "Solar panel assembly"
+        self.db.commit()
+        self.assertNotIn(patent.id, sparse_search(self.db, "battery", 10))
+
+    def test_sqlite_fts5_trigram_matches_chinese_substrings(self):
+        patent = Patent(title="电池热失控隔热结构", abstract="用于阻断热失控传播")
+        self.db.add(patent)
+        self.db.commit()
+        self.assertIn(patent.id, sparse_search(self.db, "热失控", 10))
+
+    def test_evaluation_calculates_rank_metrics_and_quality_gate(self):
+        dataset = SemanticEvaluationDataset(name="smoke", version="v1")
+        self.db.add(dataset)
+        self.db.flush()
+        self.db.add(SemanticEvaluationCase(dataset_id=dataset.id, case_key="battery", query="热失控", relevant_patent_ids=[1]))
+        self.profile.quality_thresholds = {"recall_at_k": 1.0, "mrr": 1.0}
+        self.db.commit()
+        run = SemanticEvaluationService.run(self.db, dataset, self.profile, "keyword", 10)
+        self.assertEqual(run.status, "passed")
+        self.assertEqual(run.metrics_json["recall_at_k"], 1.0)
+        self.assertEqual(run.metrics_json["mrr"], 1.0)
+
+    def test_empty_evaluation_dataset_is_rejected(self):
+        dataset = SemanticEvaluationDataset(name="empty", version="v1")
+        self.db.add(dataset)
+        self.db.commit()
+        with self.assertRaisesRegex(Exception, "Evaluation dataset must contain at least one enabled case"):
+            SemanticEvaluationService.run(self.db, dataset, self.profile, "keyword", 10)

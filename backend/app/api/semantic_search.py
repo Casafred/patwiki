@@ -6,11 +6,14 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppException, NotFoundException
 from app.database import get_db
-from app.models import SemanticIndex, SemanticIndexJob, SemanticProviderDefinition, SemanticSearchProfile
-from app.schemas.semantic_search import SemanticProfileCreate, SemanticProfileUpdate, SemanticProviderCreate, SemanticProviderUpdate, SemanticQueryRequest, SemanticRebuildRequest
-from app.search.contracts import SemanticError
+from app.models import SemanticEvaluationCase, SemanticEvaluationDataset, SemanticEvaluationRun, SemanticIndex, SemanticIndexJob, SemanticProviderDefinition, SemanticSearchProfile
+from app.schemas.semantic_search import SemanticEvaluationCaseCreate, SemanticEvaluationCaseUpdate, SemanticEvaluationDatasetCreate, SemanticEvaluationRunRequest, SemanticProfileCreate, SemanticProfileUpdate, SemanticProviderCreate, SemanticProviderTestRequest, SemanticProviderUpdate, SemanticQueryRequest, SemanticRebuildRequest
+from app.search.contracts import RerankDocument, SemanticError
 from app.services.semantic_index_service import SemanticIndexService
 from app.services.semantic_search_service import SemanticSearchService
+from app.services.semantic_evaluation_service import SemanticEvaluationService
+from app.search.sparse import status as sparse_status
+from app.search.providers.openai_rerank import OpenAICompatibleRerankProvider
 
 router = APIRouter(prefix="/semantic-search", tags=["semantic-search"])
 
@@ -47,6 +50,8 @@ def create_profile(body: SemanticProfileCreate, db: Session = Depends(get_db)):
             raise NotFoundException("Rerank provider", body.rerank_provider_id)
     if body.rerank_enabled and not body.rerank_provider_id:
         raise AppException("SEMANTIC_RERANK_DISABLED", "A rerank provider is required when rerank is enabled")
+    if body.quality_gate_enabled and not body.quality_thresholds:
+        raise AppException("SEMANTIC_QUALITY_GATE_FAILED", "Quality thresholds are required when the quality gate is enabled")
     if body.vector_backend not in {"zvec", "json_local"}:
         raise AppException("SEMANTIC_BACKEND_UNAVAILABLE", "Unsupported semantic vector backend")
     if body.retrieval_mode not in {"keyword", "semantic", "hybrid"}:
@@ -76,6 +81,8 @@ def update_profile(profile_id: int, body: SemanticProfileUpdate, db: Session = D
             raise NotFoundException("Rerank provider", changes["rerank_provider_id"])
     if changes.get("rerank_enabled") and not changes.get("rerank_provider_id", row.rerank_provider_id):
         raise AppException("SEMANTIC_RERANK_DISABLED", "A rerank provider is required when rerank is enabled")
+    if changes.get("quality_gate_enabled") and not changes.get("quality_thresholds", row.quality_thresholds or {}):
+        raise AppException("SEMANTIC_QUALITY_GATE_FAILED", "Quality thresholds are required when the quality gate is enabled")
     if changes.get("vector_backend") and changes["vector_backend"] not in {"zvec", "json_local"}:
         raise AppException("SEMANTIC_BACKEND_UNAVAILABLE", "Unsupported semantic vector backend")
     if changes.get("retrieval_mode") and changes["retrieval_mode"] not in {"keyword", "semantic", "hybrid"}:
@@ -126,6 +133,36 @@ def update_provider(provider_id: int, body: SemanticProviderUpdate, db: Session 
     db.commit()
     db.refresh(row)
     return _provider_dict(row)
+
+
+@router.post("/providers/{provider_id}/test")
+def test_provider(provider_id: int, body: SemanticProviderTestRequest, db: Session = Depends(get_db)):
+    provider = db.get(SemanticProviderDefinition, provider_id)
+    if not provider:
+        raise NotFoundException("Semantic provider", provider_id)
+    try:
+        if provider.provider_kind == "embedding":
+            profile = db.get(SemanticSearchProfile, body.profile_id) if body.profile_id else db.query(SemanticSearchProfile).filter_by(embedding_provider_id=provider.id, enabled=True).first()
+            if not profile:
+                raise SemanticError("SEMANTIC_PROVIDER_DISABLED", "An embedding profile is required to test this provider")
+            if profile.embedding_provider_id != provider.id:
+                raise SemanticError("SEMANTIC_PROVIDER_DISABLED", "The selected profile does not reference this embedding provider")
+            vector = SemanticIndexService._provider(db, profile).embed_query("patwiki provider health check")
+            provider.last_health_status, provider.last_health_at, provider.last_error_code = "healthy", datetime.utcnow(), None
+            db.commit()
+            return {"status": "healthy", "dimensions": len(vector), "checked_at": provider.last_health_at}
+        if provider.provider_kind == "rerank":
+            model = body.model or (provider.config_json or {}).get("model") or "rerank-default"
+            reranker = OpenAICompatibleRerankProvider(endpoint=provider.endpoint, credential_ref=provider.credential_ref, model=model)
+            result = reranker.rerank("patwiki provider health check", [RerankDocument("health-check", 0, "provider health check")], 1)
+            provider.last_health_status, provider.last_health_at, provider.last_error_code = "healthy", datetime.utcnow(), None
+            db.commit()
+            return {"status": "healthy", "result_count": len(result), "checked_at": provider.last_health_at}
+        raise SemanticError("SEMANTIC_PROVIDER_DISABLED", "Unsupported semantic provider kind")
+    except SemanticError as exc:
+        provider.last_health_status, provider.last_health_at, provider.last_error_code = "failed", datetime.utcnow(), exc.code
+        db.commit()
+        raise AppException(exc.code, str(exc), 400)
 
 
 @router.post("/profiles/{profile_id}/health")
@@ -182,9 +219,110 @@ def list_jobs(db: Session = Depends(get_db)):
     return {"items": [SemanticIndexService.job_dict(row) for row in db.query(SemanticIndexJob).order_by(SemanticIndexJob.id.desc()).all()]}
 
 
+@router.get("/jobs/{job_id}")
+def get_job(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(SemanticIndexJob, job_id)
+    if not job:
+        raise NotFoundException("Semantic index job", job_id)
+    return SemanticIndexService.job_dict(job)
+
+
+@router.post("/jobs/{job_id}/retry")
+def retry_job(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(SemanticIndexJob, job_id)
+    if not job:
+        raise NotFoundException("Semantic index job", job_id)
+    try:
+        return SemanticIndexService.job_dict(SemanticIndexService.retry_job(db, job))
+    except SemanticError as exc:
+        raise AppException(exc.code, str(exc), 400)
+
+
+@router.get("/evaluations/datasets")
+def list_evaluation_datasets(db: Session = Depends(get_db)):
+    rows = db.query(SemanticEvaluationDataset).order_by(SemanticEvaluationDataset.id.desc()).all()
+    return {"items": [SemanticEvaluationService.dataset_dict(row, db.query(SemanticEvaluationCase).filter_by(dataset_id=row.id).count()) for row in rows]}
+
+
+@router.post("/evaluations/datasets")
+def create_evaluation_dataset(body: SemanticEvaluationDatasetCreate, db: Session = Depends(get_db)):
+    row = SemanticEvaluationDataset(**body.model_dump())
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return SemanticEvaluationService.dataset_dict(row, 0)
+
+
+@router.get("/evaluations/datasets/{dataset_id}/cases")
+def list_evaluation_cases(dataset_id: int, db: Session = Depends(get_db)):
+    if not db.get(SemanticEvaluationDataset, dataset_id):
+        raise NotFoundException("Semantic evaluation dataset", dataset_id)
+    return {"items": [SemanticEvaluationService.case_dict(row) for row in db.query(SemanticEvaluationCase).filter_by(dataset_id=dataset_id).order_by(SemanticEvaluationCase.id).all()]}
+
+
+@router.post("/evaluations/datasets/{dataset_id}/cases")
+def create_evaluation_case(dataset_id: int, body: SemanticEvaluationCaseCreate, db: Session = Depends(get_db)):
+    if not db.get(SemanticEvaluationDataset, dataset_id):
+        raise NotFoundException("Semantic evaluation dataset", dataset_id)
+    row = SemanticEvaluationCase(dataset_id=dataset_id, **body.model_dump())
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return SemanticEvaluationService.case_dict(row)
+
+
+@router.patch("/evaluations/cases/{case_id}")
+def update_evaluation_case(case_id: int, body: SemanticEvaluationCaseUpdate, db: Session = Depends(get_db)):
+    row = db.get(SemanticEvaluationCase, case_id)
+    if not row:
+        raise NotFoundException("Semantic evaluation case", case_id)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, field, value)
+    db.commit()
+    db.refresh(row)
+    return SemanticEvaluationService.case_dict(row)
+
+
+@router.delete("/evaluations/cases/{case_id}")
+def delete_evaluation_case(case_id: int, db: Session = Depends(get_db)):
+    row = db.get(SemanticEvaluationCase, case_id)
+    if not row:
+        raise NotFoundException("Semantic evaluation case", case_id)
+    db.delete(row)
+    db.commit()
+    return {"success": True}
+
+
+@router.get("/evaluations/runs")
+def list_evaluation_runs(db: Session = Depends(get_db)):
+    return {"items": [SemanticEvaluationService.run_dict(row) for row in db.query(SemanticEvaluationRun).order_by(SemanticEvaluationRun.id.desc()).limit(100).all()]}
+
+
+@router.post("/evaluations/run")
+def run_evaluation(body: SemanticEvaluationRunRequest, db: Session = Depends(get_db)):
+    dataset = db.get(SemanticEvaluationDataset, body.dataset_id)
+    profile = db.get(SemanticSearchProfile, body.profile_id)
+    if not dataset:
+        raise NotFoundException("Semantic evaluation dataset", body.dataset_id)
+    if not profile:
+        raise NotFoundException("Semantic profile", body.profile_id)
+    index = db.get(SemanticIndex, body.index_id) if body.index_id else None
+    if body.index_id and (not index or index.profile_id != profile.id):
+        raise AppException("SEMANTIC_INDEX_NOT_READY", "Evaluation index does not belong to the selected profile")
+    try:
+        run = SemanticEvaluationService.run(db, dataset, profile, body.mode, body.top_k, index=index)
+        return SemanticEvaluationService.run_dict(run)
+    except SemanticError as exc:
+        raise AppException(exc.code, str(exc), 400)
+
+
 @router.get("/status")
 def semantic_status(db: Session = Depends(get_db)):
     active = db.query(SemanticIndex).filter(SemanticIndex.is_active == True).count()
     pending = db.query(SemanticIndexJob).filter(SemanticIndexJob.status.in_(["pending", "running", "retry_wait"])).count()
+    sparse = sparse_status(db)
     return {"configured_profiles": db.query(SemanticSearchProfile).filter(SemanticSearchProfile.enabled == True).count(),
-        "active_indexes": active, "pending_jobs": pending, "checked_at": datetime.utcnow()}
+        "active_indexes": active, "pending_jobs": pending,
+        "sparse_backend": sparse["backend"], "sparse_available": sparse["available"],
+        "evaluated_profiles": db.query(SemanticEvaluationRun.profile_id).filter(SemanticEvaluationRun.status == "passed").distinct().count(),
+        "checked_at": datetime.utcnow()}

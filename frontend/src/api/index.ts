@@ -13,6 +13,8 @@ import type {
   ImportChangeReview, ImportReviewAction,
   ProjectSolutionVersion, RiskCase,
   SemanticSearchMode, SemanticSearchResponse,
+  SemanticProvider, SemanticProfile, SemanticIndex, SemanticJob, SemanticStatus,
+  SemanticEvaluationDataset, SemanticEvaluationCase, SemanticEvaluationRun,
 } from '../types'
 
 export const fieldApi = {
@@ -271,6 +273,29 @@ export const automationApi = {
 export const semanticSearchApi = {
   query: (data: { query: string; database_id?: number | null; mode?: SemanticSearchMode; top_k?: number; include_explain?: boolean }): Promise<SemanticSearchResponse> =>
     api.post('/semantic-search/query', data),
+  profiles: (): Promise<{ items: SemanticProfile[] }> => api.get('/semantic-search/profiles'),
+  createProfile: (data: Record<string, unknown>): Promise<SemanticProfile> => api.post('/semantic-search/profiles', data),
+  updateProfile: (id: number, data: Record<string, unknown>): Promise<SemanticProfile> => api.patch(`/semantic-search/profiles/${id}`, data),
+  providers: (): Promise<{ items: SemanticProvider[] }> => api.get('/semantic-search/providers'),
+  createProvider: (data: Record<string, unknown>): Promise<SemanticProvider> => api.post('/semantic-search/providers', data),
+  updateProvider: (id: number, data: Record<string, unknown>): Promise<SemanticProvider> => api.patch(`/semantic-search/providers/${id}`, data),
+  testProvider: (id: number, data?: { profile_id?: number; model?: string }): Promise<{ status: string }> => api.post(`/semantic-search/providers/${id}/test`, data || {}),
+  profileHealth: (id: number): Promise<{ status: string; dimensions?: number }> => api.post(`/semantic-search/profiles/${id}/health`),
+  indexes: (): Promise<{ items: SemanticIndex[] }> => api.get('/semantic-search/indexes'),
+  rebuild: (profileId: number, databaseId?: number | null): Promise<SemanticJob> => api.post('/semantic-search/indexes/rebuild', { profile_id: profileId, database_id: databaseId ?? null }),
+  activate: (id: number): Promise<SemanticIndex> => api.post(`/semantic-search/indexes/${id}/activate`),
+  jobs: (): Promise<{ items: SemanticJob[] }> => api.get('/semantic-search/jobs'),
+  job: (id: number): Promise<SemanticJob> => api.get(`/semantic-search/jobs/${id}`),
+  retryJob: (id: number): Promise<SemanticJob> => api.post(`/semantic-search/jobs/${id}/retry`),
+  status: (): Promise<SemanticStatus> => api.get('/semantic-search/status'),
+  datasets: (): Promise<{ items: SemanticEvaluationDataset[] }> => api.get('/semantic-search/evaluations/datasets'),
+  createDataset: (data: { name: string; version: string; description?: string }): Promise<SemanticEvaluationDataset> => api.post('/semantic-search/evaluations/datasets', data),
+  cases: (datasetId: number): Promise<{ items: SemanticEvaluationCase[] }> => api.get(`/semantic-search/evaluations/datasets/${datasetId}/cases`),
+  createCase: (datasetId: number, data: { case_key: string; query: string; database_id?: number | null; relevant_patent_ids: number[]; notes?: string }): Promise<SemanticEvaluationCase> => api.post(`/semantic-search/evaluations/datasets/${datasetId}/cases`, data),
+  updateCase: (id: number, data: Partial<Pick<SemanticEvaluationCase, 'case_key' | 'query' | 'database_id' | 'relevant_patent_ids' | 'notes' | 'enabled'>>): Promise<SemanticEvaluationCase> => api.patch(`/semantic-search/evaluations/cases/${id}`, data),
+  deleteCase: (id: number): Promise<{ success: boolean }> => api.delete(`/semantic-search/evaluations/cases/${id}`),
+  runs: (): Promise<{ items: SemanticEvaluationRun[] }> => api.get('/semantic-search/evaluations/runs'),
+  runEvaluation: (data: { dataset_id: number; profile_id: number; mode: SemanticSearchMode; top_k: number; index_id?: number | null }): Promise<SemanticEvaluationRun> => api.post('/semantic-search/evaluations/run', data),
 }
 
 export const syncApi = {

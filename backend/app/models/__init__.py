@@ -131,6 +131,10 @@ from app.models.semantic_search import (
     SemanticDocumentState,
     SemanticIndexOutbox,
     SemanticSearchLog,
+    SemanticEvaluationDataset,
+    SemanticEvaluationCase,
+    SemanticEvaluationRun,
+    SemanticEvaluationResult,
 )
 
 
@@ -183,5 +187,6 @@ __all__ = [
     "SyncRecord", "ExternalFactObservation", "LegalStatusEvent", "WatchEvent",
     "SyncDeadLetter", "SyncLease", "SyncUpdateBatch", "SyncUpdateItem",
     "SemanticProviderDefinition", "SemanticSearchProfile", "SemanticIndex", "SemanticIndexJob",
-    "SemanticDocumentState", "SemanticIndexOutbox", "SemanticSearchLog",
+    "SemanticDocumentState", "SemanticIndexOutbox", "SemanticSearchLog", "SemanticEvaluationDataset",
+    "SemanticEvaluationCase", "SemanticEvaluationRun", "SemanticEvaluationResult",
 ]

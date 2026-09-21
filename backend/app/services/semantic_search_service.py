@@ -11,13 +11,14 @@ from app.models import Patent, PatentIdentifier, SemanticIndex, SemanticSearchLo
 from app.search.contracts import RerankDocument, SemanticError
 from app.search.document_builder import SemanticDocumentBuilder
 from app.search.fusion import weighted_rrf
+from app.search.sparse import search as sparse_search
 from app.search.providers.openai_embedding import OpenAICompatibleEmbeddingProvider
 from app.search.vector import open_vector_store
 from app.services.patent_database_scope import in_database
 from app.services.semantic_index_service import SemanticIndexService
 
 
-KEYWORD_FIELDS = ("title", "abstract", "application_number", "publication_number", "grant_number", "applicant", "inventor", "assignee", "ipc_main", "ipc_all", "cpc_main", "cpc_all", "technical_problem", "technical_solution", "technical_effect")
+KEYWORD_FIELDS = ("title", "abstract", "claims", "description_full", "application_number", "publication_number", "grant_number", "applicant", "inventor", "assignee", "ipc_main", "ipc_all", "cpc_main", "cpc_all", "technical_problem", "technical_solution", "technical_effect")
 
 
 class SemanticSearchService:
@@ -33,7 +34,7 @@ class SemanticSearchService:
         return query.filter(in_database(database_id)) if database_id is not None else query
 
     @classmethod
-    def query(cls, db: Session, *, text: str, database_id: int | None, mode: str, top_k: int, profile_id: int | None, include_explain: bool = False) -> dict:
+    def query(cls, db: Session, *, text: str, database_id: int | None, mode: str, top_k: int, profile_id: int | None, include_explain: bool = False, index_override: SemanticIndex | None = None) -> dict:
         started = time.perf_counter()
         text = text.strip()
         if not text:
@@ -63,8 +64,11 @@ class SemanticSearchService:
         if mode in {"keyword", "hybrid"}:
             keyword_started = time.perf_counter()
             term = f"%{text}%"
-            rows = scope.filter(or_(*(getattr(Patent, field).cast(String).ilike(term) for field in KEYWORD_FIELDS))).limit((profile.keyword_candidate_count if profile else 100)).all()
-            keyword_ids = [row.id for row in rows]
+            candidate_limit = profile.keyword_candidate_count if profile else 100
+            sparse_ids = sparse_search(db, text, candidate_limit)
+            rows = scope.filter(or_(*(getattr(Patent, field).cast(String).ilike(term) for field in KEYWORD_FIELDS))).limit(candidate_limit).all()
+            like_ids = [row.id for row in rows]
+            keyword_ids = list(dict.fromkeys(sparse_ids + like_ids))[:candidate_limit]
             timings["keyword"] = int((time.perf_counter() - keyword_started) * 1000)
 
         vector_ids: list[int] = []
@@ -73,7 +77,7 @@ class SemanticSearchService:
         index = None
         if mode in {"semantic", "hybrid"}:
             vector_started = time.perf_counter()
-            index = SemanticIndexService.get_active_index(db, profile.id, database_id) if profile else None
+            index = index_override or (SemanticIndexService.get_active_index(db, profile.id, database_id) if profile else None)
             if not profile or not index:
                 degraded.append("SEMANTIC_INDEX_NOT_READY")
             else:
@@ -104,7 +108,7 @@ class SemanticSearchService:
         fallback_keyword_ids = keyword_ids
         if mode == "semantic" and not vector_ids and degraded and not fallback_keyword_ids:
             term = f"%{text}%"
-            fallback_keyword_ids = [row.id for row in scope.filter(or_(*(getattr(Patent, field).cast(String).ilike(term) for field in KEYWORD_FIELDS))).limit(100).all()]
+            fallback_keyword_ids = list(dict.fromkeys(sparse_search(db, text, 100) + [row.id for row in scope.filter(or_(*(getattr(Patent, field).cast(String).ilike(term) for field in KEYWORD_FIELDS))).limit(100).all()]))[:100]
         scores = weighted_rrf([
             (1000.0, exact_ids),
             ((profile.keyword_weight if profile else 1), fallback_keyword_ids),

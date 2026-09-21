@@ -27,7 +27,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-20.2"
+CURRENT_MIGRATION_VERSION = "2026-09-21.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -145,6 +145,8 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("semantic_search_profiles", "rerank_model", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_model VARCHAR(200)"),
     _column("semantic_search_profiles", "rerank_enabled", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_enabled BOOLEAN DEFAULT 0 NOT NULL"),
     _column("semantic_search_profiles", "rerank_top_n", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_top_n INTEGER DEFAULT 20 NOT NULL"),
+    _column("semantic_search_profiles", "quality_gate_enabled", "ALTER TABLE semantic_search_profiles ADD COLUMN quality_gate_enabled BOOLEAN DEFAULT 0 NOT NULL"),
+    _column("semantic_search_profiles", "quality_thresholds", "ALTER TABLE semantic_search_profiles ADD COLUMN quality_thresholds JSON DEFAULT '{}' NOT NULL"),
     _index("patents", "ix_patents_database_id", "database_id"),
     _index("patent_databases", "ix_patent_databases_owner_id", "owner_id"),
     _index("patent_histories", "ix_patent_histories_source_view_id", "source_view_id"),

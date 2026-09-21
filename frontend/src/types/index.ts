@@ -868,6 +868,7 @@ export interface SemanticSearchResult {
     keyword_rank?: number | null
     vector_rank?: number | null
     fusion_score?: number | null
+    rerank_score?: number | null
   }
   matches: { document_type: string; snippet: string }[]
 }
@@ -880,8 +881,122 @@ export interface SemanticSearchResponse {
     index_version?: string | null
     degraded: boolean
     degraded_reasons: string[]
+    reranked?: boolean
     latency_ms: Record<string, number>
   }
+}
+
+export interface SemanticProvider {
+  id: number
+  name: string
+  provider_kind: 'embedding' | 'rerank'
+  provider_type: string
+  endpoint?: string | null
+  credential_ref?: string | null
+  config_json: JsonObject
+  enabled: boolean
+  last_health_status?: string | null
+  last_health_at?: string | null
+  last_error_code?: string | null
+}
+
+export interface SemanticProfile {
+  id: number
+  name: string
+  is_default: boolean
+  enabled: boolean
+  vector_backend: string
+  embedding_provider_id?: number | null
+  embedding_model?: string | null
+  embedding_dimensions?: number | null
+  rerank_provider_id?: number | null
+  rerank_model?: string | null
+  rerank_enabled: boolean
+  rerank_top_n: number
+  quality_gate_enabled: boolean
+  quality_thresholds: Record<string, number>
+  retrieval_mode: SemanticSearchMode
+  chunk_strategy_version: string
+  indexed_field_allowlist: string[]
+}
+
+export interface SemanticIndex {
+  id: number
+  profile_id: number
+  database_id?: number | null
+  index_version: string
+  backend_type: string
+  status: string
+  is_active: boolean
+  document_count: number
+  patent_count: number
+  last_error_code?: string | null
+}
+
+export interface SemanticJob {
+  id: number
+  profile_id: number
+  index_id?: number | null
+  job_type: string
+  status: string
+  total_items: number
+  processed_items: number
+  failed_items: number
+  error_code?: string | null
+  error_message?: string | null
+  skipped_items: number
+  attempt_count: number
+  max_attempts: number
+  next_retry_at?: string | null
+  lease_expires_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export interface SemanticStatus {
+  configured_profiles: number
+  active_indexes: number
+  pending_jobs: number
+  sparse_backend?: string
+  sparse_available?: boolean
+  evaluated_profiles?: number
+  checked_at: string
+}
+
+export interface SemanticEvaluationDataset {
+  id: number
+  name: string
+  version: string
+  description?: string | null
+  enabled: boolean
+  case_count?: number | null
+}
+
+export interface SemanticEvaluationCase {
+  id: number
+  dataset_id: number
+  case_key: string
+  query: string
+  database_id?: number | null
+  relevant_patent_ids: number[]
+  notes?: string | null
+  enabled: boolean
+  created_at?: string | null
+}
+
+export interface SemanticEvaluationRun {
+  id: number
+  dataset_id: number
+  profile_id: number
+  index_version?: string | null
+  mode: SemanticSearchMode
+  top_k: number
+  status: string
+  metrics: Record<string, number>
+  thresholds: Record<string, number>
+  error_code?: string | null
+  error_message?: string | null
+  completed_at?: string | null
 }
 
 export type ImportReviewAction = 'adopt' | 'keep_existing' | 'fill_empty' | 'ignore' | 'quarantine'

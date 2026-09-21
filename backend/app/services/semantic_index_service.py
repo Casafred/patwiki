@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Patent, PatentDatabaseMembership, SemanticDocumentState, SemanticIndex, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
+from app.models import Patent, PatentDatabaseMembership, SemanticDocumentState, SemanticEvaluationRun, SemanticIndex, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
 from app.search.contracts import SemanticError, VectorDocument
 from app.search.document_builder import SemanticDocumentBuilder
 from app.search.providers.openai_embedding import OpenAICompatibleEmbeddingProvider
@@ -23,7 +23,7 @@ class SemanticIndexService:
     def profile_dict(profile: SemanticSearchProfile) -> dict:
         return {key: getattr(profile, key) for key in (
             "id", "name", "is_default", "enabled", "vector_backend", "embedding_provider_id",
-            "embedding_model", "embedding_dimensions", "rerank_provider_id", "rerank_model", "rerank_enabled", "rerank_top_n", "retrieval_mode", "keyword_weight", "vector_weight",
+            "embedding_model", "embedding_dimensions", "rerank_provider_id", "rerank_model", "rerank_enabled", "rerank_top_n", "quality_gate_enabled", "quality_thresholds", "retrieval_mode", "keyword_weight", "vector_weight",
             "rrf_k", "keyword_candidate_count", "vector_candidate_count", "result_top_k", "template_version",
             "chunk_strategy_version", "distance_metric", "indexed_field_allowlist", "remote_field_allowlist",
         )}
@@ -41,7 +41,7 @@ class SemanticIndexService:
         return {key: getattr(job, key) for key in (
             "id", "profile_id", "index_id", "job_type", "status", "total_items", "processed_items",
             "failed_items", "skipped_items", "attempt_count", "max_attempts", "next_retry_at", "error_code",
-            "error_message", "created_at", "started_at", "finished_at",
+            "error_message", "lease_owner", "lease_expires_at", "created_at", "started_at", "finished_at",
         )}
 
     @staticmethod
@@ -106,7 +106,10 @@ class SemanticIndexService:
         profile = db.get(SemanticSearchProfile, job.profile_id)
         if not index or not profile:
             raise SemanticError("SEMANTIC_INDEX_NOT_READY", "Semantic index job references missing configuration")
-        job.status, job.started_at, job.attempt_count = "running", datetime.utcnow(), job.attempt_count + 1
+        if job.status != "running":
+            job.status, job.started_at, job.attempt_count = "running", datetime.utcnow(), job.attempt_count + 1
+        elif not job.started_at:
+            job.started_at = datetime.utcnow()
         db.commit()
         store = None
         try:
@@ -131,14 +134,16 @@ class SemanticIndexService:
                 job.processed_items += 1
             index.document_count, index.patent_count, index.status, index.completed_at = store.count(), len(patents), "validating", datetime.utcnow()
             index.manifest_hash = hashlib.sha256(index.index_version.encode()).hexdigest()
-            job.status, job.finished_at = "succeeded", datetime.utcnow()
+            job.status, job.finished_at, job.lease_owner, job.lease_expires_at = "succeeded", datetime.utcnow(), None, None
             db.commit()
         except SemanticError as exc:
             job.status, job.error_code, job.error_message, job.finished_at = "failed", exc.code, str(exc), datetime.utcnow()
+            job.lease_owner, job.lease_expires_at = None, None
             index.status, index.last_error_code, index.last_error_message = "failed", exc.code, str(exc)
             db.commit()
         except Exception as exc:
             job.status, job.error_code, job.error_message, job.finished_at = "failed", "SEMANTIC_INDEX_FAILED", str(exc), datetime.utcnow()
+            job.lease_owner, job.lease_expires_at = None, None
             index.status, index.last_error_code, index.last_error_message = "failed", "SEMANTIC_INDEX_FAILED", str(exc)
             db.commit()
         finally:
@@ -148,9 +153,35 @@ class SemanticIndexService:
         return job
 
     @classmethod
+    def retry_job(cls, db: Session, job: SemanticIndexJob) -> SemanticIndexJob:
+        if job.status not in {"failed", "retry_wait", "dead_letter"}:
+            raise SemanticError("SEMANTIC_JOB_NOT_RETRYABLE", "Only failed, retry-wait, or dead-letter jobs can be retried")
+        index = db.get(SemanticIndex, job.index_id) if job.index_id else None
+        if not index:
+            raise SemanticError("SEMANTIC_INDEX_NOT_READY", "Semantic index job references a missing index")
+        index.status, index.is_active = "building", False
+        index.last_error_code, index.last_error_message = None, None
+        job.status, job.next_retry_at, job.attempt_count = "pending", None, 0
+        job.error_code, job.error_message = None, None
+        job.lease_owner, job.lease_expires_at = None, None
+        job.processed_items, job.failed_items, job.skipped_items = 0, 0, 0
+        db.commit()
+        db.refresh(job)
+        return job
+
+    @classmethod
     def activate(cls, db: Session, index: SemanticIndex) -> SemanticIndex:
         if index.status not in {"validating", "active"} or not Path(index.path).exists():
             raise SemanticError("SEMANTIC_INDEX_NOT_READY", "Index must finish validation before activation")
+        profile = db.get(SemanticSearchProfile, index.profile_id)
+        if profile and profile.quality_gate_enabled:
+            passed = db.query(SemanticEvaluationRun).filter(
+                SemanticEvaluationRun.profile_id == profile.id,
+                SemanticEvaluationRun.index_version == index.index_version,
+                SemanticEvaluationRun.status == "passed",
+            ).order_by(SemanticEvaluationRun.id.desc()).first()
+            if not passed:
+                raise SemanticError("SEMANTIC_QUALITY_GATE_FAILED", "Index has no passing evaluation for this profile and version")
         db.query(SemanticIndex).filter(SemanticIndex.profile_id == index.profile_id, SemanticIndex.database_id == index.database_id,
             SemanticIndex.is_active == True).update({"is_active": False, "status": "retired"}, synchronize_session=False)
         index.is_active, index.status, index.activated_at = True, "active", datetime.utcnow()

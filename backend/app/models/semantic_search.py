@@ -38,6 +38,8 @@ class SemanticSearchProfile(Base):
     rerank_model = Column(String(200))
     rerank_enabled = Column(Boolean, default=False, nullable=False)
     rerank_top_n = Column(Integer, default=20, nullable=False)
+    quality_gate_enabled = Column(Boolean, default=False, nullable=False)
+    quality_thresholds = Column(JSON, default=dict, nullable=False)
     retrieval_mode = Column(String(20), default="hybrid", nullable=False)
     keyword_weight = Column(Integer, default=1, nullable=False)
     vector_weight = Column(Integer, default=1, nullable=False)
@@ -155,4 +157,61 @@ class SemanticSearchLog(Base):
     candidate_count = Column(Integer, default=0, nullable=False)
     result_count = Column(Integer, default=0, nullable=False)
     latency_ms = Column(JSON, default=dict, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class SemanticEvaluationDataset(Base):
+    __tablename__ = "semantic_evaluation_datasets"
+    __table_args__ = (UniqueConstraint("name", "version", name="uq_semantic_evaluation_dataset"),)
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    version = Column(String(60), nullable=False)
+    description = Column(Text)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class SemanticEvaluationCase(Base):
+    __tablename__ = "semantic_evaluation_cases"
+    __table_args__ = (UniqueConstraint("dataset_id", "case_key", name="uq_semantic_evaluation_case"),)
+
+    id = Column(Integer, primary_key=True)
+    dataset_id = Column(Integer, ForeignKey("semantic_evaluation_datasets.id", ondelete="CASCADE"), nullable=False, index=True)
+    case_key = Column(String(100), nullable=False)
+    query = Column(Text, nullable=False)
+    database_id = Column(Integer, ForeignKey("patent_databases.id"), index=True)
+    relevant_patent_ids = Column(JSON, default=list, nullable=False)
+    notes = Column(Text)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class SemanticEvaluationRun(Base):
+    __tablename__ = "semantic_evaluation_runs"
+
+    id = Column(Integer, primary_key=True)
+    dataset_id = Column(Integer, ForeignKey("semantic_evaluation_datasets.id"), nullable=False, index=True)
+    profile_id = Column(Integer, ForeignKey("semantic_search_profiles.id"), nullable=False, index=True)
+    index_version = Column(String(100))
+    mode = Column(String(20), nullable=False)
+    top_k = Column(Integer, nullable=False)
+    status = Column(String(30), default="running", nullable=False, index=True)
+    metrics_json = Column(JSON, default=dict, nullable=False)
+    threshold_json = Column(JSON, default=dict, nullable=False)
+    error_code = Column(String(100))
+    error_message = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime)
+
+
+class SemanticEvaluationResult(Base):
+    __tablename__ = "semantic_evaluation_results"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("semantic_evaluation_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    case_id = Column(Integer, ForeignKey("semantic_evaluation_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    retrieved_patent_ids = Column(JSON, default=list, nullable=False)
+    metrics_json = Column(JSON, default=dict, nullable=False)
+    latency_ms = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
