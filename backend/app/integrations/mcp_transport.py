@@ -68,7 +68,7 @@ class McpTransport:
         *,
         credential_ref: str | None = None,
         credential_value: str | None = None,
-        service_path_template: str = "/api/service/himmuc_api/mcp/{service_name}",
+        service_path_template: str | None = "/api/service/himmuc_api/mcp/{service_name}",
         protocol_version: str = "2025-06-18",
         client_name: str = "patwiki",
         client_version: str = "0.1.0",
@@ -81,7 +81,7 @@ class McpTransport:
         parsed = urlparse(self.endpoint)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ConnectorError("MCP endpoint 必须是 http(s) URL", error_code="invalid_mcp_endpoint")
-        if not service_path_template or "{service_name}" not in service_path_template:
+        if service_path_template and "{service_name}" not in service_path_template:
             raise ConnectorError("MCP service_path_template 缺少 service_name", error_code="invalid_mcp_service_path")
         if timeout_seconds <= 0:
             raise ConnectorError("MCP timeout_seconds 必须大于 0", error_code="invalid_timeout")
@@ -106,6 +106,11 @@ class McpTransport:
             self.client.close()
 
     def service_endpoint(self, service_name: str) -> str:
+        # The provider may give a complete streamable-HTTP endpoint. In that
+        # mode the endpoint is already scoped to one MCP service and must not
+        # have another service path appended to it.
+        if not self.service_path_template:
+            return self.endpoint
         path = self.service_path_template.format(service_name=service_name.strip())
         parsed = urlparse(path)
         if parsed.scheme:

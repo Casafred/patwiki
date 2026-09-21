@@ -117,13 +117,22 @@ class HimmPatMcpAdapter(PatentConnector):
     def __init__(self, config: dict[str, Any] | None = None, *, endpoint: str | None = None, credential_ref: str | None = None, transport: McpTransport | None = None):
         self.config = config or {}
         base_url = endpoint or self.config.get("endpoint") or "https://himmpat.com"
+        direct_endpoint = "/api/service/" in str(base_url).lower() and "/mcp/" in str(base_url).lower()
         services = dict(DEFAULT_SERVICES)
-        services.update(self.config.get("services") or {})
+        explicit_services = self.config.get("services") or {}
+        services.update(explicit_services)
+        if direct_endpoint:
+            # A complete endpoint such as .../mcp/product_patent_dossier is
+            # scoped to the dossier service; use it for all generic lifecycle
+            # operations unless the caller explicitly supplied a mapping.
+            service_name = str(base_url).rstrip("/").rsplit("/", 1)[-1]
+            services = dict(services) if explicit_services else {key: service_name for key in services}
         self.services = services
         self.transport = transport or McpTransport(
             base_url,
             credential_ref=credential_ref or self.config.get("credential_ref"),
-            service_path_template=str(self.config.get("service_path_template", "/api/service/himmuc_api/mcp/{service_name}")),
+            credential_value=(self.config.get("credential_value") or (self.config.get("auth") or {}).get("credential_value")),
+            service_path_template=(None if direct_endpoint else str(self.config.get("service_path_template", "/api/service/himmuc_api/mcp/{service_name}"))),
             protocol_version=str(self.config.get("protocol_version", "2025-06-18")),
             timeout_seconds=float(self.config.get("timeout_seconds", 30)),
             retry_config=dict(self.config.get("retry") or {}),

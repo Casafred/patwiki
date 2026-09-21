@@ -59,6 +59,7 @@ def get_connector(definition: ConnectorDefinition):
         mcp_transport = McpTransport(
             definition.endpoint or config.get("endpoint") or "",
             credential_ref=(selected_credential.credential_ref if selected_credential else auth.get("credential_ref") or config.get("credential_ref")),
+            credential_value=auth.get("credential_value") or config.get("credential_value"),
             service_path_template=str(config.get("service_path_template", "/mcp/{service_name}")),
             protocol_version=str(config.get("protocol_version", "2025-06-18")),
             timeout_seconds=float(config.get("timeout_seconds", 30)),

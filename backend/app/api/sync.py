@@ -113,6 +113,9 @@ def _validate_connector_config(values: dict) -> None:
             validate_credential_ref(str(reference))
         except CredentialStoreError as exc:
             raise BadRequestException(str(exc)) from exc
+    # credential_value is accepted for the local desktop setup flow. It is
+    # never included in connector/list responses; references remain preferred
+    # for deployments that have an OS keyring or environment secret store.
     sensitive_keys = {"authorization", "api_key", "apikey", "access_token", "refresh_token", "password", "cookie", "secret", "token", "client_secret"}
 
     def contains_inline_secret(value: object, parent_key: str = "") -> bool:

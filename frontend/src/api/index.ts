@@ -308,6 +308,7 @@ export const syncApi = {
     endpoint?: string
     capabilities_json?: JsonObject
     config_json?: JsonObject
+    credential_value?: string
     enabled?: boolean
   }): Promise<SyncConnector> => api.post('/sync/connectors', data),
   testConnector: (id: number): Promise<{ status: string; message: string; latency_ms?: number | null }> => api.post(`/sync/connectors/${id}/test`),

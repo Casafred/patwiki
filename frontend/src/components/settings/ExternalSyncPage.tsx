@@ -24,8 +24,8 @@ export default function ExternalSyncPage() {
   const [message, setMessage] = useState('')
   const [mcpCode, setMcpCode] = useState('himmpat-mcp')
   const [mcpName, setMcpName] = useState('HimmPat MCP')
-  const [mcpEndpoint, setMcpEndpoint] = useState('https://himmpat.com')
-  const [mcpCredentialRef, setMcpCredentialRef] = useState('env://HIMMPAT_API_KEY')
+  const [mcpEndpoint, setMcpEndpoint] = useState('https://www.himmpat.com/api/service/himmuc_api/mcp/product_patent_dossier')
+  const [mcpApiKey, setMcpApiKey] = useState('')
   const [mcpEnrichLegal, setMcpEnrichLegal] = useState(false)
   const [tools, setTools] = useState<JsonObject | null>(null)
   const [selectedConnectorId, setSelectedConnectorId] = useState<number | null>(null)
@@ -97,13 +97,14 @@ export default function ExternalSyncPage() {
         endpoint: mcpEndpoint.trim(),
         capabilities_json: { search: true, fetch_patent: true, legal_events: false, cursor_pagination: true },
         config_json: {
-          auth: { credential_ref: mcpCredentialRef.trim() },
+          auth: { credential_value: mcpApiKey.trim() },
           enrich_legal_status: mcpEnrichLegal,
           enrich_legal_on_fetch: false,
           retry: { max_attempts: 2, backoff_seconds: 0.5, max_delay_seconds: 5 },
         },
         enabled: true,
       })
+      setMcpApiKey('')
       setMessage('HimmPat MCP 连接器已创建。请先执行工具发现或健康检查。')
       await load()
     } catch (createError: unknown) {
@@ -168,13 +169,13 @@ export default function ExternalSyncPage() {
 
       <section className="automation-form">
         <h3>接入 HimmPat MCP</h3>
-        <p className="page-subtitle">凭证只保存引用，例如 env://HIMMPAT_API_KEY；创建后才会在手动操作时访问供应商。</p>
+        <p className="page-subtitle">填写官方 MCP 完整地址和 API Key，保存后可直接进行连接测试与工具发现。</p>
         <label>连接器 code<input className="form-input" value={mcpCode} onChange={event => setMcpCode(event.target.value)} /></label>
         <label>连接器名称<input className="form-input" value={mcpName} onChange={event => setMcpName(event.target.value)} /></label>
         <label>MCP 服务入口<input className="form-input" value={mcpEndpoint} onChange={event => setMcpEndpoint(event.target.value)} /></label>
-        <label>凭证引用<input className="form-input" value={mcpCredentialRef} onChange={event => setMcpCredentialRef(event.target.value)} /></label>
+        <label>API Key<input className="form-input" type="password" value={mcpApiKey} onChange={event => setMcpApiKey(event.target.value)} placeholder="Bearer 后面的 API Key" /></label>
         <label className="checkbox-label"><input type="checkbox" checked={mcpEnrichLegal} onChange={event => setMcpEnrichLegal(event.target.checked)} />同步时补全法律状态（可能产生额外供应商调用）</label>
-        <button className="btn btn-primary" disabled={busy || !mcpCode.trim() || !mcpName.trim() || !mcpEndpoint.trim() || !mcpCredentialRef.trim()} onClick={() => void createHimmPatConnector()}>创建 HimmPat 连接器</button>
+        <button className="btn btn-primary" disabled={busy || !mcpCode.trim() || !mcpName.trim() || !mcpEndpoint.trim() || !mcpApiKey.trim()} onClick={() => void createHimmPatConnector()}>创建并连接 HimmPat MCP</button>
       </section>
 
       {tools && <section className="automation-log-panel"><div className="section-heading"><h3>MCP 工具目录</h3><span>{Array.isArray(tools.services) ? `${tools.services.length} 个服务` : '已发现'}</span></div>

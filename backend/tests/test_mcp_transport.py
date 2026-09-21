@@ -49,6 +49,25 @@ class McpTransportTest(unittest.TestCase):
         self.assertEqual(result["content"][0]["type"], "text")
         transport.close()
 
+    def test_complete_endpoint_is_used_without_service_path(self):
+        requests = []
+
+        def handler(request: httpx.Request):
+            requests.append(request)
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"tools": []}})
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        transport = McpTransport(
+            "https://www.himmpat.com/api/service/himmuc_api/mcp/product_patent_dossier",
+            credential_value="fixture-secret",
+            service_path_template=None,
+            client=client,
+        )
+        transport.list_tools("product_patent_dossier")
+        self.assertEqual(str(requests[0].url), "https://www.himmpat.com/api/service/himmuc_api/mcp/product_patent_dossier")
+        self.assertEqual(requests[0].headers["Authorization"], "Bearer fixture-secret")
+        transport.close()
+
 
 if __name__ == "__main__":
     unittest.main()
