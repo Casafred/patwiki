@@ -320,17 +320,17 @@ class PatentService:
                 column = getattr(Patent, sort_by, None)
                 if column is not None:
                     if sort_order == "desc":
-                        query = query.order_by(desc(column))
+                        query = query.order_by(desc(column), Patent.id.asc())
                     else:
-                        query = query.order_by(column)
+                        query = query.order_by(column, Patent.id.asc())
             else:
                 json_path = f'$.{sort_by}'
                 if sort_order == "desc":
-                    query = query.order_by(desc(func.json_extract(Patent.custom_fields, json_path)))
+                    query = query.order_by(desc(func.json_extract(Patent.custom_fields, json_path)), Patent.id.asc())
                 else:
-                    query = query.order_by(func.json_extract(Patent.custom_fields, json_path))
+                    query = query.order_by(func.json_extract(Patent.custom_fields, json_path), Patent.id.asc())
         else:
-            query = query.order_by(desc(Patent.created_at))
+            query = query.order_by(desc(Patent.created_at), Patent.id.asc())
 
         query = query.offset((page - 1) * page_size).limit(page_size)
         patents = query.all()

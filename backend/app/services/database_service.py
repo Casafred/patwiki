@@ -23,7 +23,24 @@ class DatabaseService:
         if not include_archived:
             query = query.filter(PatentDatabase.is_archived == False)
         query = query.order_by(PatentDatabase.sort_order, PatentDatabase.id)
-        return query.all()
+        databases = query.all()
+        # Keep the sidebar count on the same scope as the master table.  The
+        # denormalized column can lag after imports/MCP updates, and placeholder
+        # identity rows are intentionally hidden from user-facing patent lists.
+        for database in databases:
+            database.patent_count = db.query(func.count(Patent.id)).filter(
+                and_(
+                    Patent.title != "待补全",
+                    or_(
+                        Patent.database_id == database.id,
+                        db.query(PatentDatabaseMembership.id).filter(
+                            PatentDatabaseMembership.patent_id == Patent.id,
+                            PatentDatabaseMembership.database_id == database.id,
+                        ).exists(),
+                    ),
+                ),
+            ).scalar() or 0
+        return databases
 
     @staticmethod
     def get_database(db: Session, database_id: int) -> Optional[PatentDatabase]:
@@ -462,12 +479,15 @@ class DatabaseService:
 
     @staticmethod
     def refresh_patent_count(db: Session, database_id: int) -> int:
-        count = db.query(func.count(Patent.id)).filter(or_(
-            Patent.database_id == database_id,
-            db.query(PatentDatabaseMembership.id).filter(
-                PatentDatabaseMembership.patent_id == Patent.id,
-                PatentDatabaseMembership.database_id == database_id,
-            ).exists(),
+        count = db.query(func.count(Patent.id)).filter(and_(
+            Patent.title != "待补全",
+            or_(
+                Patent.database_id == database_id,
+                db.query(PatentDatabaseMembership.id).filter(
+                    PatentDatabaseMembership.patent_id == Patent.id,
+                    PatentDatabaseMembership.database_id == database_id,
+                ).exists(),
+            ),
         )).scalar()
         database = db.query(PatentDatabase).filter(PatentDatabase.id == database_id).first()
         if database:

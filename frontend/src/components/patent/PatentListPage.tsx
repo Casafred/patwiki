@@ -788,7 +788,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         })
         return
       }
-      const merged = Array.from(new Map([...patentsRef.current, ...items].map(item => [item.id, item])).values())
+      const incomingById = new Map(items.map(item => [item.id, item]))
+      // A refresh after an edit must not reorder the visible window when the
+      // edited value is also the active sort key. Replace rows in place and
+      // leave the window boundaries unchanged, as a spreadsheet would.
+      const merged = preserveVisible
+        ? patentsRef.current.map(item => incomingById.get(item.id) || item)
+        : Array.from(new Map([...patentsRef.current, ...items].map(item => [item.id, item])).values())
       patentsRef.current = merged
       setPatents(merged, total)
       saveTableDataSnapshot(tableScopeKey, {
@@ -1663,7 +1669,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       setShowSyncUpdate(false)
       setSyncUpdateBatch(null)
       clearSelection()
-      await loadPatents()
+      // Refresh only the currently visible window.  Merging the response into
+      // the existing rows keeps the Excel-like row order, page and scroll
+      // position instead of jumping back to page one after an update.
+      const refreshPage = tableViewMode === 'continuous' ? Math.max(1, continuousPageRef.current) : page
+      const refreshSize = tableViewMode === 'continuous'
+        ? Math.min(Math.max(pageSize, patentsRef.current.length), 1000)
+        : pageSize
+      await loadPatents(refreshPage, false, refreshSize, true)
     } catch (error: unknown) {
       alert('确认外部更新失败: ' + getErrorMessage(error))
     } finally {
