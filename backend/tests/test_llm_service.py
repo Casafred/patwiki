@@ -13,6 +13,9 @@ from app.services.llm_service import (
     chat_completion,
     normalize_base_url,
     normalize_model,
+    jev_system_one,
+    JEV_LATEST_MODEL,
+    TYPESAFE_BASE_URL,
 )
 
 
@@ -82,6 +85,24 @@ class LLMServiceTest(unittest.TestCase):
             result = chat_completion("ping", self.config, retries=1)
         self.assertEqual(result["content"], "ok")
         self.assertEqual(len(_FakeClient.requests), 2)
+
+    def test_jev_system_one_payload_and_answers(self):
+        config = LLMConfig(provider="typesafe", api_key="jev-key", model=JEV_LATEST_MODEL,
+                           base_url=TYPESAFE_BASE_URL)
+        _FakeClient.responses = [httpx.Response(200, json={
+            "model": "jev-1.13.0",
+            "answers": {"relevant": {"type": "noul", "noul": 1.0}},
+            "usage": {"input_tokens": 10, "output_tokens": 3},
+        })]
+        with patch("app.services.llm_service.httpx.Client", _FakeClient):
+            result = jev_system_one({"ticket": "A patent state"}, {
+                "relevant": {"type": "noul", "instructions": "Is it relevant?"},
+            }, config, retries=0)
+        request = _FakeClient.requests[0]
+        self.assertEqual(request["url"], "https://api.typesafe.ai/v1/systemone")
+        self.assertEqual(request["json"]["model"], "jev-latest")
+        self.assertEqual(request["json"]["state"], {"ticket": "A patent state"})
+        self.assertEqual(result["answers"]["relevant"]["noul"], 1.0)
 
 
 class _ConcurrentLLM:

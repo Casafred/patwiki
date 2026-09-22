@@ -37,6 +37,7 @@ import WorkFileDialog from '../common/WorkFileDialog'
 import AttachmentField from '../common/AttachmentField'
 import PatentImageStrip from '../common/PatentImageStrip'
 import AIQuickAnalyzeModal from '../ai/AIQuickAnalyzeModal'
+import JEVQuickAnalyzeModal from '../ai/JEVQuickAnalyzeModal'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -494,6 +495,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [bulkTargetDatabaseId, setBulkTargetDatabaseId] = useState<number | null>(null)
   const [bulkTargetViewId, setBulkTargetViewId] = useState<number | null>(null)
   const [showQuickAnalyze, setShowQuickAnalyze] = useState(false)
+  const [showJEVAnalyze, setShowJEVAnalyze] = useState(false)
+  const [jevAnalyzePatentIds, setJevAnalyzePatentIds] = useState<number[]>([])
   const [quickAnalyzePatentIds, setQuickAnalyzePatentIds] = useState<number[]>([])
   const [quickAnalyzeInputFields, setQuickAnalyzeInputFields] = useState<string[]>([])
   const [showInsertAIColumn, setShowInsertAIColumn] = useState(false)
@@ -2662,6 +2665,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 <button className="menu-item" onClick={() => { setShowFieldConfig(true); setShowTableTools(false) }} title="管理显示字段、顺序和冻结列"><Icon name="columns" /> 列管理</button>
                 <div className="menu-divider" />
                 <button className="menu-item menu-item-ai" onClick={() => { setQuickAnalyzePatentIds(patents.map(p => p.id)); setShowQuickAnalyze(true); setShowTableTools(false) }} title="对当前已加载专利执行 AI 快速分析"><Icon name="sparkles" /> AI 快速分析</button>
+                <button className="menu-item menu-item-ai" disabled={selectedIds.length !== 1} onClick={() => { setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true); setShowTableTools(false) }} title={selectedIds.length === 1 ? '用 JEV 对选中专利做结构化分类和评分' : '请先选中一条专利'}><Icon name="sparkles" /> JEV 快速标引</button>
                 <button className="menu-item" onClick={() => { handleExport(); setShowTableTools(false) }}><Icon name="download" /> 导出数据</button>
                 <button className="menu-item menu-item-primary" onClick={() => { setShowWorkFileDialog(true); setShowTableTools(false) }} title="按业务模板生成 Excel、Word 或 CSV 工作文件"><Icon name="file" /> 工作文件</button>
               </div>
@@ -2698,6 +2702,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               <Icon name="refresh" size={13} /> 外部更新
             </button>
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)}>批量打标签</button>
+            {selectedIds.length === 1 && <button className="btn btn-xs btn-secondary" onClick={() => { setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true) }} title="对选中专利进行结构化分类、评分和复核判断"><Icon name="sparkles" size={13} /> JEV 标引</button>}
             <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_view')}>移动到视图</button>
             <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_database')}>移库</button>
             <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('duplicate')}>复制为工作副本</button>
@@ -3541,6 +3546,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           onStarted={handleQuickAnalyzeStarted}
         />
       )}
+      {showJEVAnalyze && <JEVQuickAnalyzeModal patents={patents.filter(patent => jevAnalyzePatentIds.includes(patent.id))} onClose={() => setShowJEVAnalyze(false)} />}
 
       {showSyncUpdate && (
         <Modal

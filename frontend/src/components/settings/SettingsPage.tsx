@@ -145,6 +145,15 @@ export default function SettingsPage() {
                     llm_model: 'deepseek-v4-flash',
                     llm_thinking_mode: 'disabled',
                     llm_reasoning_effort: 'low',
+                    })
+                } else if (provider === 'typesafe') {
+                  setLLM({
+                    ...llm,
+                    llm_provider: provider,
+                    llm_base_url: 'https://api.typesafe.ai/v1',
+                    llm_model: 'jev-latest',
+                    llm_thinking_mode: 'disabled',
+                    llm_reasoning_effort: 'low',
                   })
                 } else {
                   setLLM({ ...llm, llm_provider: provider })
@@ -152,6 +161,7 @@ export default function SettingsPage() {
               }}
             >
               <option value="deepseek">DeepSeek V4 Flash（官方）</option>
+              <option value="typesafe">TypeSafe JEV（结构化标引）</option>
               <option value="openai">OpenAI 兼容（含国内代理）</option>
               <option value="anthropic">Anthropic Claude</option>
               <option value="custom">自定义</option>
@@ -173,7 +183,7 @@ export default function SettingsPage() {
               placeholder={hasApiKey ? '已配置（输入新值可覆盖）' : 'sk-... 或国内代理 API Key'}
             />
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              DeepSeek 使用平台 API Key；也可切换到其他 OpenAI 兼容服务。
+              JEV 使用 TypeSafe 或兼容中转服务的 API Key；它适合分类、评分和是否判断，不用于普通长文本抽取。
             </div>
           </div>
 
@@ -188,7 +198,9 @@ export default function SettingsPage() {
               placeholder="https://api.openai.com/v1"
             />
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              常见值：<br />
+              JEV 官方： https://api.typesafe.ai/v1<br />
+              兔子中转： https://api.tu-zi.com/v1<br />
+              其他常见值：<br />
               • OpenAI: https://api.openai.com/v1<br />
               • DeepSeek 官方: https://api.deepseek.com<br />
               • 通义千问: https://dashscope.aliyuncs.com/compatible-mode/v1<br />
@@ -205,7 +217,7 @@ export default function SettingsPage() {
               className="form-input"
               value={llm.llm_model}
               onChange={(e) => setLLM({ ...llm, llm_model: e.target.value })}
-              placeholder="deepseek-v4-flash / gpt-4o-mini / qwen-plus 等"
+              placeholder={llm.llm_provider === 'typesafe' ? 'jev-latest 或 jev-1.13' : 'deepseek-v4-flash / gpt-4o-mini / qwen-plus 等'}
             />
           </div>
 

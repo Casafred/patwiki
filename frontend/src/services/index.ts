@@ -72,6 +72,7 @@ export const aiService = {
   listValues: (patentId: number) => aiApi.listValues(patentId),
   overrideValue: (...args: Parameters<typeof aiApi.overrideValue>) => aiApi.overrideValue(...args),
   clearOverride: (...args: Parameters<typeof aiApi.clearOverride>) => aiApi.clearOverride(...args),
+  jevAnalyze: (...args: Parameters<typeof aiApi.jevAnalyze>) => aiApi.jevAnalyze(...args),
 }
 
 export const metadataService = {

@@ -11,6 +11,8 @@ import httpx
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
+TYPESAFE_BASE_URL = "https://api.typesafe.ai/v1"
+JEV_LATEST_MODEL = "jev-latest"
 _DEEPSEEK_MODEL_ALIASES = {
     "v4flash": DEEPSEEK_FLASH_MODEL,
     "v4-flash": DEEPSEEK_FLASH_MODEL,
@@ -51,6 +53,8 @@ def normalize_model(provider: str, model: str | None) -> str:
     normalized = (model or "").strip()
     if provider.strip().lower() == "deepseek":
         return _DEEPSEEK_MODEL_ALIASES.get(normalized.lower(), normalized)
+    if provider.strip().lower() in {"typesafe", "jev", "typesafe-ai"}:
+        return normalized or JEV_LATEST_MODEL
     return normalized
 
 
@@ -78,6 +82,8 @@ def load_llm_config(overrides: dict[str, Any] | None = None) -> LLMConfig:
     if str(reasoning_effort) not in {"low", "high", "max"}:
         raise LLMServiceError("推理强度必须为 low、high 或 max")
     normalized_provider = provider or "openai"
+    if normalized_provider in {"typesafe", "jev", "typesafe-ai"} and not str(base_url or "").strip():
+        base_url = TYPESAFE_BASE_URL
     return LLMConfig(
         provider=normalized_provider,
         api_key=str(api_key),
@@ -107,6 +113,62 @@ def _build_payload(prompt: str, config: LLMConfig, *, max_tokens: int | None,
         if config.thinking_mode == "enabled":
             payload["reasoning_effort"] = config.reasoning_effort
     return payload
+
+
+def jev_system_one(state: Any, questions: dict[str, dict[str, Any]],
+                   config: LLMConfig | None = None, *, retries: int = 2) -> dict[str, Any]:
+    """Call TypeSafe AI's structured JEV System One endpoint.
+
+    Unlike chat-completions, JEV evaluates a state against typed questions and
+    returns answers with confidence/probabilities. Keeping this adapter here
+    lets the API and background jobs share retry/error handling and metadata.
+    """
+    config = config or load_llm_config()
+    if config.provider not in {"typesafe", "jev", "typesafe-ai"}:
+        raise LLMServiceError("JEV 调用要求 provider=typesafe")
+    payload = {"state": state, "model": config.model or JEV_LATEST_MODEL, "questions": questions}
+    url = f"{config.base_url}/systemone"
+    headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+    timeout = httpx.Timeout(180.0, connect=20.0)
+    for attempt in range(retries + 1):
+        response: httpx.Response | None = None
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+                response = client.post(url, headers=headers, json=payload)
+            if response.status_code >= 400:
+                detail = response.text[:500].replace("\n", " ")
+                error = LLMServiceError(
+                    f"JEV HTTP {response.status_code}（{config.model}）：{detail}",
+                    retryable=response.status_code == 429 or response.status_code >= 500,
+                )
+                if error.retryable and attempt < retries:
+                    time.sleep(_retry_delay(response, attempt))
+                    continue
+                raise error
+            try:
+                body = response.json()
+                answers = body["answers"]
+                if not isinstance(answers, dict):
+                    raise TypeError("answers must be an object")
+            except (ValueError, KeyError, TypeError) as exc:
+                raise LLMServiceError(f"JEV 返回格式无法解析：{response.text[:500]}") from exc
+            return {
+                "content": answers,
+                "answers": answers,
+                "model": body.get("model") or config.model,
+                "usage": body.get("usage"),
+                "raw": body,
+            }
+        except LLMServiceError:
+            raise
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if attempt < retries:
+                time.sleep(_retry_delay(None, attempt))
+                continue
+            raise LLMServiceError(f"JEV 网络请求失败（已重试 {retries} 次）：{exc}", retryable=True) from exc
+        except Exception as exc:
+            raise LLMServiceError(f"JEV 调用失败：{exc}") from exc
+    raise LLMServiceError("JEV 调用失败：未知错误")
 
 
 def _content_to_text(content: Any) -> str:
@@ -189,6 +251,8 @@ class UnifiedLLM:
         self.config = config
 
     def invoke(self, prompt: str, *, response_format: dict[str, str] | None = None):
+        if self.config.provider in {"typesafe", "jev", "typesafe-ai"}:
+            raise LLMServiceError("JEV 是结构化判断模型，请使用 /api/ai/jev-analyze；不支持普通聊天抽取")
         result = chat_completion(prompt, self.config, response_format=response_format)
 
         class Response:

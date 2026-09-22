@@ -170,6 +170,12 @@ async def update_settings(payload: dict):
         normalized_llm.llm_model = aliases.get(normalized_llm.llm_model.strip().lower(), normalized_llm.llm_model.strip())
         if not normalized_llm.llm_base_url.strip():
             normalized_llm.llm_base_url = "https://api.deepseek.com"
+    elif normalized_llm.llm_provider.strip().lower() in {"typesafe", "jev", "typesafe-ai"}:
+        normalized_llm.llm_provider = "typesafe"
+        if not normalized_llm.llm_model.strip() or normalized_llm.llm_model == "deepseek-v4-flash":
+            normalized_llm.llm_model = "jev-latest"
+        if not normalized_llm.llm_base_url.strip() or "deepseek.com" in normalized_llm.llm_base_url:
+            normalized_llm.llm_base_url = "https://api.typesafe.ai/v1"
 
     current["llm"] = normalized_llm.model_dump()
 
@@ -196,7 +202,7 @@ async def update_settings(payload: dict):
 async def test_llm_connection(payload: dict):
     """测试 LLM 连接是否可用"""
     try:
-        from app.services.llm_service import chat_completion, load_llm_config
+        from app.services.llm_service import chat_completion, jev_system_one, load_llm_config
 
         api_key = payload.get("api_key", "")
         # 脱敏值不能作为覆盖配置，使用当前已保存的 key。
@@ -213,7 +219,10 @@ async def test_llm_connection(payload: dict):
         if api_key and "****" not in api_key:
             overrides["api_key"] = api_key
         config = load_llm_config(overrides)
-        result = chat_completion("ping", config, max_tokens=5, retries=0)
+        if config.provider in {"typesafe", "jev", "typesafe-ai"}:
+            result = jev_system_one("ping", {"ok": {"type": "noul", "instructions": "Is this a test request?"}}, config, retries=0)
+        else:
+            result = chat_completion("ping", config, max_tokens=5, retries=0)
         return {"success": True, "message": f"连接成功，模型: {result['model']}，地址: {config.base_url}"}
     except Exception as e:
         return {"success": False, "message": f"连接失败: {str(e)}"}

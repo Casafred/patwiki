@@ -724,6 +724,12 @@ export const aiApi = {
     extractions: { name: string; target_field_key?: string; new_field_name?: string; new_field_type?: string }[]
   }): Promise<AITask> =>
     api.post('/ai/quick-analyze', params),
+
+  jevAnalyze: (params: { state: JsonValue; questions: JsonObject; model?: string }): Promise<{
+    model: string
+    answers: JsonObject
+    usage?: JsonObject | null
+  }> => api.post('/ai/jev-analyze', params),
 }
 
 export const exportApi = {

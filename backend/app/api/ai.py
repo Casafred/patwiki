@@ -5,7 +5,7 @@ import json
 import hashlib
 
 from app.database import get_db, SessionLocal
-from app.schemas.schemas import AIProcessRequest, AITaskResponse, QuickAnalyzeRequest
+from app.schemas.schemas import AIProcessRequest, AITaskResponse, QuickAnalyzeRequest, JEVAnalyzeRequest
 from app.models import AITask, Patent, AIFieldValue, CustomField
 from app.models.enums import CustomFieldType
 from app.config import settings
@@ -13,6 +13,35 @@ from app.core.exceptions import BadRequestException, NotFoundException
 from app.core.time import utc_now_naive
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+@router.post("/jev-analyze")
+def jev_analyze(req: JEVAnalyzeRequest):
+    """用 JEV 对专利文本做结构化判断；结果包含置信度/概率，适合人工复核前标引。"""
+    allowed = {"choice", "score", "noul"}
+    questions = {}
+    for key, question in req.questions.items():
+        if not key.strip():
+            raise BadRequestException("JEV question key 不能为空")
+        if question.type not in allowed:
+            raise BadRequestException(f"JEV question type 不支持：{question.type}")
+        if not question.instructions.strip():
+            raise BadRequestException(f"JEV question instructions 不能为空：{key}")
+        item = {"type": question.type, "instructions": question.instructions}
+        if question.criteria is not None:
+            item["criteria"] = question.criteria
+        questions[key] = item
+    if req.state is None or req.state == "" or req.state == {}:
+        raise BadRequestException("JEV state 不能为空")
+    if not questions:
+        raise BadRequestException("请至少配置一个 JEV question")
+    try:
+        from app.services.llm_service import jev_system_one, load_llm_config
+        config = load_llm_config({"model": req.model} if req.model else None)
+        result = jev_system_one(req.state, questions, config)
+        return {"model": result["model"], "answers": result["answers"], "usage": result["usage"]}
+    except Exception as exc:
+        raise BadRequestException(str(exc)) from exc
 
 
 def _task_errors(task: AITask) -> list[dict] | None:

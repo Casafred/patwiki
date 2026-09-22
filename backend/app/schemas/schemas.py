@@ -749,6 +749,22 @@ class QuickAnalyzeRequest(BaseSchema):
     extractions: list[QuickAnalyzeExtraction] = []   # 抽取目标列表
 
 
+class JEVQuestion(BaseSchema):
+    """TypeSafe JEV System One question."""
+    type: str
+    instructions: str
+    criteria: Any = None
+
+
+class JEVAnalyzeRequest(BaseSchema):
+    """Structured JEV evaluation for fast patent tagging/triage."""
+    # JEV accepts either a plain string or a structured JSON object. Structured
+    # state is useful when passing title/abstract/claims as named evidence.
+    state: Any
+    questions: dict[str, JEVQuestion]
+    model: Optional[str] = None
+
+
 class StatsResponse(BaseSchema):
     total_patents: int
     by_legal_status: dict[str, int]
