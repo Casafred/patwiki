@@ -9,6 +9,8 @@ interface AttachmentFieldProps {
   databaseId: number | null
   fieldKey: string
   value: JsonValue
+  displayMode?: 'all' | 'thumbnail'
+  onChange?: (attachments: AttachmentMeta[]) => void
 }
 
 function normalize(value: JsonValue): AttachmentMeta[] {
@@ -30,10 +32,12 @@ function resolveUrl(relativeUrl: string): string {
   return isTauri ? `${BACKEND_URL}${relativeUrl}` : relativeUrl
 }
 
-export default function AttachmentField({ patentId, databaseId, fieldKey, value }: AttachmentFieldProps) {
+export default function AttachmentField({ patentId, databaseId, fieldKey, value, displayMode = 'all', onChange }: AttachmentFieldProps) {
   const [attachments, setAttachments] = useState<AttachmentMeta[]>(normalize(value))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const imageAttachments = attachments.filter(item => item.is_image || item.mime_type.startsWith('image/'))
+  const displayedAttachments = displayMode === 'thumbnail' ? imageAttachments.slice(0, 1) : attachments
 
   const openFile = (attachment: AttachmentMeta, preview: boolean) => {
     // Use direct URL navigation instead of fetching a blob. The backend already
@@ -67,7 +71,9 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value 
       body.append('field_key', fieldKey)
       body.append('file', file)
       const created = await attachmentApi.upload(body)
-      setAttachments(current => [...current, created])
+      const next = [...attachments, created]
+      setAttachments(next)
+      onChange?.(next)
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, '附件上传失败'))
     } finally {
@@ -81,7 +87,9 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value 
     setError(null)
     try {
       await attachmentApi.remove(attachment.attachment_id)
-      setAttachments(current => current.filter(item => item.attachment_id !== attachment.attachment_id))
+      const next = attachments.filter(item => item.attachment_id !== attachment.attachment_id)
+      setAttachments(next)
+      onChange?.(next)
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, '附件删除失败'))
     } finally {
@@ -91,8 +99,8 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value 
 
   return (
     <div className="attachment-field" onClick={event => event.stopPropagation()}>
-      <div className="attachment-list">
-        {attachments.map(attachment => (
+      <div className={`attachment-list attachment-list-${displayMode}`}>
+        {displayedAttachments.map(attachment => (
           <div className="attachment-item" key={attachment.attachment_id}>
             <div className="attachment-media">
               {attachment.is_image || attachment.mime_type.startsWith('image/') ? (
@@ -118,6 +126,7 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value 
             <button type="button" className="attachment-action attachment-action-danger" disabled={busy} onClick={() => void remove(attachment)}>删除</button>
           </div>
         ))}
+        {displayMode === 'thumbnail' && imageAttachments.length > 1 && <span className="attachment-count">共 {imageAttachments.length} 张</span>}
       </div>
       <label className={`attachment-upload ${busy ? 'is-busy' : ''}`}>
         <span>{busy ? '处理中...' : '+ 添加附件'}</span>

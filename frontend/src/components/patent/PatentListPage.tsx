@@ -20,6 +20,7 @@ import type {
   Tag,
   SyncConnector, SyncUpdateBatch,
   SemanticSearchMode,
+  AttachmentMeta,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDate, parseApiDate } from '../../lib/date'
@@ -34,6 +35,7 @@ import GanttView from '../views/GanttView'
 import ExportDialog from '../common/ExportDialog'
 import WorkFileDialog from '../common/WorkFileDialog'
 import AttachmentField from '../common/AttachmentField'
+import PatentImageStrip from '../common/PatentImageStrip'
 import AIQuickAnalyzeModal from '../ai/AIQuickAnalyzeModal'
 
 interface PatentListPageProps {
@@ -420,6 +422,19 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     groupByFamily, setGroupByFamily, views, setViews, setCurrentProductId,
     dataVersion,
   } = useAppStore()
+
+  const updatePatentAttachments = useCallback((patentId: number, fieldKey: string, attachments: AttachmentMeta[]) => {
+    setPatents(patents.map(item => item.id === patentId
+      ? { ...item, custom_fields: { ...(item.custom_fields || {}), [fieldKey]: attachments as unknown as JsonValue } }
+      : item), totalPatents)
+  }, [patents, setPatents, totalPatents])
+
+  const rowImages = (patent: Patent): AttachmentMeta[] => {
+    const values = Object.values(patent.custom_fields || {})
+    return values.flatMap(value => Array.isArray(value)
+      ? value.filter(item => typeof item === 'object' && item !== null) as unknown as AttachmentMeta[]
+      : []).filter(item => item.is_image || item.mime_type?.startsWith('image/'))
+  }
 
   // 用 ref 保存 views，避免 views 变化时 loadPatents 被重建触发重渲染循环。
   // 原因：App.tsx 的视图加载 effect 依赖 searchParamsString，每次 URL 变化（含
@@ -2290,7 +2305,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     }
 
     if (field.field_type === 'attachment') {
-      return <AttachmentField patentId={patent.id} databaseId={activeDatabaseId} fieldKey={field.key} value={value} />
+      return <AttachmentField
+        patentId={patent.id}
+        databaseId={activeDatabaseId}
+        fieldKey={field.key}
+        value={value}
+        displayMode="thumbnail"
+        onChange={attachments => updatePatentAttachments(patent.id, field.key, attachments)}
+      />
     }
 
     if (field.field_type === 'url') {
@@ -3069,6 +3091,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     )
                   })}
                 </tr>
+                )}
+                {!isGroupRowCollapsed && !isFamilyRowCollapsed && rowImages(p).length > 0 && (
+                  <tr className="patent-image-strip-row" key={`${p.id}-images`}>
+                    <td colSpan={visibleFields.length + 3}>
+                      <PatentImageStrip attachments={rowImages(p)} />
+                    </td>
+                  </tr>
                 )}
                 </Fragment>
                 )

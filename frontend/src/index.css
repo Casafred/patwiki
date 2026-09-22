@@ -3178,6 +3178,71 @@ input[type="checkbox"] {
   font-size: 11px;
 }
 
+.attachment-list-thumbnail {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.attachment-list-thumbnail .attachment-item {
+  display: flex;
+}
+
+.attachment-list-thumbnail .attachment-item > .attachment-size,
+.attachment-list-thumbnail .attachment-item > .attachment-action {
+  display: none;
+}
+
+.attachment-count {
+  color: #64748b;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.patent-image-strip-row > td {
+  padding: 0 12px 8px 108px;
+  border-top: 0;
+  background: #fff;
+}
+
+.patent-image-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 58px;
+  padding: 6px 10px;
+  border-left: 2px solid #dbeafe;
+  background: #f8fafc;
+}
+
+.patent-image-strip-label {
+  color: #64748b;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.patent-image-strip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.patent-image-strip-list a {
+  display: block;
+  width: 52px;
+  height: 52px;
+  padding: 2px;
+  border: 1px solid #dbeafe;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.patent-image-strip-list img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .dashboard-header,
 .dashboard-header-actions,
 .dashboard-toolbar,
