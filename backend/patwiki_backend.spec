@@ -5,11 +5,13 @@
 """
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
 # 后端代码根目录（spec 文件所在目录 = backend/）
 backend_root = Path(SPECPATH).resolve()
+semantic_hiddenimports = collect_submodules("app.search")
 
 a = Analysis(
     [str(backend_root / "run.py")],
@@ -57,6 +59,7 @@ a = Analysis(
         "app.api.attachments",  # M5 附件字段
         "app.api.dashboards",  # M5 可配置仪表盘
         "app.api.comments",  # M6 协作评论
+        "app.api.semantic_search",
         # 本项目模块 - models（P0-8 拆分为子模块）
         "app.models",
         "app.models.enums",
@@ -93,6 +96,24 @@ a = Analysis(
         "app.models.attachment",  # M5 附件元数据
         "app.models.dashboard",  # M5 仪表盘
         "app.models.comment",  # M6 评论
+        "app.models.semantic_search",
+        "app.models.database_membership",
+        "app.search",
+        "app.search.contracts",
+        "app.search.document_builder",
+        "app.search.fusion",
+        "app.search.sparse",
+        "app.search.providers.openai_embedding",
+        "app.search.providers.openai_rerank",
+        "app.search.vector",
+        "app.search.vector.json_local",
+        "app.search.vector.zvec_store",
+        "app.services.semantic_index_service",
+        "app.services.semantic_job_service",
+        "app.services.semantic_search_service",
+        "app.services.semantic_evaluation_service",
+        "zvec",
+        "keyring",
         "app.ai.fields.engine",
         "init_data",
         # openai SDK 及其依赖
@@ -104,7 +125,7 @@ a = Analysis(
         "tiktoken_ext.openai_public",
         "tiktoken_ext",
         "tiktoken",
-    ],
+    ] + semantic_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -957,6 +957,17 @@ export interface SemanticStatus {
   configured_profiles: number
   active_indexes: number
   pending_jobs: number
+  outbox_pending: number
+  outbox_retry_wait: number
+  outbox_dead_letter: number
+  job_failed: number
+  job_dead_letter: number
+  document_indexed: number
+  document_pending: number
+  document_stale: number
+  document_failed: number
+  coverage_rate: number
+  last_passed_evaluation_at?: string | null
   sparse_backend?: string
   sparse_available?: boolean
   evaluated_profiles?: number

@@ -127,9 +127,9 @@ export default function SemanticSearchManagement() {
   }
 
   const saveProvider = async () => {
-    if (!providerName.trim() || !providerEndpoint.trim() || !providerCredential.trim()) { setError('供应商名称、Endpoint 和凭证引用不能为空'); return }
+    if (!providerName.trim() || !providerCredential.trim() || (providerKind === 'rerank' && !providerEndpoint.trim())) { setError(providerKind === 'rerank' ? 'Rerank 供应商名称、Endpoint 和凭证引用不能为空' : '供应商名称和凭证引用不能为空'); return }
     await runAction(async () => {
-      const data = { name: providerName.trim(), endpoint: providerEndpoint.trim(), credential_ref: providerCredential.trim(), config_json: providerModel.trim() ? { model: providerModel.trim() } : {} }
+      const data = { name: providerName.trim(), endpoint: providerEndpoint.trim() || null, credential_ref: providerCredential.trim(), config_json: providerModel.trim() ? { model: providerModel.trim() } : {} }
       if (editingProviderId) await semanticSearchService.updateProvider(editingProviderId, data)
       else await semanticSearchService.createProvider({ ...data, provider_kind: providerKind, provider_type: providerKind === 'embedding' ? 'openai_compatible' : 'openai_compatible_rerank', enabled: true })
       resetProviderForm(); setShowProviderForm(false)
@@ -241,6 +241,8 @@ export default function SemanticSearchManagement() {
         <StatusTile label="启用 Profile" value={status?.configured_profiles ?? '-'} />
         <StatusTile label="Active 索引" value={status?.active_indexes ?? '-'} />
         <StatusTile label="待处理任务" value={status?.pending_jobs ?? '-'} />
+        <StatusTile label="索引覆盖率" value={status ? `${(status.coverage_rate * 100).toFixed(1)}%` : '-'} detail={status ? `已索引 ${status.document_indexed} · 待处理 ${status.document_pending}` : undefined} />
+        <StatusTile label="失败 / 死信" value={status ? `${status.job_failed + status.document_failed} / ${status.job_dead_letter + status.outbox_dead_letter}` : '-'} detail={status ? `Outbox 重试等待 ${status.outbox_retry_wait}` : undefined} />
         <StatusTile label="稀疏检索" value={status?.sparse_available ? 'FTS5 BM25' : 'ILIKE 回退'} detail={status?.sparse_available ? '中文 trigram' : '当前 SQLite 不支持 FTS5'} />
       </div>
 
@@ -276,7 +278,7 @@ export default function SemanticSearchManagement() {
         {showProviderForm && <div className="management-form compact"><div className="management-form-grid">
           <label>名称<input className="form-input" style={inputStyle} value={providerName} onChange={event => setProviderName(event.target.value)} /></label>
           <label>类型<select className="form-input" style={inputStyle} value={providerKind} disabled={Boolean(editingProviderId)} onChange={event => setProviderKind(event.target.value as 'embedding' | 'rerank')}><option value="embedding">Embedding</option><option value="rerank">Rerank</option></select></label>
-          <label>Endpoint<input className="form-input" style={inputStyle} value={providerEndpoint} onChange={event => setProviderEndpoint(event.target.value)} placeholder="https://..." /></label>
+          <label>Endpoint（Rerank 必填）<input className="form-input" style={inputStyle} value={providerEndpoint} onChange={event => setProviderEndpoint(event.target.value)} placeholder="https://..." /></label>
           <label>凭证引用<input className="form-input" style={inputStyle} value={providerCredential} onChange={event => setProviderCredential(event.target.value)} /></label>
           <label>模型提示<input className="form-input" style={inputStyle} value={providerModel} onChange={event => setProviderModel(event.target.value)} placeholder="由 Profile 指定时可留空" /></label>
         </div><div className="management-form-actions"><button className="btn btn-secondary" onClick={() => { resetProviderForm(); setShowProviderForm(false) }}>取消</button><button className="btn btn-primary" disabled={busy} onClick={() => void saveProvider()}>{editingProviderId ? '更新供应商' : '保存供应商'}</button></div></div>}

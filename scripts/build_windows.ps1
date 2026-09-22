@@ -7,6 +7,10 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $tauriCliVersion = "2.11.4"
 
+if ($env:GITHUB_ACTIONS -ne "true" -or $env:GITHUB_REF_NAME -ne "main") {
+    throw "Windows installer packaging is CI-only. Push changes to origin/main and let GitHub Actions build the installer."
+}
+
 function Invoke-Checked {
     param(
         [Parameter(Mandatory = $true)]

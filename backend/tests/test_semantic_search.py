@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Patent, SemanticEvaluationCase, SemanticEvaluationDataset, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
+from app.models import Patent, PatentDatabase, SemanticEvaluationCase, SemanticEvaluationDataset, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
 from app.services.semantic_index_service import SemanticIndexService
 from app.services.semantic_job_service import SemanticJobService
 from app.services.semantic_evaluation_service import SemanticEvaluationService
@@ -22,6 +22,7 @@ from app.search.providers.openai_embedding import resolve_credential
 from app.search.document_builder import SemanticDocumentBuilder
 from app.search.sparse import search as sparse_search
 from app.search.vector.zvec_store import ZvecVectorStore
+from app.api.semantic_search import _validate_credential_ref, _validate_provider_endpoint
 
 
 class SemanticSearchTest(unittest.TestCase):
@@ -31,10 +32,14 @@ class SemanticSearchTest(unittest.TestCase):
         self.Session = sessionmaker(bind=self.engine)
         self.db = self.Session()
         self.profile = SemanticSearchProfile(name="test-profile", is_default=True, retrieval_mode="hybrid")
+        self.database_one = PatentDatabase(name="Database One", code="db-one")
+        self.database_two = PatentDatabase(name="Database Two", code="db-two")
         self.db.add_all([
             self.profile,
-            Patent(title="电池热失控隔热结构", publication_number="CN123456789A1", abstract="用于阻断电池热失控传播的隔热组件"),
-            Patent(title="普通散热装置", publication_number="CN987654321A1", abstract="散热片和风扇结构"),
+            self.database_one,
+            self.database_two,
+            Patent(title="电池热失控隔热结构", publication_number="CN123456789A1", abstract="用于阻断电池热失控传播的隔热组件", database=self.database_one),
+            Patent(title="普通散热装置", publication_number="CN987654321A1", abstract="散热片和风扇结构", database=self.database_two),
         ])
         self.db.commit()
 
@@ -70,6 +75,15 @@ class SemanticSearchTest(unittest.TestCase):
         with patch("keyring.get_password", return_value="test-secret") as get_password:
             self.assertEqual(resolve_credential("keyring://patwiki/embedding"), "test-secret")
         get_password.assert_called_once_with("patwiki", "embedding")
+
+    def test_provider_configuration_rejects_unsafe_endpoint_and_plaintext_secret(self):
+        with self.assertRaises(Exception):
+            _validate_provider_endpoint("embedding", "file:///tmp/provider")
+        with self.assertRaises(Exception):
+            _validate_provider_endpoint("rerank", None)
+        with self.assertRaises(Exception):
+            _validate_credential_ref("plain-secret")
+        self.assertEqual(_validate_provider_endpoint("embedding", " https://provider.test/v1 "), "https://provider.test/v1")
 
     def test_rebuild_versions_are_unique_within_one_second(self):
         first = SemanticIndexService.enqueue_rebuild(self.db, self.profile)
@@ -198,6 +212,17 @@ class SemanticSearchTest(unittest.TestCase):
         self.db.add(patent)
         self.db.commit()
         self.assertIn(patent.id, sparse_search(self.db, "热失控", 10))
+
+    def test_sparse_search_applies_database_scope_before_limit(self):
+        for index in range(3):
+            self.db.add(Patent(
+                title=f"热失控 热失控 热失控 外部库 {index}",
+                abstract="热失控",
+                database=self.database_two,
+            ))
+        self.db.commit()
+        results = sparse_search(self.db, "热失控", 1, self.database_one.id)
+        self.assertEqual(results, [1])
 
     def test_evaluation_calculates_rank_metrics_and_quality_gate(self):
         dataset = SemanticEvaluationDataset(name="smoke", version="v1")

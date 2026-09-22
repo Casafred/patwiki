@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { invoke } from '@tauri-apps/api/core'
 
 /**
  * 根据运行环境决定后端 API 地址：
@@ -7,11 +8,33 @@ import axios from 'axios'
  */
 const isTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window
 const BACKEND_PORT = 8765
-const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
+let BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
+let tauriBackendOrigin: Promise<string> | null = null
+
+async function resolveTauriBackendOrigin(): Promise<string> {
+  if (!isTauri) return BACKEND_URL
+  if (!tauriBackendOrigin) {
+    tauriBackendOrigin = invoke<number>('get_backend_port')
+      .then(port => {
+        BACKEND_URL = `http://127.0.0.1:${port}`
+        return BACKEND_URL
+      })
+      .catch(error => {
+        tauriBackendOrigin = null
+        throw error
+      })
+  }
+  return tauriBackendOrigin
+}
 
 const api = axios.create({
   baseURL: isTauri ? `${BACKEND_URL}/api` : '/api',
   timeout: 60000,
+})
+
+api.interceptors.request.use(async (config) => {
+  if (isTauri) config.baseURL = `${await resolveTauriBackendOrigin()}/api`
+  return config
 })
 
 // 后端启动需要几秒，Tauri 模式下首次请求失败时重试

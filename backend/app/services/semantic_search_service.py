@@ -65,7 +65,7 @@ class SemanticSearchService:
             keyword_started = time.perf_counter()
             term = f"%{text}%"
             candidate_limit = profile.keyword_candidate_count if profile else 100
-            sparse_ids = sparse_search(db, text, candidate_limit)
+            sparse_ids = sparse_search(db, text, candidate_limit, database_id)
             rows = scope.filter(or_(*(getattr(Patent, field).cast(String).ilike(term) for field in KEYWORD_FIELDS))).limit(candidate_limit).all()
             like_ids = [row.id for row in rows]
             keyword_ids = list(dict.fromkeys(sparse_ids + like_ids))[:candidate_limit]
@@ -108,7 +108,7 @@ class SemanticSearchService:
         fallback_keyword_ids = keyword_ids
         if mode == "semantic" and not vector_ids and degraded and not fallback_keyword_ids:
             term = f"%{text}%"
-            fallback_keyword_ids = list(dict.fromkeys(sparse_search(db, text, 100) + [row.id for row in scope.filter(or_(*(getattr(Patent, field).cast(String).ilike(term) for field in KEYWORD_FIELDS))).limit(100).all()]))[:100]
+            fallback_keyword_ids = list(dict.fromkeys(sparse_search(db, text, 100, database_id) + [row.id for row in scope.filter(or_(*(getattr(Patent, field).cast(String).ilike(term) for field in KEYWORD_FIELDS))).limit(100).all()]))[:100]
         scores = weighted_rrf([
             (1000.0, exact_ids),
             ((profile.keyword_weight if profile else 1), fallback_keyword_ids),

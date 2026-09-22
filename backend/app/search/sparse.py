@@ -70,7 +70,7 @@ def _connection_supports_fts5(db: Session) -> bool:
         return False
 
 
-def search(db: Session, query: str, limit: int) -> list[int]:
+def search(db: Session, query: str, limit: int, database_id: int | None = None) -> list[int]:
     """Return patent IDs ordered by SQLite FTS5 BM25 rank.
 
     FTS5 tokenization is intentionally allowed to fail for unsupported SQLite
@@ -82,13 +82,32 @@ def search(db: Session, query: str, limit: int) -> list[int]:
     if not query:
         return []
     try:
+        scope_clause = ""
+        params: dict[str, object] = {"query": query, "limit": limit}
+        if database_id is not None:
+            # Keep scope filtering inside the FTS query. Filtering only after
+            # LIMIT can let records from another database consume candidates.
+            scope_clause = """
+                AND f.patent_id IN (
+                    SELECT p.id
+                    FROM patents AS p
+                    WHERE p.database_id = :database_id
+                       OR EXISTS (
+                           SELECT 1
+                           FROM patent_database_memberships AS m
+                           WHERE m.patent_id = p.id AND m.database_id = :database_id
+                       )
+                )
+            """
+            params["database_id"] = database_id
         rows = db.execute(text(f"""
-            SELECT patent_id
-            FROM {FTS_TABLE}
+            SELECT f.patent_id
+            FROM {FTS_TABLE} AS f
             WHERE {FTS_TABLE} MATCH :query
+            {scope_clause}
             ORDER BY bm25({FTS_TABLE})
             LIMIT :limit
-        """), {"query": query, "limit": limit}).all()
+        """), params).all()
         return [int(row[0]) for row in rows]
     except SQLAlchemyError:
         db.rollback()

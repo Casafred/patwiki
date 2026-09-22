@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def _find_free_port(default: int = 8765) -> int:
-    """优先用 default 端口；若被占用则找一个空闲端口。"""
+    """优先用 default 端口；无显式端口时再找一个空闲端口。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.bind(("127.0.0.1", default))
@@ -22,6 +22,23 @@ def _find_free_port(default: int = 8765) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _resolve_port() -> int:
+    """Honor an explicit desktop port so the frontend and backend cannot diverge."""
+    requested = os.environ.get("PATWIKI_PORT")
+    if requested is None:
+        return _find_free_port()
+    try:
+        port = int(requested)
+    except ValueError as exc:
+        raise RuntimeError("PATWIKI_PORT must be an integer") from exc
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError as exc:
+            raise RuntimeError(f"PATWIKI_PORT {port} is already in use") from exc
+    return port
 
 
 def _write_port_file(port: int):
@@ -53,8 +70,7 @@ def main():
             sys.path.insert(0, meipass)
 
     # 环境变量优先（Tauri 启动 sidecar 时可注入端口）
-    preferred_port = int(os.environ.get("PATWIKI_PORT", "8765"))
-    port = _find_free_port(preferred_port)
+    port = _resolve_port()
 
     # 确保数据目录初始化
     from app.database import init_db

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppException, NotFoundException
 from app.database import get_db
-from app.models import SemanticEvaluationCase, SemanticEvaluationDataset, SemanticEvaluationRun, SemanticIndex, SemanticIndexJob, SemanticProviderDefinition, SemanticSearchProfile
+from app.models import SemanticDocumentState, SemanticEvaluationCase, SemanticEvaluationDataset, SemanticEvaluationRun, SemanticIndex, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
 from app.schemas.semantic_search import SemanticEvaluationCaseCreate, SemanticEvaluationCaseUpdate, SemanticEvaluationDatasetCreate, SemanticEvaluationRunRequest, SemanticProfileCreate, SemanticProfileUpdate, SemanticProviderCreate, SemanticProviderTestRequest, SemanticProviderUpdate, SemanticQueryRequest, SemanticRebuildRequest
 from app.search.contracts import RerankDocument, SemanticError
 from app.services.semantic_index_service import SemanticIndexService
@@ -22,6 +25,44 @@ def _provider_dict(row: SemanticProviderDefinition) -> dict:
     return {"id": row.id, "name": row.name, "provider_kind": row.provider_kind, "provider_type": row.provider_type,
         "endpoint": row.endpoint, "credential_ref": row.credential_ref, "config_json": row.config_json or {}, "enabled": row.enabled,
         "last_health_status": row.last_health_status, "last_health_at": row.last_health_at, "last_error_code": row.last_error_code}
+
+
+def _validate_provider_endpoint(provider_kind: str, endpoint: str | None) -> str | None:
+    """Validate provider URLs before they reach an HTTP client or SDK."""
+    normalized = endpoint.strip() if endpoint else None
+    if not normalized:
+        if provider_kind == "rerank":
+            raise AppException("VALIDATION_ERROR", "Rerank provider endpoint is required")
+        return None
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise AppException("VALIDATION_ERROR", "Provider endpoint must be an absolute http or https URL")
+    if parsed.username or parsed.password:
+        raise AppException("VALIDATION_ERROR", "Provider endpoint must not contain embedded credentials")
+    if parsed.fragment:
+        raise AppException("VALIDATION_ERROR", "Provider endpoint must not contain a URL fragment")
+    return normalized
+
+
+def _validate_credential_ref(credential_ref: str | None) -> str | None:
+    if credential_ref is None:
+        return None
+    normalized = credential_ref.strip()
+    if not normalized:
+        return None
+    if normalized.startswith("env://"):
+        if not normalized.removeprefix("env://"):
+            raise AppException("VALIDATION_ERROR", "env credential reference must include a variable name")
+        return normalized
+    if normalized.startswith("keyring://"):
+        value = normalized.removeprefix("keyring://")
+        if "/" not in value:
+            raise AppException("VALIDATION_ERROR", "keyring credential reference must include service and account")
+        service, account = value.split("/", 1)
+        if not service or not account:
+            raise AppException("VALIDATION_ERROR", "keyring credential reference must include service and account")
+        return normalized
+    raise AppException("VALIDATION_ERROR", "credential_ref must use env:// or keyring://")
 
 
 @router.post("/query")
@@ -110,9 +151,10 @@ def create_provider(body: SemanticProviderCreate, db: Session = Depends(get_db))
     valid_types = {"embedding": {"openai_compatible"}, "rerank": {"openai_compatible_rerank"}}
     if body.provider_type not in valid_types.get(body.provider_kind, set()):
         raise AppException("VALIDATION_ERROR", "Unsupported semantic provider kind or type")
-    if body.credential_ref and not body.credential_ref.startswith(("env://", "keyring://")):
-        raise AppException("VALIDATION_ERROR", "credential_ref must use env:// or keyring://")
-    row = SemanticProviderDefinition(**body.model_dump())
+    values = body.model_dump()
+    values["endpoint"] = _validate_provider_endpoint(body.provider_kind, body.endpoint)
+    values["credential_ref"] = _validate_credential_ref(body.credential_ref)
+    row = SemanticProviderDefinition(**values)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -126,8 +168,10 @@ def update_provider(provider_id: int, body: SemanticProviderUpdate, db: Session 
         raise NotFoundException("Semantic provider", provider_id)
     changes = body.model_dump(exclude_unset=True)
     credential_ref = changes.get("credential_ref")
-    if credential_ref is not None and credential_ref and not credential_ref.startswith(("env://", "keyring://")):
-        raise AppException("VALIDATION_ERROR", "credential_ref must use env:// or keyring://")
+    if "endpoint" in changes:
+        changes["endpoint"] = _validate_provider_endpoint(row.provider_kind, changes["endpoint"])
+    if credential_ref is not None:
+        changes["credential_ref"] = _validate_credential_ref(credential_ref)
     for field, value in changes.items():
         setattr(row, field, value)
     db.commit()
@@ -321,8 +365,30 @@ def semantic_status(db: Session = Depends(get_db)):
     active = db.query(SemanticIndex).filter(SemanticIndex.is_active == True).count()
     pending = db.query(SemanticIndexJob).filter(SemanticIndexJob.status.in_(["pending", "running", "retry_wait"])).count()
     sparse = sparse_status(db)
+    active_indexes = db.query(SemanticIndex).filter(SemanticIndex.is_active == True).all()
+    active_versions = [row.index_version for row in active_indexes]
+    state_query = db.query(SemanticDocumentState).filter(SemanticDocumentState.index_version.in_(active_versions)) if active_versions else None
+    document_indexed = state_query.filter(SemanticDocumentState.status == "indexed").count() if state_query else 0
+    document_pending = state_query.filter(SemanticDocumentState.status.in_(["pending", "claimed", "retry_wait"])).count() if state_query else 0
+    document_stale = state_query.filter(SemanticDocumentState.status == "stale").count() if state_query else 0
+    document_failed = state_query.filter(SemanticDocumentState.status == "failed").count() if state_query else 0
+    document_total = state_query.filter(SemanticDocumentState.status != "deleted").count() if state_query else 0
+    outbox_counts = {
+        key: db.query(SemanticIndexOutbox).filter(SemanticIndexOutbox.status == key).count()
+        for key in ("pending", "retry_wait", "dead_letter")
+    }
+    job_failed = db.query(SemanticIndexJob).filter(SemanticIndexJob.status == "failed").count()
+    job_dead_letter = db.query(SemanticIndexJob).filter(SemanticIndexJob.status == "dead_letter").count()
+    last_passed = db.query(func.max(SemanticEvaluationRun.completed_at)).filter(SemanticEvaluationRun.status == "passed").scalar()
     return {"configured_profiles": db.query(SemanticSearchProfile).filter(SemanticSearchProfile.enabled == True).count(),
         "active_indexes": active, "pending_jobs": pending,
+        "outbox_pending": outbox_counts["pending"], "outbox_retry_wait": outbox_counts["retry_wait"],
+        "outbox_dead_letter": outbox_counts["dead_letter"], "job_failed": job_failed,
+        "job_dead_letter": job_dead_letter, "document_indexed": document_indexed,
+        "document_pending": document_pending, "document_stale": document_stale,
+        "document_failed": document_failed,
+        "coverage_rate": round(document_indexed / document_total, 4) if document_total else 0.0,
+        "last_passed_evaluation_at": last_passed,
         "sparse_backend": sparse["backend"], "sparse_available": sparse["available"],
         "evaluated_profiles": db.query(SemanticEvaluationRun.profile_id).filter(SemanticEvaluationRun.status == "passed").distinct().count(),
         "checked_at": datetime.utcnow()}

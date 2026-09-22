@@ -5,13 +5,13 @@
 // 3. 应用退出时优雅终止后端进程
 
 use std::path::PathBuf;
+use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use sysinfo::{ProcessesToUpdate, System};
 use tauri::Manager;
 
-const BACKEND_PORT: u16 = 8765;
 const HEALTH_CHECK_TIMEOUT_SECS: u64 = 60;
 
 /// 找到后端可执行文件路径
@@ -47,7 +47,7 @@ fn resolve_backend_path(app: &tauri::App) -> Option<PathBuf> {
 }
 
 /// 启动后端
-fn spawn_backend(app: &tauri::App) -> std::io::Result<Child> {
+fn spawn_backend(app: &tauri::App, port: u16) -> std::io::Result<Child> {
     let backend_path = resolve_backend_path(app).ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -58,15 +58,15 @@ fn spawn_backend(app: &tauri::App) -> std::io::Result<Child> {
     println!("[PatWiki] 后端路径: {:?}", backend_path);
 
     Command::new(backend_path)
-        .env("PATWIKI_PORT", BACKEND_PORT.to_string())
+        .env("PATWIKI_PORT", port.to_string())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
 }
 
 /// 轮询后端健康检查接口，直到就绪或超时
-fn wait_for_backend_ready() -> bool {
-    let url = format!("http://127.0.0.1:{}/health", BACKEND_PORT);
+fn wait_for_backend_ready(port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{}/health", port);
     let start = Instant::now();
     let timeout = Duration::from_secs(HEALTH_CHECK_TIMEOUT_SECS);
 
@@ -125,12 +125,21 @@ fn kill_orphaned_backend() {
 }
 
 #[tauri::command]
-fn get_backend_port() -> u16 {
-    BACKEND_PORT
+fn get_backend_port(state: tauri::State<'_, BackendState>) -> u16 {
+    state.port
 }
 
 /// 后端子进程状态
-struct BackendState(Mutex<Option<Child>>);
+struct BackendState {
+    child: Mutex<Option<Child>>,
+    port: u16,
+}
+
+/// Reserve a loopback port for this desktop instance before spawning Python.
+fn select_backend_port() -> std::io::Result<u16> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    Ok(listener.local_addr()?.port())
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -142,27 +151,35 @@ pub fn run() {
             // 启动前先清理可能的遗留进程
             kill_orphaned_backend();
 
+            let backend_port = select_backend_port().map_err(|e| {
+                eprintln!("[PatWiki] 选择后端端口失败: {}", e);
+                e
+            })?;
+            println!("[PatWiki] 后端端口: {}", backend_port);
             println!("[PatWiki] 启动后端...");
-            let child = spawn_backend(app).map_err(|e| {
+            let child = spawn_backend(app, backend_port).map_err(|e| {
                 eprintln!("[PatWiki] 启动后端失败: {}", e);
                 e
             })?;
 
-            if !wait_for_backend_ready() {
+            if !wait_for_backend_ready(backend_port) {
                 eprintln!("[PatWiki] 后端启动超时");
                 let mut child = child;
                 kill_backend(&mut child);
                 return Err("后端启动超时".into());
             }
 
-            app.manage(BackendState(Mutex::new(Some(child))));
+            app.manage(BackendState {
+                child: Mutex::new(Some(child)),
+                port: backend_port,
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if let Some(state) = window.app_handle().try_state::<BackendState>() {
                     println!("[PatWiki] 窗口关闭，清理后端进程");
-                    if let Ok(mut guard) = state.0.lock() {
+                    if let Ok(mut guard) = state.child.lock() {
                         if let Some(child) = guard.as_mut() {
                             kill_backend(child);
                         }
