@@ -64,6 +64,8 @@ const INDEX_COLUMN_WIDTH = 56
 const ACTION_COLUMN_WIDTH = 98
 const PUBLICATION_REFERENCE_RE = /(?<![A-Za-z0-9])([A-Za-z]{2}\d+[A-Za-z]{1,3}\d{0,2})(?![A-Za-z0-9])/g
 const TABLE_POSITION_STORAGE_PREFIX = 'patwiki_table_position:'
+const CELL_SAVE_CONFIRM_SUPPRESS_KEY = 'patwiki_cell_save_confirm_suppress_until'
+const CELL_SAVE_CONFIRM_WINDOW_MS = 30 * 60 * 1000
 
 function safeHttpUrl(value: string): string | null {
   try {
@@ -1453,6 +1455,27 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
   const handleCellSave = async (patentId: number, fieldKey: string, value: JsonValue) => {
     const before = getFieldValue(patents.find(patent => patent.id === patentId) || ({} as Patent), fieldKey)
+    if (JSON.stringify(before) === JSON.stringify(value)) {
+      setEditingCell(null)
+      return
+    }
+    let suppressConfirmation = false
+    try {
+      const suppressedUntil = Number(localStorage.getItem(CELL_SAVE_CONFIRM_SUPPRESS_KEY) || 0)
+      suppressConfirmation = suppressedUntil > Date.now()
+    } catch {
+      suppressConfirmation = false
+    }
+    if (!suppressConfirmation) {
+      if (!window.confirm('确认修改此单元格并自动保存吗？')) return
+      if (window.confirm('30 分钟内不再提示自动保存修改吗？')) {
+        try {
+          localStorage.setItem(CELL_SAVE_CONFIRM_SUPPRESS_KEY, String(Date.now() + CELL_SAVE_CONFIRM_WINDOW_MS))
+        } catch {
+          // Preference storage is optional.
+        }
+      }
+    }
     try {
       if (viewId !== null) {
         await viewApi.updateSharedField(viewId, patentId, fieldKey, value)
@@ -1460,10 +1483,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         await patentApi.updateCell(patentId, fieldKey, value)
       }
       setEditingCell(null)
-      if (JSON.stringify(before) !== JSON.stringify(value)) {
-        setUndoStack(prev => [...prev.slice(-49), { patentId, fieldKey, before, after: value }])
-        setRedoStack([])
-      }
+      setUndoStack(prev => [...prev.slice(-49), { patentId, fieldKey, before, after: value }])
+      setRedoStack([])
       loadPatents()
     } catch (error: unknown) {
       alert('保存失败: ' + getErrorMessage(error))
@@ -2616,6 +2637,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             )}
           </div>
           <div className="datagrid-tool-menu-wrap" ref={tableToolsRef}>
+            <div className="datagrid-history-actions" aria-label="编辑历史">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleUndo()} disabled={undoStack.length === 0} title="撤回最近一次单元格编辑" aria-label="撤回">
+                <Icon name="undo" size={14} />
+              </button>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleRedo()} disabled={redoStack.length === 0} title="重做最近一次单元格编辑" aria-label="重做">
+                <Icon name="redo" size={14} />
+              </button>
+            </div>
             <button
               type="button"
               className="btn btn-sm btn-secondary datagrid-tool-trigger"
@@ -2629,10 +2658,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             {showTableTools && (
               <div className="datagrid-tool-menu" role="menu">
                 <div className="datagrid-tool-menu-heading">当前表格操作</div>
-                <div className="datagrid-tool-row">
-                  <button className="menu-item" onClick={() => { void handleUndo(); setShowTableTools(false) }} disabled={undoStack.length === 0} title="撤回最近一次单元格编辑"><Icon name="undo" /> 撤回</button>
-                  <button className="menu-item" onClick={() => { void handleRedo(); setShowTableTools(false) }} disabled={redoStack.length === 0} title="重做最近一次单元格编辑"><Icon name="redo" /> 重做</button>
-                </div>
                 <button className={`menu-item ${groupByFamily ? 'is-active' : ''}`} onClick={() => void handleFamilyGrouping()} title="把同族专利聚拢显示"><Icon name="table" /> 同族聚拢 {groupByFamily ? '已开启' : '已关闭'}</button>
                 <button className="menu-item" onClick={() => { setShowFieldConfig(true); setShowTableTools(false) }} title="管理显示字段、顺序和冻结列"><Icon name="columns" /> 列管理</button>
                 <div className="menu-divider" />
@@ -3033,7 +3058,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     ...(rowHeightLimit === 'auto' ? {} : { '--row-max-height': `${rowHeightLimit}px` } as React.CSSProperties),
                   }}
                 >
-                  <td className="col-checkbox">
+                  <td className={`col-checkbox ${activeCell?.patentId === p.id ? 'crosshair-row-cell' : ''}`}>
                     <input
                       type="checkbox"
                       checked={selectedIds.includes(p.id)}
@@ -3043,12 +3068,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     {familyBadge}
                   </td>
                   <td
-                    className="col-sequence"
+                    className={`col-sequence ${activeCell?.patentId === p.id ? 'crosshair-row-cell' : ''}`}
                     style={{ width: INDEX_COLUMN_WIDTH, minWidth: INDEX_COLUMN_WIDTH, maxWidth: INDEX_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH, zIndex: 7, background: '#fff', textAlign: 'center', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}
                   >
                     {(tableViewMode === 'pagination' ? (page - 1) * pageSize : 0) + rowIdx + 1}
                   </td>
-                  <td className="col-action" style={{ width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH, maxWidth: ACTION_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH + INDEX_COLUMN_WIDTH, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
+                  <td className={`col-action ${activeCell?.patentId === p.id ? 'crosshair-row-cell' : ''}`} style={{ width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH, maxWidth: ACTION_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH + INDEX_COLUMN_WIDTH, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
                       <button
                         className="cell-action-btn"

@@ -705,6 +705,8 @@ input, select, textarea {
 .import-file-cell span { margin-top: 4px; color: var(--ink-500); font-size: 11px; }
 
 .datagrid-tool-menu-wrap { position: relative; flex: 0 0 auto; }
+.datagrid-history-actions { display: inline-flex; gap: 4px; margin-right: 4px; vertical-align: middle; }
+.datagrid-history-actions .btn { min-width: 32px; justify-content: center; padding: 6px 8px; }
 .datagrid-tool-trigger { min-width: 112px; justify-content: center; }
 .datagrid-tool-menu { position: absolute; top: calc(100% + 7px); right: 0; z-index: 80; width: 210px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: #fff; box-shadow: 0 12px 28px rgba(22, 35, 41, 0.16); }
 .datagrid-tool-menu-heading { padding: 7px 9px 6px; border-bottom: 1px solid #edf2f2; color: var(--ink-500); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
@@ -1112,15 +1114,15 @@ input, select, textarea {
   overflow: hidden;
 }
 
-/* Spreadsheet-style active-cell crosshair. Use a quiet tint so it remains
-   useful alongside selected rows and conditional formatting. */
+/* Spreadsheet-style active-cell crosshair. Yellow remains visible on frozen
+   index/AI columns whose inline backgrounds otherwise mask row highlighting. */
 .data-grid tr.crosshair-row td {
-  background: #f7fbfb;
+  background: #fff7bf !important;
 }
 
 .data-grid td.crosshair-column-cell,
 .data-grid th.crosshair-column-header {
-  background: #eef7f6;
+  background: #fff3a3 !important;
 }
 
 .data-grid td.crosshair-cell {
@@ -1131,7 +1133,7 @@ input, select, textarea {
 
 .data-grid tr.row-selected.crosshair-row td,
 .data-grid tr.row-selected td.crosshair-column-cell {
-  background: #e8f4f2;
+  background: #ffef8a !important;
 }
 
 .data-grid td .cell-content {

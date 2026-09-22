@@ -72,12 +72,6 @@ def main():
     # 环境变量优先（Tauri 启动 sidecar 时可注入端口）
     port = _resolve_port()
 
-    # 确保数据目录初始化
-    from app.database import init_db
-    from init_data import init_default_data
-    init_db()
-    init_default_data()
-
     _write_port_file(port)
     print(f"[PatWiki] Backend listening on http://127.0.0.1:{port}", flush=True)
 
