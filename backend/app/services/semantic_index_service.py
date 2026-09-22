@@ -61,7 +61,16 @@ class SemanticIndexService:
         if database_id is None:
             query = query.filter(SemanticIndex.database_id.is_(None))
         else:
-            query = query.filter(SemanticIndex.database_id == database_id)
+            scoped = query.filter(SemanticIndex.database_id == database_id).order_by(SemanticIndex.id.desc()).first()
+            if scoped:
+                return scoped
+            # A global projection is valid for every database. The search service
+            # still applies the authoritative SQLite scope after vector recall.
+            return db.query(SemanticIndex).filter(
+                SemanticIndex.profile_id == profile_id,
+                SemanticIndex.database_id.is_(None),
+                SemanticIndex.is_active == True,
+            ).order_by(SemanticIndex.id.desc()).first()
         return query.order_by(SemanticIndex.id.desc()).first()
 
     @staticmethod
@@ -113,6 +122,11 @@ class SemanticIndexService:
         db.commit()
         store = None
         try:
+            if not profile.embedding_dimensions:
+                raise SemanticError(
+                    "SEMANTIC_DIMENSION_MISMATCH",
+                    "Embedding dimensions are unknown; run the provider health check before vectorizing",
+                )
             provider = cls._provider(db, profile)
             patents = db.query(Patent).filter(in_database(index.database_id)).all() if index.database_id else db.query(Patent).all()
             job.total_items = len(patents)

@@ -811,23 +811,35 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         if (filterConditionHasValue(condition)) viewFilters[key] = condition as unknown as JsonValue
       })
 
+      let semanticFallback = false
       if (searchText && searchMode !== 'keyword' && viewId === null) {
-        const semanticResult = await semanticSearchService.query({
-          query: searchText,
-          database_id: activeDatabaseId ?? undefined,
-          mode: searchMode,
-          top_k: requestedPageSize,
-          include_explain: false,
-        })
-        if (myRequestId !== loadPatentsRequestId.current) return false
-        setSemanticNotice(semanticResult.meta.degraded
-          ? '语义服务暂不可用，当前显示关键词结果'
-          : `当前为${searchMode === 'hybrid' ? '混合检索' : '语义检索'}结果`)
-        applyItems(semanticResult.items.map(item => item.patent), semanticResult.items.length)
-        return true
+        try {
+          const semanticResult = await semanticSearchService.query({
+            query: searchText,
+            database_id: activeDatabaseId ?? undefined,
+            mode: searchMode,
+            top_k: requestedPageSize,
+            include_explain: false,
+          })
+          if (myRequestId !== loadPatentsRequestId.current) return false
+          const reasons = semanticResult.meta.degraded_reasons || []
+          if (reasons.includes('SEMANTIC_INDEX_NOT_READY')) {
+            setSemanticNotice('尚未完成向量化，当前显示关键词结果；请到管理 > 语义检索开始向量化')
+          } else if (semanticResult.meta.degraded) {
+            setSemanticNotice('语义服务暂不可用，当前显示关键词结果')
+          } else {
+            setSemanticNotice(`当前为${searchMode === 'hybrid' ? '混合检索' : '语义检索'}结果`)
+          }
+          applyItems(semanticResult.items.map(item => item.patent), semanticResult.items.length)
+          return true
+        } catch (error: unknown) {
+          console.error('Semantic search failed, falling back to keyword search:', error)
+          semanticFallback = true
+          setSemanticNotice('语义服务暂不可用，已切换到关键词检索')
+        }
       }
-      if (searchMode !== 'keyword' && viewId !== null) setSemanticNotice('当前视图使用关键词筛选；语义检索请切换至主表')
-      else setSemanticNotice('')
+      if (searchMode !== 'keyword' && viewId !== null && !semanticFallback) setSemanticNotice('当前视图使用关键词筛选；语义检索请切换至主表')
+      else if (!semanticFallback) setSemanticNotice('')
 
       // 视图查询路径：仅当 viewId 与当前库匹配时才走视图接口。
       // 若视图尚未加载完成（views 为旧库数据）或 viewId 与当前库不一致，
@@ -2504,18 +2516,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             共 {totalPatents} 件{currentProductId ? ' · 当前产品筛选中' : ''}
           </span>
         </div>
-        <div className="datagrid-toolbar-actions">
-          {onOpenImport && (
-            <button
-              type="button"
-              className="btn btn-primary datagrid-import-button"
-              onClick={onOpenImport}
-              aria-label="导入数据"
-              title="导入 Excel、CSV 或粘贴的表格数据"
-            >
-              <Icon name="plus" size={17} />
-            </button>
-          )}
+        <div className="datagrid-toolbar-body">
+          <div className="datagrid-search-row">
           <div className="search-suggest-wrap">
             <div className="semantic-search-mode" role="group" aria-label="检索模式">
               {([['keyword', '关键词'], ['hybrid', '混合'], ['semantic', '语义']] as const).map(([mode, label]) => (
@@ -2528,13 +2530,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               <input
                 type="text"
                 className="form-input datagrid-search-input"
-                placeholder="搜索专利号、标题、申请人..."
+                placeholder={searchMode === 'semantic' ? '描述技术问题、方案或效果...' : searchMode === 'hybrid' ? '输入技术描述或专利号...' : '搜索专利号、标题、申请人...'}
                 value={searchInputText}
                 onChange={(e) => handleSearchInputChange(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
                 aria-autocomplete="list"
                 aria-controls="patent-search-suggestions"
               />
+              <button type="submit" className="btn btn-primary datagrid-search-submit" aria-label="执行检索">检索</button>
             </form>
             {searchSuggestions.length > 0 && (
               <div id="patent-search-suggestions" className="search-suggest-menu" role="listbox">
@@ -2564,6 +2567,19 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           >
             清除筛选
           </button>
+          </div>
+          <div className="datagrid-toolbar-actions">
+          {onOpenImport && (
+            <button
+              type="button"
+              className="btn btn-primary datagrid-import-button"
+              onClick={onOpenImport}
+              aria-label="导入数据"
+              title="导入 Excel、CSV 或粘贴的表格数据"
+            >
+              <Icon name="plus" size={17} />
+            </button>
+          )}
           <div className="datagrid-view-actions">
             {activeView && activeView.layout_type === 'table' && (
               <>
@@ -2627,6 +2643,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             )}
           </div>
           {viewConfigNotice && <span style={{ fontSize: 12, color: '#047857' }}>{viewConfigNotice}</span>}
+        </div>
         </div>
       </div>
 

@@ -86,7 +86,14 @@ class SemanticSearchService:
                     vector = provider.embed_query(text)
                     store = open_vector_store(profile.vector_backend, Path(index.path), profile.embedding_dimensions)
                     try:
-                        matches = store.dense_search(vector, profile.vector_candidate_count)
+                        # A global index can serve a database-scoped query, but
+                        # scope filtering happens after vector recall. Overfetch
+                        # enough candidates so records from other databases do
+                        # not consume the entire result window.
+                        vector_limit = profile.vector_candidate_count
+                        if index.database_id is None and database_id is not None:
+                            vector_limit = max(vector_limit, top_k * 5)
+                        matches = store.dense_search(vector, vector_limit)
                     finally:
                         close = getattr(store, "close", None)
                         if close:

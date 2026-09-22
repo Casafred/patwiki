@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Patent, PatentDatabase, SemanticEvaluationCase, SemanticEvaluationDataset, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
+from app.models import Patent, PatentDatabase, SemanticEvaluationCase, SemanticEvaluationDataset, SemanticIndex, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
 from app.services.semantic_index_service import SemanticIndexService
 from app.services.semantic_job_service import SemanticJobService
 from app.services.semantic_evaluation_service import SemanticEvaluationService
@@ -22,7 +22,7 @@ from app.search.providers.openai_embedding import resolve_credential
 from app.search.document_builder import SemanticDocumentBuilder
 from app.search.sparse import search as sparse_search
 from app.search.vector.zvec_store import ZvecVectorStore
-from app.api.semantic_search import _validate_credential_ref, _validate_provider_endpoint
+from app.api.semantic_search import _validate_credential_ref, _validate_provider_endpoint, healthcheck_profile
 
 
 class SemanticSearchTest(unittest.TestCase):
@@ -89,6 +89,44 @@ class SemanticSearchTest(unittest.TestCase):
         first = SemanticIndexService.enqueue_rebuild(self.db, self.profile)
         second = SemanticIndexService.enqueue_rebuild(self.db, self.profile)
         self.assertNotEqual(first.index_id, second.index_id)
+
+    def test_global_active_index_is_available_inside_database_scope(self):
+        index = SemanticIndex(
+            profile_id=self.profile.id,
+            database_id=None,
+            index_version="global-active",
+            backend_type="json_local",
+            path="data/vectors/global-active.json",
+            status="active",
+            is_active=True,
+        )
+        self.db.add(index)
+        self.db.commit()
+        selected = SemanticIndexService.get_active_index(self.db, self.profile.id, self.database_one.id)
+        self.assertEqual(selected.id, index.id)
+
+    def test_provider_health_persists_discovered_embedding_dimensions(self):
+        provider = SemanticProviderDefinition(
+            name="test-embedding-health",
+            provider_kind="embedding",
+            provider_type="openai_compatible",
+            credential_ref="env://PATWIKI_TEST_EMBEDDING_KEY",
+        )
+        self.db.add(provider)
+        self.db.flush()
+        self.profile.embedding_provider_id = provider.id
+        self.db.commit()
+
+        class FakeEmbeddingProvider:
+            @staticmethod
+            def embed_query(_text):
+                return [0.1, 0.2, 0.3]
+
+        with patch.object(SemanticIndexService, "_provider", return_value=FakeEmbeddingProvider()):
+            result = healthcheck_profile(self.profile.id, self.db)
+
+        self.assertEqual(result["dimensions"], 3)
+        self.assertEqual(self.db.get(SemanticSearchProfile, self.profile.id).embedding_dimensions, 3)
 
     def test_outbox_failure_uses_backoff_instead_of_immediate_retry(self):
         SemanticIndexService.enqueue_patent(self.db, 1, "field_changed")

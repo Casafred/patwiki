@@ -4,7 +4,7 @@
 > 状态值：`未开始` / `进行中` / `已完成` / `已阻塞`
 > 更新时把对应行的"状态"改为已完成并填入"实际完成日期"，同时在底部"变更记录"追加一行。
 
-最近更新：2026-09-21（完成语义检索管理台、SQLite FTS5/BM25、离线评测与质量门禁、Provider/Profile 操作、评测 Case 管理和任务租约/重试/dead-letter；保留真实规模基准、中文标注集和 Windows 发布回归为后续发布门禁）
+最近更新：2026-09-22（补齐语义检索首次使用向导、Embedding 维度探测与持久化、当前数据库/全局索引范围、任务轮询和搜索降级提示；重排专利列表工具栏为检索行与工具行）
 
 ---
 
@@ -144,6 +144,7 @@
 
 | 日期 | 任务ID | 变更内容 |
 |------|--------|---------|
+| 2026-09-22 | 语义检索可用性修复 | 修复全局索引在数据库作用域搜索中不可用、健康检查发现维度但未保存、未向量化时搜索错误不提示等问题；管理台新增“供应商 → Profile → 检测维度 → 开始向量化”四步向导、当前数据库/全局范围选择和后台任务轮询；专利列表将检索模式/输入框与其他表格工具拆成两行并增加明确的检索按钮。通过语义回归测试、ESLint、TypeScript、Vite build 和 diff check 后提交云端 Actions 构建。 |
 | 2026-09-20 | 语义检索 Phase 1 | 实现 Provider/Profile/Index/Job/Outbox/SearchLog 数据模型、可恢复迁移、`/semantic-search` API、OpenAI-compatible Embedding Provider、Zvec 0.7.0 与 JSON 后备 VectorStore、摘要文档构建、异步重建/激活、CRUD outbox、Exact + Keyword + Dense + RRF 查询和 SQLite 二次回填；列表主表新增关键词/混合/语义切换及降级提示。Provider/Profile API 支持受控更新、`env://`/`keyring://` 凭证引用及按 Profile 健康检查；活动索引的兼容配置禁止原地改写。Zvec 在 Windows Python 3.13 上完成创建、写入、查询、删除 PoC；Rerank、全文分块、供应商管理界面和离线质量阈值仍按 `18` 后续阶段实施。 |
 | 2026-09-20 | 语义检索 Rerank Phase 3 起步 | 新增 `RerankProvider` 契约、OpenAI-compatible rerank 适配器、Profile 的 rerank provider/model/enabled/top_n 配置及 `2026-09-20.2` 迁移；RRF 候选先经 SQLite 权限回填后才发送重排，非法响应整批回退，精确号码再次固定置顶，并返回 rerank 分数和降级原因。全文分块、完整供应商管理界面、离线质量阈值和成本指标仍未实施。 |
 | 2026-09-20 | 语义检索全文分块 Phase 4 起步 | 新增 `claims-description-v1` 确定性分块策略：保留专利摘要，同时按权利要求编号和说明书段落生成 chunk；chunk 保存稳定文档 ID、父文档、类型、序号、策略版本和 hash；全量重建、增量更新、字段清空和删除均同步维护 chunk 状态，查询按 patent_id 聚合 dense 结果；保留旧摘要 Zvec ID 兼容。完整管理界面、离线质量阈值和稀疏/BM25 后端仍未实施。 |

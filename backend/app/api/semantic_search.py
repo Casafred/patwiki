@@ -221,6 +221,10 @@ def healthcheck_profile(profile_id: int, db: Session = Depends(get_db)):
         vector = SemanticIndexService._provider(db, profile).embed_query("patwiki semantic health check")
         if profile.embedding_dimensions and len(vector) != profile.embedding_dimensions:
             raise SemanticError("SEMANTIC_DIMENSION_MISMATCH", "Embedding provider returned unexpected dimensions")
+        # The provider may discover its native dimension when the profile was
+        # created without one. Persist it before a rebuild creates the index
+        # identity and opens the vector backend.
+        profile.embedding_dimensions = len(vector)
         provider.last_health_status, provider.last_health_at, provider.last_error_code = "healthy", datetime.utcnow(), None
         db.commit()
         return {"status": "healthy", "dimensions": len(vector), "checked_at": provider.last_health_at}
