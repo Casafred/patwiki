@@ -38,11 +38,20 @@ UPDATE_BATCH_TTL_MINUTES = 30
 
 class SyncUpdateService:
     @staticmethod
-    def _validate_fields(fields: list[str] | None) -> list[str]:
-        requested = list(dict.fromkeys(fields or DEFAULT_UPDATE_FIELDS))
+    def _validate_fields(fields: list[str] | None, connector: ConnectorDefinition | None = None) -> list[str]:
+        allowed: set[str] | None = None
+        if connector and connector.provider_type in {"himmpat_mcp", "mcp_himmpat"}:
+            allowed = {"publication_number", "application_number", "title", "abstract", "applicant", "assignee", "inventor", "filing_date", "publication_date", "country", "ipc_all"}
+            if (connector.config_json or {}).get("enrich_legal_on_fetch") or (connector.config_json or {}).get("enrich_legal_status"):
+                allowed.update({"legal_status", "grant_date"})
+        requested = list(dict.fromkeys(fields if fields is not None else (sorted(allowed) if allowed is not None else DEFAULT_UPDATE_FIELDS)))
         invalid = sorted(set(requested) - EXPLICIT_UPDATE_FIELDS)
         if invalid:
             raise BadRequestException("外部更新不允许覆盖字段：" + ", ".join(invalid))
+        if allowed is not None:
+            unsupported = sorted(set(requested) - allowed)
+            if unsupported:
+                raise BadRequestException("所选 MCP 连接器无法提供更新字段：" + ", ".join(unsupported))
         return requested
 
     @staticmethod
@@ -203,7 +212,7 @@ class SyncUpdateService:
         patent_ids: list[int],
         fields: list[str] | None = None,
     ) -> SyncUpdateBatch:
-        selected_fields = cls._validate_fields(fields)
+        selected_fields = cls._validate_fields(fields, connector)
         requested_ids = list(dict.fromkeys(patent_ids))
         if not requested_ids:
             raise BadRequestException("至少选择一条专利")

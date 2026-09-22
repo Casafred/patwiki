@@ -3526,6 +3526,51 @@ input[type="checkbox"] {
   color: #94a3b8;
 }
 
+.mcp-service {
+  padding: 10px 0;
+  border-top: 1px solid #f1f5f9;
+}
+
+.mcp-service-header {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 86px 72px;
+  gap: 10px;
+  align-items: center;
+  color: #475569;
+  font-size: 12px;
+}
+
+.mcp-tool-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0 12px;
+}
+
+.mcp-tool {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 2fr) minmax(150px, 0.7fr);
+  gap: 12px;
+  align-items: start;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mcp-tool code {
+  overflow-wrap: anywhere;
+  color: #1e3a5f;
+  font-size: 11px;
+}
+
+.mcp-tool small {
+  overflow-wrap: anywhere;
+  color: #64748b;
+}
+
 .comment-panel {
   max-width: 860px;
 }
@@ -3719,6 +3764,14 @@ input[type="checkbox"] {
 
   .automation-log-row time {
     display: none;
+  }
+
+  .mcp-tool {
+    grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr);
+  }
+
+  .mcp-tool small {
+    grid-column: 1 / -1;
   }
 }
 

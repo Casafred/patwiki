@@ -564,7 +564,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [syncUpdateConnectorId, setSyncUpdateConnectorId] = useState<number | null>(null)
   const [syncUpdateBatch, setSyncUpdateBatch] = useState<SyncUpdateBatch | null>(null)
   const [syncUpdateFields, setSyncUpdateFields] = useState<Record<number, string[]>>({})
+  const [syncUpdateRequestedFields, setSyncUpdateRequestedFields] = useState<string[]>([])
   const [syncUpdateLoading, setSyncUpdateLoading] = useState(false)
+  const syncUpdateConnector = syncUpdateConnectors.find(item => item.id === syncUpdateConnectorId)
+  const syncUpdateSupportedKeys = syncUpdateConnector?.provider_type === 'himmpat_mcp'
+    ? ['publication_number', 'application_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'filing_date', 'publication_date', 'country', 'ipc_all', ...(syncUpdateConnector.capabilities.legal_events === true ? ['legal_status', 'grant_date'] : [])]
+    : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
+  const syncUpdateSupportedFields = fields.filter(field => syncUpdateSupportedKeys.includes(field.key))
 
   // 用于丢弃快速翻页/切库时旧请求的响应：每次发起 loadPatents 自增，
   // 返回时若 ID 不等于最新值，说明已有更新请求在路上，直接丢弃结果。
@@ -1598,13 +1604,20 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setSyncUpdatePatentIds(patentIds)
     setSyncUpdateBatch(null)
     setSyncUpdateFields({})
+    setSyncUpdateRequestedFields([])
     setShowSyncUpdate(true)
     setSyncUpdateLoading(true)
     try {
       const result = await syncApi.connectors()
       const available = result.items.filter(connector => connector.enabled && connector.capabilities.fetch_patent !== false)
       setSyncUpdateConnectors(available)
-      setSyncUpdateConnectorId(previous => previous && available.some(item => item.id === previous) ? previous : (available[0]?.id ?? null))
+      const connectorId = syncUpdateConnectorId && available.some(item => item.id === syncUpdateConnectorId) ? syncUpdateConnectorId : (available[0]?.id ?? null)
+      setSyncUpdateConnectorId(connectorId)
+      const connector = available.find(item => item.id === connectorId)
+      const supported = connector?.provider_type === 'himmpat_mcp'
+        ? ['publication_number', 'application_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'filing_date', 'publication_date', 'country', 'ipc_all', ...(connector.capabilities.legal_events === true ? ['legal_status', 'grant_date'] : [])]
+        : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
+      setSyncUpdateRequestedFields(supported.filter(key => fields.some(field => field.key === key)))
     } catch (error: unknown) {
       setShowSyncUpdate(false)
       alert('加载外部数据连接器失败: ' + getErrorMessage(error))
@@ -1621,6 +1634,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         connector_id: syncUpdateConnectorId,
         database_id: activeDatabaseId,
         patent_ids: syncUpdatePatentIds,
+        fields: syncUpdateRequestedFields,
       })
       setSyncUpdateBatch(result)
       setSyncUpdateFields(Object.fromEntries(result.items.map(item => [item.id, item.selected_fields || []])))
@@ -1670,6 +1684,10 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       const current = previous[itemId] || []
       return { ...previous, [itemId]: current.includes(fieldKey) ? current.filter(key => key !== fieldKey) : [...current, fieldKey] }
     })
+  }
+
+  const toggleSyncUpdateRequestedField = (fieldKey: string) => {
+    setSyncUpdateRequestedFields(previous => previous.includes(fieldKey) ? previous.filter(key => key !== fieldKey) : [...previous, fieldKey])
   }
 
   const handleCellQuickAI = (patentId: number, fieldKey: string) => {
@@ -3489,14 +3507,30 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     没有可用的外部连接器，请先在设置中配置并启用连接器。
                   </div>
                 ) : (
-                  <select className="form-input" value={syncUpdateConnectorId ?? ''} onChange={event => setSyncUpdateConnectorId(Number(event.target.value) || null)}>
+                  <select className="form-input" value={syncUpdateConnectorId ?? ''} onChange={event => {
+                    const connectorId = Number(event.target.value) || null
+                    setSyncUpdateConnectorId(connectorId)
+                    const connector = syncUpdateConnectors.find(item => item.id === connectorId)
+                    const supported = connector?.provider_type === 'himmpat_mcp'
+                      ? ['publication_number', 'application_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'filing_date', 'publication_date', 'country', 'ipc_all', ...(connector.capabilities.legal_events === true ? ['legal_status', 'grant_date'] : [])]
+                      : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
+                    setSyncUpdateRequestedFields(supported.filter(key => fields.some(field => field.key === key)))
+                  }}>
                     {syncUpdateConnectors.map(connector => <option key={connector.id} value={connector.id}>{connector.name} · {connector.provider_type}</option>)}
                   </select>
                 )}
               </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#475569', marginBottom: 5 }}>本次读取并可更新的字段</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px 12px', padding: 10, border: '1px solid #e2e8f0', borderRadius: 6, maxHeight: 150, overflowY: 'auto' }}>
+                  {syncUpdateSupportedFields.map(field => <label key={field.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#475569', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={syncUpdateRequestedFields.includes(field.key)} onChange={() => toggleSyncUpdateRequestedField(field.key)} />{field.name}
+                  </label>)}
+                </div>
+              </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <button className="btn btn-secondary" onClick={() => void cancelSyncUpdate()}>取消</button>
-                <button className="btn btn-primary" onClick={() => void previewSyncUpdate()} disabled={!syncUpdateConnectorId || syncUpdateConnectors.length === 0}>生成预览</button>
+                <button className="btn btn-primary" onClick={() => void previewSyncUpdate()} disabled={!syncUpdateConnectorId || syncUpdateConnectors.length === 0 || syncUpdateRequestedFields.length === 0}>生成预览</button>
               </div>
             </div>
           ) : (

@@ -1,5 +1,5 @@
 from app.database import SessionLocal, init_db
-from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase, PatentExportTemplate, ConnectorDefinition, SemanticSearchProfile
+from app.models import Department, ProductLine, TagGroup, CustomField, CustomFieldType, PatentDatabase, PatentExportTemplate, SemanticSearchProfile
 from app.services.view_service import ViewService
 from app.services.field_governance_service import seed_registry_baseline
 
@@ -57,17 +57,6 @@ def init_default_data():
             )
             db.add(default_db)
             db.flush()
-
-        if not db.query(ConnectorDefinition).filter(ConnectorDefinition.code == "demo").first():
-            db.add(ConnectorDefinition(
-                code="demo",
-                name="本地演示连接器",
-                transport="api",
-                provider_type="demo",
-                capabilities_json={"search": True, "fetch_patent": True, "legal_events": True, "cursor_pagination": True},
-                config_json={"version": "demo-v1", "records": []},
-                enabled=True,
-            ))
 
         # The default profile is usable immediately for exact/keyword fallback.
         # An embedding provider is intentionally not created without a user-owned credential reference.

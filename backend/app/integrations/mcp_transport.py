@@ -224,7 +224,11 @@ class McpTransport:
                 raise ConnectorError("MCP 供应商请求失败", error_code="mcp_http_error", status_code=response.status_code)
             payload = _decode_response(response)
             if payload.get("error"):
-                raise ConnectorError("MCP JSON-RPC 请求失败", error_code="mcp_rpc_error", retryable=False)
+                error = payload.get("error")
+                code = error.get("code") if isinstance(error, Mapping) else None
+                message = error.get("message") if isinstance(error, Mapping) else None
+                suffix = f"（{code}: {message}）" if code is not None and message else ""
+                raise ConnectorError(f"MCP JSON-RPC 请求失败{suffix}", error_code="mcp_rpc_error", retryable=False)
             return payload, response
         raise ConnectorError("MCP 供应商请求失败", error_code="mcp_request_exhausted", retryable=True)
 

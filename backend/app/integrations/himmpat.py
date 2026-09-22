@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 from app.integrations.contracts import (
     CanonicalPatentQuery,
@@ -117,22 +118,20 @@ class HimmPatMcpAdapter(PatentConnector):
     def __init__(self, config: dict[str, Any] | None = None, *, endpoint: str | None = None, credential_ref: str | None = None, transport: McpTransport | None = None):
         self.config = config or {}
         base_url = endpoint or self.config.get("endpoint") or "https://himmpat.com"
-        direct_endpoint = "/api/service/" in str(base_url).lower() and "/mcp/" in str(base_url).lower()
         services = dict(DEFAULT_SERVICES)
         explicit_services = self.config.get("services") or {}
         services.update(explicit_services)
-        if direct_endpoint:
-            # A complete endpoint such as .../mcp/product_patent_dossier is
-            # scoped to the dossier service; use it for all generic lifecycle
-            # operations unless the caller explicitly supplied a mapping.
-            service_name = str(base_url).rstrip("/").rsplit("/", 1)[-1]
-            services = dict(services) if explicit_services else {key: service_name for key in services}
         self.services = services
+        # Older settings saved a complete dossier endpoint. A refresh invokes
+        # several services, so derive the MCP host and retain the service path.
+        parsed = urlparse(str(base_url))
+        is_service_endpoint = "/api/service/" in parsed.path.lower() and "/mcp/" in parsed.path.lower()
+        transport_endpoint = f"{parsed.scheme}://{parsed.netloc}" if is_service_endpoint else str(base_url)
         self.transport = transport or McpTransport(
-            base_url,
+            transport_endpoint,
             credential_ref=credential_ref or self.config.get("credential_ref"),
             credential_value=(self.config.get("credential_value") or (self.config.get("auth") or {}).get("credential_value")),
-            service_path_template=(None if direct_endpoint else str(self.config.get("service_path_template", "/api/service/himmuc_api/mcp/{service_name}"))),
+            service_path_template=str(self.config.get("service_path_template", "/api/service/himmuc_api/mcp/{service_name}")),
             protocol_version=str(self.config.get("protocol_version", "2025-06-18")),
             timeout_seconds=float(self.config.get("timeout_seconds", 30)),
             retry_config=dict(self.config.get("retry") or {}),

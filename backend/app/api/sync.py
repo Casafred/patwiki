@@ -136,7 +136,9 @@ def _validate_connector_config(values: dict) -> None:
 
 @router.get("/connectors")
 def list_connectors(db: Session = Depends(get_db)):
-    return {"items": [SyncService.connector_dict(item) for item in db.query(ConnectorDefinition).order_by(ConnectorDefinition.id).all()]}
+    # Demo connectors were seed data only and must not be selectable as an
+    # external source for production updates.
+    return {"items": [SyncService.connector_dict(item) for item in db.query(ConnectorDefinition).filter(ConnectorDefinition.provider_type != "demo").order_by(ConnectorDefinition.id).all()]}
 
 
 @router.post("/connectors")

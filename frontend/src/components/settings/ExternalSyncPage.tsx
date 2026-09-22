@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { syncApi } from '../../api'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
-import type { ExternalObservation, JsonObject, SyncConnector, SyncRun, SyncSubscription } from '../../types'
+import type { ExternalObservation, JsonObject, McpToolInfo, SyncConnector, SyncRun, SyncSubscription } from '../../types'
 
 function countValue(run: SyncRun, key: string): string {
   const value = run.counts[key]
@@ -24,7 +24,7 @@ export default function ExternalSyncPage() {
   const [message, setMessage] = useState('')
   const [mcpCode, setMcpCode] = useState('himmpat-mcp')
   const [mcpName, setMcpName] = useState('HimmPat MCP')
-  const [mcpEndpoint, setMcpEndpoint] = useState('https://www.himmpat.com/api/service/himmuc_api/mcp/product_patent_dossier')
+  const [mcpEndpoint, setMcpEndpoint] = useState('https://www.himmpat.com')
   const [mcpApiKey, setMcpApiKey] = useState('')
   const [mcpEnrichLegal, setMcpEnrichLegal] = useState(false)
   const [tools, setTools] = useState<JsonObject | null>(null)
@@ -95,7 +95,7 @@ export default function ExternalSyncPage() {
         transport: 'mcp',
         provider_type: 'himmpat_mcp',
         endpoint: mcpEndpoint.trim(),
-        capabilities_json: { search: true, fetch_patent: true, legal_events: false, cursor_pagination: true },
+        capabilities_json: { search: true, fetch_patent: true, legal_events: mcpEnrichLegal, cursor_pagination: true },
         config_json: {
           auth: { credential_value: mcpApiKey.trim() },
           enrich_legal_status: mcpEnrichLegal,
@@ -169,7 +169,7 @@ export default function ExternalSyncPage() {
 
       <section className="automation-form">
         <h3>接入 HimmPat MCP</h3>
-        <p className="page-subtitle">填写官方 MCP 完整地址和 API Key，保存后可直接进行连接测试与工具发现。</p>
+        <p className="page-subtitle">填写 HimmPat 主站地址和 API Key。应用会分别调用检索、著录项和法律状态服务。</p>
         <label>连接器 code<input className="form-input" value={mcpCode} onChange={event => setMcpCode(event.target.value)} /></label>
         <label>连接器名称<input className="form-input" value={mcpName} onChange={event => setMcpName(event.target.value)} /></label>
         <label>MCP 服务入口<input className="form-input" value={mcpEndpoint} onChange={event => setMcpEndpoint(event.target.value)} /></label>
@@ -181,8 +181,19 @@ export default function ExternalSyncPage() {
       {tools && <section className="automation-log-panel"><div className="section-heading"><h3>MCP 工具目录</h3><span>{Array.isArray(tools.services) ? `${tools.services.length} 个服务` : '已发现'}</span></div>
         {Array.isArray(tools.services) && tools.services.map((service, index) => {
           const item = service as JsonObject
-          const serviceTools = Array.isArray(item.tools) ? item.tools : []
-          return <div className="automation-log-row" key={`${String(item.service || 'service')}-${index}`}><strong>{String(item.service || '-')}</strong><span>{String(item.tool_count || serviceTools.length)} 个工具</span><span>{String(item.latency_ms || 0)} ms</span></div>
+          const serviceTools = (Array.isArray(item.tools) ? item.tools : []) as unknown as McpToolInfo[]
+          return <div className="mcp-service" key={`${String(item.service || 'service')}-${index}`}>
+            <div className="mcp-service-header"><strong>{String(item.service || '-')}</strong><span>{String(item.tool_count || serviceTools.length)} 个工具</span><span>{String(item.latency_ms || 0)} ms</span></div>
+            <div className="mcp-tool-list">{serviceTools.map((tool, toolIndex) => {
+              const schema = tool.inputSchema || {}
+              const required = Array.isArray(schema.required) ? schema.required.map(String) : []
+              return <div className="mcp-tool" key={`${tool.name}-${toolIndex}`}>
+                <code>{tool.name || '未命名工具'}</code>
+                <span>{tool.description || '未提供说明'}</span>
+                <small>必填参数：{required.length ? required.join('、') : '无'}</small>
+              </div>
+            })}</div>
+          </div>
         })}
       </section>}
 

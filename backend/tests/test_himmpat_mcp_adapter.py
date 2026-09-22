@@ -80,6 +80,22 @@ class HimmPatAdapterTest(unittest.TestCase):
         self.assertEqual(record.fields["legal_status"], "pending")
         self.assertEqual(record.legal_events, ())
 
+    def test_complete_service_endpoint_is_normalized_for_cross_service_refresh(self):
+        adapter = HimmPatMcpAdapter(
+            {"credential_value": "fixture-secret"},
+            endpoint="https://www.himmpat.com/api/service/himmuc_api/mcp/product_patent_dossier",
+        )
+        self.assertEqual(adapter.transport.endpoint, "https://www.himmpat.com")
+        self.assertEqual(
+            adapter.transport.service_endpoint(adapter.services["discovery"]),
+            "https://www.himmpat.com/api/service/himmuc_api/mcp/product_patent_discovery",
+        )
+        self.assertEqual(
+            adapter.transport.service_endpoint(adapter.services["legal"]),
+            "https://www.himmpat.com/api/service/himmuc_api/mcp/product_legal_ownership_risk",
+        )
+        adapter.close()
+
 
 if __name__ == "__main__":
     unittest.main()

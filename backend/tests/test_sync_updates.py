@@ -116,6 +116,18 @@ class ExplicitSyncUpdateTest(unittest.TestCase):
         self.db.refresh(self.patent)
         self.assertEqual(self.patent.title, "用户后来修改的标题")
 
+    def test_himmpat_rejects_fields_outside_the_verified_mapping(self):
+        self.connector.provider_type = "himmpat_mcp"
+        self.connector.config_json = {"enrich_legal_status": False}
+        self.db.commit()
+        with self.assertRaises(Exception) as raised:
+            SyncUpdateService._validate_fields(["title", "claims"], self.connector)
+        self.assertIn("claims", str(raised.exception))
+        self.assertEqual(
+            SyncUpdateService._validate_fields(["title", "ipc_all"], self.connector),
+            ["title", "ipc_all"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
