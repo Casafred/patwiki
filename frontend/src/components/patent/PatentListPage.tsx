@@ -1469,7 +1469,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     } catch {
       suppressConfirmation = false
     }
-    if (!suppressConfirmation) {
+    // 空白单元格首次录入属于新增值，不需要二次确认；覆盖已有值仍需确认。
+    const beforeIsEmpty = before === null || before === undefined || before === ''
+    if (!suppressConfirmation && !beforeIsEmpty) {
       if (!window.confirm('确认修改此单元格并自动保存吗？')) return
       if (window.confirm('30 分钟内不再提示自动保存修改吗？')) {
         try {
@@ -2069,6 +2071,25 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       loadPatents()
     } catch (error: unknown) {
       alert('批量打标签失败: ' + getErrorMessage(error))
+    }
+  }
+
+  const handleBulkRollbackBefore = async () => {
+    const input = window.prompt('请输入回滚时间（例如 2026-09-23T12:00）')
+    if (!input || !selectedIds.length) return
+    const before = new Date(input)
+    if (Number.isNaN(before.getTime())) {
+      alert('时间格式无效')
+      return
+    }
+    if (!window.confirm(`确认将选中的 ${selectedIds.length} 条专利恢复到 ${input} 之前吗？`)) return
+    try {
+      const result = await patentApi.rollbackBefore(selectedIds, before.toISOString())
+      alert(`已恢复 ${result.restored_count} 个字段`)
+      clearSelection()
+      await loadPatents()
+    } catch (error: unknown) {
+      alert('批量回滚失败: ' + getErrorMessage(error))
     }
   }
 
@@ -2702,6 +2723,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               <Icon name="refresh" size={13} /> 外部更新
             </button>
             <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)}>批量打标签</button>
+            <button className="btn btn-xs btn-secondary" onClick={() => void handleBulkRollbackBefore()} title="恢复到指定时间之前的记录">批量回滚</button>
             {selectedIds.length === 1 && <button className="btn btn-xs btn-secondary" onClick={() => { setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true) }} title="对选中专利进行结构化分类、评分和复核判断"><Icon name="sparkles" size={13} /> JEV 标引</button>}
             <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_view')}>移动到视图</button>
             <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_database')}>移库</button>

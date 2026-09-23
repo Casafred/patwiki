@@ -48,7 +48,7 @@ def init_default_data():
         # P0-11：默认数据库（库是顶层品类容器）
         if db.query(PatentDatabase).count() == 0:
             default_db = PatentDatabase(
-                name="默认数据库",
+                name="专利主表",
                 code="DEFAULT",
                 description="未指定库的专利会归入此库",
                 color="#1890ff",
@@ -57,6 +57,10 @@ def init_default_data():
             )
             db.add(default_db)
             db.flush()
+        else:
+            default_db = db.query(PatentDatabase).filter(PatentDatabase.is_default == True).first()
+            if default_db and default_db.name in {"默认数据库", "默认库"}:
+                default_db.name = "专利主表"
 
         # The default profile is usable immediately for exact/keyword fallback.
         # An embedding provider is intentionally not created without a user-owned credential reference.

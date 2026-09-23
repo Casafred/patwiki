@@ -49,6 +49,8 @@ from app.models import (
     FieldObservation,
     Patent,
     PatentHistory,
+    PatentDatabaseMembership,
+    PatentDatabase,
 )
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.core.time import utc_now_naive
@@ -829,6 +831,14 @@ def _legacy_confirm_import(
                                     all_pub_nums[(pub_num, country)] = patent
 
                         if current_patent is not None:
+                            memberships = {(row.database_id, row.patent_id) for row in db.query(
+                                PatentDatabaseMembership.database_id, PatentDatabaseMembership.patent_id
+                            ).filter(PatentDatabaseMembership.patent_id == current_patent.id).all()}
+                            if (database_id, current_patent.id) not in memberships:
+                                db.add(PatentDatabaseMembership(patent_id=current_patent.id, database_id=database_id))
+                            default_db = db.query(PatentDatabase.id).filter(PatentDatabase.is_default == True).first()
+                            if default_db and (default_db.id, current_patent.id) not in memberships:
+                                db.add(PatentDatabaseMembership(patent_id=current_patent.id, database_id=default_db.id))
                             ensure_patent_identifiers(
                                 db,
                                 current_patent,

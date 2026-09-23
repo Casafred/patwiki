@@ -438,6 +438,12 @@ export const patentApi = {
   getHistory: (patentId: number, limit: number = 100): Promise<PatentHistory[]> =>
     api.get(`/patents/${patentId}/history`, { params: { limit } }),
 
+  restoreHistory: (patentId: number, historyId: number): Promise<{ success: boolean; patent_id: number; history_id: number }> =>
+    api.post(`/patents/${patentId}/history/${historyId}/restore`),
+
+  rollbackBefore: (patentIds: number[], before: string): Promise<{ success: boolean; restored_count: number }> =>
+    api.post('/patents/history/rollback-before', { patent_ids: patentIds, before }),
+
   getGraph: (patentId: number, params: { depth?: number; include_family?: boolean; include_citations?: boolean } = {}): Promise<PatentGraphResponse> =>
     api.get(`/patents/${patentId}/graph`, { params }),
 }

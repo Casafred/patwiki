@@ -1617,6 +1617,20 @@ function HistoryTab({ patent, history, loading, onReload }: {
                             <span style={{ fontSize: 11, color: '#94a3b8' }}>· {h.changed_by}</span>
                           )}
                           <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>{time}</span>
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-secondary"
+                            onClick={async () => {
+                              if (!window.confirm('确认将此专利恢复到该历史记录之前的状态吗？')) return
+                              try {
+                                await patentApi.restoreHistory(patent.id, h.id)
+                                alert('已恢复该历史状态')
+                                onReload()
+                              } catch (error) {
+                                alert('恢复失败：' + (error instanceof Error ? error.message : String(error)))
+                              }
+                            }}
+                          >恢复</button>
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'stretch', fontSize: 12, flexWrap: 'wrap' }}>
                           <div style={{

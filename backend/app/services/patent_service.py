@@ -132,6 +132,66 @@ def _apply_filter_expression(expression, operator: str, value: Any):
 
 class PatentService:
     @staticmethod
+    def _history_value_for_field(field_key: str, raw: str | None):
+        if raw is None or raw == "":
+            return None
+        if field_key.startswith("custom_fields."):
+            try:
+                return json.loads(raw)
+            except (TypeError, ValueError):
+                return raw
+        key = field_key
+        if key.endswith("_date"):
+            try:
+                return date.fromisoformat(raw[:10])
+            except ValueError:
+                pass
+        if key == "has_risk":
+            return raw.lower() == "true"
+        column = getattr(Patent, key, None)
+        enum_type = getattr(column.property.columns[0].type, "enum_class", None) if column is not None else None
+        if enum_type:
+            try:
+                return enum_type(raw)
+            except ValueError:
+                pass
+        return raw
+
+    @staticmethod
+    def restore_history(db: Session, patent: Patent, history: PatentHistory) -> None:
+        field_key = history.field_key
+        value = PatentService._history_value_for_field(field_key, history.old_value)
+        if field_key.startswith("custom_fields."):
+            key = field_key.split(".", 1)[1]
+            current = dict(patent.custom_fields or {})
+            old = current.get(key)
+            if value is None:
+                current.pop(key, None)
+            else:
+                current[key] = value
+            patent.custom_fields = current
+        elif field_key in SYSTEM_FIELDS and field_key not in {"id", "created_at", "updated_at"}:
+            old = getattr(patent, field_key)
+            setattr(patent, field_key, value)
+        else:
+            raise BadRequestException(f"字段 {field_key} 不支持回滚")
+        if _is_value_changed(old, value):
+            db.add(PatentHistory(patent_id=patent.id, field_key=field_key,
+                field_display_name=history.field_display_name, old_value=_stringify_value(old),
+                new_value=_stringify_value(value), source="rollback", changed_by="local-user"))
+
+    @staticmethod
+    def rollback_before(db: Session, patent_ids: list[int], before: datetime) -> int:
+        restored = 0
+        for patent in PatentService._load_bulk_patents(db, patent_ids):
+            histories = (db.query(PatentHistory).filter(PatentHistory.patent_id == patent.id,
+                PatentHistory.created_at >= before).order_by(PatentHistory.created_at.asc(), PatentHistory.id.asc()).all())
+            for item in {h.field_key: h for h in histories}.values():
+                PatentService.restore_history(db, patent, item)
+                restored += 1
+        db.commit()
+        return restored
+    @staticmethod
     def get_patent(db: Session, patent_id: int) -> Optional[Patent]:
         return db.query(Patent).options(
             joinedload(Patent.tags),

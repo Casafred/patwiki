@@ -61,6 +61,11 @@ def _ensure_master_views():
     db = SessionLocal()
     try:
         _backfill_database_memberships(db)
+        from app.models import PatentDatabase
+        default_database = db.query(PatentDatabase).filter(PatentDatabase.is_default == True).first()
+        if default_database and default_database.name in {"默认数据库", "默认库"}:
+            default_database.name = "专利主表"
+            db.commit()
         for database in DatabaseService.list_databases(db, include_archived=True):
             if not ViewService.get_department_master_view(db, database.id):
                 ViewService.create_view(

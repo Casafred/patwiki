@@ -30,6 +30,7 @@ from app.models import (
     PatentIdentifier,
 )
 from app.core.exceptions import NotFoundException
+from app.core.exceptions import BadRequestException
 from app.services.patent_identity_service import list_patent_identifiers, normalize_publication_number
 from app.services.relation_service import (
     find_existing_patent_by_number,
@@ -1100,6 +1101,26 @@ def get_patent_history(
         }
         for h in records
     ]
+
+class RollbackBeforeRequest(BaseModel):
+    patent_ids: list[int] = []
+    before: datetime
+
+@router.post("/{patent_id}/history/{history_id}/restore")
+def restore_patent_history(patent_id: int, history_id: int, db: Session = Depends(get_db)):
+    patent = PatentService.get_patent(db, patent_id)
+    if not patent:
+        raise NotFoundException("Patent not found")
+    history = db.query(PatentHistory).filter(PatentHistory.id == history_id, PatentHistory.patent_id == patent_id).first()
+    if not history:
+        raise NotFoundException("History record not found")
+    PatentService.restore_history(db, patent, history)
+    db.commit()
+    return {"success": True, "patent_id": patent_id, "history_id": history_id}
+
+@router.post("/history/rollback-before")
+def rollback_patents_before(payload: RollbackBeforeRequest, db: Session = Depends(get_db)):
+    return {"success": True, "restored_count": PatentService.rollback_before(db, payload.patent_ids, payload.before)}
 
 
 @router.get("/{patent_id}/field-sources")

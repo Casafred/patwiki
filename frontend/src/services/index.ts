@@ -60,6 +60,8 @@ export const patentService = {
   cleanupInvalidPlaceholders: (dryRun = true) => patentApi.cleanupInvalidPlaceholders(dryRun),
   updateCell: (...args: Parameters<typeof patentApi.updateCell>) => patentApi.updateCell(...args),
   getHistory: (...args: Parameters<typeof patentApi.getHistory>) => patentApi.getHistory(...args),
+  restoreHistory: (...args: Parameters<typeof patentApi.restoreHistory>) => patentApi.restoreHistory(...args),
+  rollbackBefore: (...args: Parameters<typeof patentApi.rollbackBefore>) => patentApi.rollbackBefore(...args),
   identifiers: (id: number) => patentApi.identifiers(id),
   fieldSources: (id: number) => patentApi.fieldSources(id),
   identityConflicts: (id: number) => patentApi.identityConflicts(id),
