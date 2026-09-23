@@ -1455,9 +1455,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }, [openPatent])
 
   const applyLocalCellValue = (patentId: number, fieldKey: string, value: JsonValue) => {
+    const fieldMeta = fields.find(field => field.key === fieldKey)
+    const isCustomField = fieldKey.startsWith('custom_fields.') || fieldMeta?.is_system === false
+    const customKey = fieldKey.startsWith('custom_fields.') ? fieldKey.slice('custom_fields.'.length) : fieldKey
     const nextPatents = patentsRef.current.map(item => item.id === patentId
-      ? (fieldKey.startsWith('custom_fields.')
-        ? { ...item, custom_fields: { ...(item.custom_fields || {}), [fieldKey.slice('custom_fields.'.length)]: value } }
+      ? (isCustomField
+        ? { ...item, custom_fields: { ...(item.custom_fields || {}), [customKey]: value } }
         : { ...item, [fieldKey]: value } as Patent)
       : item)
     patentsRef.current = nextPatents
