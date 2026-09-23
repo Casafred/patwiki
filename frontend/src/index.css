@@ -5327,6 +5327,16 @@ body {
 .semantic-field-hint { display: block; margin-top: 4px; color: #94a3b8; font-size: 10px; line-height: 1.35; }
 
 .semantic-management { display: flex; flex-direction: column; gap: 16px; }
+.ai-center-hero { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding: 22px 24px; background: linear-gradient(135deg, #f0fdfa, #f8fafc); border: 1px solid #cce9e3; border-radius: 10px; }
+.ai-center-eyebrow { color: #0f766e; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.ai-center-health { display: flex; align-items: center; gap: 7px; color: #0f766e; font-size: 12px; white-space: nowrap; }
+.ai-center-health-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 0 3px #d1fae5; }
+.ai-center-tabs { display: flex; gap: 4px; margin: 14px 0 18px; border-bottom: 1px solid #dbe8e5; }
+.ai-center-tabs button { border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; background: transparent; color: #64748b; cursor: pointer; font-size: 12px; }
+.ai-center-tabs button.active { border-bottom-color: #0f766e; color: #0f766e; font-weight: 700; }
+.ai-center-content > .workspace-page { padding: 0; }
+.ai-center-content > .workspace-page > .workspace-page-shell { max-width: none; padding: 0; }
+.ai-center-content .settings-page-header { display: none; }
 .semantic-management-message { padding: 10px 12px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 12px; }
 .semantic-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .semantic-status-tile { min-height: 82px; padding: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; flex-direction: column; gap: 5px; }

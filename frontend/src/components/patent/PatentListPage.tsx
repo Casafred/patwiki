@@ -65,8 +65,6 @@ const INDEX_COLUMN_WIDTH = 56
 const ACTION_COLUMN_WIDTH = 98
 const PUBLICATION_REFERENCE_RE = /(?<![A-Za-z0-9])([A-Za-z]{2}\d+[A-Za-z]{1,3}\d{0,2})(?![A-Za-z0-9])/g
 const TABLE_POSITION_STORAGE_PREFIX = 'patwiki_table_position:'
-const CELL_SAVE_CONFIRM_SUPPRESS_KEY = 'patwiki_cell_save_confirm_suppress_until'
-const CELL_SAVE_CONFIRM_WINDOW_MS = 30 * 60 * 1000
 
 function safeHttpUrl(value: string): string | null {
   try {
@@ -1456,31 +1454,25 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     }
   }, [openPatent])
 
+  const applyLocalCellValue = (patentId: number, fieldKey: string, value: JsonValue) => {
+    const nextPatents = patentsRef.current.map(item => item.id === patentId
+      ? (fieldKey.startsWith('custom_fields.')
+        ? { ...item, custom_fields: { ...(item.custom_fields || {}), [fieldKey.slice('custom_fields.'.length)]: value } }
+        : { ...item, [fieldKey]: value } as Patent)
+      : item)
+    patentsRef.current = nextPatents
+    setPatents(nextPatents, totalPatentsRef.current)
+  }
+
   const handleCellSave = async (patentId: number, fieldKey: string, value: JsonValue) => {
     const before = getFieldValue(patents.find(patent => patent.id === patentId) || ({} as Patent), fieldKey)
     if (JSON.stringify(before) === JSON.stringify(value)) {
       setEditingCell(null)
       return
     }
-    let suppressConfirmation = false
-    try {
-      const suppressedUntil = Number(localStorage.getItem(CELL_SAVE_CONFIRM_SUPPRESS_KEY) || 0)
-      suppressConfirmation = suppressedUntil > Date.now()
-    } catch {
-      suppressConfirmation = false
-    }
-    // 空白单元格首次录入属于新增值，不需要二次确认；覆盖已有值仍需确认。
+    // 空白单元格首次录入不需要确认；覆盖已有内容每次都确认。
     const beforeIsEmpty = before === null || before === undefined || before === ''
-    if (!suppressConfirmation && !beforeIsEmpty) {
-      if (!window.confirm('确认修改此单元格并自动保存吗？')) return
-      if (window.confirm('30 分钟内不再提示自动保存修改吗？')) {
-        try {
-          localStorage.setItem(CELL_SAVE_CONFIRM_SUPPRESS_KEY, String(Date.now() + CELL_SAVE_CONFIRM_WINDOW_MS))
-        } catch {
-          // Preference storage is optional.
-        }
-      }
-    }
+    if (!beforeIsEmpty && !window.confirm('确认覆盖此单元格的现有内容并保存吗？')) return
     try {
       if (viewId !== null) {
         await viewApi.updateSharedField(viewId, patentId, fieldKey, value)
@@ -1490,7 +1482,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       setEditingCell(null)
       setUndoStack(prev => [...prev.slice(-49), { patentId, fieldKey, before, after: value }])
       setRedoStack([])
-      loadPatents()
+      applyLocalCellValue(patentId, fieldKey, value)
     } catch (error: unknown) {
       alert('保存失败: ' + getErrorMessage(error))
     }
@@ -1571,7 +1563,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       await applyEditCommand(command, command.before)
       setUndoStack(prev => prev.slice(0, -1))
       setRedoStack(prev => [...prev, command])
-      await loadPatents()
+      applyLocalCellValue(command.patentId, command.fieldKey, command.before)
     } catch (error: unknown) { alert('撤回失败: ' + getErrorMessage(error)) }
   }
 
@@ -1582,7 +1574,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       await applyEditCommand(command, command.after)
       setRedoStack(prev => prev.slice(0, -1))
       setUndoStack(prev => [...prev, command])
-      await loadPatents()
+      applyLocalCellValue(command.patentId, command.fieldKey, command.after)
     } catch (error: unknown) { alert('重做失败: ' + getErrorMessage(error)) }
   }
 
@@ -2354,16 +2346,16 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       )
     }
 
-    if (field.field_type === 'longtext') {
+    if (field.field_type === 'longtext' || field.field_type === 'textarea' || field.field_type === 'text' || field.field_type === 'url') {
       return (
         <textarea
-          style={{ ...commonStyle, minHeight: 60, resize: 'vertical' }}
+          style={{ ...commonStyle, minHeight: 72, height: '100%', resize: 'vertical', lineHeight: 1.45 }}
           autoFocus
           defaultValue={String(value ?? '')}
           onBlur={(e) => save(e.target.value || null)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') cancel()
-            if (e.key === 'Enter' && e.ctrlKey) save((e.target as HTMLTextAreaElement).value)
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save((e.target as HTMLTextAreaElement).value)
           }}
         />
       )

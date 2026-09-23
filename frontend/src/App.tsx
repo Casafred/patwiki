@@ -15,6 +15,7 @@ import ImportModal from './components/import/ImportModal'
 import ImportHistoryPage from './components/import/ImportHistoryPage'
 import ImportGovernancePage from './components/import/ImportGovernancePage'
 import AITaskMonitor from './components/ai/AITaskMonitor'
+import AICapabilityCenter from './components/ai/AICapabilityCenter'
 import ManagementPage from './components/management/ManagementPage'
 import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
 import { SharedFormView } from './components/views/FormView'
@@ -23,7 +24,7 @@ import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } 
 import { useAppStore } from './store'
 import './index.css'
 
-export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'external-sync' | 'settings' | 'fields' | 'management' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history' | 'governance'
+export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'external-sync' | 'settings' | 'fields' | 'management' | 'ai-center' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history' | 'governance'
 
 const pageSegments: Record<Page, string> = {
   patents: 'patents',
@@ -34,6 +35,7 @@ const pageSegments: Record<Page, string> = {
   settings: 'settings',
   fields: 'fields',
   management: 'management',
+  'ai-center': 'ai-center',
   'ai-tasks': 'ai-tasks',
   'agent-analysis': 'agent-analysis',
   sharing: 'sharing',
@@ -251,6 +253,7 @@ function WorkspaceApp() {
     settings: '系统设置',
     fields: '字段管理',
     management: '管理台',
+    'ai-center': 'AI 能力中心',
     'ai-tasks': 'AI 任务',
     'agent-analysis': '智能分析',
     sharing: '协作与权限',
@@ -287,6 +290,7 @@ function WorkspaceApp() {
             <Route path="db/:databaseId/settings" element={<DatabaseRouteScope><SettingsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/fields" element={<DatabaseRouteScope><FieldSettingsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/management" element={<DatabaseRouteScope><ManagementPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/ai-center" element={<DatabaseRouteScope><AICapabilityCenter /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/sharing" element={<DatabaseRouteScope><SharingPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/import-history" element={<DatabaseRouteScope><ImportHistoryPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/governance" element={<DatabaseRouteScope><ImportGovernancePage /></DatabaseRouteScope>} />
@@ -301,6 +305,7 @@ function WorkspaceApp() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="fields" element={<FieldSettingsPage />} />
             <Route path="management" element={<ManagementPage />} />
+            <Route path="ai-center" element={<AICapabilityCenter />} />
             <Route path="sharing" element={<SharingPage />} />
             <Route path="import-history" element={<ImportHistoryPage />} />
             <Route path="governance" element={<ImportGovernancePage />} />

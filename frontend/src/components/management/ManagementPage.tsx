@@ -18,9 +18,7 @@ import type {
   TagGroup,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
-import SemanticSearchManagement from './SemanticSearchManagement'
-
-type ManagementTab = 'products' | 'projects' | 'tags' | 'organization' | 'product-lines' | 'semantic-search'
+type ManagementTab = 'products' | 'projects' | 'tags' | 'organization' | 'product-lines'
 
 const tabs: Array<{ key: ManagementTab; label: string }> = [
   { key: 'products', label: '产品' },
@@ -28,7 +26,6 @@ const tabs: Array<{ key: ManagementTab; label: string }> = [
   { key: 'tags', label: '标签' },
   { key: 'organization', label: '部门与人员' },
   { key: 'product-lines', label: '产品线' },
-  { key: 'semantic-search', label: '语义检索' },
 ]
 
 const inputStyle = { width: '100%', boxSizing: 'border-box' as const }
@@ -421,7 +418,6 @@ export default function ManagementPage() {
       {tab === 'tags' && renderTags()}
       {tab === 'organization' && renderOrganization()}
       {tab === 'product-lines' && renderProductLines()}
-      {tab === 'semantic-search' && <SemanticSearchManagement />}
     </div>
   )
 }

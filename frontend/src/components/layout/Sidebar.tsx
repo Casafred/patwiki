@@ -294,7 +294,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
             {renderSubsectionToggle('analysis', '分析与任务')}
             {expandedSubsections.analysis && <div className="sidebar-subsection-content">
               <button className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`} onClick={() => onNavigate('agent-analysis', currentDatabaseId)} title="智能分析"><Icon name="sparkles" /><span className="nav-label">智能分析</span></button>
-              <button className={`nav-item ${currentPage === 'ai-tasks' ? 'active' : ''}`} onClick={() => onNavigate('ai-tasks', currentDatabaseId)} title="AI 任务"><Icon name="activity" /><span className="nav-label">AI 任务</span></button>
+              <button className={`nav-item ${currentPage === 'ai-center' ? 'active' : ''}`} onClick={() => onNavigate('ai-center', currentDatabaseId)} title="AI 能力管理中心"><Icon name="sparkles" /><span className="nav-label">AI 能力中心</span></button>
             </div>}
           </div>
           <div className="sidebar-subsection">
@@ -350,7 +350,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
           <div className="sidebar-subsection">
             {renderSubsectionToggle('system', '系统管理')}
             {expandedSubsections.system && <div className="sidebar-subsection-content">
-              <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management', currentDatabaseId)} title="管理台"><Icon name="settings" /><span className="nav-label">管理台</span></button>
+              <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management', currentDatabaseId)} title="业务管理台"><Icon name="settings" /><span className="nav-label">业务管理台</span></button>
               <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing', currentDatabaseId)} title="协作与权限"><Icon name="users" /><span className="nav-label">协作与权限</span></button>
               <button className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings', currentDatabaseId)} title="设置"><Icon name="sliders" /><span className="nav-label">设置</span></button>
             </div>}

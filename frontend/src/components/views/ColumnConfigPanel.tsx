@@ -52,7 +52,7 @@ export default function ColumnConfigPanel({ open, fields, frozenFields, onClose,
         setDraggedKey(field.key)
       }}
       onDragEnd={() => setDraggedKey(null)}
-      onDragOver={event => event.preventDefault()}
+      onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }}
       onDrop={event => {
         event.stopPropagation()
         const sourceKey = draggedKey || event.dataTransfer.getData('text/plain')
@@ -61,7 +61,7 @@ export default function ColumnConfigPanel({ open, fields, frozenFields, onClose,
           move(field.key, visible, sourceKey)
         }
       }}
-      style={{ display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr) auto auto', gap: 8, alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: visible ? '#fff' : '#f8fafc', opacity: visible ? 1 : 0.7, cursor: 'grab' }}
+      style={{ display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr) auto auto', gap: 8, alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: visible ? '#fff' : '#f8fafc', opacity: visible ? 1 : 0.7, cursor: 'grab', userSelect: 'none' }}
     >
       <input type="checkbox" checked={visible} onChange={() => onToggleVisible(field.key)} aria-label={`显示${field.name}`} />
       <div style={{ minWidth: 0 }}><div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: '#1f2937' }}>{field.name}</div><div style={{ fontSize: 10, color: '#94a3b8' }}>{field.field_type}</div></div>
