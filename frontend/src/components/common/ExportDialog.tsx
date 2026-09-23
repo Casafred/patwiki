@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { exportApi } from '../../api'
 import type { FieldMeta, JsonObject, JsonValue } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { save as saveDesktopFile } from '@tauri-apps/plugin-dialog'
+import { writeFile as writeDesktopFile } from '@tauri-apps/plugin-fs'
 
 interface ExportDialogProps {
   fields: FieldMeta[]
@@ -28,11 +30,23 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
     setSelectedKeys(current => current.includes(key) ? current.filter(item => item !== key) : [...current, key])
   }
 
-  const download = (blob: Blob, extension: string) => {
+  const download = async (blob: Blob, extension: string) => {
+    const filename = `patwiki_export_${new Date().toISOString().slice(0, 10)}.${extension}`
+    // In the packaged desktop app, open a native save dialog and write the
+    // bytes directly to the selected path. Browser builds keep the normal
+    // download behavior as a fallback.
+    if ('__TAURI_INTERNALS__' in window) {
+      const path = await saveDesktopFile({
+        defaultPath: filename,
+        filters: [{ name: extension === 'xlsx' ? 'Excel 工作簿' : 'CSV 文件', extensions: [extension] }],
+      })
+      if (path) await writeDesktopFile(path, new Uint8Array(await blob.arrayBuffer()))
+      return Boolean(path)
+    }
     const url = window.URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `patwiki_export_${new Date().toISOString().slice(0, 10)}.${extension}`
+    anchor.download = filename
     anchor.style.display = 'none'
     document.body.appendChild(anchor)
     anchor.click()
@@ -40,6 +54,7 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
       window.URL.revokeObjectURL(url)
       anchor.remove()
     }, 2000)
+    return true
   }
 
   const handleExport = async () => {
@@ -61,8 +76,11 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
         group_by: format === 'excel' && groupBy ? groupBy : null,
       }
       const blob = format === 'excel' ? await exportApi.excel(payload) : await exportApi.csv(payload)
-      download(blob, format === 'excel' ? 'xlsx' : 'csv')
-      setSuccess(`已开始下载 patwiki_export_${new Date().toISOString().slice(0, 10)}.${format === 'excel' ? 'xlsx' : 'csv'}，请在浏览器下载列表查看。`)
+      const extension = format === 'excel' ? 'xlsx' : 'csv'
+      const saved = await download(blob, extension)
+      setSuccess(saved
+        ? ('__TAURI_INTERNALS__' in window ? '文件已保存到你选择的桌面位置。' : `已开始下载 patwiki_export_${new Date().toISOString().slice(0, 10)}.${extension}，请在浏览器下载列表查看。`)
+        : '已取消保存。')
     } catch (error: unknown) {
       setError(getErrorMessage(error, '导出失败'))
     } finally {

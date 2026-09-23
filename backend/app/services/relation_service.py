@@ -380,7 +380,11 @@ def rebuild_database_families(db: Session, database_id: int) -> dict:
     早期导入为了避免制造大量待补全记录，只保存了 ``family_members``
     原始值。这一重建只连接当前库中已经存在的专利，不产生新的占位记录。
     """
-    patents = db.query(Patent).filter(Patent.database_id == database_id).all()
+    # A canonical patent can belong to several databases. Rebuild against the
+    # same visibility predicate used by list/search so family magnets do not
+    # disappear when an imported record is owned by the master database.
+    from app.services.patent_database_scope import in_database
+    patents = db.query(Patent).filter(in_database(database_id)).all()
     by_number: dict[str, set[int]] = {}
     patent_by_id = {patent.id: patent for patent in patents if patent.id is not None}
 

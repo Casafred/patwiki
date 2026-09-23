@@ -231,7 +231,9 @@ function WorkspaceApp() {
   }
 
   const handleNavigate = (page: Page, databaseId = requestedDatabaseId ?? currentDatabaseId) => {
-    navigate(databaseId ? `/db/${databaseId}/${pageSegments[page]}` : `/${pageSegments[page]}`)
+    const sameDatabase = databaseId !== null && databaseId === (requestedDatabaseId ?? currentDatabaseId)
+    const preservedQuery = sameDatabase ? location.search : ''
+    navigate(`${databaseId ? `/db/${databaseId}/${pageSegments[page]}` : `/${pageSegments[page]}`}${preservedQuery}`)
     setSidebarOpen(false)
   }
 

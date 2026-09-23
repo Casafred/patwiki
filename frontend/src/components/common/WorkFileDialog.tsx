@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { exportApi } from '../../api'
 import type { JsonObject, JsonValue, PatentExportTemplate } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { save as saveDesktopFile } from '@tauri-apps/plugin-dialog'
+import { writeFile as writeDesktopFile } from '@tauri-apps/plugin-fs'
 
 interface WorkFileDialogProps {
   databaseId?: number | null
@@ -37,13 +39,20 @@ function toExportFilters(filters?: JsonObject): JsonObject {
   )
 }
 
-function download(blob: Blob, template: PatentExportTemplate) {
+async function download(blob: Blob, template: PatentExportTemplate) {
   const url = window.URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
   const extension = FORMAT_EXTENSIONS[template.output_format] || template.output_format
   const safeName = template.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'patwiki_work_file'
+  const filename = `${safeName}_v${template.version}.${extension}`
+  if ('__TAURI_INTERNALS__' in window) {
+    const path = await saveDesktopFile({ defaultPath: filename, filters: [{ name: extension.toUpperCase(), extensions: [extension] }] })
+    if (path) await writeDesktopFile(path, new Uint8Array(await blob.arrayBuffer()))
+    window.URL.revokeObjectURL(url)
+    return Boolean(path)
+  }
+  const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `${safeName}_v${template.version}.${extension}`
+  anchor.download = filename
   anchor.style.display = 'none'
   document.body.appendChild(anchor)
   anchor.click()
@@ -51,6 +60,7 @@ function download(blob: Blob, template: PatentExportTemplate) {
     window.URL.revokeObjectURL(url)
     anchor.remove()
   }, 2000)
+  return true
 }
 
 export default function WorkFileDialog({ databaseId, selectedIds = [], search, filters, onClose }: WorkFileDialogProps) {
@@ -107,8 +117,8 @@ export default function WorkFileDialog({ databaseId, selectedIds = [], search, f
         : selectedTemplate.output_format === 'csv'
           ? await exportApi.csv(payload)
           : await exportApi.excel(payload)
-      download(blob, selectedTemplate)
-      setSuccess(`已开始下载 ${selectedTemplate.name}，文件会出现在浏览器下载列表中。`)
+      const saved = await download(blob, selectedTemplate)
+      setSuccess(saved ? ('__TAURI_INTERNALS__' in window ? '文件已保存到你选择的桌面位置。' : `已开始下载 ${selectedTemplate.name}，文件会出现在浏览器下载列表中。`) : '已取消保存。')
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, '工作文件生成失败'))
     } finally {

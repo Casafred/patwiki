@@ -638,6 +638,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     onPatentClick(patentId)
   }, [onPatentClick, saveTablePosition])
 
+  useEffect(() => {
+    // Sidebar navigation unmounts this page. Persist the last viewport so
+    // returning from another tool restores the exact table position.
+    return () => saveTablePosition()
+  }, [saveTablePosition])
+
   const openContextPatent = useCallback(() => {
     const patentId = contextMenu?.patentId
     if (patentId) openPatent(patentId)

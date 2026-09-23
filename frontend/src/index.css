@@ -3940,7 +3940,6 @@ body {
 .sidebar-collapsed .sidebar-brand > div:not(.brand-mark),
 .sidebar-collapsed .sidebar-database,
 .sidebar-collapsed .sidebar-section-title,
-.sidebar-collapsed .sidebar-subsection,
 .sidebar-collapsed .view-switcher,
 .sidebar-collapsed .product-list,
 .sidebar-collapsed .sidebar-account .account-info,
@@ -3949,6 +3948,19 @@ body {
 .sidebar-collapsed .sidebar-form,
 .sidebar-collapsed .sidebar-inline-actions {
   display: none;
+}
+
+/* Keep every destination available in the compact rail; only labels and
+   grouping chrome disappear, while each destination keeps its icon button. */
+.sidebar-collapsed .sidebar-subsection,
+.sidebar-collapsed .sidebar-subsection-content {
+  display: block;
+}
+.sidebar-collapsed .sidebar-subsection-toggle {
+  display: none;
+}
+.sidebar-collapsed .sidebar-section-content {
+  display: block;
 }
 
 .sidebar-collapsed .sidebar-brand .sidebar-collapse-toggle {
