@@ -1018,6 +1018,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       setCurrentProductId(urlProductId)
     }
     const urlFamily = params.get('family') === '1'
+    // 仅在 URL 明确携带开关时覆盖本地持久化偏好；切库/切视图的 URL
+    // 短暂缺少 family 参数时不能把用户已开启的同族聚拢重置掉。
     if (params.has('family') && urlFamily !== groupByFamily) setGroupByFamily(urlFamily)
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPage(readPageParam(params))
@@ -3181,10 +3183,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                       }}
                       onMouseDown={() => setActiveCell({ patentId: p.id, fieldKey: field.key })}
                       onClick={(e) => {
-                        if (field.editable) {
-                          e.stopPropagation()
-                          handleCellClick(p.id, field.key, e)
-                        }
+                        e.stopPropagation()
+                        setActiveCell({ patentId: p.id, fieldKey: field.key })
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation()
+                        handleCellClick(p.id, field.key, e)
                       }}
                       onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id, fieldKey: field.key })}
                     >

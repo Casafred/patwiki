@@ -10,6 +10,7 @@ from app.models import (
     Patent, Product, Project, Tag, CustomField,
     patent_tag, patent_project, LegalStatus, PatentType,
     PatentHistory, PatentProjectLink,
+    PatentDatabaseMembership, PatentDatabase,
     FieldObservation,
     ProjectRole, RiskLevel, RelationType, DocumentRole,
 )
@@ -394,6 +395,29 @@ class PatentService:
 
         query = query.offset((page - 1) * page_size).limit(page_size)
         patents = query.all()
+
+        # 每条记录都来自全局 Wiki 主表；把跨库归属作为只读投影返回，
+        # 让主表能够明确显示该专利目前存在于哪些数据库。
+        if patents:
+            patent_ids = [patent.id for patent in patents]
+            membership_rows = db.query(
+                PatentDatabaseMembership.patent_id,
+                PatentDatabaseMembership.database_id,
+                PatentDatabase.name,
+            ).join(PatentDatabase, PatentDatabase.id == PatentDatabaseMembership.database_id).filter(
+                PatentDatabaseMembership.patent_id.in_(patent_ids),
+            ).all()
+            memberships_by_patent: dict[int, list[tuple[int, str]]] = {}
+            for patent_id, database_id, database_name in membership_rows:
+                memberships_by_patent.setdefault(patent_id, []).append((int(database_id), str(database_name)))
+            for patent in patents:
+                pairs = memberships_by_patent.get(patent.id, [])
+                # 兼容尚未补写 membership 的旧记录，至少保留 legacy database_id。
+                if patent.database_id and not any(item[0] == patent.database_id for item in pairs):
+                    name = db.query(PatentDatabase.name).filter(PatentDatabase.id == patent.database_id).scalar()
+                    pairs.append((int(patent.database_id), str(name or patent.database_id)))
+                patent.database_ids = [item[0] for item in pairs]
+                patent.database_names = [item[1] for item in pairs]
 
         # Unknown imported columns are a visible, read-only projection. Keep
         # them out of the canonical Patent JSON and inject only the latest

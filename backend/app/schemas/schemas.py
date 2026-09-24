@@ -103,6 +103,9 @@ class Patent(PatentBase):
     family_id: Optional[int] = None
     family_size: Optional[int] = None
     family_key: Optional[str] = None
+    # 汇总视图：该 canonical patent 当前被哪些专利库引用。
+    database_ids: list[int] = []
+    database_names: list[str] = []
     tags: list["Tag"] = []
     projects: list["Project"] = []
 
