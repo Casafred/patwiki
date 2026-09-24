@@ -8,7 +8,6 @@ import SettingsPage from './components/settings/SettingsPage'
 import FieldSettingsPage from './components/settings/FieldSettingsPage'
 import SharingPage from './components/settings/SharingPage'
 import AgentAnalysisPage from './components/analytics/AgentAnalysisPage'
-import DashboardPage from './components/analytics/DashboardPage'
 import AutomationPage from './components/settings/AutomationPage'
 import ExternalSyncPage from './components/settings/ExternalSyncPage'
 import ImportModal from './components/import/ImportModal'
@@ -249,7 +248,7 @@ function WorkspaceApp() {
   const pageTitles: Record<Page, string> = {
     patents: '专利工作区',
     stats: '数据看板',
-    dashboard: '可配置仪表盘',
+    dashboard: '专利统计分析',
     automation: '自动化规则',
     'external-sync': '外部数据同步',
     settings: '系统设置',
@@ -286,7 +285,7 @@ function WorkspaceApp() {
             <Route path="db/:databaseId/patents" element={<DatabaseRouteScope><PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} onOpenImport={() => setShowImport(true)} onOpenSidebar={() => setSidebarOpen(true)} /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/patents/:patentId" element={<DatabaseRouteScope><PatentDetailRoute onOpenSidebar={() => setSidebarOpen(true)} /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/stats" element={<DatabaseRouteScope><StatsPage /></DatabaseRouteScope>} />
-            <Route path="db/:databaseId/dashboard" element={<DatabaseRouteScope><DashboardPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/dashboard" element={<DatabaseRouteScope><StatsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/automation" element={<DatabaseRouteScope><AutomationPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/external-sync" element={<DatabaseRouteScope><ExternalSyncPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/settings" element={<DatabaseRouteScope><SettingsPage /></DatabaseRouteScope>} />
@@ -301,7 +300,7 @@ function WorkspaceApp() {
             <Route path="patents" element={<PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} onOpenImport={() => setShowImport(true)} onOpenSidebar={() => setSidebarOpen(true)} />} />
             <Route path="patents/:patentId" element={<PatentDetailRoute onOpenSidebar={() => setSidebarOpen(true)} />} />
             <Route path="stats" element={<StatsPage />} />
-            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="dashboard" element={<StatsPage />} />
             <Route path="automation" element={<AutomationPage />} />
             <Route path="external-sync" element={<ExternalSyncPage />} />
             <Route path="settings" element={<SettingsPage />} />

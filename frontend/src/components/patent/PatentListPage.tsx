@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   patentService as patentApi,
   fieldService as fieldApi,
@@ -448,6 +448,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }, [views])
 
   const location = useLocation()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const searchParamsString = searchParams.toString()
   const routeDatabaseId = Number(location.pathname.match(/^\/db\/(\d+)(?:\/|$)/)?.[1])
@@ -561,6 +562,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [showWorkFileDialog, setShowWorkFileDialog] = useState(false)
+  const [showImportMenu, setShowImportMenu] = useState(false)
   const [showSyncUpdate, setShowSyncUpdate] = useState(false)
   const [syncUpdatePatentIds, setSyncUpdatePatentIds] = useState<number[]>([])
   const [syncUpdateConnectors, setSyncUpdateConnectors] = useState<SyncConnector[]>([])
@@ -2616,15 +2618,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </div>
           <div className="datagrid-toolbar-actions">
           {onOpenImport && (
-            <button
-              type="button"
-              className="btn btn-primary datagrid-import-button"
-              onClick={onOpenImport}
-              aria-label="导入数据"
-              title="导入 Excel、CSV 或粘贴的表格数据"
-            >
-              <Icon name="plus" size={17} />
-            </button>
+            <div className="import-management-menu-wrap">
+              <button type="button" className="btn btn-primary datagrid-import-button" onClick={() => setShowImportMenu(value => !value)} aria-expanded={showImportMenu} title="导入数据、查看导入历史和数据治理"><Icon name="plus" size={16} /> 导入管理 <Icon name="chevron-down" size={13} /></button>
+              {showImportMenu && <div className="import-management-menu" role="menu">
+                <button type="button" onClick={() => { setShowImportMenu(false); onOpenImport() }}><Icon name="plus" size={14} /> 新建导入</button>
+                <button type="button" onClick={() => { setShowImportMenu(false); navigate(activeDatabaseId ? `/db/${activeDatabaseId}/import-history${location.search}` : '/import-history') }}><Icon name="history" size={14} /> 导入历史</button>
+                <button type="button" onClick={() => { setShowImportMenu(false); navigate(activeDatabaseId ? `/db/${activeDatabaseId}/governance${location.search}` : '/governance') }}><Icon name="check" size={14} /> 数据治理</button>
+              </div>}
+            </div>
           )}
           <div className="datagrid-view-actions">
             {activeView && activeView.layout_type === 'table' && (

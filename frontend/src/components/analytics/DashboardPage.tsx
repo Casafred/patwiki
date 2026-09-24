@@ -92,7 +92,7 @@ function CardDataView({ card }: { card: DashboardCard }) {
   )
 }
 
-export default function DashboardPage() {
+export default function DashboardPage({ embedded = false }: { embedded?: boolean }) {
   const { currentDatabaseId, currentViewId } = useAppStore()
   const [dashboards, setDashboards] = useState<Dashboard[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -201,14 +201,20 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="page-container dashboard-page">
-      <div className="page-header dashboard-header">
+    <div className={embedded ? 'dashboard-page dashboard-page-embedded' : 'page-container dashboard-page'}>
+      {!embedded && <div className="page-header dashboard-header">
         <div><h2 className="page-title">可配置仪表盘</h2><p className="page-subtitle">用指标、分布和趋势快速掌握当前专利库。</p></div>
         <div className="dashboard-header-actions">
           <select className="form-input" value={scope} onChange={event => setScope(event.target.value as 'all' | 'view')}><option value="all">当前库全部记录</option><option value="view" disabled={!currentViewId}>当前视图记录</option></select>
           <button className="btn btn-primary" disabled={!currentDatabaseId} onClick={() => void createDashboard()}>新建仪表盘</button>
         </div>
-      </div>
+      </div>}
+      {embedded && <div className="dashboard-embedded-scope">
+        <select className="form-input" value={scope} onChange={event => setScope(event.target.value as 'all' | 'view')}>
+          <option value="all">当前库全部记录</option><option value="view" disabled={!currentViewId}>当前视图记录</option>
+        </select>
+        <button className="btn btn-primary" disabled={!currentDatabaseId} onClick={() => void createDashboard()}>新建分析方案</button>
+      </div>}
       {error && <div className="error-message">{error}</div>}
       <div className="dashboard-toolbar">
         <select className="form-input" value={selectedId ?? ''} onChange={event => setSelectedId(Number(event.target.value) || null)}>

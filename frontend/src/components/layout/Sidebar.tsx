@@ -284,8 +284,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         {renderSectionToggle('workspace', '工作台')}
         {expandedSections.workspace && <div className="sidebar-section-content">
           <button className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`} onClick={() => handleProductClick(null)} title="全部专利"><Icon name="table" /><span className="nav-label">全部专利</span></button>
-          <button className={`nav-item ${currentPage === 'stats' ? 'active' : ''}`} onClick={() => onNavigate('stats', currentDatabaseId)} title="数据看板"><Icon name="chart" /><span className="nav-label">数据看板</span></button>
-          <button className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard', currentDatabaseId)} title="可配置仪表盘"><Icon name="dashboard" /><span className="nav-label">可配置仪表盘</span></button>
+          <button className={`nav-item ${currentPage === 'dashboard' || currentPage === 'stats' ? 'active' : ''}`} onClick={() => onNavigate('dashboard', currentDatabaseId)} title="专利统计分析"><Icon name="dashboard" /><span className="nav-label">专利统计分析</span></button>
         </div>}
 
         {renderSectionToggle('intelligence', '智能与自动化')}
@@ -339,14 +338,6 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
 
         {renderSectionToggle('management', '管理')}
         {expandedSections.management && <div className="sidebar-section-content">
-          <div className="sidebar-subsection">
-            {renderSubsectionToggle('data', '数据管理')}
-            {expandedSubsections.data && <div className="sidebar-subsection-content">
-              <button className={`nav-item ${currentPage === 'fields' ? 'active' : ''}`} onClick={() => onNavigate('fields', currentDatabaseId)} title="字段管理"><Icon name="columns" /><span className="nav-label">字段管理</span></button>
-              <button className={`nav-item ${currentPage === 'import-history' ? 'active' : ''}`} onClick={() => onNavigate('import-history', currentDatabaseId)} title="导入历史"><Icon name="history" /><span className="nav-label">导入历史</span></button>
-              <button className={`nav-item ${currentPage === 'governance' ? 'active' : ''}`} onClick={() => onNavigate('governance', currentDatabaseId)} title="数据治理"><Icon name="history" /><span className="nav-label">数据治理</span></button>
-            </div>}
-          </div>
           <div className="sidebar-subsection">
             {renderSubsectionToggle('system', '系统管理')}
             {expandedSubsections.system && <div className="sidebar-subsection-content">

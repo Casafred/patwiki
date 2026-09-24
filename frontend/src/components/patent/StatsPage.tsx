@@ -3,6 +3,7 @@ import { statsApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Stats } from '../../types'
 import Icon from '../common/Icon'
+import DashboardPage from '../analytics/DashboardPage'
 
 export default function StatsPage() {
   const { currentDatabaseId, currentProductId, databases, products } = useAppStore()
@@ -10,6 +11,7 @@ export default function StatsPage() {
   const [loading, setLoading] = useState(true)
   const [filterDbId, setFilterDbId] = useState<number | ''>(currentDatabaseId ?? '')
   const [filterProdId, setFilterProdId] = useState<number | ''>(currentProductId ?? '')
+  const [analysisMode, setAnalysisMode] = useState<'overview' | 'custom'>('overview')
 
   const loadStats = useCallback(async () => {
     setLoading(true)
@@ -80,8 +82,8 @@ export default function StatsPage() {
     <div>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2 className="page-title">数据看板</h2>
-          <p className="page-subtitle">专利数据多维概览 · 可按库 / 产品筛选</p>
+          <h2 className="page-title">专利统计与分析</h2>
+          <p className="page-subtitle">统一查看专利数据概览，并按当前库或当前视图配置分析方案</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <select
@@ -105,6 +107,15 @@ export default function StatsPage() {
           <button className="btn btn-sm btn-secondary" onClick={loadStats}>刷新</button>
         </div>
       </div>
+
+      <div className="analysis-mode-tabs" role="tablist" aria-label="统计分析模式">
+        <button className={analysisMode === 'overview' ? 'active' : ''} onClick={() => setAnalysisMode('overview')} role="tab" aria-selected={analysisMode === 'overview'}>数据概览</button>
+        <button className={analysisMode === 'custom' ? 'active' : ''} onClick={() => setAnalysisMode('custom')} role="tab" aria-selected={analysisMode === 'custom'}>自定义分析</button>
+      </div>
+
+      {analysisMode === 'custom' && <DashboardPage embedded />}
+
+      {analysisMode === 'overview' && <>
 
       {/* KPI 卡片（6 个） */}
       <div className="stats-cards" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
@@ -217,6 +228,7 @@ export default function StatsPage() {
           <Empty text="暂无发明人数据" />
         )}
       </Card>
+      </>}
     </div>
   )
 }

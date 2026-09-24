@@ -37,7 +37,7 @@ interface PatentDetailPageProps {
   onOpenSidebar?: () => void
 }
 
-type Tab = 'basic' | 'identity' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'history' | 'comments'
+type Tab = 'basic' | 'provenance' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
 export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, onOpenSidebar }: PatentDetailPageProps) {
@@ -268,14 +268,13 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'basic', label: '基础著录' },
-    { key: 'identity', label: '身份与来源' },
+    { key: 'provenance', label: `来源与审计${history.length > 0 ? ` (${history.length})` : ''}` },
     { key: 'technical', label: '技术信息' },
     { key: 'risk', label: '风险与应用' },
     { key: 'ai', label: 'AI 分析' },
     { key: 'attachments', label: '关联附件' },
     { key: 'custom', label: '自定义字段' },
     { key: 'relations', label: '关联关系' },
-    { key: 'history', label: `修改历史${history.length > 0 ? ` (${history.length})` : ''}` },
     { key: 'comments', label: `评论${openCommentCount > 0 ? ` (${openCommentCount})` : ''}` },
   ]
 
@@ -351,14 +350,17 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
         {activeTab === 'basic' && (
           <BasicInfoTab patent={patent} formData={formData} editing={editing} updateField={updateField} products={products} />
         )}
-        {activeTab === 'identity' && (
-          <IdentityTab
-            patent={patent}
-            identifiers={identifiers}
-            fieldSources={fieldSources}
-            identityConflicts={identityConflicts}
-            loading={identityLoading}
-          />
+        {activeTab === 'provenance' && (
+          <div className="patent-provenance-layout">
+            <section className="patent-detail-section">
+              <div className="patent-detail-section-heading"><div><h3>身份与数据来源</h3><p>专利号码、导入来源和字段最近写入位置。</p></div></div>
+              <IdentityTab patent={patent} identifiers={identifiers} fieldSources={fieldSources} identityConflicts={identityConflicts} loading={identityLoading} />
+            </section>
+            <section className="patent-detail-section">
+              <div className="patent-detail-section-heading"><div><h3>修改审计</h3><p>人工、导入、AI 和批量操作的完整变更链。</p></div></div>
+              <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
+            </section>
+          </div>
         )}
         {activeTab === 'technical' && (
           <TechnicalTab patent={patent} formData={formData} editing={editing} updateField={updateField} />
@@ -392,9 +394,6 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
             onProjectsChanged={loadPatent}
             onPatentNavigate={onPatentNavigate}
           />
-        )}
-        {activeTab === 'history' && (
-          <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
         )}
         {activeTab === 'attachments' && (
           <AttachmentsTab patent={patent} />
