@@ -582,7 +582,7 @@ export const importApi = {
 }
 
 export const statsApi = {
-  get: (params?: { database_id?: number | null; product_id?: number | null }): Promise<Stats> =>
+  get: (params?: { database_id?: number | null; product_id?: number | null; patent_ids?: number[] }): Promise<Stats> =>
     api.get('/stats', { params }),
 }
 

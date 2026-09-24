@@ -498,6 +498,15 @@ class PatentService:
 
         db.add(patent)
         db.flush()
+        # Every canonical patent is visible in the default master database;
+        # retain the originating database as an additional membership.
+        default_database = db.query(PatentDatabase).filter(PatentDatabase.is_default == True).first()
+        membership_ids = {int(patent.database_id)} if patent.database_id else set()
+        if default_database:
+            membership_ids.add(int(default_database.id))
+        for database_id in membership_ids:
+            if not db.query(PatentDatabaseMembership).filter_by(patent_id=patent.id, database_id=database_id).first():
+                db.add(PatentDatabaseMembership(patent_id=patent.id, database_id=database_id))
         from app.services.patent_identity_service import ensure_patent_identifiers
         ensure_patent_identifiers(db, patent, source_system="manual")
         from app.services.semantic_index_service import SemanticIndexService
@@ -1127,13 +1136,15 @@ class PatentService:
         return True
 
     @staticmethod
-    def get_stats(db: Session, database_id: Optional[int] = None, product_id: Optional[int] = None) -> dict:
+    def get_stats(db: Session, database_id: Optional[int] = None, product_id: Optional[int] = None, patent_ids: Optional[list[int]] = None) -> dict:
         # 基础过滤条件：按库 / 产品过滤
         def _apply_filter(q):
             if database_id is not None:
                 q = q.filter(in_database(database_id))
             if product_id is not None:
                 q = q.filter(Patent.product_id == product_id)
+            if patent_ids is not None:
+                q = q.filter(Patent.id.in_(patent_ids)) if patent_ids else q.filter(False)
             return q
 
         total = _apply_filter(db.query(func.count(Patent.id))).scalar()
@@ -1159,6 +1170,8 @@ class PatentService:
             ).outerjoin(Patent, Patent.product_id == Product.id)
             if database_id is not None:
                 products_q = products_q.filter((Patent.database_id == database_id) | (Patent.id.is_(None)))
+            if patent_ids is not None:
+                products_q = products_q.filter(Patent.id.in_(patent_ids) if patent_ids else False)
             products = products_q.group_by(Product.id, Product.name).order_by(desc("count")).limit(20).all()
             product_counts = [{"id": p.id, "name": p.name, "count": p.count} for p in products]
         else:

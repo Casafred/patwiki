@@ -1,24 +1,26 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { statsApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Stats } from '../../types'
 import Icon from '../common/Icon'
 import DashboardPage from '../analytics/DashboardPage'
 
-export default function StatsPage() {
+export default function StatsPage({ patentIds, scopeLabel }: { patentIds?: number[]; scopeLabel?: string } = {}) {
   const { currentDatabaseId, currentProductId, databases, products } = useAppStore()
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [filterDbId, setFilterDbId] = useState<number | ''>(currentDatabaseId ?? '')
   const [filterProdId, setFilterProdId] = useState<number | ''>(currentProductId ?? '')
   const [analysisMode, setAnalysisMode] = useState<'overview' | 'custom'>('overview')
+  const patentIdsKey = useMemo(() => patentIds?.join(',') || '', [patentIds])
 
   const loadStats = useCallback(async () => {
     setLoading(true)
     try {
-      const params: { database_id?: number; product_id?: number } = {}
+      const params: { database_id?: number; product_id?: number; patent_ids?: number[] } = {}
       if (filterDbId !== '') params.database_id = filterDbId
       if (filterProdId !== '') params.product_id = filterProdId
+      if (patentIdsKey) params.patent_ids = patentIdsKey.split(',').filter(Boolean).map(Number)
       const data = await statsApi.get(params)
       setStats(data)
     } catch (e) {
@@ -26,7 +28,7 @@ export default function StatsPage() {
     } finally {
       setLoading(false)
     }
-  }, [filterDbId, filterProdId])
+  }, [filterDbId, filterProdId, patentIdsKey])
 
   useEffect(() => {
     // Statistics are synchronized with the selected filters through an async request.
@@ -83,7 +85,7 @@ export default function StatsPage() {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 className="page-title">专利统计与分析</h2>
-          <p className="page-subtitle">统一查看专利数据概览，并按当前库或当前视图配置分析方案</p>
+          <p className="page-subtitle">{scopeLabel || '统一查看专利数据概览，并按当前库或当前视图配置分析方案'}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <select

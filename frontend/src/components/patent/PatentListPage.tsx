@@ -218,6 +218,51 @@ function PatentReferenceText({
 
 const DEFAULT_COLUMN_WIDTH = 150
 
+function CellEditor({
+  field,
+  value,
+  onSave,
+  onCancel,
+}: {
+  field: FieldMeta
+  value: JsonValue
+  onSave: (value: JsonValue) => void
+  onCancel: () => void
+}) {
+  const [draft, setDraft] = useState(() => String(value ?? ''))
+  const commonStyle: React.CSSProperties = {
+    width: '100%', padding: '4px 8px', border: '1px solid #3b82f6',
+    borderRadius: 3, fontSize: 13, outline: 'none', background: '#fff',
+  }
+  const submit = () => {
+    if (field.field_type === 'boolean') onSave(draft === 'true' ? true : draft === 'false' ? false : null)
+    else onSave(draft || null)
+  }
+  const isMultiline = ['longtext', 'textarea', 'text', 'url'].includes(field.field_type)
+  return (
+    <div className="cell-editor-popover" onClick={event => event.stopPropagation()}>
+      {field.field_type === 'select' && field.options ? (
+        <select style={commonStyle} autoFocus value={draft} onChange={event => setDraft(event.target.value)}>
+          <option value="">-</option>
+          {field.options.map(option => <option key={option} value={option}>{option}</option>)}
+        </select>
+      ) : field.field_type === 'boolean' ? (
+        <select style={commonStyle} autoFocus value={draft} onChange={event => setDraft(event.target.value)}>
+          <option value="">-</option><option value="true">是</option><option value="false">否</option>
+        </select>
+      ) : isMultiline ? (
+        <textarea style={{ ...commonStyle, minHeight: 90, resize: 'vertical', lineHeight: 1.45 }} autoFocus value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') onCancel(); if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) submit() }} />
+      ) : (
+        <input type={field.field_type === 'number' ? 'number' : field.field_type === 'date' ? 'date' : 'text'} style={commonStyle} autoFocus value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') onCancel(); if (event.key === 'Enter') submit() }} />
+      )}
+      <div className="cell-editor-actions">
+        <button type="button" className="btn btn-xs btn-secondary" onClick={onCancel}>取消</button>
+        <button type="button" className="btn btn-xs btn-primary" onClick={submit}>保存</button>
+      </div>
+    </div>
+  )
+}
+
 function getViewGroupFields(view?: PatentView): ViewGroupField[] {
   const config = view?.group_by_config
   if (Array.isArray(config)) return config as ViewGroupField[]
@@ -511,6 +556,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [frozenFields, setFrozenFields] = useState<Set<string>>(new Set())
   const [showColumnStats, setShowColumnStats] = useState(false)
   const [showPatentAnalysis, setShowPatentAnalysis] = useState(false)
+  const [analysisScope, setAnalysisScope] = useState<'all' | 'view' | 'selected'>('view')
   const familyRebuildDatabaseRef = useRef<number | null>(null)
   const [statsFieldKey, setStatsFieldKey] = useState('')
   const [statsData, setStatsData] = useState<{ value: string; count: number; percentage: number }[]>([])
@@ -2315,7 +2361,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   const renderCellEditor = (patent: Patent, field: FieldMeta, value: JsonValue) => {
-    const save = (v: JsonValue) => handleCellSave(patent.id, field.key, v)
     const cancel = () => setEditingCell(null)
 
     if (field.field_type === 'link') {
@@ -2330,78 +2375,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       )
     }
 
-    const commonStyle: React.CSSProperties = {
-      width: '100%',
-      padding: '4px 8px',
-      border: '1px solid #3b82f6',
-      borderRadius: 3,
-      fontSize: 13,
-      outline: 'none',
-      background: '#fff',
-    }
-
-    if (field.field_type === 'select' && field.options) {
-      return (
-        <select
-          style={commonStyle}
-          autoFocus
-          defaultValue={String(value ?? '')}
-          onBlur={(e) => save(e.target.value || null)}
-          onChange={(e) => {
-            if (e.target.value) save(e.target.value)
-          }}
-        >
-          <option value="">-</option>
-          {field.options.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      )
-    }
-
-    if (field.field_type === 'boolean') {
-      return (
-        <select
-          style={commonStyle}
-          autoFocus
-          defaultValue={value ? 'true' : value === false ? 'false' : ''}
-          onBlur={(e) => save(e.target.value === 'true' ? true : e.target.value === 'false' ? false : null)}
-        >
-          <option value="">-</option>
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </select>
-      )
-    }
-
-    if (field.field_type === 'longtext' || field.field_type === 'textarea' || field.field_type === 'text' || field.field_type === 'url') {
-      return (
-        <textarea
-          style={{ ...commonStyle, minHeight: 72, height: '100%', resize: 'vertical', lineHeight: 1.45 }}
-          autoFocus
-          defaultValue={String(value ?? '')}
-          onBlur={(e) => save(e.target.value || null)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') cancel()
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save((e.target as HTMLTextAreaElement).value)
-          }}
-        />
-      )
-    }
-
-    return (
-      <input
-        type={field.field_type === 'number' ? 'number' : field.field_type === 'date' ? 'date' : 'text'}
-        style={commonStyle}
-        autoFocus
-        defaultValue={String(value ?? '')}
-        onBlur={(e) => save(e.target.value || null)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') cancel()
-          if (e.key === 'Enter') save((e.target as HTMLInputElement).value)
-        }}
-      />
-    )
+    return <CellEditor field={field} value={value} onSave={v => void handleCellSave(patent.id, field.key, v)} onCancel={cancel} />
   }
 
   const renderCellContent = (patent: Patent, field: FieldMeta) => {
@@ -2635,7 +2609,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </div>
           <div className="datagrid-toolbar-actions">
           <div className="workbench-view-switcher"><ViewSwitcher onOpenView={() => undefined} /></div>
-          <button type="button" className="btn btn-sm btn-secondary patent-analysis-trigger" onClick={() => setShowPatentAnalysis(true)} title="对当前视图或勾选专利进行统计分析"><Icon name="chart" size={14} /> 统计分析</button>
+          <button type="button" className="btn btn-sm btn-secondary patent-analysis-trigger" onClick={() => { setAnalysisScope(selectedIds.length ? 'selected' : 'view'); setShowPatentAnalysis(true) }} title="对当前视图或勾选专利进行统计分析"><Icon name="chart" size={14} /> 统计分析</button>
           {onOpenImport && (
             <div className="import-management-menu-wrap">
               <button type="button" className="btn btn-primary datagrid-import-button" onClick={() => setShowImportMenu(value => !value)} aria-expanded={showImportMenu} title="导入数据、查看导入历史和数据治理"><Icon name="plus" size={16} /> 导入管理 <Icon name="chevron-down" size={13} /></button>
@@ -3906,7 +3880,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
       {showPatentAnalysis && (
         <Modal title="专利统计与分析" onClose={() => setShowPatentAnalysis(false)} width={1180}>
-          <div className="patent-analysis-dialog-content"><StatsPage /></div>
+          <div className="patent-analysis-dialog-content">
+            <div className="analysis-scope-switcher" role="tablist" aria-label="分析范围">
+              <button className={analysisScope === 'view' ? 'active' : ''} onClick={() => setAnalysisScope('view')}>当前视图</button>
+              <button className={analysisScope === 'selected' ? 'active' : ''} onClick={() => setAnalysisScope('selected')} disabled={selectedIds.length === 0}>已勾选 ({selectedIds.length})</button>
+              <button className={analysisScope === 'all' ? 'active' : ''} onClick={() => setAnalysisScope('all')}>整个库</button>
+            </div>
+            <StatsPage
+              patentIds={analysisScope === 'selected' ? selectedIds : analysisScope === 'view' ? patents.map(item => item.id) : undefined}
+              scopeLabel={analysisScope === 'selected' ? `当前勾选的 ${selectedIds.length} 件专利` : analysisScope === 'view' ? '当前视图已加载数据范围' : '当前数据库全部数据'}
+            />
+          </div>
         </Modal>
       )}
 

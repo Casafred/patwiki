@@ -58,12 +58,10 @@ interface SidebarProps {
 
 export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCollapse }: SidebarProps) {
   const {
-    products, currentProductId, setCurrentProductId, setProducts,
+    currentProductId, setCurrentProductId, setProducts,
     databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
     currentUser, setCurrentViewId,
   } = useAppStore()
-  const [showAddProduct, setShowAddProduct] = useState(false)
-  const [newProductName, setNewProductName] = useState('')
   const [showAddDatabase, setShowAddDatabase] = useState(false)
   const [newDbName, setNewDbName] = useState('')
   const [newDbDesc, setNewDbDesc] = useState('')
@@ -128,21 +126,6 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   const handleProductClick = (productId: number | null) => {
     setCurrentProductId(productId)
     onNavigate('patents', currentDatabaseId)
-  }
-
-  const handleAddProduct = async () => {
-    if (!newProductName.trim()) return
-    try {
-      const product = await productApi.create({ name: newProductName.trim() })
-      // 不再整页刷新，只刷新产品列表
-      await reloadProducts()
-      setCurrentProductId(product.id)
-      setNewProductName('')
-      setShowAddProduct(false)
-      onNavigate('patents', currentDatabaseId)
-    } catch {
-      alert('创建产品失败')
-    }
   }
 
   // P0-11：库切换
@@ -302,34 +285,6 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
               <button className={`nav-item ${currentPage === 'external-sync' ? 'active' : ''}`} onClick={() => onNavigate('external-sync', currentDatabaseId)} title="外部数据同步"><Icon name="refresh" /><span className="nav-label">外部数据同步</span></button>
             </div>}
           </div>
-        </div>}
-
-        <div className="sidebar-section-title sidebar-section-title-row">
-          <button type="button" className="sidebar-section-toggle" onClick={() => toggleSection('products')} aria-expanded={expandedSections.products}>
-            <span>产品分类</span><Icon name={expandedSections.products ? 'chevron-down' : 'chevron-right'} size={13} />
-          </button>
-          <button className="sidebar-add" onClick={() => setShowAddProduct(true)} title="新增产品">+</button>
-        </div>
-        {expandedSections.products && <div className="sidebar-section-content">
-          <div className="product-list">
-            {products.map((p) => (
-              <button key={p.id} className={`product-item ${currentProductId === p.id ? 'active' : ''}`} onClick={() => handleProductClick(p.id)}>
-                <span className="product-dot" />
-                <span className="product-name">{p.name}</span>
-                {p.patent_count !== undefined && <span className="product-count">{p.patent_count}</span>}
-              </button>
-            ))}
-            {products.length === 0 && <div className="sidebar-empty">暂无产品分类</div>}
-          </div>
-          {showAddProduct && (
-            <div className="sidebar-form product-form">
-              <input className="sidebar-input" placeholder="产品名称" value={newProductName} onChange={(e) => setNewProductName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddProduct()} autoFocus />
-              <div className="sidebar-form-actions">
-                <button className="sidebar-action primary" onClick={handleAddProduct}>创建</button>
-                <button className="sidebar-action" onClick={() => { setShowAddProduct(false); setNewProductName('') }}>取消</button>
-              </div>
-            </div>
-          )}
         </div>}
 
         {renderSectionToggle('management', '管理')}
