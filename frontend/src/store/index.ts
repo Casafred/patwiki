@@ -77,7 +77,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   filters: {},
   // P2-8：同族聚拢开关，初始值从 localStorage 读取
   groupByFamily: (() => {
-    try { return localStorage.getItem(GROUP_BY_FAMILY_STORAGE_KEY) === 'true' } catch { return false }
+    try {
+      const saved = localStorage.getItem(GROUP_BY_FAMILY_STORAGE_KEY)
+      // 主表默认开启同族聚拢；用户明确关闭后才保持关闭。
+      return saved === null ? true : saved === 'true'
+    } catch { return true }
   })(),
   setGroupByFamily: (v) => {
     try { localStorage.setItem(GROUP_BY_FAMILY_STORAGE_KEY, String(v)) } catch { /* storage is optional */ }

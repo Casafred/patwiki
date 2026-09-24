@@ -1115,6 +1115,13 @@ class PatentService:
             return False
         from app.services.semantic_index_service import SemanticIndexService
         SemanticIndexService.enqueue_delete(db, patent.id)
+        # SQLite/Postgres installations may not have cascades on legacy
+        # citation and association tables. Remove dependent rows explicitly so
+        # a normal row delete does not surface as a generic Network error.
+        db.query(Citation).filter(or_(Citation.citing_patent_id == patent.id, Citation.cited_patent_id == patent.id)).delete(synchronize_session=False)
+        db.query(PatentDatabaseMembership).filter(PatentDatabaseMembership.patent_id == patent.id).delete(synchronize_session=False)
+        db.execute(patent_tag.delete().where(patent_tag.c.patent_id == patent.id))
+        db.execute(patent_project.delete().where(patent_project.c.patent_id == patent.id))
         db.delete(patent)
         db.commit()
         return True

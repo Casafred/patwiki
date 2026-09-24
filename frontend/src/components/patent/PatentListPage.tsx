@@ -38,6 +38,8 @@ import AttachmentField from '../common/AttachmentField'
 import PatentImageStrip from '../common/PatentImageStrip'
 import AIQuickAnalyzeModal from '../ai/AIQuickAnalyzeModal'
 import JEVQuickAnalyzeModal from '../ai/JEVQuickAnalyzeModal'
+import StatsPage from './StatsPage'
+import ViewSwitcher from '../views/ViewSwitcher'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -508,6 +510,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [creatingAIColumn, setCreatingAIColumn] = useState(false)
   const [frozenFields, setFrozenFields] = useState<Set<string>>(new Set())
   const [showColumnStats, setShowColumnStats] = useState(false)
+  const [showPatentAnalysis, setShowPatentAnalysis] = useState(false)
+  const familyRebuildDatabaseRef = useRef<number | null>(null)
   const [statsFieldKey, setStatsFieldKey] = useState('')
   const [statsData, setStatsData] = useState<{ value: string; count: number; percentage: number }[]>([])
   const [statsLoading, setStatsLoading] = useState(false)
@@ -1359,6 +1363,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setGroupByFamily(nextValue)
     setPage(1)
   }
+
+  // 主表默认开启同族聚拢时，切入一个尚未建立族关系的数据库也要先完成
+  // 一次重建，否则接口虽收到 group_by_family=true 仍没有可聚拢的 family_id。
+  useEffect(() => {
+    if (!groupByFamily || !activeDatabaseId || familyRebuildDatabaseRef.current === activeDatabaseId) return
+    familyRebuildDatabaseRef.current = activeDatabaseId
+    void patentApi.rebuildFamilies(activeDatabaseId).then(() => loadPatents(1, false, pageSize, true)).catch(error => {
+      familyRebuildDatabaseRef.current = null
+      console.error('Failed to rebuild family relations:', error)
+    })
+  }, [activeDatabaseId, groupByFamily, loadPatents, pageSize])
 
   // 批量删除选中的专利
   const handleBulkDelete = async () => {
@@ -2619,6 +2634,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </button>
           </div>
           <div className="datagrid-toolbar-actions">
+          <div className="workbench-view-switcher"><ViewSwitcher onOpenView={() => undefined} /></div>
+          <button type="button" className="btn btn-sm btn-secondary patent-analysis-trigger" onClick={() => setShowPatentAnalysis(true)} title="对当前视图或勾选专利进行统计分析"><Icon name="chart" size={14} /> 统计分析</button>
           {onOpenImport && (
             <div className="import-management-menu-wrap">
               <button type="button" className="btn btn-primary datagrid-import-button" onClick={() => setShowImportMenu(value => !value)} aria-expanded={showImportMenu} title="导入数据、查看导入历史和数据治理"><Icon name="plus" size={16} /> 导入管理 <Icon name="chevron-down" size={13} /></button>
@@ -3884,6 +3901,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </>
             )}
           </div>
+        </Modal>
+      )}
+
+      {showPatentAnalysis && (
+        <Modal title="专利统计与分析" onClose={() => setShowPatentAnalysis(false)} width={1180}>
+          <div className="patent-analysis-dialog-content"><StatsPage /></div>
         </Modal>
       )}
 

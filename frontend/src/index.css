@@ -5386,8 +5386,11 @@ body {
 .semantic-field-hint { display: block; margin-top: 4px; color: #94a3b8; font-size: 10px; line-height: 1.35; }
 
 .semantic-management { display: flex; flex-direction: column; gap: 16px; }
-.import-management-menu-wrap { position: relative; }
-.import-management-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 170px; padding: 5px; background: #fff; border: 1px solid #dbe5e3; border-radius: 7px; box-shadow: 0 12px 30px rgba(15, 63, 62, .14); }
+.datagrid-toolbar, .datagrid-toolbar-actions, .datagrid-view-actions { overflow: visible !important; min-width: 0; }
+.datagrid-toolbar-actions { flex-wrap: wrap; }
+.datagrid-import-button { white-space: nowrap; min-width: 116px; }
+.import-management-menu-wrap { position: relative; z-index: 120; flex: 0 0 auto; }
+.import-management-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 9999; min-width: 190px; padding: 5px; background: #fff; border: 1px solid #dbe5e3; border-radius: 7px; box-shadow: 0 12px 30px rgba(15, 63, 62, .22); }
 .import-management-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-radius: 4px; background: transparent; color: #334155; cursor: pointer; text-align: left; font-size: 12px; }
 .import-management-menu button:hover { background: #f0fdfa; color: #0f766e; }
 .patent-provenance-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr); gap: 16px; align-items: start; }

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
-import ViewSwitcher from '../views/ViewSwitcher'
 import type { Page } from '../../App'
 import type { PatentDatabase } from '../../types'
 import Icon from '../common/Icon'
@@ -304,9 +303,6 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
             </div>}
           </div>
         </div>}
-
-        {renderSectionToggle('views', '视图')}
-        {expandedSections.views && <div className="sidebar-section-content"><ViewSwitcher onOpenView={() => onNavigate('patents', currentDatabaseId)} /></div>}
 
         <div className="sidebar-section-title sidebar-section-title-row">
           <button type="button" className="sidebar-section-toggle" onClick={() => toggleSection('products')} aria-expanded={expandedSections.products}>
