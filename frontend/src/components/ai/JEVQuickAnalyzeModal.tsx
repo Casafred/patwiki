@@ -158,7 +158,10 @@ export default function JEVQuickAnalyzeModal({ patents, onClose }: Props) {
   );
   const chooseTemplate = (value: "general" | "triage" | "custom") => {
     setTemplate(value);
-    if (value !== "custom") {
+    if (value === "custom") {
+      setItems([]);
+      setAdvancedText("");
+    } else {
       const next = value === "triage" ? TRIAGE : GENERAL;
       setItems(next);
       setAdvancedText(JSON.stringify(toQuestions(next), null, 2));
