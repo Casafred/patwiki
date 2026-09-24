@@ -1212,7 +1212,7 @@ export interface AttachmentMeta {
   is_image?: boolean
 }
 
-export type DashboardCardType = 'metric' | 'bar' | 'pie' | 'line' | 'progress' | 'table'
+export type DashboardCardType = 'metric' | 'bar' | 'pie' | 'donut' | 'line' | 'progress' | 'table' | 'stacked' | 'heatmap'
 
 export interface DashboardCard {
   id: string

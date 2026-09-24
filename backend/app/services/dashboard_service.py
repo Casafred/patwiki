@@ -13,7 +13,7 @@ from app.services.view_service import ViewService
 
 
 class DashboardService:
-    CARD_TYPES = {"metric", "bar", "pie", "line", "progress", "table"}
+    CARD_TYPES = {"metric", "bar", "pie", "donut", "line", "progress", "table", "stacked", "heatmap"}
     AGGREGATIONS = {"count", "sum", "avg", "min", "max"}
 
     @classmethod
@@ -117,6 +117,32 @@ class DashboardService:
         if card_type in {"bar", "pie"}:
             group_field = str(config.get("group_by") or field)
             return {"items": cls._grouped(patents, group_field)}
+        if card_type == "donut":
+            group_field = str(config.get("group_by") or field)
+            return {"items": cls._grouped(patents, group_field)}
+        if card_type == "stacked":
+            group_field = str(config.get("group_by") or "legal_status")
+            subgroup_field = str(config.get("subgroup_by") or "patent_type")
+            grouped: dict[str, Counter[str]] = {}
+            for patent in patents:
+                group_value = cls._value(patent, group_field)
+                subgroup_value = cls._value(patent, subgroup_field)
+                group_label = str(group_value) if group_value not in (None, "") else "未设置"
+                subgroup_label = str(subgroup_value) if subgroup_value not in (None, "") else "未设置"
+                grouped.setdefault(group_label, Counter())[subgroup_label] += 1
+            return {"items": [{"label": label, "segments": [{"label": key, "value": value} for key, value in counts.items()]} for label, counts in list(grouped.items())[:20]]}
+        if card_type == "heatmap":
+            row_field = str(config.get("row_field") or "legal_status")
+            col_field = str(config.get("col_field") or "patent_type")
+            matrix: dict[str, Counter[str]] = {}
+            for patent in patents:
+                row = cls._value(patent, row_field)
+                col = cls._value(patent, col_field)
+                row_label = str(row) if row not in (None, "") else "未设置"
+                col_label = str(col) if col not in (None, "") else "未设置"
+                matrix.setdefault(row_label, Counter())[col_label] += 1
+            columns = sorted({column for counts in matrix.values() for column in counts})
+            return {"columns": columns, "rows": [{"label": label, "values": [counts.get(column, 0) for column in columns]} for label, counts in list(matrix.items())[:20]]}
         if card_type == "table":
             items = cls._grouped(patents, field)
             return {"items": items[:max(1, min(50, int(config.get("limit", 10))))]}
