@@ -605,10 +605,12 @@ class PatentService:
         if custom_fields_data is not None:
             relation_fields = RELATION_FIELD_KEYS.intersection(custom_fields_data)
             if relation_fields:
-                raise BadRequestException(
-                    "同族/引用原始列是导入来源投影，不能通过普通专利编辑修改："
-                    + ", ".join(sorted(relation_fields))
-                )
+                # Detail-page saves send the full JSON object. Preserve these
+                # read-only import projections while accepting other edits.
+                custom_fields_data = {
+                    key: value for key, value in custom_fields_data.items()
+                    if key not in relation_fields
+                }
             # JSON 列没有 MutableDict 追踪，先复制再赋值才能稳定触发 SQLAlchemy 更新。
             current = dict(patent.custom_fields or {})
             for k, v in custom_fields_data.items():
@@ -1137,8 +1139,18 @@ class PatentService:
         ``ON DELETE CASCADE``. Looking at the model metadata keeps deletion
         compatible with both those databases and newly migrated databases.
         """
+        patent_table = Patent.__table__
+        # Clear self-references first (working copies use duplicate_of).
+        for foreign_key in patent_table.foreign_keys:
+            if foreign_key.column.table.name != patent_table.name or foreign_key.parent.name == "id":
+                continue
+            db.execute(patent_table.update().where(foreign_key.parent == patent_id).values({foreign_key.parent.name: None}))
         for table in Patent.metadata.tables.values():
-            if table.name == Patent.__table__.name:
+            if table.name == patent_table.name:
+                continue
+            foreign_columns = [fk.parent for fk in table.foreign_keys if fk.column.table.name == patent_table.name]
+            if foreign_columns:
+                db.execute(table.delete().where(or_(*(column == patent_id for column in foreign_columns))))
                 continue
             predicates = []
             for column_name in ("patent_id", "citing_patent_id", "cited_patent_id"):
