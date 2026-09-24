@@ -62,6 +62,7 @@ type RowHeightLimit = 'auto' | 56 | 72 | 96 | 120
 
 const TABLE_VIEW_MODE_STORAGE_KEY = 'patwiki_table_view_mode'
 const ROW_HEIGHT_LIMIT_STORAGE_KEY = 'patwiki_row_height_limit'
+const TABLE_ZOOM_STORAGE_KEY = 'patwiki_table_zoom'
 const CHECKBOX_COLUMN_WIDTH = 40
 const INDEX_COLUMN_WIDTH = 56
 const ACTION_COLUMN_WIDTH = 98
@@ -261,6 +262,15 @@ function CellEditor({
       </div>
     </div>
   )
+}
+
+function readTableZoom(): number {
+  try {
+    const value = Number(localStorage.getItem(TABLE_ZOOM_STORAGE_KEY))
+    return [75, 85, 100, 115, 130, 150].includes(value) ? value : 100
+  } catch {
+    return 100
+  }
 }
 
 function getViewGroupFields(view?: PatentView): ViewGroupField[] {
@@ -510,6 +520,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [pageSize] = useState(50)
   const [tableViewMode, setTableViewMode] = useState<TableViewMode>(() => readTableViewMode())
   const [rowHeightLimit, setRowHeightLimit] = useState<RowHeightLimit>(() => readRowHeightLimit())
+  const [tableZoom, setTableZoom] = useState(() => readTableZoom())
   const [continuousLoading, setContinuousLoading] = useState(false)
   const [searchText, setSearchText] = useState(() => searchParams.get('q') || '')
   const [searchInputText, setSearchInputText] = useState(() => searchParams.get('q') || '')
@@ -727,6 +738,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const handleRowHeightLimitChange = (limit: RowHeightLimit) => {
     try { localStorage.setItem(ROW_HEIGHT_LIMIT_STORAGE_KEY, String(limit)) } catch { /* storage is optional */ }
     setRowHeightLimit(limit)
+  }
+
+  const handleTableZoomChange = (zoom: number) => {
+    const next = Math.min(150, Math.max(75, zoom))
+    try { localStorage.setItem(TABLE_ZOOM_STORAGE_KEY, String(next)) } catch { /* storage is optional */ }
+    setTableZoom(next)
   }
 
   const loadRelationData = useCallback(async () => {
@@ -2782,7 +2799,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         </div>
       )}
 
-      <div ref={tableWrapperRef} className="data-grid-wrapper" onScroll={handleTableScroll}>
+      <div ref={tableWrapperRef} className="data-grid-wrapper" onScroll={handleTableScroll} style={{ zoom: tableZoom / 100 }}>
         {activeView?.layout_type === 'kanban' ? (
           <KanbanView
             view={activeView}
@@ -3392,6 +3409,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 ))}
               </div>
               <p className="table-settings-note">限制单元格展开高度，完整内容仍可在详情页查看。</p>
+            </section>
+            <section>
+              <h4>表格缩放</h4>
+              <div className="table-zoom-control">
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleTableZoomChange(tableZoom - 5)} disabled={tableZoom <= 75}>−</button>
+                <input type="range" min={75} max={150} step={5} value={tableZoom} onChange={event => handleTableZoomChange(Number(event.target.value))} aria-label="表格缩放比例" />
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleTableZoomChange(tableZoom + 5)} disabled={tableZoom >= 150}>＋</button>
+                <strong>{tableZoom}%</strong>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => handleTableZoomChange(100)}>重置</button>
+              </div>
+              <p className="table-settings-note">缩放表格内容以调整同一屏幕中可见的列和数据量。</p>
             </section>
           </div>
         </Modal>

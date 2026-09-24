@@ -3149,6 +3149,9 @@ input[type="checkbox"] {
   color: #475569;
   font-size: 11px;
 }
+.table-zoom-control { display: flex; align-items: center; gap: 8px; }
+.table-zoom-control input[type="range"] { width: 180px; accent-color: var(--teal-600); }
+.table-zoom-control strong { min-width: 42px; color: var(--teal-700); font-size: 12px; text-align: right; }
 
 .attachment-media {
   display: flex;
@@ -5398,6 +5401,7 @@ body {
 .semantic-management { display: flex; flex-direction: column; gap: 16px; }
 .datagrid-toolbar, .datagrid-toolbar-actions, .datagrid-view-actions { overflow: visible !important; min-width: 0; }
 .workbench-view-sidebar { width: 224px; flex: 0 0 224px; padding: 14px 10px; border-right: 1px solid var(--line); background: #f8fbfb; overflow-y: auto; }
+.sidebar-collapsed .workbench-view-sidebar { display: none; }
 .workbench-view-sidebar .view-switcher { padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: #fff; box-shadow: 0 4px 14px rgba(15, 63, 62, .05); }
 .workbench-view-sidebar .nav-section { margin: 0 0 8px; color: var(--ink-800); font-size: 13px; font-weight: 700; }
 .workbench-view-sidebar .view-switcher-control { display: flex; gap: 5px; }
