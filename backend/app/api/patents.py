@@ -771,12 +771,11 @@ def bulk_delete_patents(
     """批量删除专利。请求体直接为 [id1, id2, ...] 数组。"""
     if not patent_ids:
         return {"success": True, "deleted_count": 0}
-    from app.models.patent import Patent as PatentModel
-    patents = db.query(PatentModel).filter(PatentModel.id.in_(patent_ids)).all()
-    for p in patents:
-        db.delete(p)
-    db.commit()
-    return {"success": True, "deleted_count": len(patents)}
+    deleted_count = 0
+    for patent_id in dict.fromkeys(patent_ids):
+        if PatentService.delete_patent(db, int(patent_id)):
+            deleted_count += 1
+    return {"success": True, "deleted_count": deleted_count}
 
 
 class BulkTagRequest(BaseModel):
@@ -893,15 +892,15 @@ def delete_all_patents_in_database(
 ):
     """清空指定库下的所有专利（整库清空，不删库本身）。"""
     from app.models.patent import Patent as PatentModel
-    count = db.query(PatentModel).filter(PatentModel.database_id == database_id).count()
-    if count == 0:
+    from app.services.patent_database_scope import in_database
+    patent_ids = [row[0] for row in db.query(PatentModel.id).filter(in_database(database_id)).all()]
+    if not patent_ids:
         return {"success": True, "deleted_count": 0}
-    # 批量删除（SQLite 单条 delete 较慢，用 delete 语句）
-    db.query(PatentModel).filter(PatentModel.database_id == database_id).delete(
-        synchronize_session=False
-    )
-    db.commit()
-    return {"success": True, "deleted_count": count}
+    deleted_count = 0
+    for patent_id in patent_ids:
+        if PatentService.delete_patent(db, int(patent_id)):
+            deleted_count += 1
+    return {"success": True, "deleted_count": deleted_count}
 
 
 @router.post("/cleanup/invalid-placeholders")

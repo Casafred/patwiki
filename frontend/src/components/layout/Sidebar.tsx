@@ -266,7 +266,6 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         {renderSectionToggle('workspace', '工作台')}
         {expandedSections.workspace && <div className="sidebar-section-content">
           <button className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`} onClick={() => handleProductClick(null)} title="全部专利"><Icon name="table" /><span className="nav-label">全部专利</span></button>
-          <button className={`nav-item ${currentPage === 'dashboard' || currentPage === 'stats' ? 'active' : ''}`} onClick={() => onNavigate('dashboard', currentDatabaseId)} title="专利统计分析"><Icon name="dashboard" /><span className="nav-label">专利统计分析</span></button>
         </div>}
 
         {renderSectionToggle('intelligence', '智能与自动化')}
@@ -294,7 +293,6 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
             {expandedSubsections.system && <div className="sidebar-subsection-content">
               <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management', currentDatabaseId)} title="业务管理台"><Icon name="settings" /><span className="nav-label">业务管理台</span></button>
               <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing', currentDatabaseId)} title="协作与权限"><Icon name="users" /><span className="nav-label">协作与权限</span></button>
-              <button className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings', currentDatabaseId)} title="设置"><Icon name="sliders" /><span className="nav-label">设置</span></button>
             </div>}
           </div>
         </div>}

@@ -4665,7 +4665,17 @@ body {
 
 .detail-content {
   min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 63, 62, .05);
 }
+.detail-tabs { gap: 6px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: #f4f8f8; }
+.detail-tab { min-height: 36px; padding: 0 13px; border-radius: 6px; color: var(--ink-600); transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
+.detail-tab:hover { background: #fff; color: var(--teal-700); }
+.detail-tab.active { background: #fff; color: var(--teal-700); box-shadow: 0 2px 8px rgba(15, 118, 110, .12); }
+.detail-tab.active::after { display: none; }
 
 .identity-tab-content {
   display: flex;
@@ -5387,6 +5397,18 @@ body {
 
 .semantic-management { display: flex; flex-direction: column; gap: 16px; }
 .datagrid-toolbar, .datagrid-toolbar-actions, .datagrid-view-actions { overflow: visible !important; min-width: 0; }
+.workbench-view-sidebar { width: 224px; flex: 0 0 224px; padding: 14px 10px; border-right: 1px solid var(--line); background: #f8fbfb; overflow-y: auto; }
+.workbench-view-sidebar .view-switcher { padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: #fff; box-shadow: 0 4px 14px rgba(15, 63, 62, .05); }
+.workbench-view-sidebar .nav-section { margin: 0 0 8px; color: var(--ink-800); font-size: 13px; font-weight: 700; }
+.workbench-view-sidebar .view-switcher-control { display: flex; gap: 5px; }
+.workbench-view-sidebar .view-switcher-select { min-width: 0; flex: 1; }
+.workbench-main { overflow: hidden; }
+@media (max-width: 880px) {
+  .workbench-view-sidebar { width: 188px; flex-basis: 188px; }
+}
+@media (max-width: 680px) {
+  .workbench-view-sidebar { display: none; }
+}
 .datagrid-toolbar-actions { flex-wrap: wrap; }
 .datagrid-import-button { white-space: nowrap; min-width: 116px; }
 .import-management-menu-wrap { position: relative; z-index: 120; flex: 0 0 auto; }

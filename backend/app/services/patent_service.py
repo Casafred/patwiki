@@ -1124,16 +1124,29 @@ class PatentService:
             return False
         from app.services.semantic_index_service import SemanticIndexService
         SemanticIndexService.enqueue_delete(db, patent.id)
-        # SQLite/Postgres installations may not have cascades on legacy
-        # citation and association tables. Remove dependent rows explicitly so
-        # a normal row delete does not surface as a generic Network error.
-        db.query(Citation).filter(or_(Citation.citing_patent_id == patent.id, Citation.cited_patent_id == patent.id)).delete(synchronize_session=False)
-        db.query(PatentDatabaseMembership).filter(PatentDatabaseMembership.patent_id == patent.id).delete(synchronize_session=False)
-        db.execute(patent_tag.delete().where(patent_tag.c.patent_id == patent.id))
-        db.execute(patent_project.delete().where(patent_project.c.patent_id == patent.id))
+        PatentService._delete_patent_dependents(db, patent.id)
         db.delete(patent)
         db.commit()
         return True
+
+    @staticmethod
+    def _delete_patent_dependents(db: Session, patent_id: int) -> None:
+        """Remove every metadata row that points at a patent.
+
+        Several installations were created before all foreign keys gained
+        ``ON DELETE CASCADE``. Looking at the model metadata keeps deletion
+        compatible with both those databases and newly migrated databases.
+        """
+        for table in Patent.metadata.tables.values():
+            if table.name == Patent.__table__.name:
+                continue
+            predicates = []
+            for column_name in ("patent_id", "citing_patent_id", "cited_patent_id"):
+                column = table.c.get(column_name)
+                if column is not None:
+                    predicates.append(column == patent_id)
+            if predicates:
+                db.execute(table.delete().where(or_(*predicates)))
 
     @staticmethod
     def get_stats(db: Session, database_id: Optional[int] = None, product_id: Optional[int] = None, patent_ids: Optional[list[int]] = None) -> dict:

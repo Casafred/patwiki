@@ -526,6 +526,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [undoStack, setUndoStack] = useState<Array<{ patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
   const [redoStack, setRedoStack] = useState<Array<{ patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
+  const [columnUndo, setColumnUndo] = useState<{ viewId: number | null; beforeConfig: ViewColumnConfig[] | null; afterConfig: ViewColumnConfig[] | null; beforeFields: FieldMeta[]; afterFields: FieldMeta[] } | null>(null)
+  const [columnRedo, setColumnRedo] = useState<{ viewId: number | null; beforeConfig: ViewColumnConfig[] | null; afterConfig: ViewColumnConfig[] | null; beforeFields: FieldMeta[]; afterFields: FieldMeta[] } | null>(null)
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
   const [showTableTools, setShowTableTools] = useState(false)
   const [headerFilterText, setHeaderFilterText] = useState<string>('')
@@ -533,6 +535,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
+  const [pendingColumnDelete, setPendingColumnDelete] = useState<string | null>(null)
   const [showTableSettings, setShowTableSettings] = useState(false)
   const [viewConfigNotice, setViewConfigNotice] = useState('')
   const [showBulkEdit, setShowBulkEdit] = useState(false)
@@ -1631,6 +1634,21 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   const handleUndo = async () => {
+    if (columnUndo) {
+      try {
+        if (columnUndo.viewId !== null && columnUndo.beforeConfig) {
+          const updated = await viewApi.update(columnUndo.viewId, { column_config: columnUndo.beforeConfig })
+          setViews(viewsRef.current.map(view => view.id === updated.id ? updated : view))
+          viewsRef.current = viewsRef.current.map(view => view.id === updated.id ? updated : view)
+        } else {
+          setFields(columnUndo.beforeFields)
+          try { localStorage.setItem('patwiki_field_order', JSON.stringify(columnUndo.beforeFields.map(field => field.key))) } catch { /* storage is optional */ }
+        }
+        setColumnRedo(columnUndo)
+        setColumnUndo(null)
+      } catch (error: unknown) { alert('撤回列删除失败: ' + getErrorMessage(error)) }
+      return
+    }
     const command = undoStack[undoStack.length - 1]
     if (!command) return
     try {
@@ -1642,6 +1660,21 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   const handleRedo = async () => {
+    if (columnRedo) {
+      try {
+        if (columnRedo.viewId !== null && columnRedo.afterConfig) {
+          const updated = await viewApi.update(columnRedo.viewId, { column_config: columnRedo.afterConfig })
+          setViews(viewsRef.current.map(view => view.id === updated.id ? updated : view))
+          viewsRef.current = viewsRef.current.map(view => view.id === updated.id ? updated : view)
+        } else {
+          setFields(columnRedo.afterFields)
+          try { localStorage.setItem('patwiki_field_order', JSON.stringify(columnRedo.afterFields.map(field => field.key))) } catch { /* storage is optional */ }
+        }
+        setColumnUndo(columnRedo)
+        setColumnRedo(null)
+      } catch (error: unknown) { alert('重做列删除失败: ' + getErrorMessage(error)) }
+      return
+    }
     const command = redoStack[redoStack.length - 1]
     if (!command) return
     try {
@@ -1996,21 +2029,23 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   // 从当前表格移除列。列移除只改变视图/浏览器列配置，不删除专利主数据。
-  const handleDeleteColumnByKey = async (fieldKey: string) => {
+  const deleteColumnByKey = async (fieldKey: string) => {
     const field = fields.find(f => f.key === fieldKey)
     if (!field) {
       alert('未找到该列信息')
       return
     }
-    const confirmText = `确定要从当前表格移除列"${field.name}"吗？\n\n• 只移除当前表格的显示配置\n• 专利主数据和该列已有内容都会保留\n• 之后可在列管理中重新显示`
-    if (!confirm(confirmText)) return
     try {
       if (activeView) {
-        const next = buildViewColumnConfig(activeView, fields).map(column =>
+        const beforeConfig = buildViewColumnConfig(activeView, fields)
+        const next = beforeConfig.map(column =>
           column.key === fieldKey ? { ...column, visible: false } : column,
         )
         await saveViewColumnConfig(next)
+        setColumnUndo({ viewId: activeView.id, beforeConfig, afterConfig: next, beforeFields: fields, afterFields: fields })
       } else {
+        const beforeFields = fields
+        const afterFields = fields.map(item => item.key === fieldKey ? { ...item, visible: false } : item)
         setFields(previous => {
           const next = previous.map(item => item.key === fieldKey ? { ...item, visible: false } : item)
           try {
@@ -2018,7 +2053,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           } catch (error) { console.error('Failed to save hidden fields:', error) }
           return next
         })
+        setColumnUndo({ viewId: null, beforeConfig: null, afterConfig: null, beforeFields, afterFields })
       }
+      setColumnRedo(null)
       setContextMenu(null)
     } catch (error: unknown) {
       alert('移除列失败: ' + getErrorMessage(error))
@@ -2158,6 +2195,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       alert('批量回滚失败: ' + getErrorMessage(error))
     }
   }
+
+  const requestDeleteColumnByKey = (fieldKey: string) => setPendingColumnDelete(fieldKey)
 
   const toggleBulkTagId = (tagId: number) => {
     setBulkTagIds(prev => prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId])
@@ -2534,7 +2573,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f3f4f6' }}>
+    <div className="workbench-shell" style={{ display: 'flex', height: '100%', background: '#f3f4f6' }}>
+      <aside className="workbench-view-sidebar" aria-label="工作台视图">
+        <ViewSwitcher onOpenView={() => undefined} />
+      </aside>
+      <div className="workbench-main" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
       <div className="datagrid-toolbar">
         <div className="datagrid-toolbar-heading">
           {onOpenSidebar && (
@@ -2608,7 +2651,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </button>
           </div>
           <div className="datagrid-toolbar-actions">
-          <div className="workbench-view-switcher"><ViewSwitcher onOpenView={() => undefined} /></div>
           <button type="button" className="btn btn-sm btn-secondary patent-analysis-trigger" onClick={() => { setAnalysisScope(selectedIds.length ? 'selected' : 'view'); setShowPatentAnalysis(true) }} title="对当前视图或勾选专利进行统计分析"><Icon name="chart" size={14} /> 统计分析</button>
           {onOpenImport && (
             <div className="import-management-menu-wrap">
@@ -2657,10 +2699,10 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </div>
           <div className="datagrid-tool-menu-wrap" ref={tableToolsRef}>
             <div className="datagrid-history-actions" aria-label="编辑历史">
-              <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleUndo()} disabled={undoStack.length === 0} title="撤回最近一次单元格编辑" aria-label="撤回">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleUndo()} disabled={undoStack.length === 0 && !columnUndo} title="撤回最近一次编辑或列删除" aria-label="撤回">
                 <Icon name="undo" size={14} />
               </button>
-              <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleRedo()} disabled={redoStack.length === 0} title="重做最近一次单元格编辑" aria-label="重做">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleRedo()} disabled={redoStack.length === 0 && !columnRedo} title="重做最近一次编辑或列删除" aria-label="重做">
                 <Icon name="redo" size={14} />
               </button>
             </div>
@@ -2821,10 +2863,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                           justifyContent: 'space-between',
                           height: '100%',
                           padding: '0 10px',
-                          cursor: field.sortable ? 'pointer' : 'default',
+                          cursor: 'pointer',
                           minHeight: 34,
                         }}
-                        onClick={() => handleSort(field.key)}
+                        onClick={() => {
+                          const firstPatent = patents[0]
+                          if (firstPatent) setActiveCell({ patentId: firstPatent.id, fieldKey: field.key })
+                          setActiveHeaderMenu(null)
+                        }}
                       >
                         <span style={{
                           fontSize: 12,
@@ -3278,6 +3324,25 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         </div>}
       </div>}
 
+      {pendingColumnDelete && (
+        <Modal title="确认移除列" onClose={() => setPendingColumnDelete(null)} width={460}>
+          {(() => {
+            const field = fields.find(item => item.key === pendingColumnDelete)
+            if (!field) return <div className="empty-state">列不存在或已被移除。</div>
+            return (
+              <>
+                <p style={{ margin: '0 0 10px', color: '#334155', fontSize: 13 }}>确定从当前表格移除“{field.name}”吗？</p>
+                <p style={{ margin: 0, color: '#64748b', fontSize: 12, lineHeight: 1.6 }}>这只会隐藏当前表格中的列，专利数据和已有内容会保留。操作完成后可以使用工具栏的撤回按钮恢复。</p>
+                <div className="modal-footer" style={{ margin: '18px -20px -20px' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setPendingColumnDelete(null)}>取消</button>
+                  <button type="button" className="btn btn-danger" onClick={() => { const key = pendingColumnDelete; setPendingColumnDelete(null); void deleteColumnByKey(key) }}>确认移除</button>
+                </div>
+              </>
+            )
+          })()}
+        </Modal>
+      )}
+
       {showFieldConfig && activeView && (
         <ViewColumnConfigPanel
           key={activeView.id}
@@ -3286,7 +3351,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           fields={fields}
           onClose={() => setShowFieldConfig(false)}
           onSave={saveViewColumnConfig}
-          onRemove={fieldKey => void handleDeleteColumnByKey(fieldKey)}
+          onRemove={requestDeleteColumnByKey}
         />
       )}
 
@@ -3340,7 +3405,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           onClose={() => setShowFieldConfig(false)}
           onToggleVisible={handleToggleFieldVisible}
           onToggleFreeze={handleToggleFreeze}
-          onRemove={fieldKey => void handleDeleteColumnByKey(fieldKey)}
+          onRemove={requestDeleteColumnByKey}
           onReorder={handleReorderFields}
         />
       )}
@@ -3978,7 +4043,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                   <Icon name="columns" /> 右侧插入新列
                 </div>
                 <div className="menu-divider" />
-                <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => void handleDeleteColumnByKey(field.key)}>
+                <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => requestDeleteColumnByKey(field.key)}>
                   <Icon name="trash" /> 从当前表格移除
                 </div>
               </>
@@ -4160,6 +4225,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           onClose={() => setShowWorkFileDialog(false)}
         />
       )}
+      </div>
     </div>
   )
 }
