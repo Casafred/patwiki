@@ -1448,6 +1448,51 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     })
   }, [activeDatabaseId, groupByFamily, loadPatents, pageSize])
 
+  const refreshAfterDeletion = async (deletedIds: number[] = []) => {
+    if (deletedIds.length > 0) {
+      const deleted = new Set(deletedIds)
+      patentsRef.current = patentsRef.current.filter(item => !deleted.has(item.id))
+      setPatents(patentsRef.current, Math.max(0, totalPatentsRef.current - deleted.size))
+    }
+    const element = tableWrapperRef.current
+    const scrollTop = element?.scrollTop ?? 0
+    const scrollLeft = element?.scrollLeft ?? 0
+    const loadedPages = Math.max(1, continuousPageRef.current)
+    if (groupByFamily && activeDatabaseId) {
+      try {
+        await patentApi.rebuildFamilies(activeDatabaseId)
+        setCollapsedFamilyKeys(new Set())
+        setGroupedGroups([])
+      } catch (error) {
+        // The record is already deleted; a transient family rebuild failure
+        // must not turn a successful delete into a misleading error.
+        console.error('Failed to rebuild family relations after deletion:', error)
+      }
+    }
+    if (tableViewMode === 'continuous') {
+      await restoreContinuousPosition({
+        page,
+        continuousPage: loadedPages,
+        scrollTop,
+        scrollLeft,
+        savedAt: Date.now(),
+      })
+      return
+    }
+    const loaded = await loadPatents(page, false, pageSize)
+    if (!loaded) return
+    // A full page can become empty after deleting its last row.
+    if (page > 1 && totalPatentsRef.current <= (page - 1) * pageSize) {
+      setPage(page - 1)
+      return
+    }
+    window.requestAnimationFrame(() => {
+      if (!element) return
+      element.scrollTop = scrollTop
+      element.scrollLeft = scrollLeft
+    })
+  }
+
   // 批量删除选中的专利
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return
@@ -1456,8 +1501,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       const result = await patentApi.bulkDelete(selectedIds)
       alert(`已删除 ${result.deleted_count} 条专利`)
       clearSelection()
-      setPage(1)
-      loadPatents()
+      await refreshAfterDeletion(selectedIds)
     } catch (error: unknown) {
       alert(getErrorMessage(error, '删除失败'))
     }
@@ -2101,7 +2145,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       if (selectedIds.includes(patentId)) {
         setSelectedIds(selectedIds.filter(id => id !== patentId))
       }
-      await loadPatents()
+      await refreshAfterDeletion([patentId])
     } catch (error: unknown) {
       alert('删除失败: ' + getErrorMessage(error))
     }
