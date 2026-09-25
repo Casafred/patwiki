@@ -125,6 +125,33 @@ class ExternalSyncTest(unittest.TestCase):
         self.db.refresh(patent)
         self.assertEqual(patent.title, "外部同步专利")
 
+    def test_subscription_updates_only_selected_fields(self):
+        patent = Patent(
+            title="人工标题", publication_number="CN123456789A1",
+            applicant="原申请人", database_id=self.database.id,
+        )
+        self.db.add(patent)
+        self.db.commit()
+        subscription = SyncService.create_subscription(self.db, {
+            "database_id": self.database.id,
+            "connector_id": self.connector.id,
+            "name": "只更新公开日",
+            "scope_json": {"update_fields": ["publication_date"]},
+            "schedule_json": {},
+            "review_policy": "safe_auto_apply",
+            "enabled": True,
+        })
+        SyncService.run_subscription(self.db, subscription)
+        self.db.refresh(patent)
+        self.assertEqual(patent.title, "人工标题")
+        self.assertEqual(patent.applicant, "原申请人")
+        self.assertEqual(str(patent.publication_date), "2026-01-01")
+        self.assertEqual(
+            {item.canonical_field_key for item in self.db.query(ExternalFactObservation).all()},
+            {"publication_date"},
+        )
+        self.assertFalse(any(item.field_key == "legal_status" for item in self.db.query(PatentHistory).all()))
+
     def test_failed_run_remains_queryable(self):
         connector = ConnectorDefinition(code="unsupported", name="Unsupported", provider_type="unknown")
         self.db.add(connector)

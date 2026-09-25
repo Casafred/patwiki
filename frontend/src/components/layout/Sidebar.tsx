@@ -277,13 +277,6 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
               <button className={`nav-item ${currentPage === 'ai-center' ? 'active' : ''}`} onClick={() => onNavigate('ai-center', currentDatabaseId)} title="AI 能力管理中心"><Icon name="sparkles" /><span className="nav-label">AI 能力中心</span></button>
             </div>}
           </div>
-          <div className="sidebar-subsection">
-            {renderSubsectionToggle('automation', '自动化')}
-            {expandedSubsections.automation && <div className="sidebar-subsection-content">
-              <button className={`nav-item ${currentPage === 'automation' ? 'active' : ''}`} onClick={() => onNavigate('automation', currentDatabaseId)} title="自动化规则"><Icon name="automation" /><span className="nav-label">自动化规则</span></button>
-              <button className={`nav-item ${currentPage === 'external-sync' ? 'active' : ''}`} onClick={() => onNavigate('external-sync', currentDatabaseId)} title="外部数据同步"><Icon name="refresh" /><span className="nav-label">外部数据同步</span></button>
-            </div>}
-          </div>
         </div>}
 
         {renderSectionToggle('management', '管理')}

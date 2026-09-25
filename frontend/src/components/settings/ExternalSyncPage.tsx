@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { syncApi } from '../../api'
+import { fieldService as fieldApi } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
-import type { ExternalObservation, JsonObject, McpToolInfo, SyncConnector, SyncRun, SyncSubscription } from '../../types'
+import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, SyncConnector, SyncRun, SyncSubscription } from '../../types'
+
+const EXTERNAL_UPDATE_FIELDS = [
+  ['publication_date', '公开日'], ['grant_date', '授权日'], ['legal_status', '法律状态'],
+  ['application_number', '申请号'], ['publication_number', '公开号'], ['title', '标题'],
+  ['abstract', '摘要'], ['applicant', '申请人'], ['assignee', '受让人'], ['inventor', '发明人'],
+  ['filing_date', '申请日'], ['country', '国家/地区'], ['ipc_all', 'IPC 分类'],
+] as const
 
 function countValue(run: SyncRun, key: string): string {
   const value = run.counts[key]
@@ -19,6 +27,8 @@ export default function ExternalSyncPage() {
   const [applicant, setApplicant] = useState('')
   const [expression, setExpression] = useState('')
   const [intervalMinutes, setIntervalMinutes] = useState('1440')
+  const [targetFields, setTargetFields] = useState<string[]>(['publication_date', 'legal_status', 'title', 'abstract'])
+  const [fields, setFields] = useState<FieldMeta[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -33,12 +43,14 @@ export default function ExternalSyncPage() {
   const load = useCallback(async () => {
     if (!currentDatabaseId) return
     try {
-      const [connectorResult, subscriptionResult, runResult, observationResult] = await Promise.all([
+      const [connectorResult, subscriptionResult, runResult, observationResult, fieldResult] = await Promise.all([
         syncApi.connectors(),
         syncApi.subscriptions(currentDatabaseId),
         syncApi.runs(),
         syncApi.observations(),
+        fieldApi.list(),
       ])
+      setFields(fieldResult)
       setConnectors(connectorResult.items)
       const availableConnector = connectorResult.items.find(item => item.enabled) || connectorResult.items[0]
       setSelectedConnectorId(current => current && connectorResult.items.some(item => item.id === current) ? current : availableConnector?.id || null)
@@ -64,7 +76,7 @@ export default function ExternalSyncPage() {
         database_id: currentDatabaseId,
         connector_id: selectedConnectorId,
         name: name.trim(),
-        scope_json: { applicant: applicant.trim() || undefined, expression: expression.trim() || undefined },
+        scope_json: { applicant: applicant.trim() || undefined, expression: expression.trim() || undefined, update_fields: targetFields },
         schedule_json: { interval_minutes: Number(intervalMinutes) || 1440 },
         review_policy: 'safe_auto_apply',
         enabled: true,
@@ -149,8 +161,8 @@ export default function ExternalSyncPage() {
     <div className="page-container automation-page">
       <div className="page-header dashboard-header">
         <div>
-          <h2 className="page-title">外部数据同步</h2>
-          <p className="page-subtitle">连接外部专利数据源，按订阅更新事实并保留可审查来源。</p>
+          <h2 className="page-title">MCP 外部数据更新</h2>
+          <p className="page-subtitle">连接数据源，设置当前库的更新范围、字段与周期；所有变更保留来源和运行记录。</p>
         </div>
         <button className="btn btn-secondary" disabled={busy || !currentDatabaseId} onClick={() => void load()}>刷新状态</button>
       </div>
@@ -179,6 +191,7 @@ export default function ExternalSyncPage() {
       </section>
 
       {tools && <section className="automation-log-panel"><div className="section-heading"><h3>MCP 工具目录</h3><span>{Array.isArray(tools.services) ? `${tools.services.length} 个服务` : '已发现'}</span></div>
+        <div className="mcp-field-mapping"><strong>外部信息与目标列</strong><span>系统以字段的规范属性匹配，而不依赖表头文字。例如“公开日”“公开日期”只要映射到 publication_date 属性，就会更新同一信息。自定义且未映射属性的列不会自动覆盖。</span><div className="mcp-field-mapping-grid">{EXTERNAL_UPDATE_FIELDS.map(([key, label]) => <span key={key}>{label} → {fields.find(field => field.key === key)?.name || label} <small>({key})</small></span>)}</div></div>
         {Array.isArray(tools.services) && tools.services.map((service, index) => {
           const item = service as JsonObject
           const serviceTools = (Array.isArray(item.tools) ? item.tools : []) as unknown as McpToolInfo[]
@@ -198,17 +211,18 @@ export default function ExternalSyncPage() {
       </section>}
 
       <section className="automation-form">
-        <h3>新建监控订阅</h3>
+        <h3>新建自动更新规则</h3>
         <label>数据连接器<select className="form-input" value={selectedConnectorId || ''} onChange={event => setSelectedConnectorId(Number(event.target.value) || null)}><option value="">请选择连接器</option>{connectors.map(connector => <option key={connector.id} value={connector.id}>{connector.name} · {connector.provider_type}</option>)}</select></label>
         <label>订阅名称<input className="form-input" value={name} onChange={event => setName(event.target.value)} /></label>
         <label>申请人<input className="form-input" value={applicant} onChange={event => setApplicant(event.target.value)} placeholder="可选" /></label>
         <label>关键词表达式<input className="form-input" value={expression} onChange={event => setExpression(event.target.value)} placeholder="可选" /></label>
         <label>同步间隔（分钟）<input className="form-input" type="number" min="1" value={intervalMinutes} onChange={event => setIntervalMinutes(event.target.value)} /></label>
-        <button className="btn btn-primary" disabled={busy || !currentDatabaseId || !selectedConnectorId} onClick={() => void createSubscription()}>保存订阅</button>
+        <fieldset className="mcp-target-fields"><legend>允许自动更新的目标字段</legend><p>当前库字段名称可以调整，但需映射到对应规范属性。法律事件仍作为来源历史保存；只有勾选的属性会更新当前值。</p><div className="mcp-target-fields-grid">{EXTERNAL_UPDATE_FIELDS.map(([key, label]) => <label key={key}><input type="checkbox" checked={targetFields.includes(key)} onChange={event => setTargetFields(previous => event.target.checked ? [...previous, key] : previous.filter(item => item !== key))} />{fields.find(field => field.key === key)?.name || label}<small>{key}</small></label>)}</div></fieldset>
+        <button className="btn btn-primary" disabled={busy || !currentDatabaseId || !selectedConnectorId || targetFields.length === 0} onClick={() => void createSubscription()}>保存自动更新规则</button>
       </section>
 
       <section className="automation-list">
-        <div className="section-heading"><h3>同步订阅</h3><span>{subscriptions.length} 个</span></div>
+        <div className="section-heading"><h3>自动更新规则</h3><span>{subscriptions.length} 个</span></div>
         {subscriptions.map(subscription => <div className="automation-rule" key={subscription.id}>
           <div className="automation-rule-main"><div><h3>{subscription.name}</h3><p>{subscription.review_policy} · {subscription.schedule.interval_minutes ? `每 ${String(subscription.schedule.interval_minutes)} 分钟` : '手动'}</p></div><span className={`rule-status ${subscription.enabled ? 'enabled' : 'disabled'}`}>{subscription.enabled ? '已启用' : '已停用'}</span></div>
           <div className="automation-rule-meta"><span>{subscription.last_status || '尚未运行'}</span><span>{subscription.last_run_at || '-'}</span></div>

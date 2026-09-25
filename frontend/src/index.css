@@ -5725,6 +5725,24 @@ body {
 .ai-center-content > .workspace-page { padding: 0; }
 .ai-center-content > .workspace-page > .workspace-page-shell { max-width: none; padding: 0; }
 .ai-center-content .settings-page-header { display: none; }
+.mcp-automation-bridge { margin-top: 20px; padding: 18px; border: 1px solid #cce9e3; border-radius: 10px; background: #f8fcfb; }
+.mcp-automation-bridge-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.mcp-automation-bridge-heading h3 { margin: 0; color: #0f172a; font-size: 16px; }
+.mcp-automation-bridge-heading p { margin: 5px 0 0; color: #64748b; font-size: 12px; }
+.mcp-automation-bridge-badge { flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; background: #dff7f1; color: #0f766e; font-size: 11px; font-weight: 700; }
+.mcp-automation-bridge .automation-page { padding: 0; background: transparent; }
+.mcp-automation-bridge .page-header { display: none; }
+.mcp-field-mapping { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 16px; padding: 13px 14px; border: 1px solid #cce9e3; border-radius: 8px; background: #f0fdfa; color: #365b59; font-size: 12px; line-height: 1.55; }
+.mcp-field-mapping strong { color: #0f766e; font-size: 13px; }
+.mcp-field-mapping-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.mcp-field-mapping-grid span { padding: 7px 9px; border: 1px solid #cce9e3; border-radius: 5px; background: #fff; color: #275c57; }
+.mcp-target-fields { margin: 2px 0 12px; padding: 12px; border: 1px solid #dbe5e3; border-radius: 7px; background: #fbfefe; }
+.mcp-target-fields legend { padding: 0 5px; color: #0f766e; font-size: 12px; font-weight: 700; }
+.mcp-target-fields p { margin: 0 0 9px; color: #64748b; font-size: 11px; }
+.mcp-target-fields-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.mcp-target-fields-grid label { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 7px 8px; border: 1px solid #e2e8f0; border-radius: 5px; background: #fff; color: #334155; font-size: 12px; }
+.mcp-target-fields-grid small { margin-left: auto; color: #94a3b8; font-size: 10px; overflow-wrap: anywhere; }
+@media (max-width: 680px) { .mcp-automation-bridge-heading { flex-direction: column; } .mcp-field-mapping-grid { grid-template-columns: 1fr; } }
 .semantic-management-message { padding: 10px 12px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 12px; }
 .semantic-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .semantic-status-tile { min-height: 82px; padding: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; flex-direction: column; gap: 5px; }

@@ -267,8 +267,10 @@ def process_record(db: Session, run: SyncRun, subscription: SyncSubscription, re
         if not db.query(PatentDatabaseMembership).filter_by(patent_id=patent.id, database_id=subscription.database_id).first():
             db.add(PatentDatabaseMembership(patent_id=patent.id, database_id=subscription.database_id))
         ensure_patent_identifiers(db, patent, source_system="external")
+    configured_fields = (subscription.scope_json or {}).get("update_fields")
+    selected_fields = set(configured_fields) if isinstance(configured_fields, list) else SAFE_EXTERNAL_FIELDS | {"legal_status"}
     for field_key, value in record.fields.items():
-        if field_key not in SAFE_EXTERNAL_FIELDS or value is None:
+        if field_key not in SAFE_EXTERNAL_FIELDS or field_key not in selected_fields or value is None:
             continue
         observation = record_observation(db, run, snapshot, sync_record, patent, field_key, value, subscription.review_policy)
         run.counts_json["observations"] += 1
@@ -276,5 +278,8 @@ def process_record(db: Session, run: SyncRun, subscription: SyncSubscription, re
             run.counts_json["auto_applied"] += 1
         elif observation.decision == "pending_review":
             run.counts_json["review"] += 1
-    run.counts_json["legal_events"] += apply_legal_events(db, run, snapshot, patent, record, subscription.database_id, subscription.id)
+    run.counts_json["legal_events"] += apply_legal_events(
+        db, run, snapshot, patent, record, subscription.database_id, subscription.id,
+        apply_current_status="legal_status" in selected_fields,
+    )
     sync_record.outcome = "processed"

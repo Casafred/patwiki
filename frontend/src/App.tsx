@@ -8,8 +8,6 @@ import SettingsPage from './components/settings/SettingsPage'
 import FieldSettingsPage from './components/settings/FieldSettingsPage'
 import SharingPage from './components/settings/SharingPage'
 import AgentAnalysisPage from './components/analytics/AgentAnalysisPage'
-import AutomationPage from './components/settings/AutomationPage'
-import ExternalSyncPage from './components/settings/ExternalSyncPage'
 import ImportModal from './components/import/ImportModal'
 import ImportHistoryPage from './components/import/ImportHistoryPage'
 import ImportGovernancePage from './components/import/ImportGovernancePage'
@@ -290,8 +288,8 @@ function WorkspaceApp() {
             <Route path="db/:databaseId/patents/:patentId" element={<DatabaseRouteScope><PatentDetailRoute onOpenSidebar={() => setSidebarOpen(true)} /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/stats" element={<DatabaseRouteScope><StatsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/dashboard" element={<DatabaseRouteScope><StatsPage /></DatabaseRouteScope>} />
-            <Route path="db/:databaseId/automation" element={<DatabaseRouteScope><AutomationPage /></DatabaseRouteScope>} />
-            <Route path="db/:databaseId/external-sync" element={<DatabaseRouteScope><ExternalSyncPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/automation" element={<DatabaseRouteScope><AICapabilityCenter initialTab="mcp" /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/external-sync" element={<DatabaseRouteScope><AICapabilityCenter initialTab="mcp" /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/settings" element={<DatabaseRouteScope><SettingsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/fields" element={<DatabaseRouteScope><FieldSettingsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/management" element={<DatabaseRouteScope><ManagementPage /></DatabaseRouteScope>} />
@@ -305,8 +303,8 @@ function WorkspaceApp() {
             <Route path="patents/:patentId" element={<PatentDetailRoute onOpenSidebar={() => setSidebarOpen(true)} />} />
             <Route path="stats" element={<StatsPage />} />
             <Route path="dashboard" element={<StatsPage />} />
-            <Route path="automation" element={<AutomationPage />} />
-            <Route path="external-sync" element={<ExternalSyncPage />} />
+            <Route path="automation" element={<AICapabilityCenter initialTab="mcp" />} />
+            <Route path="external-sync" element={<AICapabilityCenter initialTab="mcp" />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="fields" element={<FieldSettingsPage />} />
             <Route path="management" element={<ManagementPage />} />
