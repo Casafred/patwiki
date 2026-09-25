@@ -4,7 +4,7 @@ from datetime import datetime, date
 import json
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.attributes import set_committed_value
-from sqlalchemy import func, or_, and_, desc, text, String
+from sqlalchemy import func, or_, and_, desc, text, String, inspect
 
 from app.models import (
     Patent, Product, Project, Tag, CustomField,
@@ -1125,8 +1125,19 @@ class PatentService:
         if not patent:
             return False
         from app.services.semantic_index_service import SemanticIndexService
-        SemanticIndexService.enqueue_delete(db, patent.id)
+        from app.models.semantic_search import SemanticIndexOutbox
+        # The outbox still has a non-null FK to patents.id in deployed SQLite
+        # databases. Enqueuing a delete event and then deleting its parent in
+        # one transaction always fails. Apply the vector delete while the
+        # patent and membership still exist; dependent outbox rows can then be
+        # removed with the rest of the patent metadata.
+        delete_event = SemanticIndexOutbox(operation="delete", patent_id=patent.id, reason="record_deleted", dedupe_key=f"delete:{patent.id}")
+        SemanticIndexService.apply_outbox(db, delete_event)
         PatentService._delete_patent_dependents(db, patent.id)
+        # Ensure dependent DELETE statements are sent before the ORM emits
+        # DELETE FROM patents during commit (important for reflected legacy
+        # tables that are outside SQLAlchemy's unit-of-work graph).
+        db.flush()
         db.delete(patent)
         db.commit()
         return True
@@ -1139,26 +1150,68 @@ class PatentService:
         ``ON DELETE CASCADE``. Looking at the model metadata keeps deletion
         compatible with both those databases and newly migrated databases.
         """
+        # Do not rely solely on SQLAlchemy's imported metadata here. Existing
+        # installations can contain tables created by an older migration, and
+        # those tables still enforce foreign keys even when the current model
+        # no longer imports them. Inspect the live database schema instead.
+        bind = db.connection()
+        inspector = inspect(bind)
         patent_table = Patent.__table__
-        # Clear self-references first (working copies use duplicate_of).
-        for foreign_key in patent_table.foreign_keys:
-            if foreign_key.column.table.name != patent_table.name or foreign_key.parent.name == "id":
+        # Working copies and other legacy self-references must be detached
+        # before deleting the target row.
+        for foreign_key in inspector.get_foreign_keys(patent_table.name):
+            if foreign_key.get("referred_table") != patent_table.name:
                 continue
-            db.execute(patent_table.update().where(foreign_key.parent == patent_id).values({foreign_key.parent.name: None}))
-        for table in Patent.metadata.tables.values():
-            if table.name == patent_table.name:
+            for column_name in foreign_key.get("constrained_columns") or []:
+                column = patent_table.c.get(column_name)
+                if column is not None and column_name != "id":
+                    db.execute(patent_table.update().where(column == patent_id).values({column_name: None}))
+        for table_name in inspector.get_table_names():
+            if table_name == patent_table.name:
                 continue
-            foreign_columns = [fk.parent for fk in table.foreign_keys if fk.column.table.name == patent_table.name]
-            if foreign_columns:
-                db.execute(table.delete().where(or_(*(column == patent_id for column in foreign_columns))))
+            foreign_columns: list[str] = []
+            try:
+                table_columns = {column.get("name") for column in inspector.get_columns(table_name)}
+            except Exception:
+                table_columns = set()
+            try:
+                for foreign_key in inspector.get_foreign_keys(table_name):
+                    if foreign_key.get("referred_table") != patent_table.name:
+                        continue
+                    foreign_columns.extend(
+                        column for column in (foreign_key.get("constrained_columns") or [])
+                        if column
+                    )
+            except Exception:
+                # A malformed legacy table should not prevent the remaining
+                # known dependents from being cleaned up.
                 continue
-            predicates = []
-            for column_name in ("patent_id", "citing_patent_id", "cited_patent_id"):
-                column = table.c.get(column_name)
-                if column is not None:
-                    predicates.append(column == patent_id)
-            if predicates:
-                db.execute(table.delete().where(or_(*predicates)))
+            # A few very old SQLite tables lost their FK declaration during
+            # a table rebuild, but still keep a patent reference column. They
+            # must be cleaned too or the logical record will remain orphaned.
+            if not foreign_columns:
+                foreign_columns = [
+                    column for column in ("patent_id", "citing_patent_id", "cited_patent_id")
+                    if column in table_columns
+                ]
+            if not foreign_columns:
+                continue
+            table = patent_table.metadata.tables.get(table_name)
+            if table is None:
+                # The table may be present in the database but absent from the
+                # current ORM registry. Use quoted SQL identifiers from the
+                # inspector result rather than silently leaving an FK behind.
+                quoted = bind.dialect.identifier_preparer.quote(table_name)
+                predicates = [
+                    f"{bind.dialect.identifier_preparer.quote(column)} = :patent_id"
+                    for column in dict.fromkeys(foreign_columns)
+                ]
+                db.execute(text(f"DELETE FROM {quoted} WHERE {' OR '.join(predicates)}"), {"patent_id": patent_id})
+            else:
+                columns = [table.c.get(column) for column in dict.fromkeys(foreign_columns)]
+                columns = [column for column in columns if column is not None]
+                if columns:
+                    db.execute(table.delete().where(or_(*(column == patent_id for column in columns))))
 
     @staticmethod
     def get_stats(db: Session, database_id: Optional[int] = None, product_id: Optional[int] = None, patent_ids: Optional[list[int]] = None) -> dict:

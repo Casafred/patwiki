@@ -396,15 +396,6 @@ def rebuild_database_families(db: Session, database_id: int) -> dict:
             if normalized:
                 by_number.setdefault(normalized, set()).add(patent.id)
 
-    # A patent lifecycle is identified by its application number. Publication
-    # and grant numbers can change across the lifecycle, so records sharing a
-    # normalized application number must be magnetized even when the import
-    # did not include an explicit family_members column.
-    for member_ids in by_number.values():
-        ids = list(member_ids)
-        for member_id in ids[1:]:
-            union(ids[0], member_id)
-
     parent = {patent_id: patent_id for patent_id in patent_by_id}
 
     def find(item: int) -> int:
@@ -417,6 +408,15 @@ def rebuild_database_families(db: Session, database_id: int) -> dict:
         left_root, right_root = find(left), find(right)
         if left_root != right_root:
             parent[right_root] = left_root
+
+    # A patent lifecycle is identified by its application number. Publication
+    # and grant numbers can change across the lifecycle, so records sharing a
+    # normalized application number must be magnetized even when the import
+    # did not include an explicit family_members column.
+    for member_ids in by_number.values():
+        ids = list(member_ids)
+        for member_id in ids[1:]:
+            union(ids[0], member_id)
 
     existing_groups: dict[int, list[int]] = {}
     for patent in patents:

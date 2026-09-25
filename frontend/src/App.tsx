@@ -111,6 +111,7 @@ function WorkspaceApp() {
   const searchParamsString = searchParams.toString()
   const currentPage = useMemo(() => getPageFromPath(location.pathname), [location.pathname])
   const [showImport, setShowImport] = useState(false)
+  const [initializing, setInitializing] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const lastLoadedViewsDatabaseId = useRef<number | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -200,6 +201,8 @@ function WorkspaceApp() {
       }
     } catch (e) {
       console.error('Failed to load meta data:', e)
+    } finally {
+      setInitializing(false)
     }
   }, [currentDatabaseId, requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProducts, setProjects, setTags])
 
@@ -263,6 +266,7 @@ function WorkspaceApp() {
   }
   return (
     <div className={`app-container ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      {initializing && <div className="app-initializing" role="status" aria-live="polite"><div className="app-initializing-mark"><Icon name="sparkles" size={22} /></div><div className="app-initializing-title">正在初始化 PatWiki</div><div className="app-initializing-subtitle">正在准备数据库、视图和 AI 能力</div><div className="app-initializing-progress"><span /></div></div>}
       <Sidebar
         currentPage={currentPage}
         onNavigate={handleNavigate}

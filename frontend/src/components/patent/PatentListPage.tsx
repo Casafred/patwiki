@@ -1422,6 +1422,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       try {
         const result = await patentApi.rebuildFamilies(activeDatabaseId)
         setViewConfigNotice(`已重建 ${result.family_count} 个同族组，覆盖 ${result.grouped_patent_count} 件专利`)
+        setCollapsedFamilyKeys(new Set())
+        setGroupedGroups([])
+        await loadPatents(1, false, pageSize, true)
       } catch (error: unknown) {
         setViewConfigNotice(getErrorMessage(error, '同族关系重建失败'))
       }
@@ -1435,7 +1438,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   useEffect(() => {
     if (!groupByFamily || !activeDatabaseId || familyRebuildDatabaseRef.current === activeDatabaseId) return
     familyRebuildDatabaseRef.current = activeDatabaseId
-    void patentApi.rebuildFamilies(activeDatabaseId).then(() => loadPatents(1, false, pageSize, true)).catch(error => {
+    void patentApi.rebuildFamilies(activeDatabaseId).then(() => {
+      setCollapsedFamilyKeys(new Set())
+      setGroupedGroups([])
+      return loadPatents(1, false, pageSize, true)
+    }).catch(error => {
       familyRebuildDatabaseRef.current = null
       console.error('Failed to rebuild family relations:', error)
     })

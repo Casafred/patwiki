@@ -17,6 +17,8 @@ from app.models import (
     PatentView,
 )
 from app.services.database_service import DatabaseService
+from app.services.patent_service import PatentService
+from app.models.semantic_search import SemanticIndexOutbox
 
 
 class DatabaseServiceTest(unittest.TestCase):
@@ -90,6 +92,40 @@ class DatabaseServiceTest(unittest.TestCase):
         self.assertEqual(self.db.query(ImportSourceRow).filter_by(id=source_id).count(), 0)
         self.assertEqual(self.db.query(FieldObservation).filter_by(import_batch_id=batch_id).count(), 0)
         self.assertEqual(self.db.query(PatentHistory).filter_by(import_batch_id=batch_id).count(), 0)
+
+    def test_delete_patent_cleans_unknown_legacy_foreign_key_tables(self):
+        """Deletion must handle tables from older app versions not in the ORM registry."""
+        self.db.execute(text(
+            "CREATE TABLE legacy_patent_links ("
+            "id INTEGER PRIMARY KEY, patent_id INTEGER NOT NULL, "
+            "FOREIGN KEY(patent_id) REFERENCES patents(id))"
+        ))
+        database = PatentDatabase(name="旧表删除库", code="LEGACY_PATENT_DELETE")
+        patent = Patent(title="带旧表引用的专利", database=database)
+        self.db.add(patent)
+        self.db.flush()
+        self.db.execute(text("INSERT INTO legacy_patent_links (patent_id) VALUES (:patent_id)"), {"patent_id": patent.id})
+        self.db.commit()
+
+        self.assertTrue(PatentService.delete_patent(self.db, patent.id))
+        self.assertIsNone(self.db.query(Patent).filter_by(id=patent.id).first())
+        self.assertEqual(self.db.execute(text("SELECT count(*) FROM legacy_patent_links")).scalar(), 0)
+
+    def test_delete_patent_cleans_semantic_outbox_with_foreign_keys_enabled(self):
+        database = PatentDatabase(name="语义删除库", code="SEMANTIC_PATENT_DELETE")
+        patent = Patent(title="带语义任务的专利", database=database)
+        self.db.add(patent)
+        self.db.flush()
+        patent_id = patent.id
+        self.db.add(SemanticIndexOutbox(
+            operation="upsert", patent_id=patent_id,
+            reason="record_updated", dedupe_key=f"upsert:{patent_id}",
+        ))
+        self.db.commit()
+
+        self.assertTrue(PatentService.delete_patent(self.db, patent_id))
+        self.assertIsNone(self.db.get(Patent, patent_id))
+        self.assertEqual(self.db.query(SemanticIndexOutbox).filter_by(patent_id=patent_id).count(), 0)
 
     def test_force_delete_detaches_duplicate_patent_in_another_database(self):
         target_db = PatentDatabase(name="目标库", code="DELETE_TARGET")
