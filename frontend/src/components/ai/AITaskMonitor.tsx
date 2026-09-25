@@ -117,7 +117,7 @@ export default function AITaskMonitor() {
   }
 
   return (
-    <div>
+    <div className="ai-task-monitor-page">
       <div className="page-header">
         <h2 className="page-title">AI 任务监控</h2>
         <p className="page-subtitle">
@@ -168,20 +168,12 @@ export default function AITaskMonitor() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="ai-task-list">
           {tasks.map(task => {
             const progress = getProgress(task)
             const isRunning = task.status === 'pending' || task.status === 'processing' || task.status === 'running'
             return (
-              <div
-                key={task.id}
-                style={{
-                  background: 'white',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 8,
-                  padding: 16,
-                }}
-              >
+              <div key={task.id} className="ai-task-card">
                 {/* 任务头部 */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>

@@ -40,6 +40,15 @@ interface PatentDetailPageProps {
 type Tab = 'basic' | 'provenance' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
+const LEGAL_STATUS_LABELS: Record<string, string> = {
+  unknown: '未知', pending: '待审', published: '公开', examining: '实审中',
+  granted: '授权', rejected: '驳回', withdrawn: '撤回',
+  deemed_withdrawn: '视撤', expired: '终止', abandoned: '放弃',
+}
+const PATENT_TYPE_LABELS: Record<string, string> = {
+  invention: '发明', utility_model: '实用新型', design: '外观设计', pct: 'PCT',
+}
+
 export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, onOpenSidebar }: PatentDetailPageProps) {
   const [patent, setPatent] = useState<Patent | null>(null)
   const [loading, setLoading] = useState(true)
@@ -327,6 +336,33 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
               <button className="btn btn-danger" onClick={handleDelete}>删除</button>
             </>
           )}
+        </div>
+      </div>
+
+      <div className="detail-overview-strip" aria-label="专利核心信息">
+        <div className="detail-overview-item detail-overview-status">
+          <span>法律状态</span>
+          <strong>{LEGAL_STATUS_LABELS[patent.legal_status || ''] || patent.legal_status || '未标注'}</strong>
+        </div>
+        <div className="detail-overview-item">
+          <span>专利类型</span>
+          <strong>{PATENT_TYPE_LABELS[patent.patent_type || ''] || patent.patent_type || '未标注'}</strong>
+        </div>
+        <div className="detail-overview-item">
+          <span>国家 / 地区</span>
+          <strong>{patent.country || '未标注'}</strong>
+        </div>
+        <div className="detail-overview-item">
+          <span>申请日</span>
+          <strong>{formatApiDate(patent.filing_date)}</strong>
+        </div>
+        <div className="detail-overview-item">
+          <span>公开日</span>
+          <strong>{formatApiDate(patent.publication_date)}</strong>
+        </div>
+        <div className="detail-overview-item">
+          <span>同族 / 修改</span>
+          <strong>{patent.family_id ? `族 ${patent.family_id}` : '未建立同族'} · {history.length} 次</strong>
         </div>
       </div>
 
@@ -641,8 +677,9 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
   products: Product[]
 }) {
   return (
-    <div className="detail-grid">
-      <Field label="标题" required>
+    <div className="detail-grid detail-bibliography-grid">
+      <div className="detail-group-heading">申请与公开标识</div>
+      <Field label="标题" required full>
         {editing ? (
           <input className="form-input" value={formData.title || ''} onChange={e => updateField('title', e.target.value)} />
         ) : <div className="field-value">{patent.title}</div>}
@@ -665,6 +702,8 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
           <input className="form-input" value={formData.grant_number || ''} onChange={e => updateField('grant_number', e.target.value)} />
         ) : <div className="field-value mono">{patent.grant_number || '-'}</div>}
       </Field>
+
+      <div className="detail-group-heading">权利人与发明人</div>
 
       <Field label="申请人">
         {editing ? (
@@ -689,6 +728,8 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
           <input className="form-input" value={formData.assignee || ''} onChange={e => updateField('assignee', e.target.value)} />
         ) : <div className="field-value">{patent.assignee || '-'}</div>}
       </Field>
+
+      <div className="detail-group-heading">法律状态与关键日期</div>
 
       <Field label="申请日">
         {editing ? (
@@ -722,7 +763,7 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
             <option value="expired">终止</option>
             <option value="abandoned">放弃</option>
           </select>
-        ) : <div className="field-value">{patent.legal_status || '-'}</div>}
+        ) : <div className="field-value">{LEGAL_STATUS_LABELS[patent.legal_status || ''] || patent.legal_status || '-'}</div>}
       </Field>
 
       <Field label="专利类型">
@@ -733,7 +774,7 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
             <option value="design">外观设计</option>
             <option value="pct">PCT</option>
           </select>
-        ) : <div className="field-value">{patent.patent_type || '-'}</div>}
+        ) : <div className="field-value">{PATENT_TYPE_LABELS[patent.patent_type || ''] || patent.patent_type || '-'}</div>}
       </Field>
 
       <Field label="国家">
@@ -741,6 +782,8 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
           <input className="form-input" value={formData.country || ''} onChange={e => updateField('country', e.target.value)} />
         ) : <div className="field-value">{patent.country || '-'}</div>}
       </Field>
+
+      <div className="detail-group-heading">分类、优先权与业务归属</div>
 
       <Field label="主 IPC">
         {editing ? (
@@ -780,6 +823,8 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
           </select>
         ) : <div className="field-value">{products.find(p => p.id === patent.product_id)?.name || '-'}</div>}
       </Field>
+
+      <div className="detail-group-heading">技术摘要</div>
 
       <Field label="摘要" full>
         {editing ? (
@@ -1533,7 +1578,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div className="history-timeline">
           {Object.entries(groups).map(([day, items]) => (
             <div key={day}>
               <div style={{
@@ -1550,7 +1595,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
                     const sourceName = first.source_table_title || '未标注来源文件'
                     const isExpanded = expandedImportBatches.has(item.key)
                     return (
-                      <div key={item.key} style={{ border: '1px solid #fde68a', borderRadius: 8, background: '#fffbeb' }}>
+                      <div key={item.key} className="history-import-batch" style={{ border: '1px solid #fde68a', borderRadius: 8, background: '#fffbeb' }}>
                         <button
                           type="button"
                           onClick={() => setExpandedImportBatches(previous => {
@@ -1559,12 +1604,13 @@ function HistoryTab({ patent, history, loading, onReload }: {
                             else next.add(item.key)
                             return next
                           })}
+                          className="history-import-batch-toggle"
                           style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
                         >
                           <span style={{ color: '#92400e', fontSize: 14 }}>{isExpanded ? '▾' : '▸'}</span>
                           <span style={{ padding: '1px 8px', borderRadius: 10, fontSize: 11, background: '#fef3c7', color: '#92400e', fontWeight: 500 }}>导入批次</span>
-                          <strong style={{ fontSize: 13, color: '#78350f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sourceName}</strong>
-                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#a16207', whiteSpace: 'nowrap' }}>
+                          <strong className="history-import-batch-name" style={{ fontSize: 13, color: '#78350f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sourceName}</strong>
+                          <span className="history-import-batch-count" style={{ marginLeft: 'auto', fontSize: 11, color: '#a16207', whiteSpace: 'nowrap' }}>
                             {item.histories.length} 项字段变更{rows.length > 0 ? ` · 来源行 ${rows.join('、')}` : ''}
                           </span>
                         </button>

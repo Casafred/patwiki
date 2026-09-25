@@ -210,7 +210,7 @@ export default function JEVQuickAnalyzeModal({ patents, onClose }: Props) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
-        className="modal-content"
+        className="modal-content jev-quick-analyze-modal"
         style={{
           width: "min(1120px, 96vw)",
           maxHeight: "92vh",

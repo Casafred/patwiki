@@ -5258,6 +5258,259 @@ body {
   gap: 10px;
 }
 
+/* Patent Wiki: keep the record readable as the number of patent fields grows. */
+.detail-page {
+  width: min(1480px, 100%);
+  max-width: 1480px;
+  box-sizing: border-box;
+}
+
+.detail-header {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.detail-identity h2,
+.detail-identifiers span,
+.detail-meta span {
+  overflow-wrap: anywhere;
+}
+
+.detail-overview-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  margin: 16px 0 18px;
+}
+
+.detail-overview-item {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #dce8e7;
+  border-radius: 8px;
+  background: #f8fbfb;
+}
+
+.detail-overview-item span,
+.detail-overview-item strong {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-overview-item span {
+  color: var(--ink-500);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.detail-overview-item strong {
+  margin-top: 5px;
+  color: var(--ink-900);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.detail-overview-status {
+  border-color: #a7e3d7;
+  background: #effaf7;
+}
+
+.detail-overview-status strong { color: #0f766e; }
+
+.detail-bibliography-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-group-heading {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding: 8px 2px 5px;
+  border-bottom: 1px solid #dce8e7;
+  color: var(--teal-700);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-group-heading:not(:first-child) {
+  margin-top: 14px;
+}
+
+.patent-provenance-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+.patent-detail-section,
+.identity-tab-content,
+.identity-section,
+.history-timeline,
+.history-timeline > * {
+  min-width: 0;
+}
+
+.patent-detail-section {
+  overflow: hidden;
+}
+
+.identity-section-heading,
+.patent-detail-section-heading {
+  flex-wrap: wrap;
+}
+
+.field-source-row {
+  grid-template-columns: minmax(150px, .75fr) minmax(0, 1.4fr) minmax(220px, 1fr);
+}
+
+.field-source-value,
+.field-source-meta,
+.identity-conflict-detail,
+.identity-conflict-values {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.history-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.history-timeline > div > div:last-child {
+  min-width: 0;
+}
+
+.history-timeline button,
+.history-timeline strong,
+.history-timeline span {
+  max-width: 100%;
+}
+
+.history-timeline pre,
+.history-timeline code {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.history-import-batch,
+.history-import-batch-toggle {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.history-import-batch-toggle {
+  flex-wrap: wrap;
+}
+
+.history-import-batch-name {
+  min-width: 0;
+  flex: 1 1 220px;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+
+.history-import-batch-count {
+  min-width: 0;
+  flex: 0 1 auto;
+  margin-left: 0 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+
+.jev-quick-analyze-modal {
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid #d7e2e5;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink-900);
+  box-shadow: 0 24px 72px rgba(15, 23, 42, .25);
+}
+
+.jev-quick-analyze-modal .modal-header {
+  margin: -20px -20px 16px;
+  background: #f8fbfb;
+  border-radius: 10px 10px 0 0;
+}
+
+.ai-task-monitor-page {
+  min-height: calc(100vh - 48px);
+  padding: 22px 24px 48px;
+  box-sizing: border-box;
+  background: #f5f8fa;
+}
+
+.ai-task-monitor-page .page-header,
+.ai-task-monitor-page .toolbar,
+.ai-task-card,
+.ai-task-monitor-page .empty-state {
+  background: #ffffff;
+  border: 1px solid #dce5ea;
+  box-shadow: 0 5px 18px rgba(15, 23, 42, .05);
+}
+
+.ai-task-monitor-page .page-header {
+  padding: 18px 20px;
+  border-radius: 10px 10px 0 0;
+}
+
+.ai-task-monitor-page .toolbar {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+}
+
+.ai-task-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-task-card {
+  min-width: 0;
+  padding: 16px;
+  border-radius: 9px;
+}
+
+.ai-task-card > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ai-task-card pre {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 1100px) {
+  .detail-overview-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .detail-bibliography-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .field-source-row { grid-template-columns: minmax(140px, 1fr) minmax(0, 1.5fr); }
+  .field-source-meta { grid-column: 1 / -1; }
+}
+
+@media (max-width: 680px) {
+  .detail-page { padding: 14px 12px 32px; }
+  .detail-overview-strip,
+  .detail-bibliography-grid { grid-template-columns: 1fr; }
+  .detail-content { padding: 12px; }
+  .patent-detail-section { padding: 12px; }
+  .identity-projection-grid { grid-template-columns: 1fr; }
+  .field-source-row { grid-template-columns: 1fr; }
+  .field-source-meta { grid-column: auto; }
+  .ai-task-monitor-page { padding: 14px 12px 32px; }
+  .jev-quick-analyze-modal { padding: 14px; }
+  .jev-quick-analyze-modal .modal-header { margin: -14px -14px 14px; }
+}
+
 .datagrid-toolbar-heading {
   display: flex;
   width: 100%;
@@ -5455,7 +5708,7 @@ body {
 .analysis-scope-switcher button:disabled { opacity: .45; cursor: not-allowed; }
 .import-management-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-radius: 4px; background: transparent; color: #334155; cursor: pointer; text-align: left; font-size: 12px; }
 .import-management-menu button:hover { background: #f0fdfa; color: #0f766e; }
-.patent-provenance-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr); gap: 16px; align-items: start; }
+.patent-provenance-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
 .patent-detail-section { min-width: 0; padding: 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 9px; box-shadow: 0 4px 14px rgba(15, 23, 42, .04); }
 .patent-detail-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding-bottom: 11px; border-bottom: 1px solid #eef2f7; }
 .patent-detail-section-heading h3 { margin: 0; color: #0f172a; font-size: 15px; }
