@@ -719,6 +719,8 @@ input, select, textarea {
 .datagrid-tool-menu .menu-item.is-active { background: #eefaf7; color: var(--teal-700); font-weight: 650; }
 .datagrid-tool-menu .menu-item-ai { color: #2456a6; }
 .datagrid-tool-menu .menu-item-primary { color: var(--teal-700); font-weight: 650; }
+.datagrid-tool-menu .menu-item-danger { color: #b42318; }
+.datagrid-tool-menu .menu-item-danger:hover { background: #fef3f2; }
 .datagrid-tool-row { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
 .datagrid-tool-menu .menu-divider { height: 1px; margin: 4px 0; background: #edf2f2; }
 
@@ -6051,6 +6053,20 @@ body {
   white-space: nowrap;
 }
 
+.selection-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.selection-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: #c7e3dd;
+}
+
 .selection-clear {
   margin-left: auto;
 }
@@ -6264,6 +6280,11 @@ body {
   .selection-actions {
     width: 100%;
     flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .selection-divider {
+    display: none;
   }
 
   .selection-clear {

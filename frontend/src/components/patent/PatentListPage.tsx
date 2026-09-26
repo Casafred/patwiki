@@ -2875,7 +2875,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                   <button type="button" className="menu-item" onClick={() => { close(); handleExport() }}><Icon name="download" /> 导出数据</button>
                   <button type="button" className="menu-item menu-item-primary" onClick={() => { close(); setShowWorkFileDialog(true) }} title="按业务模板生成 Excel、Word 或 CSV 工作文件"><Icon name="file" /> 工作文件</button>
                   <div className="menu-divider" />
-                  <button type="button" className="menu-item" style={{ color: '#b42318' }} onClick={() => { close(); setShowClearDatabase(true) }} title="清空当前库内的全部专利，保留库本身（主表也适用）"><Icon name="trash" /> 清空当前库专利</button>
+                  <button type="button" className="menu-item menu-item-danger" onClick={() => { close(); setShowClearDatabase(true) }} title="清空当前库内的全部专利，保留库本身（主表也适用）"><Icon name="trash" /> 清空当前库专利</button>
                 </>
               )}
             </ToolbarMenu>
@@ -2913,26 +2913,47 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             已选中 {selectedIds.length} 件专利
           </span>
           <div className="selection-actions">
-            <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)}>批量编辑</button>
-            <button className="btn btn-xs btn-primary" onClick={() => void openSyncUpdate(selectedIds)} title="从外部数据源预览并确认覆盖更新">
-              <Icon name="refresh" size={13} /> 外部更新
-            </button>
-            <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)}>批量打标签</button>
-            <button className="btn btn-xs btn-secondary" onClick={() => void handleBulkRollbackBefore()} title="恢复到指定时间之前的记录">批量回滚</button>
-            {selectedIds.length === 1 && <button className="btn btn-xs btn-secondary" onClick={() => { setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true) }} title="对选中专利进行结构化分类、评分和复核判断"><Icon name="sparkles" size={13} /> JEV 标引</button>}
-            <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_view')}>移动到视图</button>
-            <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('move_database')}>移库</button>
-            <button className="btn btn-xs btn-secondary" onClick={() => openBulkTransfer('duplicate')}>复制为工作副本</button>
-            <button className="btn btn-xs btn-primary" onClick={() => { setQuickAnalyzePatentIds(selectedIds); setShowQuickAnalyze(true) }}>
-              <Icon name="sparkles" size={13} /> AI 快速分析
-            </button>
-            <button
-              className="btn btn-xs btn-danger"
-              onClick={handleBulkDelete}
-              style={{ color: '#dc2626', borderColor: '#fecaca' }}
-            >
-              批量删除
-            </button>
+            <div className="selection-group" aria-label="AI 操作">
+              <button className="btn btn-xs btn-primary" onClick={() => { setQuickAnalyzePatentIds(selectedIds); setShowQuickAnalyze(true) }} title="对选中专利执行 AI 快速分析">
+                <Icon name="sparkles" size={13} /> AI 快速分析
+              </button>
+              {selectedIds.length === 1 && (
+                <button className="btn btn-xs btn-secondary" onClick={() => { setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true) }} title="对选中专利进行结构化分类、评分和复核判断">
+                  <Icon name="sparkles" size={13} /> JEV 标引
+                </button>
+              )}
+            </div>
+            <span className="selection-divider" aria-hidden="true" />
+            <div className="selection-group" aria-label="批量编辑">
+              <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)} title="批量修改选中专利的字段值">
+                <Icon name="edit" size={13} /> 批量编辑
+              </button>
+              <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)} title="为选中专利批量添加或移除标签">
+                <Icon name="tag" size={13} /> 批量打标签
+              </button>
+            </div>
+            <span className="selection-divider" aria-hidden="true" />
+            <div className="selection-group" aria-label="移动与更多操作">
+              <ToolbarMenu label="批量移动" icon="move" triggerClassName="btn btn-xs btn-secondary" title="移动到视图、移库或复制为工作副本">
+                {(close) => (
+                  <>
+                    <button type="button" className="menu-item" onClick={() => { close(); openBulkTransfer('move_view') }}><Icon name="move" /> 移动到视图</button>
+                    <button type="button" className="menu-item" onClick={() => { close(); openBulkTransfer('move_database') }}><Icon name="database" /> 移库</button>
+                    <button type="button" className="menu-item" onClick={() => { close(); openBulkTransfer('duplicate') }}><Icon name="copy" /> 复制为工作副本</button>
+                  </>
+                )}
+              </ToolbarMenu>
+              <ToolbarMenu label="更多" icon="more-horizontal" triggerClassName="btn btn-xs btn-secondary" title="外部更新、批量回滚、批量删除">
+                {(close) => (
+                  <>
+                    <button type="button" className="menu-item" onClick={() => { close(); void openSyncUpdate(selectedIds) }} title="从外部数据源预览并确认覆盖更新"><Icon name="refresh" /> 外部更新</button>
+                    <button type="button" className="menu-item" onClick={() => { close(); void handleBulkRollbackBefore() }} title="恢复到指定时间之前的记录"><Icon name="history" /> 批量回滚</button>
+                    <div className="menu-divider" />
+                    <button type="button" className="menu-item menu-item-danger" onClick={() => { close(); handleBulkDelete() }}><Icon name="trash" /> 批量删除</button>
+                  </>
+                )}
+              </ToolbarMenu>
+            </div>
           </div>
           <button className="btn btn-xs btn-ghost selection-clear" onClick={clearSelection}>
             取消选择
