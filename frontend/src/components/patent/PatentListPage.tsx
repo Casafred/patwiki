@@ -2924,12 +2924,15 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               )}
             </div>
             <span className="selection-divider" aria-hidden="true" />
-            <div className="selection-group" aria-label="批量编辑">
+            <div className="selection-group" aria-label="批量编辑与更新">
               <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)} title="批量修改选中专利的字段值">
                 <Icon name="edit" size={13} /> 批量编辑
               </button>
               <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)} title="为选中专利批量添加或移除标签">
                 <Icon name="tag" size={13} /> 批量打标签
+              </button>
+              <button className="btn btn-xs btn-primary" onClick={() => void openSyncUpdate(selectedIds)} title="从外部数据源预览并确认覆盖更新">
+                <Icon name="refresh" size={13} /> 外部更新
               </button>
             </div>
             <span className="selection-divider" aria-hidden="true" />
@@ -2943,10 +2946,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                   </>
                 )}
               </ToolbarMenu>
-              <ToolbarMenu label="更多" icon="more-horizontal" triggerClassName="btn btn-xs btn-secondary" title="外部更新、批量回滚、批量删除">
+              <ToolbarMenu label="更多" icon="more-horizontal" triggerClassName="btn btn-xs btn-secondary" title="批量回滚、批量删除">
                 {(close) => (
                   <>
-                    <button type="button" className="menu-item" onClick={() => { close(); void openSyncUpdate(selectedIds) }} title="从外部数据源预览并确认覆盖更新"><Icon name="refresh" /> 外部更新</button>
                     <button type="button" className="menu-item" onClick={() => { close(); void handleBulkRollbackBefore() }} title="恢复到指定时间之前的记录"><Icon name="history" /> 批量回滚</button>
                     <div className="menu-divider" />
                     <button type="button" className="menu-item menu-item-danger" onClick={() => { close(); handleBulkDelete() }}><Icon name="trash" /> 批量删除</button>
