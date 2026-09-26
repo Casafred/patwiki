@@ -7,6 +7,7 @@ import hashlib
 import re
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -446,17 +447,49 @@ def rebuild_database_families(db: Session, database_id: int) -> dict:
     for patent_id in parent:
         components.setdefault(find(patent_id), []).append(patent_id)
 
+    # Reuse the family the members already point at whenever one exists.
+    # Keying families only by the MD5 of the current member set made every
+    # deletion mint a brand-new family id (FAM_xxx hash of the reduced set),
+    # which orphaned the old row and made the frontend 磁吸聚拢 display (and
+    # its collapse state, keyed by family id) disappear after each delete.
+    all_families = db.query(PatentFamily).all()
+    family_by_row_id = {family.id: family for family in all_families}
+    member_count_rows = (
+        db.query(Patent.family_id, func.count(Patent.id))
+        .filter(Patent.family_id.isnot(None))
+        .group_by(Patent.family_id)
+        .all()
+    )
+    global_member_count: dict[int, int] = {row[0]: row[1] for row in member_count_rows}
+
     grouped_patent_ids: set[int] = set()
     family_count = 0
+    reused_families: set[int] = set()
     for member_ids in components.values():
         if len(member_ids) < 2:
             continue
         members = [patent_by_id[item] for item in member_ids]
-        family = _get_or_create_family_by_ids(
-            db,
-            member_ids,
-            [member.publication_number or member.application_number or "" for member in members],
-        )
+        # Prefer the family that the most members currently belong to, then
+        # the globally largest one, so a surviving majority keeps its id.
+        votes: dict[int, int] = {}
+        for member in members:
+            if member.family_id is not None and member.family_id in family_by_row_id:
+                votes[member.family_id] = votes.get(member.family_id, 0) + 1
+        family = None
+        if votes:
+            chosen_row_id = max(
+                votes,
+                key=lambda row_id: (votes[row_id], global_member_count.get(row_id, 0)),
+            )
+            family = family_by_row_id[chosen_row_id]
+            reused_families.add(chosen_row_id)
+        if family is None:
+            family = _get_or_create_family_by_ids(
+                db,
+                member_ids,
+                [member.publication_number or member.application_number or "" for member in members],
+            )
+            family_by_row_id[family.id] = family
         for member in members:
             member.family_id = family.id
             grouped_patent_ids.add(member.id)
@@ -467,6 +500,18 @@ def rebuild_database_families(db: Session, database_id: int) -> dict:
         if patent.id not in grouped_patent_ids:
             patent.family_id = None
 
+    # Drop families left without any member (e.g. legacy hash-keyed rows from
+    # earlier rebuilds) so repeated rebuilds do not accumulate garbage rows.
+    referenced_family_ids = {
+        row_id
+        for (row_id,) in db.query(Patent.family_id).filter(Patent.family_id.isnot(None)).distinct()
+    }
+    orphaned_families = [
+        family for family in all_families if family.id not in referenced_family_ids
+    ]
+    for family in orphaned_families:
+        db.delete(family)
+
     db.commit()
     return {
         "database_id": database_id,
@@ -474,6 +519,8 @@ def rebuild_database_families(db: Session, database_id: int) -> dict:
         "family_count": family_count,
         "grouped_patent_count": len(grouped_patent_ids),
         "relation_matches": relation_matches,
+        "reused_family_count": len(reused_families),
+        "removed_empty_families": len(orphaned_families),
     }
 
 

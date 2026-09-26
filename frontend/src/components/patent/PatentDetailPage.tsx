@@ -836,55 +836,152 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
 }
 
 // ============ 技术信息 Tab ============
+
+// 权利要求按编号解析：仅当超过一半的行以“1. / 2、”等形式开头时才视为编号列表，
+// 否则按原始段落展示，避免把普通文本误拆。
+function parseClaims(raw: string): Array<{ no: string | null; text: string }> | null {
+  if (!raw || !raw.trim()) return null
+  const lines = raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  if (lines.length === 0) return null
+  let numbered = 0
+  const parsed = lines.map(line => {
+    const match = line.match(/^(\d{1,3})[.、)．]\s*(.*)$/)
+    if (match) numbered += 1
+    return match ? { no: match[1], text: match[2] } : { no: null, text: line }
+  })
+  return numbered >= Math.ceil(parsed.length / 2) ? parsed : null
+}
+
 function TechnicalTab({ patent, formData, editing, updateField }: {
   patent: Patent
   formData: PatentEditData
   editing: boolean
   updateField: (key: keyof PatentEditData, value: unknown) => void
 }) {
+  const storyline = [
+    { key: 'technical_problem', label: '技术问题', hint: '本专利要解决什么问题', value: patent.technical_problem, accent: 'problem' },
+    { key: 'technical_solution', label: '技术方案', hint: '采用什么手段解决', value: patent.technical_solution, accent: 'solution' },
+    { key: 'technical_effect', label: '技术效果', hint: '带来了哪些有益效果', value: patent.technical_effect, accent: 'effect' },
+  ]
+  const storylineEmpty = storyline.every(item => !item.value || !String(item.value).trim())
+  const claims = patent.claims || ''
+  const parsedClaims = editing ? null : parseClaims(claims)
+  const claimCount = parsedClaims ? parsedClaims.filter(item => item.no !== null).length : 0
+  const summaryParts: string[] = []
+  if (!storylineEmpty) summaryParts.push('技术主线')
+  if (claims.trim()) summaryParts.push(claimCount > 0 ? `${claimCount} 项权利要求` : '权利要求')
+  const headerSummary = summaryParts.length > 0 ? summaryParts.join(' · ') : '技术主线尚未记录'
+
+  if (editing) {
+    return (
+      <div className="tech-tab">
+        <section className="tech-edit-card">
+          <h3>分类标签</h3>
+          <div className="detail-grid">
+            <Field label="分类">
+              <input className="form-input" value={formData.category || ''} onChange={e => updateField('category', e.target.value)} />
+            </Field>
+            <Field label="子分类">
+              <input className="form-input" value={formData.subcategory || ''} onChange={e => updateField('subcategory', e.target.value)} />
+            </Field>
+          </div>
+        </section>
+        <section className="tech-edit-card">
+          <h3>技术主线</h3>
+          <div className="tech-edit-stack">
+            <Field label="技术问题" full>
+              <textarea className="form-input" rows={3} value={formData.technical_problem || ''} onChange={e => updateField('technical_problem', e.target.value)} />
+            </Field>
+            <Field label="技术方案" full>
+              <textarea className="form-input" rows={5} value={formData.technical_solution || ''} onChange={e => updateField('technical_solution', e.target.value)} />
+            </Field>
+            <Field label="技术效果" full>
+              <textarea className="form-input" rows={3} value={formData.technical_effect || ''} onChange={e => updateField('technical_effect', e.target.value)} />
+            </Field>
+          </div>
+        </section>
+        <section className="tech-edit-card">
+          <h3>权利要求与保护范围</h3>
+          <div className="tech-edit-stack">
+            <Field label="权利要求" full>
+              <textarea className="form-input" rows={8} value={formData.claims || ''} onChange={e => updateField('claims', e.target.value)} placeholder={'每条一行，如：1. 一种……装置，其特征在于……'} />
+            </Field>
+            <Field label="保护范围说明" full>
+              <textarea className="form-input" rows={3} value={formData.scope_description || ''} onChange={e => updateField('scope_description', e.target.value)} />
+            </Field>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
   return (
-    <div className="detail-grid">
-      <Field label="分类">
-        {editing ? (
-          <input className="form-input" value={formData.category || ''} onChange={e => updateField('category', e.target.value)} />
-        ) : <div className="field-value">{patent.category || '-'}</div>}
-      </Field>
+    <div className="tech-tab">
+      <div className="tech-header">
+        <div className="tech-chips">
+          {patent.category && <span className="tech-chip">{patent.category}</span>}
+          {patent.subcategory && <span className="tech-chip tech-chip-sub">{patent.subcategory}</span>}
+        </div>
+        <span className="tech-header-summary">{headerSummary}</span>
+      </div>
 
-      <Field label="子分类">
-        {editing ? (
-          <input className="form-input" value={formData.subcategory || ''} onChange={e => updateField('subcategory', e.target.value)} />
-        ) : <div className="field-value">{patent.subcategory || '-'}</div>}
-      </Field>
+      {storylineEmpty ? (
+        <div className="tech-story-empty">
+          <div className="tech-story-empty-icon">§</div>
+          <div>
+            <strong>还没有技术问题 / 方案 / 效果记录</strong>
+            <p>点击右上角「编辑专利」，按“问题 → 方案 → 效果”补充技术主线，也可以用 AI 分析自动抽取。</p>
+          </div>
+        </div>
+      ) : (
+        <ol className="tech-story">
+          {storyline.map((item, index) => (
+            <li key={item.key} className={`tech-story-item ${item.value ? '' : 'tech-story-item-empty'} tech-accent-${item.accent}`}>
+              <div className="tech-story-marker"><span>{index + 1}</span></div>
+              <div className="tech-story-body">
+                <div className="tech-story-label">
+                  {item.label}
+                  <small>{item.hint}</small>
+                </div>
+                <div className="tech-story-text">{item.value || '未记录'}</div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
 
-      <Field label="技术问题" full>
-        {editing ? (
-          <textarea className="form-input" rows={3} value={formData.technical_problem || ''} onChange={e => updateField('technical_problem', e.target.value)} />
-        ) : <div className="field-value">{patent.technical_problem || '-'}</div>}
-      </Field>
+      {patent.scope_description && (
+        <section className="tech-scope">
+          <h3>保护范围说明</h3>
+          <p>{patent.scope_description}</p>
+        </section>
+      )}
 
-      <Field label="技术方案" full>
-        {editing ? (
-          <textarea className="form-input" rows={5} value={formData.technical_solution || ''} onChange={e => updateField('technical_solution', e.target.value)} />
-        ) : <div className="field-value">{patent.technical_solution || '-'}</div>}
-      </Field>
-
-      <Field label="技术效果" full>
-        {editing ? (
-          <textarea className="form-input" rows={3} value={formData.technical_effect || ''} onChange={e => updateField('technical_effect', e.target.value)} />
-        ) : <div className="field-value">{patent.technical_effect || '-'}</div>}
-      </Field>
-
-      <Field label="权利要求" full>
-        {editing ? (
-          <textarea className="form-input" rows={8} value={formData.claims || ''} onChange={e => updateField('claims', e.target.value)} />
-        ) : <div className="field-value mono" style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{patent.claims || '-'}</div>}
-      </Field>
-
-      <Field label="保护范围说明" full>
-        {editing ? (
-          <textarea className="form-input" rows={3} value={formData.scope_description || ''} onChange={e => updateField('scope_description', e.target.value)} />
-        ) : <div className="field-value">{patent.scope_description || '-'}</div>}
-      </Field>
+      {claims.trim() ? (
+        <section className="tech-claims">
+          <div className="tech-claims-heading">
+            <h3>权利要求</h3>
+            {claimCount > 0 && <span className="tech-claims-count">{claimCount} 项</span>}
+          </div>
+          {parsedClaims ? (
+            <ol className="tech-claim-list">
+              {parsedClaims.map((claim, index) => (
+                <li className="tech-claim" key={`${claim.no ?? 'x'}-${index}`}>
+                  <span className="tech-claim-no">{claim.no ?? ''}</span>
+                  <span className="tech-claim-text">{claim.text}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="tech-claims-raw">{claims}</div>
+          )}
+        </section>
+      ) : (
+        <section className="tech-claims tech-claims-empty">
+          <div className="tech-claims-heading"><h3>权利要求</h3></div>
+          <p>尚未录入权利要求文本。</p>
+        </section>
+      )}
     </div>
   )
 }

@@ -17,6 +17,8 @@ function countValue(run: SyncRun, key: string): string {
   return typeof value === 'number' ? String(value) : '0'
 }
 
+type McpTab = 'connectors' | 'monitor' | 'runs'
+
 export default function ExternalSyncPage() {
   const { currentDatabaseId } = useAppStore()
   const [connectors, setConnectors] = useState<SyncConnector[]>([])
@@ -39,6 +41,7 @@ export default function ExternalSyncPage() {
   const [mcpEnrichLegal, setMcpEnrichLegal] = useState(false)
   const [tools, setTools] = useState<JsonObject | null>(null)
   const [selectedConnectorId, setSelectedConnectorId] = useState<number | null>(null)
+  const [activeTab, setActiveTab] = useState<McpTab>('connectors')
 
   const load = useCallback(async () => {
     if (!currentDatabaseId) return
@@ -157,8 +160,14 @@ export default function ExternalSyncPage() {
     } finally { setBusy(false) }
   }
 
+  const tabs: { key: McpTab; label: string; badge?: number }[] = [
+    { key: 'connectors', label: '连接器', badge: connectors.length },
+    { key: 'monitor', label: '自动监控', badge: subscriptions.length },
+    { key: 'runs', label: '运行与审查', badge: observations.length },
+  ]
+
   return (
-    <div className="page-container automation-page">
+    <div className="page-container automation-page mcp-page">
       <div className="page-header dashboard-header">
         <div>
           <h2 className="page-title">MCP 外部数据更新</h2>
@@ -169,77 +178,203 @@ export default function ExternalSyncPage() {
       {error && <div className="error-message">{error}</div>}
       {message && <div className="success-message">{message}</div>}
 
-      <section className="automation-log-panel">
-        <div className="section-heading"><h3>连接器</h3><span>{connectors.length} 个</span></div>
-        {connectors.map(connector => <div className="automation-log-row" key={connector.id}>
-          <strong>{connector.name}</strong><span>{connector.provider_type}</span><span>{connector.enabled ? '已启用' : '已停用'}</span>
-          <button className="btn btn-secondary" disabled={busy} onClick={() => void testConnector(connector)}>健康检查</button>
-          {connector.transport === 'mcp' && <button className="btn btn-secondary" disabled={busy} onClick={() => void discoverTools(connector)}>发现工具</button>}
-        </div>)}
-        {connectors.length === 0 && <div className="empty-state">暂无连接器。</div>}
-      </section>
+      <nav className="mcp-tabs" role="tablist" aria-label="MCP 数据更新分区">
+        {tabs.map(tab => (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.key}
+            className={`mcp-tab ${activeTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            {tab.label}
+            {typeof tab.badge === 'number' && tab.badge > 0 && <span className="mcp-tab-badge">{tab.badge}</span>}
+          </button>
+        ))}
+      </nav>
 
-      <section className="automation-form">
-        <h3>接入 HimmPat MCP</h3>
-        <p className="page-subtitle">填写 HimmPat 主站地址和 API Key。应用会分别调用检索、著录项和法律状态服务。</p>
-        <label>连接器 code<input className="form-input" value={mcpCode} onChange={event => setMcpCode(event.target.value)} /></label>
-        <label>连接器名称<input className="form-input" value={mcpName} onChange={event => setMcpName(event.target.value)} /></label>
-        <label>MCP 服务入口<input className="form-input" value={mcpEndpoint} onChange={event => setMcpEndpoint(event.target.value)} /></label>
-        <label>API Key<input className="form-input" type="password" value={mcpApiKey} onChange={event => setMcpApiKey(event.target.value)} placeholder="Bearer 后面的 API Key" /></label>
-        <label className="checkbox-label"><input type="checkbox" checked={mcpEnrichLegal} onChange={event => setMcpEnrichLegal(event.target.checked)} />同步时补全法律状态（可能产生额外供应商调用）</label>
-        <button className="btn btn-primary" disabled={busy || !mcpCode.trim() || !mcpName.trim() || !mcpEndpoint.trim() || !mcpApiKey.trim()} onClick={() => void createHimmPatConnector()}>创建并连接 HimmPat MCP</button>
-      </section>
-
-      {tools && <section className="automation-log-panel"><div className="section-heading"><h3>MCP 工具目录</h3><span>{Array.isArray(tools.services) ? `${tools.services.length} 个服务` : '已发现'}</span></div>
-        <div className="mcp-field-mapping"><strong>外部信息与目标列</strong><span>系统以字段的规范属性匹配，而不依赖表头文字。例如“公开日”“公开日期”只要映射到 publication_date 属性，就会更新同一信息。自定义且未映射属性的列不会自动覆盖。</span><div className="mcp-field-mapping-grid">{EXTERNAL_UPDATE_FIELDS.map(([key, label]) => <span key={key}>{label} → {fields.find(field => field.key === key)?.name || label} <small>({key})</small></span>)}</div></div>
-        {Array.isArray(tools.services) && tools.services.map((service, index) => {
-          const item = service as JsonObject
-          const serviceTools = (Array.isArray(item.tools) ? item.tools : []) as unknown as McpToolInfo[]
-          return <div className="mcp-service" key={`${String(item.service || 'service')}-${index}`}>
-            <div className="mcp-service-header"><strong>{String(item.service || '-')}</strong><span>{String(item.tool_count || serviceTools.length)} 个工具</span><span>{String(item.latency_ms || 0)} ms</span></div>
-            <div className="mcp-tool-list">{serviceTools.map((tool, toolIndex) => {
-              const schema = tool.inputSchema || {}
-              const required = Array.isArray(schema.required) ? schema.required.map(String) : []
-              return <div className="mcp-tool" key={`${tool.name}-${toolIndex}`}>
-                <code>{tool.name || '未命名工具'}</code>
-                <span>{tool.description || '未提供说明'}</span>
-                <small>必填参数：{required.length ? required.join('、') : '无'}</small>
-              </div>
-            })}</div>
+      {activeTab === 'connectors' && (
+        <div className="mcp-tab-body">
+          <div className="section-heading">
+            <h3>数据源连接器</h3>
+            <span>{connectors.length} 个 · 健康检查验证连通性，发现工具刷新 MCP 目录</span>
           </div>
-        })}
-      </section>}
+          {connectors.length > 0 ? (
+            <div className="mcp-connector-grid">
+              {connectors.map(connector => (
+                <div className="mcp-connector-card" key={connector.id}>
+                  <div className="mcp-connector-card-head">
+                    <strong title={connector.code}>{connector.name}</strong>
+                    <span className={`mcp-chip ${connector.enabled ? 'mcp-chip-ok' : 'mcp-chip-muted'}`}>{connector.enabled ? '已启用' : '已停用'}</span>
+                  </div>
+                  <div className="mcp-connector-card-tags">
+                    <span className="mcp-chip mcp-chip-muted">{connector.provider_type}</span>
+                    <span className="mcp-chip mcp-chip-muted">{connector.transport.toUpperCase()}</span>
+                    {connector.mcp_catalog_updated_at && <span className="mcp-chip mcp-chip-muted">目录 {String(connector.mcp_catalog_updated_at).slice(0, 10)}</span>}
+                  </div>
+                  {connector.endpoint && <div className="mcp-connector-endpoint" title={connector.endpoint}>{connector.endpoint}</div>}
+                  <div className="mcp-connector-actions">
+                    <button className="btn btn-secondary" disabled={busy} onClick={() => void testConnector(connector)}>健康检查</button>
+                    {connector.transport === 'mcp' && <button className="btn btn-secondary" disabled={busy} onClick={() => void discoverTools(connector)}>发现工具</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">暂无连接器。可在下方接入 HimmPat MCP。</div>
+          )}
 
-      <section className="automation-form">
-        <h3>新建自动更新规则</h3>
-        <label>数据连接器<select className="form-input" value={selectedConnectorId || ''} onChange={event => setSelectedConnectorId(Number(event.target.value) || null)}><option value="">请选择连接器</option>{connectors.map(connector => <option key={connector.id} value={connector.id}>{connector.name} · {connector.provider_type}</option>)}</select></label>
-        <label>订阅名称<input className="form-input" value={name} onChange={event => setName(event.target.value)} /></label>
-        <label>申请人<input className="form-input" value={applicant} onChange={event => setApplicant(event.target.value)} placeholder="可选" /></label>
-        <label>关键词表达式<input className="form-input" value={expression} onChange={event => setExpression(event.target.value)} placeholder="可选" /></label>
-        <label>同步间隔（分钟）<input className="form-input" type="number" min="1" value={intervalMinutes} onChange={event => setIntervalMinutes(event.target.value)} /></label>
-        <fieldset className="mcp-target-fields"><legend>允许自动更新的目标字段</legend><p>当前库字段名称可以调整，但需映射到对应规范属性。法律事件仍作为来源历史保存；只有勾选的属性会更新当前值。</p><div className="mcp-target-fields-grid">{EXTERNAL_UPDATE_FIELDS.map(([key, label]) => <label key={key}><input type="checkbox" checked={targetFields.includes(key)} onChange={event => setTargetFields(previous => event.target.checked ? [...previous, key] : previous.filter(item => item !== key))} />{fields.find(field => field.key === key)?.name || label}<small>{key}</small></label>)}</div></fieldset>
-        <button className="btn btn-primary" disabled={busy || !currentDatabaseId || !selectedConnectorId || targetFields.length === 0} onClick={() => void createSubscription()}>保存自动更新规则</button>
-      </section>
+          <div className="mcp-access-layout">
+            <section className="mcp-panel">
+              <div className="section-heading"><h3>接入 HimmPat MCP</h3><span>主站地址 + API Key</span></div>
+              <p className="mcp-panel-hint">填写 HimmPat 主站地址和 API Key。应用会分别调用检索、著录项和法律状态服务。</p>
+              <div className="mcp-form-grid">
+                <label>连接器 code<input className="form-input" value={mcpCode} onChange={event => setMcpCode(event.target.value)} /></label>
+                <label>连接器名称<input className="form-input" value={mcpName} onChange={event => setMcpName(event.target.value)} /></label>
+                <label className="mcp-form-full">MCP 服务入口<input className="form-input" value={mcpEndpoint} onChange={event => setMcpEndpoint(event.target.value)} /></label>
+                <label className="mcp-form-full">API Key<input className="form-input" type="password" value={mcpApiKey} onChange={event => setMcpApiKey(event.target.value)} placeholder="Bearer 后面的 API Key" /></label>
+                <label className="checkbox-label mcp-form-full"><input type="checkbox" checked={mcpEnrichLegal} onChange={event => setMcpEnrichLegal(event.target.checked)} />同步时补全法律状态（可能产生额外供应商调用）</label>
+              </div>
+              <button className="btn btn-primary" disabled={busy || !mcpCode.trim() || !mcpName.trim() || !mcpEndpoint.trim() || !mcpApiKey.trim()} onClick={() => void createHimmPatConnector()}>创建并连接 HimmPat MCP</button>
+            </section>
 
-      <section className="automation-list">
-        <div className="section-heading"><h3>自动更新规则</h3><span>{subscriptions.length} 个</span></div>
-        {subscriptions.map(subscription => <div className="automation-rule" key={subscription.id}>
-          <div className="automation-rule-main"><div><h3>{subscription.name}</h3><p>{subscription.review_policy} · {subscription.schedule.interval_minutes ? `每 ${String(subscription.schedule.interval_minutes)} 分钟` : '手动'}</p></div><span className={`rule-status ${subscription.enabled ? 'enabled' : 'disabled'}`}>{subscription.enabled ? '已启用' : '已停用'}</span></div>
-          <div className="automation-rule-meta"><span>{subscription.last_status || '尚未运行'}</span><span>{subscription.last_run_at || '-'}</span></div>
-          <div className="automation-actions"><button className="btn btn-secondary" disabled={busy || !subscription.enabled} onClick={() => void runSubscription(subscription)}>立即同步</button></div>
-        </div>)}
-        {subscriptions.length === 0 && <div className="empty-state">当前数据库还没有同步订阅。</div>}
-      </section>
+            <section className="mcp-panel">
+              <div className="section-heading"><h3>外部信息与目标列</h3><span>按规范属性匹配</span></div>
+              <p className="mcp-panel-hint">系统以字段的规范属性匹配，而不依赖表头文字。例如“公开日”“公开日期”只要映射到 publication_date 属性，就会更新同一信息。自定义且未映射属性的列不会自动覆盖。</p>
+              <div className="mcp-field-mapping-grid">
+                {EXTERNAL_UPDATE_FIELDS.map(([key, label]) => <span key={key}>{label} → {fields.find(field => field.key === key)?.name || label} <small>({key})</small></span>)}
+              </div>
+            </section>
+          </div>
 
-      <section className="automation-log-panel"><div className="section-heading"><h3>最近运行</h3><span>{runs.length} 条</span></div>
-        {runs.slice(0, 10).map(run => <div className="automation-log-row" key={run.id}><span className={`log-status ${run.status === 'succeeded' ? 'success' : run.status}`}>{run.status}</span><span>记录 {countValue(run, 'records')}</span><span>应用 {countValue(run, 'auto_applied')}</span><span>审查 {countValue(run, 'review')}</span><time>{run.finished_at || run.created_at || '-'}</time></div>)}
-        {runs.length === 0 && <div className="empty-state">暂无同步运行记录。</div>}
-      </section>
+          {tools && (
+            <section className="mcp-panel">
+              <div className="section-heading"><h3>MCP 工具目录</h3><span>{Array.isArray(tools.services) ? `${tools.services.length} 个服务` : '已发现'}</span></div>
+              {Array.isArray(tools.services) && tools.services.map((service, index) => {
+                const item = service as JsonObject
+                const serviceTools = (Array.isArray(item.tools) ? item.tools : []) as unknown as McpToolInfo[]
+                return <div className="mcp-service" key={`${String(item.service || 'service')}-${index}`}>
+                  <div className="mcp-service-header"><strong>{String(item.service || '-')}</strong><span>{String(item.tool_count || serviceTools.length)} 个工具</span><span>{String(item.latency_ms || 0)} ms</span></div>
+                  <div className="mcp-tool-list">{serviceTools.map((tool, toolIndex) => {
+                    const schema = tool.inputSchema || {}
+                    const required = Array.isArray(schema.required) ? schema.required.map(String) : []
+                    return <div className="mcp-tool" key={`${tool.name}-${toolIndex}`}>
+                      <code>{tool.name || '未命名工具'}</code>
+                      <span>{tool.description || '未提供说明'}</span>
+                      <small>必填参数：{required.length ? required.join('、') : '无'}</small>
+                    </div>
+                  })}</div>
+                </div>
+              })}
+            </section>
+          )}
+        </div>
+      )}
 
-      <section className="automation-log-panel"><div className="section-heading"><h3>待审查外部事实</h3><span>{observations.length} 条</span></div>
-        {observations.slice(0, 20).map(observation => <div className="automation-log-row" key={observation.id}><span>{observation.canonical_field_key}</span><span>{observation.current_value || '空'} → {observation.candidate_value || '空'}</span><span>专利 #{observation.patent_id || '-'}</span><button className="btn btn-secondary" disabled={busy} onClick={() => void decide(observation, 'accepted')}>接受</button><button className="btn btn-secondary" disabled={busy} onClick={() => void decide(observation, 'rejected')}>拒绝</button></div>)}
-        {observations.length === 0 && <div className="empty-state">暂无待审查事实。</div>}
-      </section>
+      {activeTab === 'monitor' && (
+        <div className="mcp-tab-body">
+          <div className="mcp-monitor-layout">
+            <section className="mcp-panel mcp-monitor-form">
+              <div className="section-heading"><h3>新建自动监控规则</h3><span>{targetFields.length} 个目标字段</span></div>
+              <div className="mcp-form-grid">
+                <label className="mcp-form-full">数据连接器<select className="form-input" value={selectedConnectorId || ''} onChange={event => setSelectedConnectorId(Number(event.target.value) || null)}><option value="">请选择连接器</option>{connectors.map(connector => <option key={connector.id} value={connector.id}>{connector.name} · {connector.provider_type}</option>)}</select></label>
+                <label>订阅名称<input className="form-input" value={name} onChange={event => setName(event.target.value)} /></label>
+                <label>同步间隔（分钟）<input className="form-input" type="number" min="1" value={intervalMinutes} onChange={event => setIntervalMinutes(event.target.value)} /></label>
+                <label className="mcp-form-full">申请人<input className="form-input" value={applicant} onChange={event => setApplicant(event.target.value)} placeholder="可选，按申请人圈定监控范围" /></label>
+                <label className="mcp-form-full">关键词表达式<input className="form-input" value={expression} onChange={event => setExpression(event.target.value)} placeholder="可选，例如：(芯片 OR 半导体) AND 封装" /></label>
+              </div>
+              <fieldset className="mcp-target-fields">
+                <legend>允许自动更新的目标字段</legend>
+                <p>当前库字段名称可以调整，但需映射到对应规范属性。法律事件仍作为来源历史保存；只有勾选的属性会更新当前值。</p>
+                <div className="mcp-target-fields-grid">{EXTERNAL_UPDATE_FIELDS.map(([key, label]) => <label key={key}><input type="checkbox" checked={targetFields.includes(key)} onChange={event => setTargetFields(previous => event.target.checked ? [...previous, key] : previous.filter(item => item !== key))} />{fields.find(field => field.key === key)?.name || label}<small>{key}</small></label>)}</div>
+              </fieldset>
+              <button className="btn btn-primary" disabled={busy || !currentDatabaseId || !selectedConnectorId || targetFields.length === 0} onClick={() => void createSubscription()}>保存自动监控规则</button>
+            </section>
+
+            <section className="mcp-monitor-list">
+              <div className="section-heading"><h3>已有监控规则</h3><span>{subscriptions.length} 个 · {currentDatabaseId ? '当前库' : '未选择数据库'}</span></div>
+              {subscriptions.length > 0 ? (
+                <div className="mcp-rule-list">
+                  {subscriptions.map(subscription => (
+                    <div className="mcp-rule-card" key={subscription.id}>
+                      <div className="mcp-rule-card-head">
+                        <strong>{subscription.name}</strong>
+                        <span className={`rule-status ${subscription.enabled ? 'enabled' : 'disabled'}`}>{subscription.enabled ? '已启用' : '已停用'}</span>
+                      </div>
+                      <div className="mcp-rule-card-meta">
+                        <span>{subscription.schedule.interval_minutes ? `每 ${String(subscription.schedule.interval_minutes)} 分钟` : '手动'}</span>
+                        <span>{subscription.review_policy}</span>
+                        <span>上次运行：{subscription.last_run_at || '-'}</span>
+                      </div>
+                      <div className="mcp-rule-card-status">
+                        <span className={`mcp-chip ${subscription.last_status === 'succeeded' ? 'mcp-chip-ok' : subscription.last_status ? 'mcp-chip-warn' : 'mcp-chip-muted'}`}>{subscription.last_status || '尚未运行'}</span>
+                        <div className="mcp-rule-card-actions">
+                          <button className="btn btn-secondary" disabled={busy || !subscription.enabled} onClick={() => void runSubscription(subscription)}>立即同步</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">当前数据库还没有监控规则。先在左侧创建一条，之后每次运行都会留档。</div>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'runs' && (
+        <div className="mcp-tab-body">
+          <div className="mcp-runs-layout">
+            <section className="mcp-panel">
+              <div className="section-heading"><h3>最近运行</h3><span>{runs.length} 条</span></div>
+              {runs.length > 0 ? (
+                <div className="mcp-run-list">
+                  {runs.slice(0, 10).map(run => (
+                    <div className="mcp-run-row" key={run.id}>
+                      <span className={`log-status ${run.status === 'succeeded' ? 'success' : run.status}`}>{run.status}</span>
+                      <span>记录 {countValue(run, 'records')}</span>
+                      <span>应用 {countValue(run, 'auto_applied')}</span>
+                      <span>审查 {countValue(run, 'review')}</span>
+                      <time>{run.finished_at || run.created_at || '-'}</time>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">暂无同步运行记录。</div>
+              )}
+            </section>
+
+            <section className="mcp-panel">
+              <div className="section-heading"><h3>待审查外部事实</h3><span>{observations.length} 条</span></div>
+              {observations.length > 0 ? (
+                <div className="mcp-observation-list">
+                  {observations.slice(0, 20).map(observation => (
+                    <div className="mcp-observation-card" key={observation.id}>
+                      <div className="mcp-observation-head">
+                        <span className="mcp-chip mcp-chip-info">{observation.canonical_field_key}</span>
+                        <span className="mcp-observation-patent">专利 #{observation.patent_id || '-'}</span>
+                      </div>
+                      <div className="mcp-observation-diff">
+                        <span className="mcp-observation-old" title={observation.current_value || ''}>{observation.current_value || '空'}</span>
+                        <span className="mcp-observation-arrow">→</span>
+                        <span className="mcp-observation-new" title={observation.candidate_value || ''}>{observation.candidate_value || '空'}</span>
+                      </div>
+                      <div className="mcp-observation-actions">
+                        <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(observation, 'accepted')}>接受</button>
+                        <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(observation, 'rejected')}>拒绝</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">暂无待审查事实。</div>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

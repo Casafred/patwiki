@@ -843,13 +843,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     append = false,
     requestedPageSize = pageSize,
     preserveVisible = false,
+    replaceWindow = false,
   ): Promise<boolean> => {
     const myRequestId = ++loadPatentsRequestId.current
     const effectivePage = requestedPage
+    // replaceWindow：原地替换可见窗口（删除行后的刷新）。不进入 loading 态、
+    // 不清空旧行、不重置滚动，表格始终保持挂载，滚动位置自然保留。
+    const keepVisible = preserveVisible || replaceWindow
     if (!append) {
-      if (!preserveVisible) setLoading(true)
-      if (!preserveVisible) patentsRef.current = []
-      if (!preserveVisible) {
+      if (!keepVisible) setLoading(true)
+      if (!keepVisible) patentsRef.current = []
+      if (!keepVisible) {
         continuousPageRef.current = effectivePage
         continuousHasMoreRef.current = true
         if (tableViewMode === 'continuous') tableWrapperRef.current?.scrollTo({ top: 0 })
@@ -857,6 +861,18 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     }
     const applyItems = (items: Patent[], total: number) => {
       totalPatentsRef.current = total
+      if (!append && replaceWindow) {
+        patentsRef.current = items
+        setPatents(items, total)
+        saveTableDataSnapshot(tableScopeKey, {
+          items,
+          total,
+          continuousPage: continuousPageRef.current,
+          hasMore: items.length < total,
+          savedAt: Date.now(),
+        })
+        return
+      }
       if (!append && !preserveVisible) {
         patentsRef.current = items
         setPatents(items, total)
@@ -1454,15 +1470,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       patentsRef.current = patentsRef.current.filter(item => !deleted.has(item.id))
       setPatents(patentsRef.current, Math.max(0, totalPatentsRef.current - deleted.size))
     }
-    const element = tableWrapperRef.current
-    const scrollTop = element?.scrollTop ?? 0
-    const scrollLeft = element?.scrollLeft ?? 0
-    const loadedPages = Math.max(1, continuousPageRef.current)
     if (groupByFamily && activeDatabaseId) {
       try {
+        // 后端 rebuild 现在会复用既有族（family_id 保持稳定），因此这里
+        // 不再重置 collapsedFamilyKeys，折叠状态跨删除保留。
         await patentApi.rebuildFamilies(activeDatabaseId)
-        setCollapsedFamilyKeys(new Set())
-        setGroupedGroups([])
       } catch (error) {
         // The record is already deleted; a transient family rebuild failure
         // must not turn a successful delete into a misleading error.
@@ -1470,27 +1482,33 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       }
     }
     if (tableViewMode === 'continuous') {
-      await restoreContinuousPosition({
-        page,
-        continuousPage: loadedPages,
-        scrollTop,
-        scrollLeft,
-        savedAt: Date.now(),
-      })
+      // 连续模式下原地重载已加载的窗口：先整窗替换（不卸载表格），再分块
+      // 追加补足原有行数。表格全程保持挂载，滚动位置自然停留在原地。
+      const targetRowCount = patentsRef.current.length + deletedIds.length
+      const chunkSize = 1000
+      const first = await loadPatents(1, false, Math.min(Math.max(targetRowCount, 1), chunkSize), false, true)
+      if (!first) return
+      let nextBackendPage = 2
+      let previousLoadedCount = patentsRef.current.length
+      while (patentsRef.current.length < targetRowCount && patentsRef.current.length < totalPatentsRef.current) {
+        const loaded = await loadPatents(nextBackendPage, true, chunkSize)
+        if (!loaded || patentsRef.current.length <= previousLoadedCount) break
+        previousLoadedCount = patentsRef.current.length
+        nextBackendPage += 1
+        if (nextBackendPage > 2000) break
+      }
+      continuousPageRef.current = Math.max(1, Math.ceil(patentsRef.current.length / pageSize))
+      continuousHasMoreRef.current = patentsRef.current.length < totalPatentsRef.current
       return
     }
-    const loaded = await loadPatents(page, false, pageSize)
+    // 分页模式：replaceWindow 原地替换当前页，不触发 loading 骨架，
+    // 浏览器不会因内容收缩而把 scrollTop 归零。
+    const loaded = await loadPatents(page, false, pageSize, false, true)
     if (!loaded) return
     // A full page can become empty after deleting its last row.
     if (page > 1 && totalPatentsRef.current <= (page - 1) * pageSize) {
       setPage(page - 1)
-      return
     }
-    window.requestAnimationFrame(() => {
-      if (!element) return
-      element.scrollTop = scrollTop
-      element.scrollLeft = scrollLeft
-    })
   }
 
   // 批量删除选中的专利
