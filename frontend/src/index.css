@@ -705,6 +705,9 @@ input, select, textarea {
 .import-file-cell span { margin-top: 4px; color: var(--ink-500); font-size: 11px; }
 
 .datagrid-tool-menu-wrap { position: relative; flex: 0 0 auto; }
+.toolbar-menu { position: relative; display: inline-flex; flex: 0 0 auto; }
+.datagrid-tool-menu-left { left: 0; right: auto; }
+.datagrid-tool-menu-right { right: 0; left: auto; }
 .datagrid-history-actions { display: inline-flex; gap: 4px; margin-right: 4px; vertical-align: middle; }
 .datagrid-history-actions .btn { min-width: 32px; justify-content: center; padding: 6px 8px; }
 .datagrid-tool-trigger { min-width: 112px; justify-content: center; }
@@ -4108,6 +4111,29 @@ body {
   color: #f2fbfa;
 }
 
+/* Database switcher entry point in the compact rail; expands the sidebar. */
+.sidebar-rail-database {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-rail-database {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  margin: 12px auto 4px;
+  place-items: center;
+  border: 1px solid #385257;
+  border-radius: 9px;
+  background: transparent;
+  color: #9ab1b2;
+  cursor: pointer;
+}
+
+.sidebar-collapsed .sidebar-rail-database:hover {
+  background: #20383d;
+  color: #f2fbfa;
+}
+
 .sidebar-collapsed .sidebar {
   width: 68px;
 }
@@ -4216,6 +4242,17 @@ body {
   font-weight: 700;
   letter-spacing: 0.8px;
   text-transform: uppercase;
+}
+
+.sidebar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sidebar-section {
+  display: grid;
+  gap: 2px;
 }
 
 .sidebar-count {
@@ -5199,6 +5236,10 @@ body {
 
   .sidebar-open.sidebar-collapsed .sidebar-inline-actions {
     display: flex;
+  }
+
+  .sidebar-open.sidebar-collapsed .sidebar-rail-database {
+    display: none;
   }
 
   .sidebar-open.sidebar-collapsed .sidebar-account .account-info {

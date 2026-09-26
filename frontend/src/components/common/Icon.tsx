@@ -2,8 +2,8 @@ import type { ReactNode, SVGProps } from 'react'
 
 export type IconName =
   | 'activity' | 'automation' | 'chart' | 'check' | 'chevron-down' | 'chevron-left' | 'chevron-right' | 'chevron-up'
-  | 'columns' | 'copy' | 'dashboard' | 'download' | 'file' | 'filter' | 'history' | 'lock' | 'menu'
-  | 'play' | 'plus' | 'refresh' | 'settings' | 'sliders' | 'sparkles' | 'table' | 'tag' | 'trash'
+  | 'columns' | 'copy' | 'dashboard' | 'database' | 'download' | 'edit' | 'file' | 'filter' | 'history' | 'lock' | 'menu'
+  | 'more-horizontal' | 'move' | 'play' | 'plus' | 'refresh' | 'settings' | 'sliders' | 'sparkles' | 'table' | 'tag' | 'trash'
   | 'undo' | 'unlock' | 'redo' | 'users' | 'x'
 
 const paths: Record<IconName, ReactNode> = {
@@ -18,12 +18,16 @@ const paths: Record<IconName, ReactNode> = {
   columns: <path d="M4 4h16v16H4zm5 0v16m6-16v16" />,
   copy: <path d="M8 8h11v12H8zM5 16H4V4h11v1" />,
   dashboard: <path d="M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z" />,
+  database: <path d="M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />,
   download: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 20h16" />,
+  edit: <path d="M4 20h4L18 10l-4-4L4 16zM13.5 6.5l4 4" />,
   file: <path d="M6 3h8l4 4v14H6zM14 3v5h5M9 13h6m-6 4h6" />,
   filter: <path d="M4 5h16l-6 7v5l-4 2v-7z" />,
   history: <path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5m4-1v5l3 2" />,
   lock: <path d="M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v10H6z" />,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
+  'more-horizontal': <path d="M5 12h.01M12 12h.01M19 12h.01" />,
+  move: <path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9 3 12l3 3M18 9l3 3-3 3" />,
   play: <path d="m9 6 9 6-9 6z" />,
   plus: <path d="M12 5v14M5 12h14" />,
   refresh: <path d="M20 11a8 8 0 0 0-14.7-4L3 10m0 0V5m0 5h5M4 13a8 8 0 0 0 14.7 4L21 14m0 0v5m0-5h-5" />,

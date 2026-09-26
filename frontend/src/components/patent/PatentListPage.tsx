@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback, useRef } from 'react'
+import { Fragment, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   patentService as patentApi,
@@ -25,7 +25,7 @@ import type {
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDate, parseApiDate } from '../../lib/date'
-import Icon from '../common/Icon'
+import Icon, { type IconName } from '../common/Icon'
 import GroupConfigPanel from '../views/GroupConfigPanel'
 import ViewColumnConfigPanel from '../views/ViewColumnConfigPanel'
 import ColumnConfigPanel from '../views/ColumnConfigPanel'
@@ -475,6 +475,61 @@ function LinkFieldEditor({ patentId, field, currentLinks, onChanged, onCancel }:
   )
 }
 
+interface ToolbarMenuProps {
+  label?: ReactNode
+  icon?: IconName
+  iconOnly?: boolean
+  title?: string
+  triggerClassName?: string
+  align?: 'left' | 'right'
+  children: (close: () => void) => ReactNode
+}
+
+function ToolbarMenu({
+  label,
+  icon,
+  iconOnly = false,
+  title,
+  triggerClassName = 'btn btn-sm btn-secondary',
+  align = 'left',
+  children,
+}: ToolbarMenuProps) {
+  const [open, setOpen] = useState(false)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [open])
+
+  return (
+    <div className="toolbar-menu" ref={wrapperRef}>
+      <button
+        type="button"
+        className={triggerClassName}
+        onClick={() => setOpen(value => !value)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={iconOnly ? title : undefined}
+        title={title}
+      >
+        {iconOnly
+          ? <Icon name={icon ?? 'more-horizontal'} size={16} />
+          : <>{icon && <Icon name={icon} size={14} />} {label} <Icon name={open ? 'chevron-up' : 'chevron-down'} size={13} /></>}
+      </button>
+      {open && (
+        <div className={`datagrid-tool-menu ${align === 'right' ? 'datagrid-tool-menu-right' : 'datagrid-tool-menu-left'}`} role="menu">
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function PatentListPage({ onPatentClick, viewId = null, onOpenImport, onOpenSidebar }: PatentListPageProps) {
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading, databases, products,
@@ -542,7 +597,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [columnUndo, setColumnUndo] = useState<{ viewId: number | null; beforeConfig: ViewColumnConfig[] | null; afterConfig: ViewColumnConfig[] | null; beforeFields: FieldMeta[]; afterFields: FieldMeta[] } | null>(null)
   const [columnRedo, setColumnRedo] = useState<{ viewId: number | null; beforeConfig: ViewColumnConfig[] | null; afterConfig: ViewColumnConfig[] | null; beforeFields: FieldMeta[]; afterFields: FieldMeta[] } | null>(null)
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
-  const [showTableTools, setShowTableTools] = useState(false)
   const [headerFilterText, setHeaderFilterText] = useState<string>('')
   const [headerFilterOperator, setHeaderFilterOperator] = useState<FilterOperator>('contains')
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
@@ -631,7 +685,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [showWorkFileDialog, setShowWorkFileDialog] = useState(false)
-  const [showImportMenu, setShowImportMenu] = useState(false)
   const [showSyncUpdate, setShowSyncUpdate] = useState(false)
   const [syncUpdatePatentIds, setSyncUpdatePatentIds] = useState<number[]>([])
   const [syncUpdateConnectors, setSyncUpdateConnectors] = useState<SyncConnector[]>([])
@@ -655,7 +708,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const continuousLoadingRef = useRef(false)
   const continuousHasMoreRef = useRef(true)
   const tableWrapperRef = useRef<HTMLDivElement>(null)
-  const tableToolsRef = useRef<HTMLDivElement>(null)
   const restoredScopeRef = useRef<string | null>(null)
   const [activeCell, setActiveCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
 
@@ -1357,15 +1409,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     return () => document.removeEventListener('click', handleClickOutside)
   }, [activeHeaderMenu])
 
-  useEffect(() => {
-    if (!showTableTools) return
-    const handleClickOutside = (event: MouseEvent) => {
-      if (!tableToolsRef.current?.contains(event.target as Node)) setShowTableTools(false)
-    }
-    document.addEventListener('click', handleClickOutside)
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [showTableTools])
-
   // 右键菜单：点击其他位置或按 Esc 关闭
   useEffect(() => {
     if (!contextMenu) return
@@ -1438,7 +1481,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
   const handleFamilyGrouping = async () => {
     const nextValue = !groupByFamily
-    setShowTableTools(false)
     if (nextValue && activeDatabaseId) {
       try {
         const result = await patentApi.rebuildFamilies(activeDatabaseId)
@@ -2779,53 +2821,64 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </button>
           </div>
           <div className="datagrid-toolbar-actions">
-          <button type="button" className="btn btn-sm btn-secondary patent-analysis-trigger" onClick={() => { setAnalysisScope(selectedIds.length ? 'selected' : 'view'); setShowPatentAnalysis(true) }} title="对当前视图或勾选专利进行统计分析"><Icon name="chart" size={14} /> 统计分析</button>
-          {onOpenImport && (
-            <div className="import-management-menu-wrap">
-              <button type="button" className="btn btn-primary datagrid-import-button" onClick={() => setShowImportMenu(value => !value)} aria-expanded={showImportMenu} title="导入数据、查看导入历史和数据治理"><Icon name="plus" size={16} /> 导入管理 <Icon name="chevron-down" size={13} /></button>
-              {showImportMenu && <div className="import-management-menu" role="menu">
-                <button type="button" onClick={() => { setShowImportMenu(false); onOpenImport() }}><Icon name="plus" size={14} /> 新建导入</button>
-                <button type="button" onClick={() => { setShowImportMenu(false); navigate(activeDatabaseId ? `/db/${activeDatabaseId}/import-history${location.search}` : '/import-history') }}><Icon name="history" size={14} /> 导入历史</button>
-                <button type="button" onClick={() => { setShowImportMenu(false); navigate(activeDatabaseId ? `/db/${activeDatabaseId}/governance${location.search}` : '/governance') }}><Icon name="check" size={14} /> 数据治理</button>
-              </div>}
-            </div>
-          )}
-          <div className="datagrid-view-actions">
-            {activeView && activeView.layout_type === 'table' && (
-              <>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${getViewGroupFields(activeView).length > 0 ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setShowGroupConfig(true)}
-                  title="按字段分组并折叠展示"
-                >
-                  <Icon name="table" size={14} /> 分组
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${activeView.conditional_formatting?.length ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setShowConditionalConfig(true)}
-                  title="按条件突出显示单元格"
-                >
-                  <Icon name="filter" size={14} /> 条件格式
-                </button>
-                {getViewGroupFields(activeView).length > 0 && (
-                  <span className="view-tools-summary">
-                    已按 {getViewGroupFields(activeView).map(item => fields.find(field => field.key === item.field)?.name || item.field).join(' / ')} 分组
-                  </span>
+            {onOpenImport && (
+              <ToolbarMenu
+                label="导入管理"
+                icon="plus"
+                triggerClassName="btn btn-sm btn-primary datagrid-import-button"
+                title="导入数据、查看导入历史和数据治理"
+              >
+                {(close) => (
+                  <>
+                    <button type="button" className="menu-item" onClick={() => { close(); onOpenImport() }}><Icon name="plus" size={14} /> 新建导入</button>
+                    <button type="button" className="menu-item" onClick={() => { close(); navigate(activeDatabaseId ? `/db/${activeDatabaseId}/import-history${location.search}` : '/import-history') }}><Icon name="history" size={14} /> 导入历史</button>
+                    <button type="button" className="menu-item" onClick={() => { close(); navigate(activeDatabaseId ? `/db/${activeDatabaseId}/governance${location.search}` : '/governance') }}><Icon name="check" size={14} /> 数据治理</button>
+                  </>
                 )}
-              </>
+              </ToolbarMenu>
             )}
-            {(activeView?.layout_type === 'table' || !activeView) && (
-              <button type="button" className="btn btn-sm btn-secondary datagrid-view-settings-button" onClick={() => setShowTableSettings(true)} title="设置查看模式和行高">
-                <Icon name="sliders" size={14} /> 查看设置
-                <span className="datagrid-view-settings-hint">
-                  {tableViewMode === 'continuous' ? '连续' : '分页'} · {rowHeightLimit === 'auto' ? '自适应' : `${rowHeightLimit}px`}
-                </span>
-              </button>
+            <div className="datagrid-view-actions" aria-label="常用表格工具">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
+              {activeView && activeView.layout_type === 'table' && (
+                <>
+                  <button type="button" className={`btn btn-sm ${getViewGroupFields(activeView).length > 0 ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setShowGroupConfig(true)} title="按字段分组并折叠展示"><Icon name="table" size={14} /> 分组</button>
+                  <button type="button" className={`btn btn-sm ${activeView.conditional_formatting?.length ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setShowConditionalConfig(true)} title="按条件突出显示单元格"><Icon name="filter" size={14} /> 条件格式</button>
+                </>
+              )}
+              {(activeView?.layout_type === 'table' || !activeView) && (
+                <button type="button" className="btn btn-sm btn-secondary datagrid-view-settings-button" onClick={() => setShowTableSettings(true)} title="设置查看模式和行高">
+                  <Icon name="sliders" size={14} /> 查看设置
+                  <span className="datagrid-view-settings-hint">
+                    {tableViewMode === 'continuous' ? '连续' : '分页'} · {rowHeightLimit === 'auto' ? '自适应' : `${rowHeightLimit}px`}
+                  </span>
+                </button>
+              )}
+            </div>
+            {getViewGroupFields(activeView).length > 0 && (
+              <span className="view-tools-summary">
+                已按 {getViewGroupFields(activeView).map(item => fields.find(field => field.key === item.field)?.name || item.field).join(' / ')} 分组
+              </span>
             )}
-          </div>
-          <div className="datagrid-tool-menu-wrap" ref={tableToolsRef}>
+            <ToolbarMenu label="分析" icon="chart" title="统计分析、AI 快速分析、JEV 快速标引">
+              {(close) => (
+                <>
+                  <button type="button" className="menu-item" onClick={() => { close(); setAnalysisScope(selectedIds.length ? 'selected' : 'view'); setShowPatentAnalysis(true) }} title="对当前视图或勾选专利进行统计分析"><Icon name="chart" /> 统计分析</button>
+                  <button type="button" className="menu-item menu-item-ai" onClick={() => { close(); setQuickAnalyzePatentIds(patents.map(p => p.id)); setShowQuickAnalyze(true) }} title="对当前已加载专利执行 AI 快速分析"><Icon name="sparkles" /> AI 快速分析</button>
+                  <button type="button" className="menu-item menu-item-ai" disabled={selectedIds.length !== 1} onClick={() => { close(); setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true) }} title={selectedIds.length === 1 ? '用 JEV 对选中专利做结构化分类和评分' : '请先选中一条专利'}><Icon name="sparkles" /> JEV 快速标引</button>
+                </>
+              )}
+            </ToolbarMenu>
+            <ToolbarMenu label="更多" icon="more-horizontal" title="同族聚拢、导出数据、工作文件等">
+              {(close) => (
+                <>
+                  <button type="button" className={`menu-item ${groupByFamily ? 'is-active' : ''}`} onClick={() => { close(); void handleFamilyGrouping() }} title="把同族专利聚拢显示"><Icon name="table" /> 同族聚拢 {groupByFamily ? '已开启' : '已关闭'}</button>
+                  <button type="button" className="menu-item" onClick={() => { close(); handleExport() }}><Icon name="download" /> 导出数据</button>
+                  <button type="button" className="menu-item menu-item-primary" onClick={() => { close(); setShowWorkFileDialog(true) }} title="按业务模板生成 Excel、Word 或 CSV 工作文件"><Icon name="file" /> 工作文件</button>
+                  <div className="menu-divider" />
+                  <button type="button" className="menu-item" style={{ color: '#b42318' }} onClick={() => { close(); setShowClearDatabase(true) }} title="清空当前库内的全部专利，保留库本身（主表也适用）"><Icon name="trash" /> 清空当前库专利</button>
+                </>
+              )}
+            </ToolbarMenu>
             <div className="datagrid-history-actions" aria-label="编辑历史">
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleUndo()} disabled={undoStack.length === 0 && !columnUndo} title="撤回最近一次编辑或列删除" aria-label="撤回">
                 <Icon name="undo" size={14} />
@@ -2834,33 +2887,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 <Icon name="redo" size={14} />
               </button>
             </div>
-            <button
-              type="button"
-              className="btn btn-sm btn-secondary datagrid-tool-trigger"
-              onClick={event => { event.stopPropagation(); setShowTableTools(value => !value) }}
-              aria-expanded={showTableTools}
-              aria-haspopup="menu"
-              title="打开表格操作"
-            >
-              <Icon name="sliders" /> 表格工具 <Icon name={showTableTools ? 'chevron-up' : 'chevron-down'} size={13} />
-            </button>
-            {showTableTools && (
-              <div className="datagrid-tool-menu" role="menu">
-                <div className="datagrid-tool-menu-heading">当前表格操作</div>
-                <button className={`menu-item ${groupByFamily ? 'is-active' : ''}`} onClick={() => void handleFamilyGrouping()} title="把同族专利聚拢显示"><Icon name="table" /> 同族聚拢 {groupByFamily ? '已开启' : '已关闭'}</button>
-                <button className="menu-item" onClick={() => { setShowFieldConfig(true); setShowTableTools(false) }} title="管理显示字段、顺序和冻结列"><Icon name="columns" /> 列管理</button>
-                <div className="menu-divider" />
-                <button className="menu-item menu-item-ai" onClick={() => { setQuickAnalyzePatentIds(patents.map(p => p.id)); setShowQuickAnalyze(true); setShowTableTools(false) }} title="对当前已加载专利执行 AI 快速分析"><Icon name="sparkles" /> AI 快速分析</button>
-                <button className="menu-item menu-item-ai" disabled={selectedIds.length !== 1} onClick={() => { setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true); setShowTableTools(false) }} title={selectedIds.length === 1 ? '用 JEV 对选中专利做结构化分类和评分' : '请先选中一条专利'}><Icon name="sparkles" /> JEV 快速标引</button>
-                <button className="menu-item" onClick={() => { handleExport(); setShowTableTools(false) }}><Icon name="download" /> 导出数据</button>
-                <button className="menu-item menu-item-primary" onClick={() => { setShowWorkFileDialog(true); setShowTableTools(false) }} title="按业务模板生成 Excel、Word 或 CSV 工作文件"><Icon name="file" /> 工作文件</button>
-                <div className="menu-divider" />
-                <button className="menu-item" style={{ color: '#b42318' }} onClick={() => { setShowClearDatabase(true); setShowTableTools(false) }} title="清空当前库内的全部专利，保留库本身（主表也适用）"><Icon name="trash" /> 清空当前库专利</button>
-              </div>
-            )}
+            {viewConfigNotice && <span style={{ fontSize: 12, color: '#047857' }}>{viewConfigNotice}</span>}
           </div>
-          {viewConfigNotice && <span style={{ fontSize: 12, color: '#047857' }}>{viewConfigNotice}</span>}
-        </div>
         </div>
       </div>
 

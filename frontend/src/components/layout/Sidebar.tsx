@@ -3,28 +3,16 @@ import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Page } from '../../App'
 import type { PatentDatabase } from '../../types'
-import Icon from '../common/Icon'
+import Icon, { type IconName } from '../common/Icon'
 
 const SIDEBAR_SECTIONS_STORAGE_KEY = 'patwiki_sidebar_sections'
-const SIDEBAR_SUBSECTIONS_STORAGE_KEY = 'patwiki_sidebar_subsections'
-type SidebarSectionKey = 'workspace' | 'intelligence' | 'views' | 'products' | 'management'
-type SidebarSubsectionKey = 'analysis' | 'automation' | 'data' | 'system'
+type SidebarSectionKey = 'workspace' | 'intelligence' | 'management'
 type SidebarSections = Record<SidebarSectionKey, boolean>
-type SidebarSubsections = Record<SidebarSubsectionKey, boolean>
 
 const DEFAULT_SIDEBAR_SECTIONS: SidebarSections = {
   workspace: true,
   intelligence: true,
-  views: true,
-  products: true,
   management: true,
-}
-
-const DEFAULT_SIDEBAR_SUBSECTIONS: SidebarSubsections = {
-  analysis: true,
-  automation: true,
-  data: true,
-  system: true,
 }
 
 function readSidebarSections(): SidebarSections {
@@ -38,16 +26,38 @@ function readSidebarSections(): SidebarSections {
   }
 }
 
-function readSidebarSubsections(): SidebarSubsections {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SIDEBAR_SUBSECTIONS_STORAGE_KEY) || '{}') as Partial<SidebarSubsections>
-    return Object.fromEntries(
-      Object.keys(DEFAULT_SIDEBAR_SUBSECTIONS).map(key => [key, parsed[key as SidebarSubsectionKey] !== false]),
-    ) as SidebarSubsections
-  } catch {
-    return DEFAULT_SIDEBAR_SUBSECTIONS
-  }
+interface NavDestination {
+  page: Page
+  label: string
+  icon: IconName
+  hint: string
 }
+
+const NAV_SECTIONS: Array<{ key: SidebarSectionKey; label: string; items: NavDestination[] }> = [
+  {
+    key: 'workspace',
+    label: '专利工作区',
+    items: [
+      { page: 'patents', label: '全部专利', icon: 'table', hint: '浏览、检索与管理当前库全部专利' },
+    ],
+  },
+  {
+    key: 'intelligence',
+    label: '智能与自动化',
+    items: [
+      { page: 'agent-analysis', label: '智能分析', icon: 'activity', hint: '用智能体对专利做多维分析' },
+      { page: 'ai-center', label: 'AI 能力中心', icon: 'sparkles', hint: '管理 AI 能力、任务与配置' },
+    ],
+  },
+  {
+    key: 'management',
+    label: '系统管理',
+    items: [
+      { page: 'management', label: '业务管理台', icon: 'dashboard', hint: '字段、模板与业务规则配置' },
+      { page: 'sharing', label: '协作与权限', icon: 'users', hint: '成员、角色与权限管理' },
+    ],
+  },
+]
 
 interface SidebarProps {
   currentPage: Page
@@ -66,9 +76,10 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   const [newDbName, setNewDbName] = useState('')
   const [newDbDesc, setNewDbDesc] = useState('')
   const [expandedSections, setExpandedSections] = useState<SidebarSections>(() => readSidebarSections())
-  const [expandedSubsections, setExpandedSubsections] = useState<SidebarSubsections>(() => readSidebarSubsections())
   const [pendingDeleteDatabase, setPendingDeleteDatabase] = useState<PatentDatabase | null>(null)
   const [deletingDatabase, setDeletingDatabase] = useState(false)
+
+  const currentDatabase = databases.find(d => d.id === currentDatabaseId) ?? null
 
   const toggleSection = (key: SidebarSectionKey) => {
     setExpandedSections(previous => {
@@ -87,22 +98,6 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
     >
       <span>{label}</span>
       <Icon name={expandedSections[key] ? 'chevron-down' : 'chevron-right'} size={13} />
-    </button>
-  )
-
-  const renderSubsectionToggle = (key: SidebarSubsectionKey, label: string) => (
-    <button
-      type="button"
-      className="sidebar-subsection-toggle"
-      onClick={() => setExpandedSubsections(previous => {
-        const next = { ...previous, [key]: !previous[key] }
-        try { localStorage.setItem(SIDEBAR_SUBSECTIONS_STORAGE_KEY, JSON.stringify(next)) } catch { /* preferences are optional */ }
-        return next
-      })}
-      aria-expanded={expandedSubsections[key]}
-    >
-      <span>{label}</span>
-      <Icon name={expandedSubsections[key] ? 'chevron-down' : 'chevron-right'} size={12} />
     </button>
   )
 
@@ -126,6 +121,20 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   const handleProductClick = (productId: number | null) => {
     setCurrentProductId(productId)
     onNavigate('patents', currentDatabaseId)
+  }
+
+  const isDestinationActive = (page: Page) => (
+    page === 'patents'
+      ? currentPage === 'patents' && !currentProductId
+      : currentPage === page
+  )
+
+  const handleNavSelect = (page: Page) => {
+    if (page === 'patents') {
+      handleProductClick(null)
+    } else {
+      onNavigate(page, currentDatabaseId)
+    }
   }
 
   // P0-11：库切换
@@ -222,9 +231,19 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         </button>
       </div>
 
+      <button
+        type="button"
+        className="sidebar-rail-database"
+        onClick={() => onToggleCollapse(false)}
+        aria-label="展开并切换专利库"
+        title={`当前库：${currentDatabase?.name ?? '未选择'}（点击展开切换）`}
+      >
+        <Icon name="database" size={18} />
+      </button>
+
       <div className="sidebar-database">
         <div className="sidebar-label-row">
-          <span className="sidebar-label">当前专利库</span>
+          <span className="sidebar-label"><Icon name="database" size={12} /> 当前专利库</span>
           <span className="sidebar-count">{databases.length}</span>
         </div>
         <select
@@ -238,10 +257,8 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
             <option key={d.id} value={d.id}>{d.name}</option>
           ))}
         </select>
-        {currentDatabaseId !== null && databases.find(d => d.id === currentDatabaseId) && (
-          <div className="database-meta">
-            {databases.find(d => d.id === currentDatabaseId)?.patent_count ?? 0} 条专利
-          </div>
+        {currentDatabase && (
+          <div className="database-meta">{currentDatabase.patent_count ?? 0} 条专利</div>
         )}
         {showAddDatabase ? (
           <div className="sidebar-form">
@@ -255,7 +272,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         ) : (
           <div className="sidebar-inline-actions">
             <button className="sidebar-link" onClick={() => setShowAddDatabase(true)}>+ 新建专利库</button>
-            {currentDatabaseId !== null && databases.find(d => d.id === currentDatabaseId && !d.is_default) && (
+            {currentDatabase && !currentDatabase.is_default && (
               <button className="sidebar-link danger" onClick={requestDeleteDatabase} title="删除当前库及库内专利">删除</button>
             )}
           </div>
@@ -263,32 +280,28 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
       </div>
 
       <nav className="sidebar-nav">
-        {renderSectionToggle('workspace', '工作台')}
-        {expandedSections.workspace && <div className="sidebar-section-content">
-          <button className={`nav-item ${currentPage === 'patents' && !currentProductId ? 'active' : ''}`} onClick={() => handleProductClick(null)} title="全部专利"><Icon name="table" /><span className="nav-label">全部专利</span></button>
-        </div>}
-
-        {renderSectionToggle('intelligence', '智能与自动化')}
-        {expandedSections.intelligence && <div className="sidebar-section-content">
-          <div className="sidebar-subsection">
-            {renderSubsectionToggle('analysis', '分析与任务')}
-            {expandedSubsections.analysis && <div className="sidebar-subsection-content">
-              <button className={`nav-item ${currentPage === 'agent-analysis' ? 'active' : ''}`} onClick={() => onNavigate('agent-analysis', currentDatabaseId)} title="智能分析"><Icon name="sparkles" /><span className="nav-label">智能分析</span></button>
-              <button className={`nav-item ${currentPage === 'ai-center' ? 'active' : ''}`} onClick={() => onNavigate('ai-center', currentDatabaseId)} title="AI 能力管理中心"><Icon name="sparkles" /><span className="nav-label">AI 能力中心</span></button>
-            </div>}
+        {NAV_SECTIONS.map(section => (
+          <div className="sidebar-section" key={section.key}>
+            {renderSectionToggle(section.key, section.label)}
+            {(collapsed || expandedSections[section.key]) && (
+              <div className="sidebar-section-content">
+                {section.items.map(item => (
+                  <button
+                    key={item.page}
+                    type="button"
+                    className={`nav-item ${isDestinationActive(item.page) ? 'active' : ''}`}
+                    onClick={() => handleNavSelect(item.page)}
+                    title={collapsed ? item.label : item.hint}
+                    aria-current={isDestinationActive(item.page) ? 'page' : undefined}
+                  >
+                    <Icon name={item.icon} size={17} />
+                    <span className="nav-label">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>}
-
-        {renderSectionToggle('management', '管理')}
-        {expandedSections.management && <div className="sidebar-section-content">
-          <div className="sidebar-subsection">
-            {renderSubsectionToggle('system', '系统管理')}
-            {expandedSubsections.system && <div className="sidebar-subsection-content">
-              <button className={`nav-item ${currentPage === 'management' ? 'active' : ''}`} onClick={() => onNavigate('management', currentDatabaseId)} title="业务管理台"><Icon name="settings" /><span className="nav-label">业务管理台</span></button>
-              <button className={`nav-item ${currentPage === 'sharing' ? 'active' : ''}`} onClick={() => onNavigate('sharing', currentDatabaseId)} title="协作与权限"><Icon name="users" /><span className="nav-label">协作与权限</span></button>
-            </div>}
-          </div>
-        </div>}
+        ))}
       </nav>
 
       <button className="sidebar-account" onClick={() => onNavigate('sharing', currentDatabaseId)} title="管理协作与权限">
