@@ -1449,4 +1449,9 @@ def _patent_to_dict(patent: Patent) -> dict:
         "custom_fields": dict(patent.custom_fields or {}),
         "ai_fields": dict(patent.ai_fields or {}),
         "database_id": patent.database_id,
+        # 同族聚拢字段：视图查询走的是本序列化函数，必须与大表直查保持一致，
+        # 否则前端在视图路径下拿不到 family_id/family_size，磁吸聚拢会消失。
+        "family_id": patent.family_id,
+        "family_size": getattr(patent, "family_size", None),
+        "family_key": getattr(patent, "family_key", None),
     }

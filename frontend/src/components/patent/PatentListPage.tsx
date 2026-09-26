@@ -13,6 +13,7 @@ import {
   syncService as syncApi,
   semanticSearchService,
 } from '../../services'
+import { databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
@@ -478,7 +479,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     patents, totalPatents, currentProductId, currentDatabaseId, loading, databases, products,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
     groupByFamily, setGroupByFamily, views, setViews, setCurrentProductId,
-    dataVersion,
+    dataVersion, setDatabases,
   } = useAppStore()
 
   const updatePatentAttachments = useCallback((patentId: number, fieldKey: string, attachments: AttachmentMeta[]) => {
@@ -1469,6 +1470,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       const deleted = new Set(deletedIds)
       patentsRef.current = patentsRef.current.filter(item => !deleted.has(item.id))
       setPatents(patentsRef.current, Math.max(0, totalPatentsRef.current - deleted.size))
+    }
+    // 删除会改变库内总数：侧边栏等处读取的是 databases[].patent_count，
+    // 若不回写就会出现“表格已少一条、侧边栏仍是旧数字”的不一致。
+    if (activeDatabaseId != null && Number.isInteger(activeDatabaseId) && activeDatabaseId > 0) {
+      try {
+        const { patent_count } = await databaseApi.refreshCount(activeDatabaseId)
+        setDatabases(databases.map(db => db.id === activeDatabaseId ? { ...db, patent_count } : db))
+      } catch (error) {
+        // 计数刷新失败不应把一次成功的删除变成报错，记录后继续。
+        console.error('Failed to refresh database count after deletion:', error)
+      }
     }
     if (groupByFamily && activeDatabaseId) {
       try {

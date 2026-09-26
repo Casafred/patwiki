@@ -127,7 +127,16 @@ def _apply_filter_expression(expression, operator: str, value: Any):
     if operator == "ends_with":
         return text_expression.ilike(f"%{value_text}")
     if operator == "eq":
-        return func.lower(text_expression) == value_text.strip().lower()
+        # SQLite 把布尔列存成整数，cast 成文本后是 "1"/"0"；而前端可能传
+        # true/false，str() 后是 "True"/"False"。统一按布尔语义匹配，避免
+        # {"has_risk": {"eq": true}} 这类筛选永远匹配不到任何行。
+        lowered = value_text.strip().lower()
+        candidates = {lowered}
+        if lowered in ("true", "1"):
+            candidates.update(("true", "1"))
+        elif lowered in ("false", "0"):
+            candidates.update(("false", "0"))
+        return func.lower(text_expression).in_(list(candidates))
     return None
 
 
