@@ -97,8 +97,13 @@ function CardDataView({ card }: { card: DashboardCard }) {
     const items = itemsFrom(card)
     const total = items.reduce((sum, item) => sum + item.value, 0) || 1
     const colors = ['#0f766e', '#2563eb', '#d97706', '#9333ea', '#dc2626', '#0891b2']
-    let offset = 0
-    const gradient = items.map((item, index) => { const start = offset; offset += item.value / total * 100; return `${colors[index % colors.length]} ${start}% ${offset}%` }).join(', ')
+    const gradient = items.reduce<{ stops: string[]; offset: number }>((acc, item, index) => {
+      const end = acc.offset + (item.value / total) * 100
+      return {
+        stops: [...acc.stops, `${colors[index % colors.length]} ${acc.offset}% ${end}%`],
+        offset: end,
+      }
+    }, { stops: [], offset: 0 }).stops.join(', ')
     return <div className="dashboard-donut-layout"><div className="dashboard-donut" style={{ background: `conic-gradient(${gradient || '#e2e8f0 0 100%'})` }}><div>{items.reduce((sum, item) => sum + item.value, 0)}</div></div><div className="dashboard-donut-legend">{items.map((item, index) => <div key={item.label}><span style={{ background: colors[index % colors.length] }} /> <span title={item.label}>{item.label}</span><b>{item.value}</b></div>)}</div></div>
   }
   if (card.type === 'heatmap') {

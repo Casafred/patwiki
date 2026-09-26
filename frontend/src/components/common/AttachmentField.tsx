@@ -3,6 +3,7 @@ import { attachmentApi } from '../../api'
 import { BACKEND_URL } from '../../lib/api'
 import type { AttachmentMeta, JsonValue } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import ImageLightbox from './ImageLightbox'
 
 interface AttachmentFieldProps {
   patentId: number
@@ -36,8 +37,14 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
   const [attachments, setAttachments] = useState<AttachmentMeta[]>(normalize(value))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const imageAttachments = attachments.filter(item => item.is_image || item.mime_type.startsWith('image/'))
   const displayedAttachments = displayMode === 'thumbnail' ? imageAttachments.slice(0, 1) : attachments
+
+  const openImage = (attachment: AttachmentMeta) => {
+    const index = imageAttachments.findIndex(item => item.attachment_id === attachment.attachment_id)
+    if (index >= 0) setLightboxIndex(index)
+  }
 
   const openFile = (attachment: AttachmentMeta, preview: boolean) => {
     // Use direct URL navigation instead of fetching a blob. The backend already
@@ -108,7 +115,7 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
                   type="button"
                   className="attachment-thumbnail-button"
                   title={`预览 ${attachment.filename}`}
-                  onClick={() => void openFile(attachment, true)}
+                  onClick={() => openImage(attachment)}
                 >
                   <img
                     className="attachment-thumbnail"
@@ -121,7 +128,7 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
               <span className="attachment-name" title={attachment.filename}>{attachment.filename}</span>
             </div>
             <span className="attachment-size">{formatSize(attachment.file_size)}</span>
-            <button type="button" className="attachment-action" onClick={() => void openFile(attachment, true)}>预览</button>
+            <button type="button" className="attachment-action" onClick={() => { if (attachment.is_image || attachment.mime_type.startsWith('image/')) openImage(attachment); else void openFile(attachment, true) }}>预览</button>
             <button type="button" className="attachment-action" onClick={() => void openFile(attachment, false)}>下载</button>
             <button type="button" className="attachment-action attachment-action-danger" disabled={busy} onClick={() => void remove(attachment)}>删除</button>
           </div>
@@ -133,6 +140,18 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
         <input type="file" disabled={busy || !databaseId} onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = '' }} />
       </label>
       {error && <div className="attachment-error">{error}</div>}
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          images={imageAttachments.map(image => ({
+            src: resolveUrl(image.preview_url),
+            title: image.filename,
+            downloadUrl: resolveUrl(image.download_url),
+          }))}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onIndexChange={setLightboxIndex}
+        />
+      )}
     </div>
   )
 }

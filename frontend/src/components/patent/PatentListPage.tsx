@@ -37,6 +37,7 @@ import ExportDialog from '../common/ExportDialog'
 import WorkFileDialog from '../common/WorkFileDialog'
 import AttachmentField from '../common/AttachmentField'
 import PatentImageStrip from '../common/PatentImageStrip'
+import ImageLightbox from '../common/ImageLightbox'
 import AIQuickAnalyzeModal from '../ai/AIQuickAnalyzeModal'
 import JEVQuickAnalyzeModal from '../ai/JEVQuickAnalyzeModal'
 import StatsPage from './StatsPage'
@@ -548,6 +549,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
   const [pendingColumnDelete, setPendingColumnDelete] = useState<string | null>(null)
+  const [showClearDatabase, setShowClearDatabase] = useState(false)
+  const [clearingDatabase, setClearingDatabase] = useState(false)
+  const [urlImagePreview, setUrlImagePreview] = useState<{ src: string; title?: string } | null>(null)
   const [showTableSettings, setShowTableSettings] = useState(false)
   const [viewConfigNotice, setViewConfigNotice] = useState('')
   const [showBulkEdit, setShowBulkEdit] = useState(false)
@@ -1534,6 +1538,27 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       await refreshAfterDeletion(selectedIds)
     } catch (error: unknown) {
       alert(getErrorMessage(error, '删除失败'))
+    }
+  }
+
+  // 清空当前库内的全部专利（保留库本身，用于主表/默认库等不可删除的库）
+  const handleClearDatabase = async () => {
+    if (activeDatabaseId == null || !Number.isInteger(activeDatabaseId) || activeDatabaseId <= 0) {
+      alert('当前没有明确的数据库范围，操作已取消')
+      return
+    }
+    if (clearingDatabase) return
+    setClearingDatabase(true)
+    try {
+      const result = await databaseApi.clearPatents(activeDatabaseId)
+      clearSelection()
+      setShowClearDatabase(false)
+      await refreshAfterDeletion()
+      alert(`已清空 ${result.deleted_count} 条专利`)
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '清空失败'))
+    } finally {
+      setClearingDatabase(false)
     }
   }
 
@@ -2539,14 +2564,19 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       if (!url) return <span style={{ color: '#94a3b8', fontSize: 12 }}>{value ? String(value) : '-'}</span>
       if (isImageUrl(url)) {
         return (
-          <a href={url} target="_blank" rel="noreferrer noopener" onClick={event => event.stopPropagation()} title={url}>
+          <button
+            type="button"
+            onClick={event => { event.stopPropagation(); setUrlImagePreview({ src: url, title: url }) }}
+            title={url}
+            style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }}
+          >
             <img
               src={url}
               alt={field.name}
               loading="lazy"
               style={{ display: 'block', width: 64, height: 48, objectFit: 'contain', border: '1px solid #e2e8f0', borderRadius: 4, background: '#f8fafc' }}
             />
-          </a>
+          </button>
         )
       }
       return (
@@ -2824,6 +2854,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 <button className="menu-item menu-item-ai" disabled={selectedIds.length !== 1} onClick={() => { setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true); setShowTableTools(false) }} title={selectedIds.length === 1 ? '用 JEV 对选中专利做结构化分类和评分' : '请先选中一条专利'}><Icon name="sparkles" /> JEV 快速标引</button>
                 <button className="menu-item" onClick={() => { handleExport(); setShowTableTools(false) }}><Icon name="download" /> 导出数据</button>
                 <button className="menu-item menu-item-primary" onClick={() => { setShowWorkFileDialog(true); setShowTableTools(false) }} title="按业务模板生成 Excel、Word 或 CSV 工作文件"><Icon name="file" /> 工作文件</button>
+                <div className="menu-divider" />
+                <button className="menu-item" style={{ color: '#b42318' }} onClick={() => { setShowClearDatabase(true); setShowTableTools(false) }} title="清空当前库内的全部专利，保留库本身（主表也适用）"><Icon name="trash" /> 清空当前库专利</button>
               </div>
             )}
           </div>
@@ -3740,6 +3772,36 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         />
       )}
       {showJEVAnalyze && <JEVQuickAnalyzeModal patents={patents.filter(patent => jevAnalyzePatentIds.includes(patent.id))} onClose={() => setShowJEVAnalyze(false)} />}
+
+      {showClearDatabase && (
+        <div className="modal-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !clearingDatabase) setShowClearDatabase(false) }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="clear-db-title">
+            <div className="modal-header">
+              <h2 id="clear-db-title">清空当前库专利</h2>
+              <button type="button" className="modal-close" onClick={() => setShowClearDatabase(false)} disabled={clearingDatabase} aria-label="关闭">×</button>
+            </div>
+            <div className="modal-body">
+              <p>确定清空「{databases.find(d => d.id === activeDatabaseId)?.name || '当前库'}」内的全部专利吗？</p>
+              <p className="text-muted">库内 {databases.find(d => d.id === activeDatabaseId)?.patent_count ?? 0} 条专利及其关联数据将被删除，库本身会保留。此操作不可恢复。</p>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn-secondary" onClick={() => setShowClearDatabase(false)} disabled={clearingDatabase}>取消</button>
+              <button type="button" className="btn-danger" onClick={() => void handleClearDatabase()} disabled={clearingDatabase}>
+                {clearingDatabase ? '清空中...' : '确认清空'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {urlImagePreview && (
+        <ImageLightbox
+          images={[urlImagePreview]}
+          index={0}
+          onClose={() => setUrlImagePreview(null)}
+          onIndexChange={() => { /* 单图预览无需切换 */ }}
+        />
+      )}
 
       {showSyncUpdate && (
         <Modal

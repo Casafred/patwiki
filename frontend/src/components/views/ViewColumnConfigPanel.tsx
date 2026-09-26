@@ -82,7 +82,12 @@ export default function ViewColumnConfigPanel({ open, view, fields, onClose, onS
     </div>
   }
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onMouseDown={event => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
       <div className="modal" style={{ maxWidth: 760 }} onClick={event => event.stopPropagation()}>
         <div className="modal-header">
           <div>

@@ -208,7 +208,12 @@ export default function JEVQuickAnalyzeModal({ patents, onClose }: Props) {
   };
   const answerEntries = result ? Object.entries(result.answers || {}) : [];
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div
         className="modal-content jev-quick-analyze-modal"
         style={{
@@ -562,7 +567,7 @@ export default function JEVQuickAnalyzeModal({ patents, onClose }: Props) {
                     margin: "7px 0 12px",
                   }}
                 >
-                  申请号：{current?.application_number || "未填写"}　公开号：
+                  申请号：{current?.application_number || "未填写"} 公开号：
                   {current?.publication_number || "未填写"}
                   <br />
                   IPC：{current?.ipc_all || current?.ipc_main || "未填写"}
