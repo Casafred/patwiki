@@ -65,6 +65,7 @@ class SnapshotManifest(WireModel):
     count: int = Field(ge=0, le=MAX_RECORDS)
     databases: list[dict] = Field(max_length=500)
     signature_status: Literal["not_signed", "signed"] = "not_signed"
+    signer_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class SnapshotPermissions(WireModel):
