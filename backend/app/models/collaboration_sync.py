@@ -239,6 +239,24 @@ class SyncEntityState(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class SyncEntityFieldState(Base):
+    """Last accepted remote value used as the three-way merge base."""
+
+    __tablename__ = "collaboration_sync_entity_field_states"
+    __table_args__ = (
+        UniqueConstraint("origin_node_uid", "entity_uid", "field_key", name="uq_collab_entity_field_origin"),
+        Index("ix_collab_entity_field_entity", "entity_uid"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    origin_node_uid = Column(String(80), nullable=False, index=True)
+    entity_uid = Column(String(100), nullable=False)
+    field_key = Column(String(200), nullable=False)
+    last_value = Column(JSON, nullable=True)
+    last_version = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class SyncChange(Base):
     __tablename__ = "collaboration_sync_changes"
 
@@ -259,6 +277,8 @@ class SyncConflict(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     conflict_uid = Column(String(80), unique=True, nullable=False, index=True)
+    package_id = Column(Integer, ForeignKey("collaboration_sync_packages.id", ondelete="CASCADE"), nullable=True, index=True)
+    origin_node_uid = Column(String(80), nullable=True, index=True)
     entity_uid = Column(String(100), nullable=False, index=True)
     entity_type = Column(String(50), nullable=False)
     field_key = Column(String(200), nullable=False)

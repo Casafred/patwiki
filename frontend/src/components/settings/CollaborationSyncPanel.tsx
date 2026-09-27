@@ -31,14 +31,22 @@ const buttonStyle = { border: '1px solid #a8bacb', borderRadius: 4, background: 
 
 type Unit = { id: number; name: string; team_type?: string | null; unit_type: string }
 type Responsibility = Record<string, unknown>
-type Grant = { grant_uid: string; username: string; database_id: number; database_name: string; fields: string[]; product_ids: number[]; expires_at?: string | null; revoked: boolean }
+type Grant = { grant_uid: string; username: string; database_id: number; database_name: string; fields: string[]; product_ids: number[]; actions: string[]; expires_at?: string | null; revoked: boolean }
 type Account = CollaborationIdentity & { role_assignments?: Array<{ role: string; unit_id?: number | null }> }
+type DeviceIdentity = { node_uid: string; name: string; fingerprint: string; public_key: string }
+type TrustedDevice = { fingerprint: string; name: string; public_key: string; revoked: boolean; created_at?: string | null }
+type ApplyConflict = { entity_uid: string; field_key: string; base_value: unknown; local_value: unknown; remote_value: unknown }
+type ApplyPreview = { create_count: number; update_count: number; unchanged_count: number; conflicts: ApplyConflict[] }
 
 export default function CollaborationSyncPanel() {
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [setupPath, setSetupPath] = useState('')
   const [identity, setIdentity] = useState<CollaborationIdentity | null>(null)
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [deviceIdentity, setDeviceIdentity] = useState<DeviceIdentity | null>(null)
+  const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([])
+  const [trustedDeviceName, setTrustedDeviceName] = useState('')
+  const [trustedDevicePublicKey, setTrustedDevicePublicKey] = useState('')
   const [units, setUnits] = useState<Unit[]>([])
   const [responsibilities, setResponsibilities] = useState<Responsibility[]>([])
   const [grants, setGrants] = useState<Grant[]>([])
@@ -50,6 +58,9 @@ export default function CollaborationSyncPanel() {
   const [loginName, setLoginName] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [password, setPassword] = useState('')
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
   const [setupToken, setSetupToken] = useState('')
   const [newRole, setNewRole] = useState('member')
   const [newUnit, setNewUnit] = useState('')
@@ -61,6 +72,8 @@ export default function CollaborationSyncPanel() {
   const [grantUser, setGrantUser] = useState('')
   const [grantDatabase, setGrantDatabase] = useState('')
   const [grantProducts, setGrantProducts] = useState<number[]>([])
+  const [grantActions, setGrantActions] = useState<string[]>(['export'])
+  const [grantEditPassword, setGrantEditPassword] = useState('')
   const [exportDatabaseIds, setExportDatabaseIds] = useState<number[]>([])
   const [exportProducts, setExportProducts] = useState<number[]>([])
   const [exportFields, setExportFields] = useState<string[]>(fields)
@@ -72,8 +85,14 @@ export default function CollaborationSyncPanel() {
   const [preview, setPreview] = useState<{ count: number; sample: unknown[]; manifest: Record<string, unknown> } | null>(null)
   const [selectedPackage, setSelectedPackage] = useState('')
   const [selectedRecords, setSelectedRecords] = useState<unknown[]>([])
+  const [applyPackageUid, setApplyPackageUid] = useState('')
+  const [applyDatabaseId, setApplyDatabaseId] = useState('')
+  const [applyEditPassword, setApplyEditPassword] = useState('')
+  const [applyPreview, setApplyPreview] = useState<ApplyPreview | null>(null)
+  const [applyDecisions, setApplyDecisions] = useState<Record<string, 'local' | 'remote'>>({})
 
   const isAdmin = useMemo(() => Boolean(identity?.roles.some(role => role === 'system_admin' || role === 'department_leader')), [identity])
+  const grantTargetIsViewer = accounts.find(account => String(account.id) === grantUser)?.roles.includes('viewer') || false
   const exportRequest = useMemo(() => ({ database_ids: exportDatabaseIds,
     product_ids: exportProducts.length ? exportProducts : undefined, fields: exportFields,
     recipient_names: recipients.split(',').map(value => value.trim()).filter(Boolean), password: packagePassword }),
@@ -86,6 +105,7 @@ export default function CollaborationSyncPanel() {
     setProducts(productRows.filter(item => item.is_active !== false))
     setExportDatabaseIds(current => current.length ? current : dbs.filter(item => !item.is_archived).slice(0, 1).map(item => item.id))
     setGrantDatabase(current => current || String(dbs.find(item => !item.is_archived)?.id || ''))
+    setApplyDatabaseId(current => current || String(dbs.find(item => !item.is_archived)?.id || ''))
   }, [])
 
   const loadAdminData = useCallback(async () => {
@@ -98,6 +118,12 @@ export default function CollaborationSyncPanel() {
     setUnits(unitRows)
     setResponsibilities(responsibilityRows.items)
     setGrants(grantRows.items)
+    const [localDevice, trustedRows] = await Promise.all([
+      collaborationSyncApi.deviceIdentity().catch(error => { setMessage(getErrorMessage(error, '本机设备密钥不可用')); return null }),
+      collaborationSyncApi.trustedDevices().catch(error => { setMessage(getErrorMessage(error)); return { items: [] as TrustedDevice[] } }),
+    ])
+    setDeviceIdentity(localDevice)
+    setTrustedDevices(trustedRows.items)
   }, [identity])
 
   const loadPackages = useCallback(async () => {
@@ -168,6 +194,17 @@ export default function CollaborationSyncPanel() {
     setMessage('已退出协同账号')
   }
 
+  const handleChangePassword = async () => {
+    if (newPassword.length < 10 || newPassword !== confirmNewPassword) return
+    setBusy(true)
+    try {
+      await collaborationSyncApi.changePassword({ current_password: currentPassword, new_password: newPassword })
+      setCurrentPassword(''); setNewPassword(''); setConfirmNewPassword('')
+      setMessage('密码已修改，其他登录会话已撤销')
+    } catch (error: unknown) { setMessage(getErrorMessage(error, '修改密码失败')) }
+    finally { setBusy(false) }
+  }
+
   const handleCreateAccount = async () => {
     setBusy(true)
     try {
@@ -191,13 +228,67 @@ export default function CollaborationSyncPanel() {
   }
 
   const handleCreateGrant = async () => {
-    if (!grantUser || !grantDatabase) return
+    if (!grantUser || !grantDatabase || (grantActions.includes('apply') && grantEditPassword.length < 10)) return
     setBusy(true)
     try {
       await collaborationSyncApi.createGrant({ user_id: Number(grantUser), database_id: Number(grantDatabase),
-        product_ids: grantProducts, fields: exportFields, expires_days: 90 })
-      setMessage('同步导出授权已创建'); await loadAdminData()
+        product_ids: grantProducts, fields: exportFields, actions: grantActions,
+        edit_password: grantActions.includes('apply') ? grantEditPassword : undefined, expires_days: 90 })
+      setGrantEditPassword(''); setMessage('同步授权已创建'); await loadAdminData()
     } catch (error: unknown) { setMessage(getErrorMessage(error, '创建授权失败')) }
+    finally { setBusy(false) }
+  }
+
+  const handleTrustDevice = async () => {
+    if (!trustedDeviceName.trim() || !trustedDevicePublicKey.trim()) return
+    setBusy(true)
+    try {
+      const result = await collaborationSyncApi.trustDevice({ name: trustedDeviceName.trim(), public_key: trustedDevicePublicKey.trim() })
+      setTrustedDeviceName(''); setTrustedDevicePublicKey('')
+      setMessage(`已登记可信设备：${result.name} · ${result.fingerprint}`)
+      await loadAdminData()
+    } catch (error: unknown) { setMessage(getErrorMessage(error, '登记设备失败')) }
+    finally { setBusy(false) }
+  }
+
+  const handleRevokeDevice = async (fingerprint: string) => {
+    setBusy(true)
+    try {
+      await collaborationSyncApi.revokeTrustedDevice(fingerprint)
+      setMessage(`已撤销设备信任：${fingerprint}`)
+      await loadAdminData()
+    } catch (error: unknown) { setMessage(getErrorMessage(error, '撤销设备失败')) }
+    finally { setBusy(false) }
+  }
+
+  const handlePreviewApply = async (packageUid: string) => {
+    if (!applyDatabaseId) return
+    setBusy(true); setApplyPackageUid(packageUid); setApplyPreview(null); setApplyDecisions({})
+    try {
+      const result = await collaborationSyncApi.previewApply(packageUid, {
+        database_id: Number(applyDatabaseId), edit_password: applyEditPassword || undefined,
+      })
+      setApplyPreview(result as ApplyPreview)
+      setMessage(`主表应用预览：新增 ${result.create_count} 条、更新 ${result.update_count} 条、冲突 ${result.conflicts.length} 项`)
+    } catch (error: unknown) { setMessage(getErrorMessage(error, '无法预览主表应用')) }
+    finally { setBusy(false) }
+  }
+
+  const handleApplyPackage = async () => {
+    if (!applyPackageUid || !applyDatabaseId || !applyPreview) return
+    setBusy(true)
+    try {
+      const decisions = applyPreview.conflicts.flatMap(conflict => {
+        const choice = applyDecisions[`${conflict.entity_uid}:${conflict.field_key}`]
+        return choice ? [{ entity_uid: conflict.entity_uid, field_key: conflict.field_key, choice }] : []
+      })
+      const result = await collaborationSyncApi.apply(applyPackageUid, {
+        database_id: Number(applyDatabaseId), edit_password: applyEditPassword || undefined, decisions,
+      })
+      setMessage(`主表应用完成：新增 ${result.created} 条、更新 ${result.updated} 条、待处理冲突 ${result.pending_conflicts} 项；同步前备份：${result.backup_path || '未生成（仅内存数据库）'}`)
+      setApplyPreview(null); setApplyDecisions({})
+      await loadPackages()
+    } catch (error: unknown) { setMessage(getErrorMessage(error, '主表应用失败')) }
     finally { setBusy(false) }
   }
 
@@ -281,6 +372,29 @@ export default function CollaborationSyncPanel() {
     </div>}
 
     {identity && <>
+      <details style={{ marginBottom: 14 }}>
+        <summary style={{ cursor: 'pointer', fontSize: 12, color: '#334155' }}>修改协同密码</summary>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, maxWidth: 780, paddingTop: 8 }}>
+          <input style={inputStyle} type="password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} placeholder="当前密码" autoComplete="current-password" />
+          <input style={inputStyle} type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="新密码（至少 10 位）" autoComplete="new-password" />
+          <input style={inputStyle} type="password" value={confirmNewPassword} onChange={event => setConfirmNewPassword(event.target.value)} placeholder="确认新密码" autoComplete="new-password" />
+          <button style={buttonStyle} disabled={busy || currentPassword.length < 10 || newPassword.length < 10 || newPassword !== confirmNewPassword} onClick={() => void handleChangePassword()}>保存新密码</button>
+        </div>
+      </details>
+      {isAdmin && <div style={{ borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0', padding: '10px 0', marginBottom: 14 }}>
+        <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>可信同步设备</h4>
+        {deviceIdentity && <div style={{ display: 'grid', gap: 6, marginBottom: 10, fontSize: 11 }}>
+          <div>本机指纹：<code style={{ overflowWrap: 'anywhere' }}>{deviceIdentity.fingerprint}</code> <button style={buttonStyle} onClick={() => void navigator.clipboard?.writeText(deviceIdentity.fingerprint)}>复制指纹</button></div>
+          <div>本机公钥：<code style={{ overflowWrap: 'anywhere' }}>{deviceIdentity.public_key}</code> <button style={buttonStyle} onClick={() => void navigator.clipboard?.writeText(deviceIdentity.public_key)}>复制公钥</button></div>
+          <div style={{ color: '#64748b' }}>请通过公司批准的独立渠道核对指纹后，再登记对方公钥。签名证明包来自该设备，不代替员工身份认证。</div>
+        </div>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 1fr) minmax(200px, 2fr) auto', gap: 7 }}>
+          <input style={inputStyle} value={trustedDeviceName} onChange={event => setTrustedDeviceName(event.target.value)} placeholder="设备名称" />
+          <input style={inputStyle} value={trustedDevicePublicKey} onChange={event => setTrustedDevicePublicKey(event.target.value)} placeholder="对方 Ed25519 公钥（Base64）" />
+          <button style={buttonStyle} disabled={busy || !trustedDeviceName.trim() || !trustedDevicePublicKey.trim()} onClick={() => void handleTrustDevice()}>登记可信设备</button>
+        </div>
+        <div style={{ marginTop: 8, maxHeight: 130, overflow: 'auto', fontSize: 11 }}>{trustedDevices.map(device => <div key={device.fingerprint} style={{ display: 'grid', gridTemplateColumns: 'minmax(90px, auto) minmax(0, 1fr) auto', alignItems: 'center', gap: 8, borderTop: '1px solid #edf0f3', padding: '5px 0' }}><span>{device.name} · {device.revoked ? '已撤销' : '有效'}</span><code style={{ overflowWrap: 'anywhere' }}>{device.fingerprint}</code>{!device.revoked && <button style={buttonStyle} disabled={busy} onClick={() => void handleRevokeDevice(device.fingerprint)}>撤销</button>}</div>)}</div>
+      </div>}
       {isAdmin && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 18 }}>
         <div style={{ borderTop: '2px solid #0f766e', paddingTop: 10 }}>
           <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>协同账号</h4>
@@ -292,9 +406,10 @@ export default function CollaborationSyncPanel() {
               <option value="member">组员</option><option value="group_leader">组长</option><option value="department_leader">部门领导</option><option value="system_admin">维护管理员</option><option value="viewer">只读协作者</option>
             </select>
             <select style={inputStyle} value={newUnit} onChange={event => setNewUnit(event.target.value)}><option value="">选择所属组（可选）</option>{units.filter(unit => unit.unit_type === 'team').map(unit => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select>
-            <button style={buttonStyle} disabled={busy || !loginName || password.length < 10} onClick={() => void handleCreateAccount()}>创建账号</button>
+            <button style={buttonStyle} disabled={busy || !loginName || password.length < 10 || (newRole === 'group_leader' && !newUnit)} onClick={() => void handleCreateAccount()}>创建账号</button>
           </div>
           <div style={{ marginTop: 8, maxHeight: 170, overflow: 'auto', fontSize: 11, color: '#475569' }}>{accounts.map(account => <div key={account.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(90px, 1fr) minmax(105px, auto) auto', alignItems: 'center', gap: 5, padding: '3px 0' }}><span>{account.display_name || account.username} · {account.username}</span><select style={{ ...inputStyle, padding: '3px 4px', fontSize: 10 }} disabled={!account.active} value={account.roles[0] || 'member'} onChange={event => { const role = event.target.value; const unitId = account.role_assignments?.find(item => item.role === 'group_leader')?.unit_id || (newUnit ? Number(newUnit) : undefined); void collaborationSyncApi.setAccountRole(account.id, role, unitId).then(loadAdminData).catch(error => setMessage(getErrorMessage(error))) }}><option value="member">组员</option><option value="group_leader">组长</option><option value="department_leader">部门领导</option><option value="system_admin">维护管理员</option><option value="viewer">只读协作者</option></select><button style={{ ...buttonStyle, padding: '2px 5px' }} onClick={() => void collaborationSyncApi.setAccountActive(account.id, !account.active).then(loadAdminData).catch(error => setMessage(getErrorMessage(error)))}>{account.active ? '停用' : '启用'}</button></div>)}</div>
+          <div style={{ marginTop: 6, color: '#64748b', fontSize: 11 }}>管理员和部门领导拥有本机协同管理权限；组长、组员按品类和字段授权同步；只读协作者不能应用到主表。</div>
         </div>
 
         <div style={{ borderTop: '2px solid #0f766e', paddingTop: 10 }}>
@@ -316,10 +431,16 @@ export default function CollaborationSyncPanel() {
             <select style={inputStyle} value={grantUser} onChange={event => setGrantUser(event.target.value)}><option value="">选择协同账号</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.display_name || account.username}</option>)}</select>
             <select style={inputStyle} value={grantDatabase} onChange={event => setGrantDatabase(event.target.value)}><option value="">选择数据库</option>{databases.map(database => <option key={database.id} value={database.id}>{database.name}</option>)}</select>
             <select multiple style={{ ...inputStyle, height: 96 }} value={grantProducts.map(String)} onChange={event => setGrantProducts(Array.from(event.target.selectedOptions, option => Number(option.value)))}>{products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}</select>
-            <div style={{ fontSize: 11, color: '#64748b' }}>未选择品类表示该库全部品类。字段权限使用下方导出字段选择。</div>
-            <button style={buttonStyle} disabled={busy || !grantUser || !grantDatabase} onClick={() => void handleCreateGrant()}>按当前字段授权 90 天</button>
+            <div style={{ fontSize: 11, color: '#64748b' }}>未选择品类表示该库全部品类。字段权限使用导出字段选择。</div>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12 }}>
+              <label><input type="checkbox" checked={grantActions.includes('export')} onChange={event => setGrantActions(current => event.target.checked ? [...new Set([...current, 'export'])] : current.filter(action => action !== 'export'))} /> 导出</label>
+              <label><input type="checkbox" checked={grantActions.includes('apply')} disabled={grantTargetIsViewer} onChange={event => setGrantActions(current => event.target.checked ? [...new Set([...current, 'apply'])] : current.filter(action => action !== 'apply'))} /> 应用到本地主表</label>
+            </div>
+            {grantTargetIsViewer && <div style={{ fontSize: 11, color: '#9a3412' }}>只读协作者不能获得主表应用权限。</div>}
+            {grantActions.includes('apply') && <input style={inputStyle} type="password" value={grantEditPassword} onChange={event => setGrantEditPassword(event.target.value)} placeholder="独立编辑密码（至少 10 位）" />}
+            <button style={buttonStyle} disabled={busy || !grantUser || !grantDatabase || !grantActions.length || (grantActions.includes('apply') && grantEditPassword.length < 10)} onClick={() => void handleCreateGrant()}>按当前范围授权 90 天</button>
           </div>
-          <div style={{ marginTop: 8, maxHeight: 110, overflow: 'auto', fontSize: 11 }}>{grants.filter(grant => !grant.revoked).map(grant => <div key={grant.grant_uid} style={{ display: 'flex', justifyContent: 'space-between', gap: 6, padding: '3px 0' }}><span>{grant.username} · {grant.database_name}</span><button style={{ ...buttonStyle, padding: '2px 5px' }} onClick={() => void collaborationSyncApi.revokeGrant(grant.grant_uid).then(loadAdminData).catch(error => setMessage(getErrorMessage(error)))}>撤销</button></div>)}</div>
+          <div style={{ marginTop: 8, maxHeight: 110, overflow: 'auto', fontSize: 11 }}>{grants.filter(grant => !grant.revoked).map(grant => <div key={grant.grant_uid} style={{ display: 'flex', justifyContent: 'space-between', gap: 6, padding: '3px 0' }}><span>{grant.username} · {grant.database_name} · {grant.actions.join('+')}</span><button style={{ ...buttonStyle, padding: '2px 5px' }} onClick={() => void collaborationSyncApi.revokeGrant(grant.grant_uid).then(loadAdminData).catch(error => setMessage(getErrorMessage(error)))}>撤销</button></div>)}</div>
         </div>
       </div>}
 
@@ -345,14 +466,32 @@ export default function CollaborationSyncPanel() {
             <input style={{ ...inputStyle, padding: 5 }} type="file" accept=".pwshare,application/octet-stream" onChange={event => { setImportFile(event.target.files?.[0] || null); setPreview(null) }} />
             <input style={inputStyle} type="password" value={importPassword} onChange={event => setImportPassword(event.target.value)} placeholder="共享密码" />
             <button style={buttonStyle} disabled={busy || !importFile || importPassword.length < 10} onClick={() => void handleImportPreview()}>解密并预览</button>
-            {preview && <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, fontSize: 12 }}><div>{preview.count} 条记录 · {String(preview.manifest.created_at || '')} · {String((preview.manifest.created_by as Record<string, unknown> | undefined)?.username || '')}</div><pre style={{ maxHeight: 130, overflow: 'auto', background: '#f8fafc', padding: 8, fontSize: 10 }}>{JSON.stringify(preview.sample, null, 2)}</pre><button style={buttonStyle} disabled={busy} onClick={() => void handleImport()}>导入到只读共享区</button></div>}
+            {preview && <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, fontSize: 12 }}><div>{preview.count} 条记录 · {String(preview.manifest.created_at || '')} · {String((preview.manifest.created_by as Record<string, unknown> | undefined)?.username || '')} · 签名：{preview.manifest.signature_status === 'trusted' ? '可信' : preview.manifest.signature_status === 'signed_untrusted' ? '待登记信任' : '未签名'}</div>{typeof preview.manifest.signer_fingerprint === 'string' && <div style={{ overflowWrap: 'anywhere', color: '#475569' }}>发送设备指纹：<code>{preview.manifest.signer_fingerprint}</code></div>}<pre style={{ maxHeight: 130, overflow: 'auto', background: '#f8fafc', padding: 8, fontSize: 10 }}>{JSON.stringify(preview.sample, null, 2)}</pre><button style={buttonStyle} disabled={busy} onClick={() => void handleImport()}>导入到只读共享区</button></div>}
           </div>
         </div>
       </div>
 
       <div style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 12 }}>
         <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>同步包收发记录</h4>
-        {packages.length === 0 ? <div style={{ fontSize: 12, color: '#64748b' }}>暂无同步包</div> : packages.map((item: CollaborationPackage) => <div key={item.package_uid} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', alignItems: 'center', gap: 8, borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><span style={{ overflowWrap: 'anywhere' }}>{item.direction === 'inbox' ? '收到' : '发出'} · {item.package_uid} · {item.count} 条 · {item.status}</span>{item.direction === 'outbox' && <button style={buttonStyle} onClick={() => void collaborationSyncApi.download(item.package_uid).then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${item.package_uid}.pwshare`; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载</button>}<button style={buttonStyle} onClick={() => void handleShowRecords(item.package_uid)}>查看只读记录</button></div>)}
+        {packages.length === 0 ? <div style={{ fontSize: 12, color: '#64748b' }}>暂无同步包</div> : packages.map((item: CollaborationPackage) => <div key={item.package_uid} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', alignItems: 'center', gap: 8, borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><span style={{ overflowWrap: 'anywhere' }}>{item.direction === 'inbox' ? '收到' : '发出'} · {item.package_uid} · {item.count} 条 · {item.status} · {item.signature_status === 'trusted' || item.signature_status === 'signed' ? '签名' : item.signature_status === 'signed_untrusted' ? '待信任' : '未签名'}</span>{item.direction === 'outbox' && <button style={buttonStyle} onClick={() => void collaborationSyncApi.download(item.package_uid).then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${item.package_uid}.pwshare`; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载</button>}{item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status) && <button style={buttonStyle} disabled={busy || !databases.length} onClick={() => void handlePreviewApply(item.package_uid)}>预览主表应用</button>}<button style={buttonStyle} onClick={() => void handleShowRecords(item.package_uid)}>查看只读记录</button></div>)}
+        {applyPackageUid && <div style={{ display: 'grid', gap: 8, marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
+          <strong style={{ fontSize: 12 }}>应用到本地主表 · {applyPackageUid}</strong>
+          <select style={inputStyle} value={applyDatabaseId} onChange={event => { setApplyDatabaseId(event.target.value); setApplyPreview(null) }}><option value="">选择本机目标数据库</option>{databases.map(database => <option key={database.id} value={database.id}>{database.name}</option>)}</select>
+          {!isAdmin && <input style={inputStyle} type="password" value={applyEditPassword} onChange={event => setApplyEditPassword(event.target.value)} placeholder="编辑授权密码" />}
+          <button style={buttonStyle} disabled={busy || !applyDatabaseId} onClick={() => void handlePreviewApply(applyPackageUid)}>重新核对差异</button>
+          {applyPreview && <>
+            <div style={{ fontSize: 12, color: '#334155' }}>新增 {applyPreview.create_count} 条 · 更新 {applyPreview.update_count} 条 · 无变化 {applyPreview.unchanged_count} 条 · 冲突 {applyPreview.conflicts.length} 项</div>
+            {applyPreview.conflicts.map(conflict => {
+              const key = `${conflict.entity_uid}:${conflict.field_key}`
+              return <div key={key} style={{ borderTop: '1px solid #edf0f3', paddingTop: 7, display: 'grid', gap: 5, fontSize: 11 }}>
+                <strong>{conflict.entity_uid} · {fieldLabel(conflict.field_key)}</strong>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 6 }}><div>本机：{JSON.stringify(conflict.local_value)}</div><div>接收：{JSON.stringify(conflict.remote_value)}</div></div>
+                <div style={{ display: 'flex', gap: 12 }}><label><input type="radio" name={key} checked={applyDecisions[key] === 'local'} onChange={() => setApplyDecisions(current => ({ ...current, [key]: 'local' }))} /> 保留本机</label><label><input type="radio" name={key} checked={applyDecisions[key] === 'remote'} onChange={() => setApplyDecisions(current => ({ ...current, [key]: 'remote' }))} /> 接受接收值</label></div>
+              </div>
+            })}
+            <button style={{ ...buttonStyle, background: '#edf5f4', borderColor: '#78b9aa' }} disabled={busy} onClick={() => void handleApplyPackage()}>应用无冲突项和已选决策</button>
+          </>}
+        </div>}
         {selectedPackage && <div style={{ marginTop: 8 }}><div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>{selectedPackage} · 最多显示 1000 条</div><pre style={{ maxHeight: 240, overflow: 'auto', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, padding: 10, fontSize: 10 }}>{JSON.stringify(selectedRecords, null, 2)}</pre></div>}
       </div>
     </>}

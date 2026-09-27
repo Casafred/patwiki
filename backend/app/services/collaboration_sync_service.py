@@ -1,20 +1,33 @@
 """Offline, read-only patent snapshot export and import."""
 from __future__ import annotations
 
-import os
-from datetime import datetime, timedelta
+import sqlite3
+import base64
+import hashlib
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app.core.time import utc_now_naive
-from app.models import Patent, PatentDatabase, PatentDatabaseMembership, Product, User
-from app.models.collaboration_sync import CollaborationCredential, PermissionGrant, SyncPackage, SyncPackageMember, SyncPackageRecord, SyncWorkspace
-from app.services.collaboration_identity_service import audit, roles, uid, workspace_dir
+from app.models import LegalStatus, Patent, PatentDatabase, PatentDatabaseMembership, PatentHistory, PatentType, Product, RiskLevel, User
+from app.services.patent_identity_service import ensure_patent_identifiers
+from app.models.collaboration_sync import (
+    CollaborationCredential, PermissionGrant, SyncConflict, SyncEntityFieldState,
+    SyncPackage, SyncPackageMember, SyncPackageRecord, SyncWorkspace, TrustedSyncDevice,
+)
+from app.services.collaboration_identity_service import PASSWORDS, audit, roles, uid, workspace_dir
 from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, encode, file_hash
+from app.services.patent_identity_service import (
+    find_patents_by_identifier_specs_bulk,
+    identifier_specs_from_values,
+)
+from app.services.patent_service import PatentService, _stringify_value
 
 EXPORT_FIELDS = frozenset({
     "application_number", "publication_number", "grant_number", "title", "abstract", "claims",
@@ -49,6 +62,79 @@ def _workspace(db: Session, user_id: int) -> SyncWorkspace:
         db.add(workspace)
         db.flush()
     return workspace
+
+
+def device_signing_identity(db: Session, user_id: int) -> dict:
+    """Load or create this workspace's signing key in the OS credential store."""
+    workspace = _workspace(db, user_id)
+    try:
+        import keyring
+
+        if getattr(keyring.get_keyring(), "priority", 0) <= 0:
+            raise RuntimeError("no secure credential store")
+        encoded = keyring.get_password("PatWiki.Collaboration.DeviceSigning.v1", workspace.node_uid)
+        if encoded:
+            private_bytes = base64.b64decode(encoded, validate=True)
+            private_key = Ed25519PrivateKey.from_private_bytes(private_bytes)
+        else:
+            private_key = Ed25519PrivateKey.generate()
+            private_bytes = private_key.private_bytes(
+                serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption(),
+            )
+            encoded = base64.b64encode(private_bytes).decode("ascii")
+            keyring.set_password("PatWiki.Collaboration.DeviceSigning.v1", workspace.node_uid, encoded)
+            if keyring.get_password("PatWiki.Collaboration.DeviceSigning.v1", workspace.node_uid) != encoded:
+                raise RuntimeError("credential store did not persist the key")
+        public_bytes = private_key.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+        )
+    except Exception as exc:
+        raise HTTPException(503, "无法访问本机安全凭据库，未生成或签发同步包。请检查 Windows 凭据管理器。") from exc
+    fingerprint = hashlib.sha256(public_bytes).hexdigest()
+    workspace.public_key = base64.b64encode(public_bytes).decode("ascii")
+    db.flush()
+    return {
+        "node_uid": workspace.node_uid,
+        "name": workspace.name,
+        "fingerprint": fingerprint,
+        "public_key": workspace.public_key,
+        "private_key": private_bytes,
+    }
+
+
+def trusted_device_keys(db: Session) -> dict[str, bytes]:
+    devices = db.query(TrustedSyncDevice).filter(TrustedSyncDevice.revoked_at.is_(None)).all()
+    trusted = {}
+    for device in devices:
+        try:
+            key = base64.b64decode(device.public_key, validate=True)
+        except (ValueError, TypeError):
+            continue
+        if len(key) == 32 and hashlib.sha256(key).hexdigest() == device.fingerprint:
+            trusted[device.fingerprint] = key
+    workspace = db.query(SyncWorkspace).first()
+    if workspace and workspace.public_key:
+        try:
+            local_key = base64.b64decode(workspace.public_key, validate=True)
+        except (ValueError, TypeError):
+            local_key = b""
+        if len(local_key) == 32:
+            trusted[hashlib.sha256(local_key).hexdigest()] = local_key
+    return trusted
+
+
+def package_signer_is_trusted(db: Session, manifest: dict, trusted_keys: dict[str, bytes] | None = None) -> bool:
+    fingerprint = manifest.get("signer_fingerprint")
+    public_key = manifest.get("signer_public_key")
+    if not fingerprint or not public_key:
+        return False
+    try:
+        raw_key = base64.b64decode(public_key, validate=True)
+    except (ValueError, TypeError):
+        return False
+    if len(raw_key) != 32 or hashlib.sha256(raw_key).hexdigest() != fingerprint:
+        return False
+    return (trusted_keys if trusted_keys is not None else trusted_device_keys(db)).get(fingerprint) == raw_key
 
 
 def _validate_request(db: Session, user_id: int, request):
@@ -166,6 +252,12 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
         scopes = [database_uids[database_id] for database_id in memberships if database_id in database_uids]
         product = products.get(patent.product_id)
         payload = {field: _value(getattr(patent, field)) for field in fields}
+        if "custom_fields" in payload and isinstance(payload["custom_fields"], dict):
+            # Attachment IDs, local paths and download URLs are machine-local.
+            payload["custom_fields"] = {
+                key: value for key, value in payload["custom_fields"].items()
+                if key != "attachments"
+            }
         records.append({"entity_type": "patent", "entity_uid": patent.entity_uid,
                         "record_version": patent.record_version or 1,
                         "origin_node_uid": patent.origin_node_uid,
@@ -192,6 +284,7 @@ def export_package(db: Session, user_id: int, request) -> dict:
         fields, recipients, databases = _validate_request(db, user_id, request)
         workspace = _workspace(db, user_id)
         records = _records(db, user_id, request, fields, databases, workspace.node_uid)
+        signing_identity = device_signing_identity(db, user_id)
     except HTTPException as exc:
         _audit_denial(db, user_id, "package_export_denied", {"database_ids": request.database_ids,
                        "status_code": exc.status_code, "reason": str(exc.detail)})
@@ -204,16 +297,17 @@ def export_package(db: Session, user_id: int, request) -> dict:
                 "created_by": {"user_uid": user.user_uid, "username": user.username},
                 "origin_node_uid": workspace.node_uid, "fields": fields, "count": len(records),
                 "databases": [{"database_uid": item.database_uid, "name": item.name} for item in databases],
-                "signature_status": "not_signed"}
+                "signature_status": "signed", "signer_fingerprint": signing_identity["fingerprint"]}
     permissions = {"access": "viewer", "recipients": recipients, "fields": fields,
                    "can_edit": False, "can_redistribute": False}
-    raw = encode(manifest, permissions, records, request.password)
+    raw = encode(manifest, permissions, records, request.password, signing_identity["private_key"])
     path = workspace_dir() / "outbox" / f"{package_uid}.pwshare"
     with path.open("xb") as stream:
         stream.write(raw)
     package = SyncPackage(package_uid=package_uid, package_type="snapshot", direction="outbox",
                           path=str(path), file_hash=file_hash(raw), created_by=user_id,
                           status="created", access="viewer", manifest_json=manifest,
+                          signature_status="signed",
                           expires_at=now + timedelta(days=request.expires_days))
     db.add(package)
     db.flush()
@@ -244,7 +338,7 @@ async def read_upload(upload: UploadFile) -> bytes:
 
 def _validated_import(db: Session, user_id: int, raw: bytes, password: str):
     try:
-        manifest, permissions, records = decode(raw, password)
+        manifest, permissions, records = decode(raw, password, trusted_device_keys(db))
         if datetime.fromisoformat(manifest["expires_at"]) <= utc_now_naive():
             raise HTTPException(410, "同步包已过期")
         user = db.get(User, user_id)
@@ -278,7 +372,7 @@ def import_package(db: Session, user_id: int, raw: bytes, password: str) -> dict
     package = SyncPackage(package_uid=package_uid, package_type="snapshot", direction="inbox",
                           path=str(path), file_hash=file_hash(raw), created_by=user_id,
                           status="imported", access="viewer", manifest_json=manifest,
-                          signature_status="not_signed", applied_at=utc_now_naive(),
+                          signature_status=manifest.get("signature_status", "not_signed"), applied_at=None,
                           expires_at=datetime.fromisoformat(manifest["expires_at"]))
     db.add(package)
     db.flush()
@@ -298,6 +392,455 @@ def import_package(db: Session, user_id: int, raw: bytes, password: str) -> dict
     return {"package_uid": package_uid, "count": len(records), "status": "imported"}
 
 
+_NO_BASELINE = object()
+_DATE_FIELDS = {"filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date"}
+_ENUM_FIELDS = {"patent_type": PatentType, "legal_status": LegalStatus, "risk_level": RiskLevel}
+
+
+def _batch_local_patents(db: Session, records: list[SyncPackageRecord]) -> dict[int, Patent | None]:
+    """Resolve rows by stable UID, then batch-match existing official numbers."""
+    entity_uids = list(dict.fromkeys(row.entity_uid for row in records))
+    by_entity: dict[str, Patent] = {}
+    for offset in range(0, len(entity_uids), 500):
+        rows = db.query(Patent).filter(
+            Patent.entity_uid.in_(entity_uids[offset:offset + 500]),
+        ).all()
+        by_entity.update({row.entity_uid: row for row in rows})
+
+    result: dict[int, Patent | None] = {}
+    for row in records:
+        patent = by_entity.get(row.entity_uid)
+        if patent is None:
+            result[row.id] = None
+        elif patent.deleted_at:
+            raise HTTPException(409, "本机已有同 UID 的已删除专利，请先人工恢复后再同步")
+        else:
+            result[row.id] = patent
+
+    candidates: dict[int, set[int]] = {row.id: set() for row in records}
+    for field_key in ("application_number", "publication_number", "grant_number"):
+        values = list(dict.fromkeys(
+            str((row.payload_json or {}).get(field_key)) for row in records
+            if (row.payload_json or {}).get(field_key)
+        ))
+        by_value: dict[str, set[int]] = {}
+        column = getattr(Patent, field_key)
+        for offset in range(0, len(values), 500):
+            matches = db.query(Patent).filter(column.in_(values[offset:offset + 500])).all()
+            for match in matches:
+                by_value.setdefault(str(getattr(match, field_key)), set()).add(match.id)
+        for row in records:
+            value = (row.payload_json or {}).get(field_key)
+            if value:
+                candidates[row.id].update(by_value.get(str(value), set()))
+
+    specs_by_row = {
+        row.id: identifier_specs_from_values({
+            "application": (row.payload_json or {}).get("application_number"),
+            "publication": (row.payload_json or {}).get("publication_number"),
+            "grant": (row.payload_json or {}).get("grant_number"),
+        }, (row.payload_json or {}).get("country"))
+        for row in records
+    }
+    for row_id, matches in find_patents_by_identifier_specs_bulk(db, specs_by_row).items():
+        candidates[row_id].update(match.id for match in matches)
+
+    candidate_ids = sorted({patent_id for ids in candidates.values() for patent_id in ids})
+    by_id = {
+        row.id: row
+        for offset in range(0, len(candidate_ids), 500)
+        for row in db.query(Patent).filter(Patent.id.in_(candidate_ids[offset:offset + 500])).all()
+    }
+    for row in records:
+        matches = [by_id[patent_id] for patent_id in candidates[row.id] if patent_id in by_id]
+        uid_match = by_entity.get(row.entity_uid)
+        if uid_match and any(match.id != uid_match.id for match in matches):
+            raise HTTPException(409, "同步包中的官方号码与本机其他专利冲突，请先人工处理身份冲突")
+        if uid_match:
+            continue
+        active = [match for match in matches if match.deleted_at is None]
+        if len(active) > 1:
+            raise HTTPException(409, "本机号码索引命中多条专利，需先人工处理身份冲突")
+        if active:
+            result[row.id] = active[0]
+        elif matches:
+            raise HTTPException(409, "本机已有相同专利号码的已删除记录，请先人工恢复后再同步")
+        else:
+            result[row.id] = None
+    return result
+
+
+def _ensure_database_memberships(db: Session, patent: Patent, target_database: PatentDatabase) -> None:
+    database_ids = {target_database.id}
+    default_database = db.query(PatentDatabase).filter(PatentDatabase.is_default.is_(True)).first()
+    if default_database:
+        database_ids.add(default_database.id)
+    for database_id in database_ids:
+        if not db.query(PatentDatabaseMembership).filter_by(
+            patent_id=patent.id, database_id=database_id,
+        ).first():
+            db.add(PatentDatabaseMembership(patent_id=patent.id, database_id=database_id))
+
+
+def _local_value(patent: Patent, field_key: str):
+    if field_key == "custom_fields":
+        return {
+            key: value for key, value in (patent.custom_fields or {}).items()
+            if key != "attachments"
+        }
+    return _value(getattr(patent, field_key))
+
+
+def _matching_apply_grants(db: Session, user_id: int, database: PatentDatabase,
+                           password: str | None) -> list[PermissionGrant]:
+    now = utc_now_naive()
+    grants = db.query(PermissionGrant).filter(
+        PermissionGrant.subject_user_id == user_id,
+        PermissionGrant.scope_type == "database",
+        PermissionGrant.scope_uid == database.database_uid,
+        PermissionGrant.revoked_at.is_(None),
+        or_(PermissionGrant.expires_at.is_(None), PermissionGrant.expires_at > now),
+    ).all()
+    matching = []
+    for grant in grants:
+        if "apply" not in (grant.actions or []) or not password or not grant.password_digest:
+            continue
+        try:
+            if PASSWORDS.verify(grant.password_digest, password):
+                matching.append(grant)
+        except Exception:
+            continue
+    return matching
+
+
+def _has_matching_apply_grant(grants: list[PermissionGrant], product: Product | None,
+                              fields: set[str]) -> bool:
+    if product is None:
+        return False
+    for grant in grants:
+        product_scope = (grant.scope_json or {}).get("product_ids") or []
+        if fields.issubset(set(grant.field_scope or [])) and (
+            not product_scope or product.id in product_scope
+        ):
+            return True
+    return False
+
+
+def _apply_context(db: Session, user_id: int, package_uid: str, database_id: int):
+    package = _visible_package(db, user_id, package_uid)
+    if package.direction != "inbox" or package.status not in {"imported", "partially_applied"}:
+        raise HTTPException(409, "只有已导入且未完成应用的收件包可以写入主表")
+    if package.expires_at and package.expires_at <= utc_now_naive():
+        raise HTTPException(410, "同步包已过期，不能应用到主表")
+    if not package_signer_is_trusted(db, package.manifest_json or {}):
+        raise HTTPException(403, "同步包发送设备未受本机信任。先核对并登记设备指纹，未签名或未受信包只可阅读。")
+    source_databases = (package.manifest_json or {}).get("databases", [])
+    if len(source_databases) != 1:
+        raise HTTPException(400, "主表应用目前要求同步包只包含一个来源数据库")
+    database = db.get(PatentDatabase, database_id)
+    if not database or database.is_archived:
+        raise HTTPException(404, "目标数据库不存在或已归档")
+    selected_target_uid = (package.manifest_json or {}).get("applied_target_database_uid")
+    if selected_target_uid and selected_target_uid != database.database_uid:
+        raise HTTPException(409, "部分应用的同步包必须继续应用到首次选择的本机数据库")
+    records = db.query(SyncPackageRecord).filter(SyncPackageRecord.package_id == package.id).order_by(
+        SyncPackageRecord.id
+    ).all()
+    return package, database, records
+
+
+def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: PatentDatabase,
+                records: list[SyncPackageRecord], edit_password: str | None) -> tuple[list[dict], list[dict]]:
+    manifest = package.manifest_json or {}
+    origin_node_uid = manifest.get("origin_node_uid")
+    if not origin_node_uid:
+        raise HTTPException(400, "同步包缺少來源設備標識")
+    privileged = bool(roles(db, user_id) & PRIVILEGED)
+    if not privileged and "viewer" in roles(db, user_id):
+        raise HTTPException(403, "只读协作者不能应用同步包到主表")
+    apply_grants = [] if privileged else _matching_apply_grants(db, user_id, database, edit_password)
+    products = db.query(Product).filter(Product.is_active.is_(True)).all()
+    products_by_code = {product.code: product for product in products if product.code}
+    products_by_name = {product.name: product for product in products}
+    local_patents = _batch_local_patents(db, records)
+    entity_uids = list(dict.fromkeys(row.entity_uid for row in records))
+    baselines: dict[tuple[str, str], SyncEntityFieldState] = {}
+    for offset in range(0, len(entity_uids), 500):
+        states = db.query(SyncEntityFieldState).filter(
+            SyncEntityFieldState.origin_node_uid == origin_node_uid,
+            SyncEntityFieldState.entity_uid.in_(entity_uids[offset:offset + 500]),
+        ).all()
+        baselines.update({(state.entity_uid, state.field_key): state for state in states})
+    plans, conflicts = [], []
+    for row in records:
+        payload = row.payload_json or {}
+        if not payload or set(payload) - EXPORT_FIELDS or "title" not in payload:
+            raise HTTPException(400, "共享记录包含不支持的字段")
+        product_data = ((row.scope_json or {}).get("product") or {})
+        product = products_by_code.get(product_data.get("code")) or products_by_name.get(product_data.get("name"))
+        source_product = (row.scope_json or {}).get("product")
+        if source_product and product is None:
+            raise HTTPException(409, "本机找不到同步包中的品类，请先建立相同品类代码或名称")
+        if not privileged and not _has_matching_apply_grant(apply_grants, product, set(payload)):
+            raise HTTPException(403, "没有匹配此数据库、品类和字段范围的主表应用授权，或编辑密码错误")
+        patent = local_patents[row.id]
+        record_plan = {"record": row, "patent": patent, "product": product, "updates": {}, "conflicts": []}
+        if patent is None:
+            record_plan["updates"] = dict(payload)
+            plans.append(record_plan)
+            continue
+        for field_key, remote_value in payload.items():
+            baseline = baselines.get((row.entity_uid, field_key))
+            if baseline and row.record_version < baseline.last_version:
+                raise HTTPException(409, "收到旧版本快照，请导入来源设备更新的同步包")
+            base_value = baseline.last_value if baseline else _NO_BASELINE
+            local_value = _local_value(patent, field_key)
+            if local_value == remote_value:
+                continue
+            if base_value is not _NO_BASELINE and local_value == base_value:
+                record_plan["updates"][field_key] = remote_value
+                continue
+            if base_value is not _NO_BASELINE and remote_value == base_value:
+                continue
+            conflict = {"entity_uid": row.entity_uid, "field_key": field_key,
+                        "base_value": None if base_value is _NO_BASELINE else base_value,
+                        "local_value": local_value, "remote_value": remote_value}
+            record_plan["conflicts"].append(conflict)
+            conflicts.append(conflict)
+        plans.append(record_plan)
+    return plans, conflicts
+
+
+def preview_apply(db: Session, user_id: int, package_uid: str, request) -> dict:
+    try:
+        package, database, records = _apply_context(db, user_id, package_uid, request.database_id)
+        plans, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
+        return {"package_uid": package_uid, "database_id": database.id,
+                "create_count": sum(1 for plan in plans if plan["patent"] is None),
+                "update_count": sum(1 for plan in plans if plan["patent"] is not None and plan["updates"]),
+                "unchanged_count": sum(1 for plan in plans if plan["patent"] is not None and not plan["updates"] and not plan["conflicts"]),
+                "conflicts": conflicts}
+    except HTTPException as exc:
+        _audit_denial(db, user_id, "package_apply_preview_denied", {"package_uid": package_uid,
+                       "status_code": exc.status_code, "reason": str(exc.detail)})
+        raise
+
+
+def _coerce_remote_value(field_key: str, value):
+    if field_key == "custom_fields":
+        if not isinstance(value, dict):
+            raise HTTPException(400, "自定义字段数据格式无效")
+        return value
+    if field_key in _DATE_FIELDS and value is not None:
+        try:
+            return date.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, f"字段 {field_key} 日期格式无效") from exc
+    enum_type = _ENUM_FIELDS.get(field_key)
+    if enum_type and value is not None:
+        try:
+            return enum_type(value)
+        except ValueError as exc:
+            raise HTTPException(400, f"字段 {field_key} 枚举值无效") from exc
+    return value
+
+
+def _save_baseline(db: Session, origin_node_uid: str, row: SyncPackageRecord, field_key: str,
+                   remote_value, record_version: int) -> None:
+    state = db.query(SyncEntityFieldState).filter_by(
+        origin_node_uid=origin_node_uid, entity_uid=row.entity_uid, field_key=field_key,
+    ).first()
+    if state is None:
+        state = SyncEntityFieldState(origin_node_uid=origin_node_uid, entity_uid=row.entity_uid,
+                                     field_key=field_key)
+        db.add(state)
+    state.last_value = remote_value
+    state.last_version = record_version
+
+
+def _create_apply_backup(db: Session, package_uid: str) -> Path | None:
+    """Create a consistent SQLite snapshot before a package can change the master table."""
+    bind = db.get_bind()
+    database_url = bind.url
+    if database_url.get_backend_name() != "sqlite":
+        raise RuntimeError("协同主表应用的自动备份目前只支持 SQLite")
+    database_name = database_url.database
+    if not database_name or database_name == ":memory:" or "mode=memory" in database_name:
+        return None
+    source_path = Path(database_name)
+    if not source_path.exists() or source_path.stat().st_size == 0:
+        raise RuntimeError("无法定位本机 SQLite 数据库，已阻止主表应用")
+    backup_dir = source_path.parent / "backups" / "collaboration-sync"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = utc_now_naive().strftime("%Y%m%dT%H%M%S%fZ")
+    backup_path = backup_dir / f"patwiki-sync-{package_uid}-{stamp}.db"
+    try:
+        source = sqlite3.connect(str(source_path))
+        target = sqlite3.connect(str(backup_path))
+        try:
+            source.backup(target)
+            result = target.execute("PRAGMA integrity_check").fetchone()
+            if not result or result[0] != "ok":
+                raise RuntimeError("同步前备份完整性校验失败")
+        finally:
+            target.close()
+            source.close()
+    except Exception:
+        backup_path.unlink(missing_ok=True)
+        raise
+    return backup_path
+
+
+_RISK_PROJECTION_FIELDS = {"has_risk", "risk_level", "risk_description"}
+
+
+def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: User | None) -> None:
+    """Keep legacy risk projections auditable when a sync package carries them."""
+    for field_key in _RISK_PROJECTION_FIELDS.intersection(updates):
+        new_value = _coerce_remote_value(field_key, updates[field_key])
+        old_value = getattr(patent, field_key)
+        if old_value == new_value:
+            continue
+        setattr(patent, field_key, new_value)
+        db.add(PatentHistory(
+            patent_id=patent.id,
+            field_key=field_key,
+            field_display_name=field_key,
+            old_value=_stringify_value(old_value),
+            new_value=_stringify_value(new_value),
+            source="collaboration_sync",
+            changed_by=actor.username if actor else None,
+        ))
+
+
+def apply_package(db: Session, user_id: int, package_uid: str, request) -> dict:
+    try:
+        package, database, records = _apply_context(db, user_id, package_uid, request.database_id)
+        plans, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
+        decisions = {(item.entity_uid, item.field_key): item.choice for item in request.decisions}
+        if len(decisions) != len(request.decisions):
+            raise HTTPException(400, "冲突决策重复")
+        conflict_keys = {(item["entity_uid"], item["field_key"]) for item in conflicts}
+        if set(decisions) - conflict_keys:
+            raise HTTPException(400, "决策包含当前包中不存在的冲突字段")
+        origin_node_uid = package.manifest_json["origin_node_uid"]
+        by_conflict_key = {(item["entity_uid"], item["field_key"]): item for item in conflicts}
+        backup_path = _create_apply_backup(db, package_uid)
+        created = updated = unchanged = pending = 0
+        actor = db.get(User, user_id)
+        for plan in plans:
+            row: SyncPackageRecord = plan["record"]
+            patent: Patent | None = plan["patent"]
+            product: Product | None = plan["product"]
+            payload = row.payload_json or {}
+            if patent is None:
+                data = {key: _coerce_remote_value(key, value) for key, value in payload.items()}
+                custom_fields = data.pop("custom_fields", {})
+                data["title"] = data.get("title")
+                patent = Patent(**data, custom_fields=custom_fields, database_id=database.id,
+                                product_id=product.id if product else None, entity_uid=row.entity_uid,
+                                origin_node_uid=origin_node_uid, record_version=row.record_version)
+                db.add(patent)
+                db.flush()
+                _ensure_database_memberships(db, patent, database)
+                for field_key, remote_value in payload.items():
+                    if field_key == "custom_fields":
+                        for custom_key, custom_value in (remote_value or {}).items():
+                            db.add(PatentHistory(
+                                patent_id=patent.id, field_key=f"custom_fields.{custom_key}",
+                                field_display_name=custom_key, old_value=None,
+                                new_value=_stringify_value(custom_value), source="collaboration_sync",
+                                changed_by=actor.username if actor else None))
+                    else:
+                        db.add(PatentHistory(
+                            patent_id=patent.id, field_key=field_key, field_display_name=field_key,
+                            old_value=None, new_value=_stringify_value(_coerce_remote_value(field_key, remote_value)),
+                            source="collaboration_sync", changed_by=actor.username if actor else None))
+                ensure_patent_identifiers(db, patent, source_system="collaboration_sync")
+                from app.services.formula_service import FormulaService
+                FormulaService.recalculate_patent(db, patent, commit=False)
+                from app.services.semantic_index_service import SemanticIndexService
+                SemanticIndexService.enqueue_patent(db, patent.id, "collaboration_sync_created")
+                created += 1
+            else:
+                updates = dict(plan["updates"])
+                for conflict in plan["conflicts"]:
+                    key = (conflict["entity_uid"], conflict["field_key"])
+                    choice = decisions.get(key)
+                    prior = db.query(SyncConflict).filter_by(
+                        package_id=package.id, entity_uid=key[0], field_key=key[1],
+                    ).first()
+                    if choice == "remote":
+                        updates[key[1]] = conflict["remote_value"]
+                    if choice:
+                        if prior is None:
+                            prior = SyncConflict(conflict_uid=uid("conflict"), package_id=package.id,
+                                                origin_node_uid=origin_node_uid, entity_uid=key[0],
+                                                entity_type="patent", field_key=key[1])
+                            db.add(prior)
+                        prior.base_value = conflict["base_value"]
+                        prior.local_value = conflict["local_value"]
+                        prior.remote_value = conflict["remote_value"]
+                        prior.status = "resolved"
+                        prior.decision = choice
+                        prior.decided_by = user_id
+                        prior.decided_at = utc_now_naive()
+                    elif prior is None:
+                        db.add(SyncConflict(conflict_uid=uid("conflict"), package_id=package.id,
+                                            origin_node_uid=origin_node_uid, entity_uid=key[0],
+                                            entity_type="patent", field_key=key[1],
+                                            base_value=conflict["base_value"], local_value=conflict["local_value"],
+                                            remote_value=conflict["remote_value"], status="pending"))
+                    else:
+                        prior.base_value = conflict["base_value"]
+                        prior.local_value = conflict["local_value"]
+                        prior.remote_value = conflict["remote_value"]
+                    if not choice:
+                        pending += 1
+                if updates:
+                    converted = {key: _coerce_remote_value(key, value) for key, value in updates.items()}
+                    risk_updates = {key: converted.pop(key) for key in list(converted) if key in _RISK_PROJECTION_FIELDS}
+                    if converted:
+                        PatentService.update_patent(db, patent, converted, source="collaboration_sync",
+                                                    changed_by=actor.username if actor else None, commit=False,
+                                                    run_post_update_hooks=False)
+                    if risk_updates:
+                        _apply_risk_projection(db, patent, risk_updates, actor)
+                    if converted or risk_updates:
+                        from app.services.semantic_index_service import SemanticIndexService
+                        SemanticIndexService.enqueue_patent(db, patent.id, "collaboration_sync_updated")
+                    updated += 1
+                elif not plan["conflicts"]:
+                    unchanged += 1
+                _ensure_database_memberships(db, patent, database)
+            for field_key, remote_value in payload.items():
+                key = (row.entity_uid, field_key)
+                if key in by_conflict_key and key not in decisions:
+                    continue
+                _save_baseline(db, origin_node_uid, row, field_key, remote_value, row.record_version)
+        package.status = "partially_applied" if pending else "applied"
+        package.applied_at = utc_now_naive()
+        manifest = dict(package.manifest_json or {})
+        manifest["applied_target_database_uid"] = database.database_uid
+        manifest["last_apply_backup_path"] = str(backup_path) if backup_path else None
+        package.manifest_json = manifest
+        audit(db, user_id, "package_applied", package_id=package.id,
+              detail={"created": created, "updated": updated, "unchanged": unchanged,
+                      "pending_conflicts": pending, "database_uid": database.database_uid,
+                      "backup_path": str(backup_path) if backup_path else None})
+        db.commit()
+        return {"package_uid": package_uid, "status": package.status, "created": created,
+                "updated": updated, "unchanged": unchanged, "pending_conflicts": pending,
+                "conflicts": conflicts, "backup_path": str(backup_path) if backup_path else None}
+    except HTTPException as exc:
+        _audit_denial(db, user_id, "package_apply_denied", {"package_uid": package_uid,
+                       "status_code": exc.status_code, "reason": str(exc.detail)})
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
 def _visible_package(db: Session, user_id: int, package_uid: str) -> SyncPackage:
     package = db.query(SyncPackage).filter(SyncPackage.package_uid == package_uid).first()
     if not package or (package.created_by != user_id and not (roles(db, user_id) & PRIVILEGED)):
@@ -309,10 +852,19 @@ def list_packages(db: Session, user_id: int) -> list[dict]:
     query = db.query(SyncPackage)
     if not (roles(db, user_id) & PRIVILEGED):
         query = query.filter(SyncPackage.created_by == user_id)
-    return [{"package_uid": row.package_uid, "direction": row.direction, "status": row.status,
-             "file_hash": row.file_hash, "count": (row.manifest_json or {}).get("count", 0),
-             "path": row.path, "created_at": row.created_at.isoformat() if row.created_at else None}
-            for row in query.order_by(SyncPackage.created_at.desc()).limit(100).all()]
+    result = []
+    trusted_keys = trusted_device_keys(db)
+    for row in query.order_by(SyncPackage.created_at.desc()).limit(100).all():
+        manifest = row.manifest_json or {}
+        signature_status = row.signature_status
+        if signature_status in {"signed", "trusted"} and not package_signer_is_trusted(db, manifest, trusted_keys):
+            signature_status = "signed_untrusted"
+        result.append({"package_uid": row.package_uid, "direction": row.direction, "status": row.status,
+                       "file_hash": row.file_hash, "count": manifest.get("count", 0),
+                       "path": row.path, "created_at": row.created_at.isoformat() if row.created_at else None,
+                       "signature_status": signature_status,
+                       "signer_fingerprint": manifest.get("signer_fingerprint")})
+    return result
 
 
 def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:

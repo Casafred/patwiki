@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import base64
 import json
 import secrets
 import zipfile
@@ -11,8 +12,9 @@ from datetime import datetime
 from typing import Literal
 
 from argon2.low_level import Type, hash_secret_raw
-from cryptography.exceptions import InvalidTag
+from cryptography.exceptions import InvalidSignature, InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -29,10 +31,15 @@ class WireModel(BaseModel):
 
 class Envelope(WireModel):
     format: Literal["patwiki.pwshare"] = "patwiki.pwshare"
-    format_version: Literal[1] = 1
+    format_version: Literal[1, 2] = 1
     profile: Literal["patent-snapshot-v1"] = PROFILE
     package_id: str = Field(pattern=UID_PATTERN)
     encryption: Literal["aes-256-gcm+argon2id"] = "aes-256-gcm+argon2id"
+    signer_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    signer_public_key: str | None = None
+    signature_algorithm: Literal["ed25519"] | None = None
+    payload_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    signature: str | None = None
 
 
 class SnapshotRecord(WireModel):
@@ -57,7 +64,7 @@ class SnapshotManifest(WireModel):
     fields: list[str] = Field(min_length=1, max_length=100)
     count: int = Field(ge=0, le=MAX_RECORDS)
     databases: list[dict] = Field(max_length=500)
-    signature_status: Literal["not_signed"] = "not_signed"
+    signature_status: Literal["not_signed", "signed"] = "not_signed"
 
 
 class SnapshotPermissions(WireModel):
@@ -116,10 +123,24 @@ def _write_zip(entries: dict[str, bytes], compression=zipfile.ZIP_DEFLATED) -> b
     return output.getvalue()
 
 
-def encode(manifest: dict, permissions: dict, records: list[dict], password: str) -> bytes:
+def _aad(envelope: dict) -> bytes:
+    return json_bytes({key: envelope[key] for key in ("format", "format_version", "profile", "package_id", "encryption")})
+
+
+def _signature_payload(envelope: dict) -> bytes:
+    return json_bytes({key: value for key, value in envelope.items() if key != "signature"})
+
+
+def encode(
+    manifest: dict,
+    permissions: dict,
+    records: list[dict],
+    password: str,
+    signing_private_key: bytes | None = None,
+) -> bytes:
     SnapshotManifest.model_validate(manifest)
     SnapshotPermissions.model_validate(permissions)
-    envelope = Envelope(package_id=manifest["package_id"]).model_dump()
+    envelope = Envelope(package_id=manifest["package_id"]).model_dump(exclude_none=True)
     lines = io.BytesIO()
     for record in records:
         line = json_bytes(record)
@@ -133,25 +154,65 @@ def encode(manifest: dict, permissions: dict, records: list[dict], password: str
         "data/patents.ndjson": lines.getvalue(),
     })
     salt, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
-    encrypted = AESGCM(_key(password, salt)).encrypt(nonce, plain, json_bytes(envelope))
-    return _write_zip({"manifest.json": json_bytes(envelope), "payload.bin": salt + nonce + encrypted}, zipfile.ZIP_STORED)
+    if signing_private_key is None:
+        encrypted = AESGCM(_key(password, salt)).encrypt(nonce, plain, _aad(envelope))
+        return _write_zip({"manifest.json": json_bytes(envelope), "payload.bin": salt + nonce + encrypted}, zipfile.ZIP_STORED)
+
+    private_key = Ed25519PrivateKey.from_private_bytes(signing_private_key)
+    public_key = private_key.public_key().public_bytes_raw()
+    envelope.update({
+        "format_version": 2,
+        "signer_fingerprint": hashlib.sha256(public_key).hexdigest(),
+        "signer_public_key": base64.b64encode(public_key).decode("ascii"),
+        "signature_algorithm": "ed25519",
+    })
+    payload = salt + nonce + AESGCM(_key(password, salt)).encrypt(nonce, plain, _aad(envelope))
+    envelope["payload_sha256"] = hashlib.sha256(payload).hexdigest()
+    envelope["signature"] = base64.b64encode(private_key.sign(_signature_payload(envelope))).decode("ascii")
+    return _write_zip({"manifest.json": json_bytes(envelope), "payload.bin": payload}, zipfile.ZIP_STORED)
 
 
-def decode(raw: bytes, password: str) -> tuple[dict, dict, list[dict]]:
+def decode(
+    raw: bytes,
+    password: str,
+    trusted_public_keys: dict[str, bytes] | None = None,
+) -> tuple[dict, dict, list[dict]]:
     if len(raw) > MAX_BYTES:
         raise HTTPException(413, "同步包超过 100MB")
     try:
         outer = _read_zip(raw, {"manifest.json", "payload.bin"})
-        envelope = Envelope.model_validate_json(outer["manifest.json"]).model_dump()
+        envelope = Envelope.model_validate_json(outer["manifest.json"]).model_dump(exclude_none=True)
         encrypted = outer["payload.bin"]
         if len(encrypted) < 44:
             raise ValueError("truncated payload")
-        plain = AESGCM(_key(password, encrypted[:16])).decrypt(encrypted[16:28], encrypted[28:], json_bytes(envelope))
+        signature_status = "not_signed"
+        if envelope["format_version"] == 2:
+            required = ("signer_fingerprint", "signer_public_key", "signature_algorithm", "payload_sha256", "signature")
+            if any(not envelope.get(key) for key in required):
+                raise ValueError("missing signature fields")
+            public_key = base64.b64decode(envelope["signer_public_key"], validate=True)
+            signature = base64.b64decode(envelope["signature"], validate=True)
+            if len(public_key) != 32 or len(signature) != 64:
+                raise ValueError("invalid signature key size")
+            if hashlib.sha256(public_key).hexdigest() != envelope["signer_fingerprint"]:
+                raise ValueError("signer fingerprint mismatch")
+            if hashlib.sha256(encrypted).hexdigest() != envelope["payload_sha256"]:
+                raise ValueError("signed payload hash mismatch")
+            Ed25519PublicKey.from_public_bytes(public_key).verify(signature, _signature_payload(envelope))
+            trusted = (trusted_public_keys or {}).get(envelope["signer_fingerprint"])
+            if trusted is not None and trusted != public_key:
+                raise ValueError("trusted key mismatch")
+            signature_status = "trusted" if trusted is not None else "signed_untrusted"
+        elif any(envelope.get(key) for key in ("signer_fingerprint", "signer_public_key", "signature_algorithm", "payload_sha256", "signature")):
+            raise ValueError("legacy envelope contains signature fields")
+        plain = AESGCM(_key(password, encrypted[:16])).decrypt(encrypted[16:28], encrypted[28:], _aad(envelope))
         inner = _read_zip(plain, {"manifest.json", "schema.json", "permissions.json", "data/patents.ndjson"})
         manifest = SnapshotManifest.model_validate_json(inner["manifest.json"]).model_dump()
         permissions = SnapshotPermissions.model_validate_json(inner["permissions.json"]).model_dump()
         if manifest["package_id"] != envelope["package_id"]:
             raise ValueError("package ID mismatch")
+        if envelope["format_version"] == 2 and manifest["signature_status"] != "signed":
+            raise ValueError("signed envelope has unsigned manifest")
         if permissions["fields"] != manifest["fields"] or any(
             name != name.strip().lower() or not name for name in permissions["recipients"]
         ):
@@ -172,9 +233,13 @@ def decode(raw: bytes, password: str) -> tuple[dict, dict, list[dict]]:
             records.append(record)
         if manifest["count"] != len(records):
             raise ValueError("record count mismatch")
+        manifest["signature_status"] = signature_status
+        manifest["signer_fingerprint"] = envelope.get("signer_fingerprint")
+        manifest["signer_public_key"] = envelope.get("signer_public_key")
         return manifest, permissions, records
-    except (ValueError, TypeError, KeyError, OverflowError, RecursionError, ValidationError, InvalidTag,
-            zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError, zlib.error) as exc:
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError, ValidationError,
+            InvalidSignature, InvalidTag, zipfile.BadZipFile, RuntimeError,
+            NotImplementedError, EOFError, zlib.error) as exc:
         raise HTTPException(400, "同步包密码错误、格式不兼容或内容已损坏") from exc
 
 

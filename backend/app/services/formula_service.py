@@ -324,13 +324,17 @@ class FormulaService:
         db: Session,
         patent: Patent,
         formula_keys: Optional[set[str]] = None,
+        commit: bool = True,
     ) -> dict[str, Any]:
         ordered = cls._formula_order(db)
         if formula_keys is not None:
             ordered = [field for field in ordered if field.key in formula_keys]
         errors = cls._recalculate_values(db, patent, ordered)
-        db.commit()
-        db.refresh(patent)
+        if commit:
+            db.commit()
+            db.refresh(patent)
+        else:
+            db.flush()
         return {"updated": len(ordered), "errors": errors}
 
     @classmethod
@@ -367,12 +371,13 @@ class FormulaService:
         db: Session,
         patent: Patent,
         changed_fields: Iterable[str],
+        commit: bool = True,
     ) -> dict[str, Any]:
         changed = {field.replace("custom_fields.", "", 1) for field in changed_fields}
         affected = cls._affected_formula_keys(db, changed)
         if not affected:
             return {"updated": 0, "errors": {}}
-        return cls.recalculate_patent(db, patent, affected)
+        return cls.recalculate_patent(db, patent, affected, commit=commit)
 
     @classmethod
     def _affected_formula_keys(

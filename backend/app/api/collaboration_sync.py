@@ -1,10 +1,13 @@
 """Authenticated department collaboration and offline sync package API."""
 from __future__ import annotations
 
+import hashlib
+import base64
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from argon2.exceptions import VerificationError
 from app.core.time import utc_now_naive
 from sqlalchemy.orm import Session
 
@@ -13,19 +16,20 @@ from app.models import User
 from app.models import PatentDatabase, Product
 from app.models.collaboration_sync import (
     CollaborationCredential, CollaborationEdge, CollaborationSession, OrganizationUnit, PermissionGrant,
-    SyncPackage, UserResponsibility, UserRoleAssignment,
+    SyncPackage, TrustedSyncDevice, SyncWorkspace, UserResponsibility, UserRoleAssignment,
 )
 from app.schemas.collaboration_sync import (
-    AccountRequest, AccountRoleRequest, BootstrapRequest, ExportRequest, LibraryGrantRequest,
-    ActiveRequest, LoginRequest, ResponsibilityRequest, UnitRequest,
+    AccountRequest, AccountRoleRequest, BootstrapRequest, ExportRequest, LibraryGrantRequest, PeerRequest,
+    ActiveRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ResponsibilityRequest, UnitRequest,
 )
 from app.services.collaboration_identity_service import (
-    bootstrap, create_account, identity, login, logout, require_admin, roles,
+    PASSWORDS, audit, bootstrap, create_account, identity, login, logout, require_admin, roles,
     session_user, setup_status, uid,
 )
 from app.services.collaboration_sync_service import (
     export_package, import_package, inspect_package, list_packages,
     export_path, package_records, preview_export, read_upload, EXPORT_FIELDS,
+    device_signing_identity,
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
@@ -62,6 +66,98 @@ def logout_system(authorization: str | None = Header(default=None), user: User =
 @router.get("/identity/me")
 def get_identity(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return identity(db, user)
+
+
+@router.patch("/identity/password")
+def change_own_password(
+    request: PasswordRequest,
+    authorization: str | None = Header(default=None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    credential = db.get(CollaborationCredential, user.id)
+    try:
+        valid = bool(credential and PASSWORDS.verify(credential.password_hash, request.current_password))
+    except VerificationError:
+        valid = False
+    if not valid or not authorization or not authorization.startswith("Bearer "):
+        audit(db, user.id, "password_changed", result="denied")
+        db.commit()
+        raise HTTPException(403, "当前密码错误")
+    current_session_hash = hashlib.sha256(authorization[7:].encode()).hexdigest()
+    credential.password_hash = PASSWORDS.hash(request.new_password)
+    db.query(CollaborationSession).filter(
+        CollaborationSession.user_id == user.id,
+        CollaborationSession.token_hash != current_session_hash,
+    ).delete(synchronize_session=False)
+    audit(db, user.id, "password_changed")
+    db.commit()
+    return {"success": True, "other_sessions_revoked": True}
+
+
+@router.get("/devices/identity")
+def get_device_identity(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    result = device_signing_identity(db, user.id)
+    db.commit()
+    result.pop("private_key", None)
+    return result
+
+
+@router.get("/devices/trusted")
+def list_trusted_devices(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    return {"items": [{"fingerprint": row.fingerprint, "name": row.name,
+                        "public_key": row.public_key, "revoked": row.revoked_at is not None,
+                        "created_at": row.created_at.isoformat() if row.created_at else None}
+                       for row in db.query(TrustedSyncDevice).order_by(TrustedSyncDevice.created_at).all()]}
+
+
+@router.post("/devices/trusted")
+def trust_device(request: PeerRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    if not request.name.strip():
+        raise HTTPException(400, "设备名称不能为空")
+    try:
+        public_key = base64.b64decode(request.public_key, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "设备公钥必须是 Base64 编码的 Ed25519 公钥") from exc
+    if len(public_key) != 32:
+        raise HTTPException(400, "Ed25519 设备公钥长度无效")
+    fingerprint = hashlib.sha256(public_key).hexdigest()
+    own = db.query(SyncWorkspace).first()
+    if own and own.public_key:
+        try:
+            own_key = base64.b64decode(own.public_key, validate=True)
+        except (ValueError, TypeError):
+            own_key = b""
+        if own_key == public_key:
+            raise HTTPException(400, "无需登记本机自己的设备密钥")
+    record = db.get(TrustedSyncDevice, fingerprint)
+    if record and record.public_key != request.public_key:
+        raise HTTPException(409, "设备指纹已存在但公钥不一致")
+    if record is None:
+        record = TrustedSyncDevice(fingerprint=fingerprint, name=request.name.strip(), public_key=request.public_key)
+        db.add(record)
+    else:
+        record.name = request.name.strip()
+        record.revoked_at = None
+    audit(db, user.id, "sync_device_trusted", detail={"fingerprint": fingerprint, "name": record.name})
+    db.commit()
+    return {"fingerprint": fingerprint, "name": record.name, "public_key": record.public_key, "revoked": False}
+
+
+@router.delete("/devices/trusted/{fingerprint}")
+def revoke_trusted_device(fingerprint: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    record = db.get(TrustedSyncDevice, fingerprint)
+    if not record:
+        raise HTTPException(404, "可信设备不存在")
+    if record.revoked_at is None:
+        record.revoked_at = utc_now_naive()
+        audit(db, user.id, "sync_device_revoked", detail={"fingerprint": fingerprint})
+        db.commit()
+    return {"fingerprint": fingerprint, "revoked": True}
 
 
 @router.post("/accounts")
@@ -268,6 +364,11 @@ def create_library_grant(request: LibraryGrantRequest, user: User = Depends(curr
     fields = list(dict.fromkeys(request.fields))
     if not fields or "title" not in fields or set(fields) - EXPORT_FIELDS:
         raise HTTPException(400, "字段范围无效")
+    actions = list(dict.fromkeys(request.actions))
+    if "apply" in actions and not request.edit_password:
+        raise HTTPException(400, "主表应用授权必须设置独立编辑密码")
+    if "apply" in actions and "viewer" in roles(db, target.id):
+        raise HTTPException(400, "只读协作者不能获得主表应用授权")
     if request.product_ids:
         existing_ids = {row[0] for row in db.query(Product.id).filter(Product.id.in_(request.product_ids)).all()}
         if existing_ids != set(request.product_ids):
@@ -275,15 +376,19 @@ def create_library_grant(request: LibraryGrantRequest, user: User = Depends(curr
     grant = PermissionGrant(grant_uid=uid("grant"), subject_user_id=target.id, granted_by=user.id,
                             scope_type="database", scope_uid=database.database_uid, field_scope=fields,
                             scope_json={"product_ids": list(dict.fromkeys(request.product_ids))},
-                            actions=["export"], expires_at=utc_now_naive() + timedelta(days=request.expires_days))
+                            actions=actions,
+                            password_digest=PASSWORDS.hash(request.edit_password) if request.edit_password else None,
+                            expires_at=utc_now_naive() + timedelta(days=request.expires_days))
     db.add(grant)
     from app.services.collaboration_identity_service import audit
     audit(db, user.id, "permission_granted", detail={"grant_uid": grant.grant_uid,
-          "subject_user_id": target.id, "database_uid": database.database_uid})
+          "subject_user_id": target.id, "database_uid": database.database_uid,
+          "actions": actions})
     db.commit()
     return {"grant_uid": grant.grant_uid, "user_id": target.id, "username": target.username,
             "database_id": database.id, "database_name": database.name,
             "fields": fields, "product_ids": grant.scope_json["product_ids"],
+            "actions": actions,
             "expires_at": grant.expires_at.isoformat()}
 
 
@@ -298,6 +403,7 @@ def list_library_grants(user: User = Depends(current_user), db: Session = Depend
             result.append({"grant_uid": grant.grant_uid, "username": target.username,
                            "database_id": database.id, "database_name": database.name,
                            "fields": grant.field_scope, "product_ids": (grant.scope_json or {}).get("product_ids", []),
+                           "actions": grant.actions,
                            "expires_at": grant.expires_at.isoformat() if grant.expires_at else None,
                            "revoked": grant.revoked_at is not None})
     return {"items": result}
@@ -340,6 +446,18 @@ async def import_package_file(
     file: UploadFile = File(...), password: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
     return import_package(db, user.id, await read_upload(file), password)
+
+
+@router.post("/packages/{package_uid}/preview-apply")
+def preview_apply_package(package_uid: str, request: ApplyPackageRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_sync_service import preview_apply
+    return preview_apply(db, user.id, package_uid, request)
+
+
+@router.post("/packages/{package_uid}/apply")
+def apply_package_file(package_uid: str, request: ApplyPackageRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_sync_service import apply_package
+    return apply_package(db, user.id, package_uid, request)
 
 
 @router.get("/packages")

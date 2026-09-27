@@ -538,6 +538,7 @@ class PatentService:
         source_view_id: Optional[int] = None,
         source_view_name: Optional[str] = None,
         commit: bool = True,
+        run_post_update_hooks: bool = True,
     ) -> Patent:
         """更新专利字段并写入历史记录。
 
@@ -652,9 +653,10 @@ class PatentService:
             db.refresh(patent)
         if changed_fields:
             from app.services.formula_service import FormulaService
-            FormulaService.on_field_changed(db, patent, changed_fields)
-            from app.services.automation_service import AutomationEngine
-            AutomationEngine.on_event(db, "field_changed", patent_id=patent.id, field_changes=changed_fields)
+            FormulaService.on_field_changed(db, patent, changed_fields, commit=commit)
+            if run_post_update_hooks:
+                from app.services.automation_service import AutomationEngine
+                AutomationEngine.on_event(db, "field_changed", patent_id=patent.id, field_changes=changed_fields)
         return patent
 
     @staticmethod

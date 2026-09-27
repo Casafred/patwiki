@@ -114,6 +114,7 @@ a = Analysis(
         "app.services.semantic_evaluation_service",
         "zvec",
         "keyring",
+        "keyring.backends.Windows",
         "app.ai.fields.engine",
         "init_data",
         # openai SDK 及其依赖

@@ -1478,6 +1478,8 @@ export interface CollaborationPackage {
   count: number
   path: string
   created_at?: string | null
+  signature_status?: string
+  signer_fingerprint?: string | null
 }
 
 export interface DatabaseMember {

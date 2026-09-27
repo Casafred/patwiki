@@ -77,4 +77,18 @@ class LibraryGrantRequest(RequestModel):
     database_id: int
     product_ids: list[int] = Field(default_factory=list, max_length=500)
     fields: list[str] = Field(min_length=1, max_length=100)
+    actions: list[Literal["export", "apply"]] = Field(default_factory=lambda: ["export"], min_length=1, max_length=2)
+    edit_password: str | None = Field(default=None, min_length=10, max_length=200)
     expires_days: int = Field(default=90, ge=1, le=365)
+
+
+class SyncConflictDecision(RequestModel):
+    entity_uid: str = Field(pattern=r"^pat_[a-f0-9]{32}$")
+    field_key: str = Field(min_length=1, max_length=200)
+    choice: Literal["local", "remote"]
+
+
+class ApplyPackageRequest(RequestModel):
+    database_id: int
+    edit_password: str | None = Field(default=None, min_length=10, max_length=200)
+    decisions: list[SyncConflictDecision] = Field(default_factory=list, max_length=20000)

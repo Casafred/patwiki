@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-26.1"
+CURRENT_MIGRATION_VERSION = "2026-09-27.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -153,6 +153,8 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("attachments", "sha256", "ALTER TABLE attachments ADD COLUMN sha256 VARCHAR(64)"),
     _column("attachments", "width", "ALTER TABLE attachments ADD COLUMN width INTEGER"),
     _column("attachments", "height", "ALTER TABLE attachments ADD COLUMN height INTEGER"),
+    _column("collaboration_sync_conflicts", "package_id", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN package_id INTEGER REFERENCES collaboration_sync_packages(id) ON DELETE CASCADE"),
+    _column("collaboration_sync_conflicts", "origin_node_uid", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN origin_node_uid VARCHAR(80)"),
     _column("sync_records", "identity_candidate_patent_ids", "ALTER TABLE sync_records ADD COLUMN identity_candidate_patent_ids JSON"),
     _column("connector_definitions", "mcp_catalog_json", "ALTER TABLE connector_definitions ADD COLUMN mcp_catalog_json JSON"),
     _column("connector_definitions", "mcp_catalog_updated_at", "ALTER TABLE connector_definitions ADD COLUMN mcp_catalog_updated_at DATETIME"),
