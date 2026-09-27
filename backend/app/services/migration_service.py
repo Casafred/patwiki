@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+from uuid import uuid4
 from typing import Iterable, Sequence
 
 from sqlalchemy import inspect, text
@@ -27,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-21.1"
+CURRENT_MIGRATION_VERSION = "2026-09-26.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -64,10 +65,24 @@ def _index(table: str, name: str, column: str) -> SchemaOperation:
     )
 
 
+def _unique_index(table: str, name: str, column: str) -> SchemaOperation:
+    return SchemaOperation(
+        f"index:{table}.{name}", "index", table, name,
+        f"CREATE UNIQUE INDEX {name} ON {table} ({column})",
+    )
+
+
 # Compatibility changes that were previously hidden in database.py.  New
 # tables and model-defined indexes are handled by Base.metadata.create_all;
 # these entries cover columns/indexes that create_all cannot add to an old DB.
 SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
+    _column("collaboration_user_responsibilities", "unit_id", "ALTER TABLE collaboration_user_responsibilities ADD COLUMN unit_id INTEGER REFERENCES collaboration_organization_units(id) ON DELETE SET NULL"),
+    _column("users", "user_uid", "ALTER TABLE users ADD COLUMN user_uid VARCHAR(80)"),
+    _column("patents", "entity_uid", "ALTER TABLE patents ADD COLUMN entity_uid VARCHAR(100)"),
+    _column("patents", "origin_node_uid", "ALTER TABLE patents ADD COLUMN origin_node_uid VARCHAR(80)"),
+    _column("patents", "record_version", "ALTER TABLE patents ADD COLUMN record_version INTEGER DEFAULT 1 NOT NULL"),
+    _column("patents", "deleted_at", "ALTER TABLE patents ADD COLUMN deleted_at DATETIME"),
+    _column("patent_databases", "database_uid", "ALTER TABLE patent_databases ADD COLUMN database_uid VARCHAR(100)"),
     _column("patents", "database_id", "ALTER TABLE patents ADD COLUMN database_id INTEGER REFERENCES patent_databases(id)"),
     _column("field_definitions", "source_timestamp", "ALTER TABLE field_definitions ADD COLUMN source_timestamp DATETIME"),
     _column("patent_projects", "relation_type", "ALTER TABLE patent_projects ADD COLUMN relation_type VARCHAR(20)"),
@@ -166,7 +181,41 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _index("attachments", "ix_attachments_import_batch_id", "import_batch_id"),
     _index("attachments", "ix_attachments_source_type", "source_type"),
     _index("attachments", "ix_attachments_sha256", "sha256"),
+    _unique_index("users", "ix_users_user_uid", "user_uid"),
+    _unique_index("patents", "ix_patents_entity_uid", "entity_uid"),
+    _index("patents", "ix_patents_origin_node_uid", "origin_node_uid"),
+    _index("patents", "ix_patents_deleted_at", "deleted_at"),
+    _unique_index("patent_databases", "ix_patent_databases_database_uid", "database_uid"),
+    _index("collaboration_user_responsibilities", "ix_collaboration_user_responsibilities_unit_id", "unit_id"),
 )
+
+
+def _backfill_collaboration_uids(bind: Engine) -> None:
+    """Assign immutable IDs to legacy rows without using machine-local PKs in packages."""
+    with bind.begin() as connection:
+        for table, column, prefix in (
+            ("users", "user_uid", "user"),
+            ("patent_databases", "database_uid", "db"),
+            ("patents", "entity_uid", "pat"),
+        ):
+            connection.execute(text(
+                f"UPDATE {table} SET {column} = :prefix || lower(hex(randomblob(16))) "
+                f"WHERE {column} IS NULL"
+            ), {"prefix": f"{prefix}_"})
+        workspace = connection.execute(text(
+            "SELECT workspace_uid, node_uid FROM collaboration_sync_workspaces ORDER BY id LIMIT 1"
+        )).first()
+        node_uid = workspace.node_uid if workspace else f"node_{uuid4().hex}"
+        if not workspace:
+            connection.execute(text(
+                "INSERT INTO collaboration_sync_workspaces "
+                "(workspace_uid, node_uid, name, format_version) "
+                "VALUES (:workspace_uid, :node_uid, :name, 1)"
+            ), {"workspace_uid": f"ws_{uuid4().hex}", "node_uid": node_uid,
+                "name": "本机协作空间"})
+        connection.execute(text(
+            "UPDATE patents SET origin_node_uid = :node_uid WHERE origin_node_uid IS NULL"
+        ), {"node_uid": node_uid})
 
 
 class MigrationError(RuntimeError):
@@ -435,6 +484,7 @@ def run_pending_migrations(
 
         Base.metadata.create_all(bind=bind)
         _apply_operations(bind, operations)
+        _backfill_collaboration_uids(bind)
         integrity_after = _integrity_check(bind)
         counts_after = _table_counts(bind)
 

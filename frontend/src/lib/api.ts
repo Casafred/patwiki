@@ -34,6 +34,8 @@ const api = axios.create({
 
 api.interceptors.request.use(async (config) => {
   if (isTauri) config.baseURL = `${await resolveTauriBackendOrigin()}/api`
+  const token = localStorage.getItem('patwiki_collaboration_token')
+  if (token) config.headers.set('Authorization', `Bearer ${token}`)
   return config
 })
 

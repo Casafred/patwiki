@@ -1461,6 +1461,25 @@ export interface User {
   created_at?: string
 }
 
+export interface CollaborationIdentity {
+  id: number
+  user_uid?: string | null
+  username: string
+  display_name?: string | null
+  roles: string[]
+  active: boolean
+}
+
+export interface CollaborationPackage {
+  package_uid: string
+  direction: string
+  status: string
+  file_hash: string
+  count: number
+  path: string
+  created_at?: string | null
+}
+
 export interface DatabaseMember {
   id: number
   user_id: number

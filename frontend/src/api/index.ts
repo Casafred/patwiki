@@ -15,6 +15,7 @@ import type {
   SemanticSearchMode, SemanticSearchResponse,
   SemanticProvider, SemanticProfile, SemanticIndex, SemanticJob, SemanticStatus,
   SemanticEvaluationDataset, SemanticEvaluationCase, SemanticEvaluationRun,
+  CollaborationIdentity, CollaborationPackage,
 } from '../types'
 
 export const fieldApi = {
@@ -845,4 +846,35 @@ export const sharingApi = {
   // 当前用户视角：与我共享的库
   listUserDatabases: (userId: number): Promise<SharedDatabase[]> =>
     api.get(`/users/${userId}/databases`),
+}
+
+export const collaborationSyncApi = {
+  setupStatus: (): Promise<{ configured: boolean; setup_token_path?: string | null }> => api.get('/collaboration-sync/setup-status'),
+  bootstrap: (data: { username: string; password: string; display_name: string; setup_token: string }): Promise<{ token: string; expires_at: string; user: CollaborationIdentity }> => api.post('/collaboration-sync/bootstrap', data),
+  login: (data: { username: string; password: string }): Promise<{ token: string; expires_at: string; user: CollaborationIdentity }> => api.post('/collaboration-sync/login', data),
+  me: (): Promise<CollaborationIdentity> => api.get('/collaboration-sync/identity/me'),
+  logout: (): Promise<{ success: boolean }> => api.post('/collaboration-sync/logout'),
+  accounts: (): Promise<{ items: CollaborationIdentity[] }> => api.get('/collaboration-sync/accounts'),
+  createAccount: (data: { username: string; password: string; display_name: string; role: string; unit_id?: number }): Promise<CollaborationIdentity> => api.post('/collaboration-sync/accounts', data),
+  setAccountActive: (userId: number, active: boolean): Promise<{ user_id: number; active: boolean }> => api.patch(`/collaboration-sync/accounts/${userId}/active`, { active }),
+  setAccountRole: (userId: number, role: string, unitId?: number): Promise<CollaborationIdentity> => api.patch(`/collaboration-sync/accounts/${userId}/role`, { role, unit_id: unitId }),
+  units: (): Promise<Array<{ id: number; name: string; unit_type: string; team_type?: string | null; parent_id?: number | null }>> => api.get('/collaboration-sync/organization/units'),
+  responsibilities: (): Promise<{ items: Array<Record<string, unknown>> }> => api.get('/collaboration-sync/organization/responsibilities'),
+  assignResponsibility: (data: { user_id: number; product_id: number; team_type: string; unit_id: number; level: string }): Promise<Record<string, unknown>> => api.post('/collaboration-sync/organization/responsibilities', data),
+  grants: (): Promise<{ items: Array<{ grant_uid: string; username: string; database_id: number; database_name: string; fields: string[]; product_ids: number[]; expires_at?: string | null; revoked: boolean }> }> => api.get('/collaboration-sync/permissions/library-grants'),
+  createGrant: (data: { user_id: number; database_id: number; product_ids: number[]; fields: string[]; expires_days: number }): Promise<Record<string, unknown>> => api.post('/collaboration-sync/permissions/library-grants', data),
+  revokeGrant: (grantUid: string): Promise<{ success: boolean }> => api.delete(`/collaboration-sync/permissions/library-grants/${encodeURIComponent(grantUid)}`),
+  previewExport: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number }): Promise<{ count: number; fields: string[] }> => api.post('/collaboration-sync/packages/preview-export', data),
+  exportPackage: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number }): Promise<{ package_uid: string; path: string; count: number; file_hash: string }> => api.post('/collaboration-sync/packages/export', data),
+  inspect: (file: File, password: string): Promise<{ count: number; sample: unknown[]; manifest: Record<string, unknown> }> => {
+    const body = new FormData(); body.append('file', file); body.append('password', password)
+    return api.post('/collaboration-sync/packages/inspect', body)
+  },
+  importPackage: (file: File, password: string): Promise<{ package_uid: string; count: number; status: string }> => {
+    const body = new FormData(); body.append('file', file); body.append('password', password)
+    return api.post('/collaboration-sync/packages/import', body)
+  },
+  listPackages: (): Promise<{ items: CollaborationPackage[] }> => api.get('/collaboration-sync/packages'),
+  records: (packageUid: string): Promise<{ items: unknown[] }> => api.get(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/records`),
+  download: (packageUid: string): Promise<Blob> => api.get(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/download`, { responseType: 'blob' }),
 }

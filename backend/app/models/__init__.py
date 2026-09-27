@@ -136,6 +136,13 @@ from app.models.semantic_search import (
     SemanticEvaluationRun,
     SemanticEvaluationResult,
 )
+from app.models.collaboration_sync import (
+    CollaborationCredential, CollaborationSession, TrustedSyncDevice,
+    OrganizationUnit, UserRoleAssignment, UserResponsibility, CollaborationEdge,
+    PermissionGrant, SyncWorkspace, SyncChannel, SyncPackage, SyncPackageMember,
+    SyncPackageRecord, SyncCheckpoint, SyncEntityState, SyncChange, SyncConflict,
+    SyncTombstone, SyncAuditEvent,
+)
 
 
 __all__ = [
@@ -189,4 +196,9 @@ __all__ = [
     "SemanticProviderDefinition", "SemanticSearchProfile", "SemanticIndex", "SemanticIndexJob",
     "SemanticDocumentState", "SemanticIndexOutbox", "SemanticSearchLog", "SemanticEvaluationDataset",
     "SemanticEvaluationCase", "SemanticEvaluationRun", "SemanticEvaluationResult",
+    "CollaborationCredential", "CollaborationSession", "TrustedSyncDevice",
+    "OrganizationUnit", "UserRoleAssignment", "UserResponsibility", "CollaborationEdge",
+    "PermissionGrant", "SyncWorkspace", "SyncChannel", "SyncPackage", "SyncPackageMember",
+    "SyncPackageRecord", "SyncCheckpoint", "SyncEntityState", "SyncChange", "SyncConflict",
+    "SyncTombstone", "SyncAuditEvent",
 ]

@@ -3,6 +3,7 @@ import { sharingApi, databaseApi, departmentApi, productLineApi } from '../../ap
 import { useAppStore } from '../../store'
 import type { User, DatabaseMember, Department } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import CollaborationSyncPanel from './CollaborationSyncPanel'
 
 export default function SharingPage() {
   const { currentUser, setCurrentUser, databases, currentDatabaseId } = useAppStore()
@@ -218,6 +219,8 @@ export default function SharingPage() {
         <h2 className="page-title">权限管理与协作</h2>
         <p className="page-subtitle">管理成员身份、部门归属与专利库访问权限</p>
       </div>
+
+      <CollaborationSyncPanel />
 
       {/* 当前用户 */}
       <div style={{

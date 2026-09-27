@@ -6,6 +6,7 @@
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from uuid import uuid4
 
 from app.database import Base
 
@@ -14,6 +15,7 @@ class PatentDatabase(Base):
     __tablename__ = "patent_databases"
 
     id = Column(Integer, primary_key=True, index=True)
+    database_uid = Column(String(100), unique=True, nullable=True, index=True, default=lambda: f"db_{uuid4().hex}")
     name = Column(String(200), nullable=False)
     code = Column(String(50), unique=True, index=True)
     description = Column(Text)

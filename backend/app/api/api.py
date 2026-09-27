@@ -24,6 +24,7 @@ from app.api.project_risk import router as project_risk_router
 from app.api.system import router as system_router
 from app.api.sync import router as sync_router
 from app.api.semantic_search import router as semantic_search_router
+from app.api.collaboration_sync import router as collaboration_sync_router
 
 api_router = APIRouter()
 api_router.include_router(databases_router)
@@ -50,3 +51,4 @@ api_router.include_router(project_risk_router)
 api_router.include_router(system_router)
 api_router.include_router(sync_router)
 api_router.include_router(semantic_search_router)
+api_router.include_router(collaboration_sync_router)

@@ -6,6 +6,7 @@ MVP 版本：用户无密码（仅标识），通过 localStorage 在前端记�
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from uuid import uuid4
 
 from app.database import Base
 
@@ -14,6 +15,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_uid = Column(String(80), unique=True, nullable=True, index=True, default=lambda: f"user_{uuid4().hex}")
     username = Column(String(100), unique=True, nullable=False, index=True)
     display_name = Column(String(200))
     email = Column(String(255))

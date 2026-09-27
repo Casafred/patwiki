@@ -9,6 +9,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy import text
+from uuid import uuid4
 
 from app.database import Base
 from app.models.enums import LegalStatus, PatentType, RiskLevel
@@ -47,6 +49,10 @@ class Patent(Base):
     __tablename__ = "patents"
 
     id = Column(Integer, primary_key=True, index=True)
+    entity_uid = Column(String(100), unique=True, nullable=True, index=True, default=lambda: f"pat_{uuid4().hex}")
+    origin_node_uid = Column(String(80), nullable=True, index=True)
+    record_version = Column(Integer, nullable=False, default=1, onupdate=text("record_version + 1"))
+    deleted_at = Column(DateTime, nullable=True, index=True)
 
     # 著录项目
     application_number = Column(String(100), index=True)
