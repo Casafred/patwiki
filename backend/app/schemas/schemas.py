@@ -155,13 +155,25 @@ class Product(ProductBase):
 
 class ProjectBase(BaseSchema):
     name: str
+    project_no: Optional[str] = None
+    # Kept for older clients; new clients should use project_no.
     code: Optional[str] = None
     product_id: Optional[int] = None
+    product_category: Optional[str] = None
+    department_ids: list[int] = Field(default_factory=list)
+    project_level: Optional[str] = None
+    project_type: Optional[str] = None
+    brands: list[str] = Field(default_factory=list)
+    project_manager: Optional[str] = None
+    research_owner: Optional[str] = None
+    shipping_regions: Optional[str] = None
+    current_stage: Optional[str] = None
+    product_model: Optional[str] = None
     description: Optional[str] = None
     module: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    status: Optional[str] = "active"
+    status: Optional[str] = "in_progress"
 
 
 class ProjectCreate(ProjectBase):
@@ -170,8 +182,19 @@ class ProjectCreate(ProjectBase):
 
 class ProjectUpdate(BaseSchema):
     name: Optional[str] = None
+    project_no: Optional[str] = None
     code: Optional[str] = None
     product_id: Optional[int] = None
+    product_category: Optional[str] = None
+    department_ids: Optional[list[int]] = None
+    project_level: Optional[str] = None
+    project_type: Optional[str] = None
+    brands: Optional[list[str]] = None
+    project_manager: Optional[str] = None
+    research_owner: Optional[str] = None
+    shipping_regions: Optional[str] = None
+    current_stage: Optional[str] = None
+    product_model: Optional[str] = None
     description: Optional[str] = None
     module: Optional[str] = None
     start_date: Optional[date] = None

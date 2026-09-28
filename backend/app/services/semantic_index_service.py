@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Patent, PatentDatabaseMembership, SemanticDocumentState, SemanticEvaluationRun, SemanticIndex, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
+from app.models import Patent, PatentDatabase, PatentDatabaseMembership, SemanticDocumentState, SemanticEvaluationRun, SemanticIndex, SemanticIndexJob, SemanticIndexOutbox, SemanticProviderDefinition, SemanticSearchProfile
 from app.search.contracts import SemanticError, VectorDocument
 from app.search.document_builder import SemanticDocumentBuilder
 from app.search.providers.openai_embedding import OpenAICompatibleEmbeddingProvider
@@ -226,7 +226,10 @@ class SemanticIndexService:
         indexes = db.query(SemanticIndex).filter(SemanticIndex.is_active == True).all()
         if patent:
             membership_ids = {row.database_id for row in db.query(PatentDatabaseMembership).filter(PatentDatabaseMembership.patent_id == item.patent_id).all()}
+            default_database_id = db.query(PatentDatabase.id).filter(PatentDatabase.is_default.is_(True)).scalar()
             relevant = [index for index in indexes if index.database_id is None or index.database_id in membership_ids]
+            if default_database_id is not None and default_database_id not in membership_ids:
+                relevant.extend(index for index in indexes if index.database_id == default_database_id and index not in relevant)
         else:
             # Membership is gone after a delete. Document state is the durable proof
             # that a projection contains this Patent and must be cleaned up.

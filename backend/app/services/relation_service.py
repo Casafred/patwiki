@@ -19,6 +19,7 @@ from app.services.patent_identity_service import (
     ensure_patent_identifiers,
     normalize_publication_number,
 )
+from app.services.patent_database_scope import in_database
 
 
 # 同族/引用列的常见分隔符：分号、逗号、顿号、竖线、换行、Tab、连续空格（≥2）
@@ -184,13 +185,13 @@ def _find_or_create_patent_by_number(
         # 优先在当前库内匹配
         if database_id is not None:
             existing = db.query(Patent).filter(
-                Patent.database_id == database_id,
+                in_database(database_id),
                 Patent.application_number == variant,
             ).first()
             if existing:
                 return existing
             existing = db.query(Patent).filter(
-                Patent.database_id == database_id,
+                in_database(database_id),
                 Patent.publication_number == variant,
             ).first()
             if existing:

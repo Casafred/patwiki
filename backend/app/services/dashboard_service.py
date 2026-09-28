@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Dashboard, Patent, PatentView
 from app.services.view_service import ViewService
+from app.services.patent_database_scope import in_database
 
 
 class DashboardService:
@@ -175,7 +176,7 @@ class DashboardService:
                 raise ValueError("视图不属于当前仪表盘所在的库")
             patents, _ = ViewService.list_view_patents(db, view, page=1, page_size=1000)
         else:
-            patents = db.query(Patent).filter(Patent.database_id == dashboard.database_id).all()
+            patents = db.query(Patent).filter(in_database(dashboard.database_id)).all()
         cards = cls.normalize_layout(dashboard.layout or [])
         return {
             "dashboard_id": dashboard.id,

@@ -15,6 +15,7 @@ from app.services.formula_engine import (
     FormulaEngine,
     FormulaError,
 )
+from app.services.patent_database_scope import in_database
 
 
 FIELD_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -355,7 +356,7 @@ class FormulaService:
         if patent_ids:
             query = query.filter(Patent.id.in_(patent_ids))
         if database_id is not None:
-            query = query.filter(Patent.database_id == database_id)
+            query = query.filter(in_database(database_id))
         patents = query.all()
         errors: dict[str, int] = {}
         for patent in patents:

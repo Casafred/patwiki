@@ -12,6 +12,7 @@ import type {
   GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
   ImportChangeReview, ImportReviewAction,
   ProjectSolutionVersion, RiskCase,
+  ProjectHistoryEntry,
   SemanticSearchMode, SemanticSearchResponse,
   SemanticProvider, SemanticProfile, SemanticIndex, SemanticJob, SemanticStatus,
   SemanticEvaluationDataset, SemanticEvaluationCase, SemanticEvaluationRun,
@@ -228,6 +229,13 @@ export const attachmentApi = {
     api.post('/attachments/upload', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
   list: (patentId: number, fieldKey?: string): Promise<AttachmentMeta[]> =>
     api.get(`/attachments/patent/${patentId}`, { params: { field_key: fieldKey } }),
+  library: (): Promise<AttachmentMeta[]> => api.get('/attachments/library'),
+  listForProject: (projectId: number): Promise<AttachmentMeta[]> => api.get(`/attachments/projects/${projectId}`),
+  uploadForProject: (projectId: number, data: FormData): Promise<AttachmentMeta> =>
+    api.post(`/attachments/projects/${projectId}`, data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  updateProject: (attachmentId: number, data: { note: string | null }): Promise<AttachmentMeta> =>
+    api.patch(`/attachments/project/${attachmentId}`, data),
+  removeProject: (attachmentId: number): Promise<{ success: boolean }> => api.delete(`/attachments/project/${attachmentId}`),
   update: (attachmentId: number, data: { note: string | null }): Promise<AttachmentMeta> =>
     api.patch(`/attachments/${attachmentId}`, data),
   download: (attachmentId: number, preview = false): Promise<Blob> =>
@@ -482,6 +490,8 @@ export const productApi = {
 
 export const projectApi = {
   list: (params: JsonObject = {}): Promise<Project[]> => api.get('/projects', { params }),
+  get: (id: number): Promise<Project> => api.get(`/projects/${id}`),
+  history: (id: number): Promise<ProjectHistoryEntry[]> => api.get(`/projects/${id}/history`),
   create: (data: Partial<Project>): Promise<Project> => api.post('/projects', data),
   update: (id: number, data: Partial<Project>): Promise<Project> => api.put(`/projects/${id}`, data),
   delete: (id: number): Promise<{ success: boolean }> => api.delete(`/projects/${id}`),

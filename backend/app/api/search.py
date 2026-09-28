@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Patent
+from app.services.patent_database_scope import in_database
 
 router = APIRouter(tags=["search"])
 
@@ -38,7 +39,7 @@ def suggest_search_terms(
         for field, _ in SUGGESTION_FIELDS
     )))
     if database_id is not None:
-        query = query.filter(Patent.database_id == database_id)
+        query = query.filter(in_database(database_id))
 
     patents = query.order_by(Patent.updated_at.desc(), Patent.id.desc()).limit(min(limit * 5, 100)).all()
     folded_term = term.casefold()

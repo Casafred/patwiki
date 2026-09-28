@@ -14,6 +14,8 @@ import ImportGovernancePage from './components/import/ImportGovernancePage'
 import AITaskMonitor from './components/ai/AITaskMonitor'
 import AICapabilityCenter from './components/ai/AICapabilityCenter'
 import ManagementPage from './components/management/ManagementPage'
+import ProjectWikiPage from './components/management/ProjectWikiPage'
+import AttachmentLibraryPage from './components/management/AttachmentLibraryPage'
 import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
 import { SharedFormView } from './components/views/FormView'
 import Icon from './components/common/Icon'
@@ -21,7 +23,7 @@ import { customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
 
-export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'external-sync' | 'settings' | 'fields' | 'management' | 'ai-center' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history' | 'governance'
+export type Page = 'patents' | 'stats' | 'dashboard' | 'automation' | 'external-sync' | 'settings' | 'fields' | 'management' | 'project-wiki' | 'attachments' | 'ai-center' | 'ai-tasks' | 'agent-analysis' | 'sharing' | 'import-history' | 'governance'
 
 const pageSegments: Record<Page, string> = {
   patents: 'patents',
@@ -32,6 +34,8 @@ const pageSegments: Record<Page, string> = {
   settings: 'settings',
   fields: 'fields',
   management: 'management',
+  'project-wiki': 'projects',
+  attachments: 'attachments',
   'ai-center': 'ai-center',
   'ai-tasks': 'ai-tasks',
   'agent-analysis': 'agent-analysis',
@@ -56,7 +60,7 @@ function getDatabaseIdFromPath(pathname: string): number | null {
 function DatabaseRouteScope({ children }: { children: ReactNode }) {
   const { databaseId } = useParams<{ databaseId: string }>()
   const parsedDatabaseId = Number(databaseId)
-  const { currentDatabaseId, setCurrentDatabaseId, setCurrentViewId } = useAppStore()
+  const { currentDatabaseId, setCurrentDatabaseId, setCurrentViewId, databases } = useAppStore()
 
   useEffect(() => {
     if (!Number.isInteger(parsedDatabaseId) || parsedDatabaseId <= 0) return
@@ -67,6 +71,14 @@ function DatabaseRouteScope({ children }: { children: ReactNode }) {
 
   if (!Number.isInteger(parsedDatabaseId) || parsedDatabaseId <= 0) {
     return <Navigate to="/patents" replace />
+  }
+  if (databases.length === 0) {
+    return <div className="page-loading" role="status">正在加载专利库…</div>
+  }
+  const databaseExists = databases.some(database => database.id === parsedDatabaseId)
+  if (!databaseExists) {
+    const defaultDatabase = databases.find(database => database.is_default) || databases[0]
+    return <Navigate to={defaultDatabase ? `/db/${defaultDatabase.id}/patents` : '/patents'} replace />
   }
   return <>{children}</>
 }
@@ -121,7 +133,7 @@ function WorkspaceApp() {
   })
   const {
     setCustomFields, setTags, setProjects,
-    setDatabases, setCurrentDatabaseId, currentDatabaseId,
+    setDatabases, setCurrentDatabaseId, currentDatabaseId, databases,
     setViews, setCurrentViewId, currentViewId,
     bumpDataVersion,
   } = useAppStore()
@@ -192,13 +204,7 @@ function WorkspaceApp() {
       setTags(tags)
       setProjects(projects)
       setDatabases(databases)
-      const requestedDatabase = requestedDatabaseId !== null
-        ? databases.find(database => database.id === requestedDatabaseId)
-        : undefined
-      // URL 中的库优先于本地默认库，保证刷新后仍停留在原工作区。
-      if (requestedDatabase) {
-        if (currentDatabaseId !== requestedDatabase.id) setCurrentDatabaseId(requestedDatabase.id)
-      } else if (useAppStore.getState().currentDatabaseId === null && databases.length > 0) {
+      if (useAppStore.getState().currentDatabaseId === null && databases.length > 0) {
         const def = databases.find(d => d.is_default) || databases[0]
         setCurrentDatabaseId(def.id)
       }
@@ -207,11 +213,40 @@ function WorkspaceApp() {
     } finally {
       setInitializing(false)
     }
-  }, [requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProjects, setTags])
+  }, [setCustomFields, setCurrentDatabaseId, setDatabases, setProjects, setTags])
 
   useEffect(() => {
     void loadMeta()
   }, [loadMeta])
+
+  useEffect(() => {
+    if (initializing || databases.length === 0) return
+    const defaultDatabase = databases.find(database => database.is_default) || databases[0]
+    const requestedDatabase = requestedDatabaseId !== null
+      ? databases.find(database => database.id === requestedDatabaseId)
+      : undefined
+    if (requestedDatabase) {
+      if (currentDatabaseId !== requestedDatabase.id) setCurrentDatabaseId(requestedDatabase.id)
+      if (location.pathname === '/patents') {
+        const next = new URLSearchParams(location.search)
+        next.delete('db')
+        navigate(`/db/${requestedDatabase.id}/patents${next.size ? `?${next}` : ''}`, { replace: true })
+      }
+      return
+    }
+    if (requestedDatabaseId !== null) {
+      if (defaultDatabase) {
+        setCurrentDatabaseId(defaultDatabase.id)
+        setCurrentViewId(null)
+        navigate(`/db/${defaultDatabase.id}/patents`, { replace: true })
+      }
+      return
+    }
+    if (defaultDatabase && currentDatabaseId === null) setCurrentDatabaseId(defaultDatabase.id)
+    if (defaultDatabase && location.pathname === '/patents' && !new URLSearchParams(location.search).has('db')) {
+      navigate(`/db/${defaultDatabase.id}/patents${location.search}`, { replace: true })
+    }
+  }, [currentDatabaseId, databases, initializing, location.pathname, location.search, navigate, requestedDatabaseId, setCurrentDatabaseId, setCurrentViewId])
 
   useEffect(() => {
     if (currentDatabaseId === null || currentViewId === null) return
@@ -270,6 +305,8 @@ function WorkspaceApp() {
     settings: '系统设置',
     fields: '字段管理',
     management: '管理台',
+    'project-wiki': '项目 Wiki',
+    attachments: '附件库',
     'ai-center': 'AI 能力中心',
     'ai-tasks': 'AI 任务',
     'agent-analysis': '智能分析',
@@ -308,6 +345,7 @@ function WorkspaceApp() {
             <Route path="db/:databaseId/settings" element={<DatabaseRouteScope><SettingsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/fields" element={<DatabaseRouteScope><FieldSettingsPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/management" element={<DatabaseRouteScope><ManagementPage /></DatabaseRouteScope>} />
+            <Route path="db/:databaseId/attachments" element={<DatabaseRouteScope><AttachmentLibraryPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/ai-center" element={<DatabaseRouteScope><AICapabilityCenter /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/sharing" element={<DatabaseRouteScope><SharingPage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/import-history" element={<DatabaseRouteScope><ImportHistoryPage /></DatabaseRouteScope>} />
@@ -323,6 +361,8 @@ function WorkspaceApp() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="fields" element={<FieldSettingsPage />} />
             <Route path="management" element={<ManagementPage />} />
+            <Route path="attachments" element={<AttachmentLibraryPage />} />
+            <Route path="projects/:projectId" element={<ProjectWikiPage />} />
             <Route path="ai-center" element={<AICapabilityCenter />} />
             <Route path="sharing" element={<SharingPage />} />
             <Route path="import-history" element={<ImportHistoryPage />} />

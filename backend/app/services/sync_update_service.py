@@ -20,13 +20,13 @@ from app.models import (
     ExternalFactObservation,
     ExternalSnapshot,
     Patent,
-    PatentDatabaseMembership,
     SyncRecord,
     SyncRun,
     SyncUpdateBatch,
     SyncUpdateItem,
 )
 from app.services.patent_service import PatentService
+from app.services.patent_database_scope import in_database
 from app.services.sync_reconciliation import apply_legal_events, resolve_patent
 from app.services.sync_support import LEGAL_STATUS_MAP, SAFE_EXTERNAL_FIELDS, date_value, hash_payload, now, serialize_value
 
@@ -56,11 +56,9 @@ class SyncUpdateService:
 
     @staticmethod
     def _patent_in_database(db: Session, patent: Patent, database_id: int) -> bool:
-        if patent.database_id == database_id:
-            return True
-        return bool(db.query(PatentDatabaseMembership).filter_by(
-            patent_id=patent.id,
-            database_id=database_id,
+        return bool(db.query(Patent.id).filter(
+            Patent.id == patent.id,
+            in_database(database_id),
         ).first())
 
     @staticmethod

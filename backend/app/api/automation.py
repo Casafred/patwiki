@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models import AutomationLog, AutomationRule, Patent, PatentDatabase
 from app.schemas.schemas import AutomationManualExecuteRequest, AutomationRuleCreate, AutomationRuleUpdate
 from app.services.automation_service import AutomationEngine
+from app.services.patent_database_scope import in_database
 from app.core.exceptions import BadRequestException, NotFoundException
 
 
@@ -148,7 +149,7 @@ def execute_rule(rule_id: int, body: AutomationManualExecuteRequest, db: Session
         raise NotFoundException("Database not found")
     patent = db.query(Patent).filter(
         Patent.id == body.patent_id,
-        Patent.database_id == rule.database_id,
+        in_database(rule.database_id),
     ).first()
     if not patent:
         raise NotFoundException("Patent not found in rule database")

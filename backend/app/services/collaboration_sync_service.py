@@ -28,6 +28,7 @@ from app.services.patent_identity_service import (
     identifier_specs_from_values,
 )
 from app.services.patent_service import PatentService, _stringify_value
+from app.services.patent_database_scope import in_database
 
 EXPORT_FIELDS = frozenset({
     "application_number", "publication_number", "grant_number", "title", "abstract", "claims",
@@ -175,12 +176,8 @@ def _validate_request(db: Session, user_id: int, request):
 
 
 def _query(db: Session, request):
-    query = db.query(Patent).filter(Patent.deleted_at.is_(None)).filter(or_(
-        Patent.database_id.in_(request.database_ids),
-        Patent.id.in_(db.query(PatentDatabaseMembership.patent_id).filter(
-            PatentDatabaseMembership.database_id.in_(request.database_ids)
-        )),
-    ))
+    scopes = [in_database(database_id) for database_id in request.database_ids]
+    query = db.query(Patent).filter(Patent.deleted_at.is_(None)).filter(or_(*scopes))
     if request.patent_ids is not None:
         query = query.filter(Patent.id.in_(request.patent_ids))
     if request.product_ids is not None:
@@ -236,6 +233,10 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
             PatentDatabaseMembership.database_id.in_(request.database_ids),
         ).all():
             memberships_by_patent.setdefault(patent_id, set()).add(database_id)
+    default_scope_ids = {database.id for database in databases if database.is_default}
+    for patent in patents:
+        if default_scope_ids:
+            memberships_by_patent.setdefault(patent.id, set()).update(default_scope_ids)
     product_ids = {patent.product_id for patent in patents if patent.product_id}
     products = {item.id: item for item in db.query(Product).filter(Product.id.in_(product_ids)).all()} if product_ids else {}
     records = []

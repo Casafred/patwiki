@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.services.patent_service import PatentService, SYSTEM_FIELDS
 from app.services.field_registry import get_all_fields_meta
+from app.services.patent_database_scope import in_database
 
 
 class ViewService:
@@ -638,7 +639,7 @@ class ViewService:
                 raise ValueError("目标看板列不在当前视图配置中")
         patent = db.query(Patent).filter(
             Patent.id == patent_id,
-            Patent.database_id == view.database_id,
+            in_database(view.database_id),
         ).first()
         if not patent:
             raise ValueError(f"专利 {patent_id} 不属于当前视图所在的库")
@@ -735,7 +736,7 @@ class ViewService:
             raise ValueError("甘特任务结束日期不能早于开始日期")
         patent = db.query(Patent).filter(
             Patent.id == patent_id,
-            Patent.database_id == view.database_id,
+            in_database(view.database_id),
         ).first()
         if not patent:
             raise ValueError(f"专利 {patent_id} 不属于当前视图所在的库")

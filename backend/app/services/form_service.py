@@ -11,6 +11,7 @@ from app.models import FormShareLink, Patent, PatentView
 from app.schemas.schemas import PatentCreate
 from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
 from app.services.patent_service import SYSTEM_FIELDS, PatentService
+from app.services.patent_database_scope import in_database
 from app.services.view_service import (
     ViewService,
     _get_item_field_value,
@@ -191,7 +192,7 @@ class FormService:
                 raise ValueError("公开表单只能新增专利")
             patent = db.query(Patent).filter(
                 Patent.id == patent_id,
-                Patent.database_id == view.database_id,
+                in_database(view.database_id),
             ).first()
             if not patent:
                 raise ValueError("待编辑专利不属于当前视图所在的库")

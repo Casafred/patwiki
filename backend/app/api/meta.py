@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.models import (
-    Product, ProductLine, Project, Tag, TagGroup,
+    Product, ProductLine, Project, ProjectHistory, Tag, TagGroup,
     CustomField, Department, Person, CustomFieldType,
     Patent,
 )
@@ -51,7 +51,8 @@ def list_products(
         func.count(Patent.id).label("cnt"),
     ).filter(Patent.product_id.isnot(None))
     if database_id is not None:
-        count_query = count_query.filter(Patent.database_id == database_id)
+        from app.services.patent_database_scope import in_database
+        count_query = count_query.filter(in_database(database_id))
     count_map = {pid: cnt for pid, cnt in count_query.group_by(Patent.product_id).all()}
 
     for p in products:
@@ -104,12 +105,67 @@ def list_projects(
     return projects
 
 
+PROJECT_HISTORY_FIELDS = (
+    "name", "code", "product_id", "product_category", "department_ids",
+    "project_level", "project_type", "brands", "project_manager",
+    "research_owner", "shipping_regions", "current_stage", "product_model",
+    "description", "module", "start_date", "end_date", "status",
+)
+
+
+def _project_value(value):
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _project_snapshot(project: Project) -> dict:
+    return {field: _project_value(getattr(project, field)) for field in PROJECT_HISTORY_FIELDS}
+
+
+def _record_project_history(db: Session, project: Project, before: dict | None, action: str):
+    after = _project_snapshot(project)
+    changes = {
+        field: {"before": before.get(field) if before else None, "after": value}
+        for field, value in after.items()
+        if before is None or before.get(field) != value
+    }
+    if changes:
+        db.add(ProjectHistory(
+            project_id=project.id,
+            action=action,
+            changed_by="local-user",
+            changes=changes,
+            snapshot=after,
+        ))
+
+
+def _validate_project_departments(db: Session, department_ids: list[int] | None):
+    ids = list(dict.fromkeys(int(item) for item in (department_ids or [])))
+    if ids and db.query(Department.id).filter(Department.id.in_(ids)).count() != len(ids):
+        raise BadRequestException("所属部门包含不存在的部门")
+    return ids
+
+
+@router.get("/projects/{project_id}", response_model=ProjectSchema)
+def get_project(project_id: int, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise NotFoundException("Project not found")
+    project.patent_count = len(project.patents)
+    return project
+
+
 @router.post("/projects", response_model=ProjectSchema)
 def create_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
-    project = Project(**project_in.model_dump())
+    values = project_in.model_dump(exclude={"project_no"})
+    values["code"] = project_in.project_no if project_in.project_no is not None else project_in.code
+    values["department_ids"] = _validate_project_departments(db, values.get("department_ids"))
+    project = Project(**values)
     db.add(project)
+    db.flush()
+    _record_project_history(db, project, None, "created")
     db.commit()
     db.refresh(project)
+    project.patent_count = len(project.patents)
     return project
 
 
@@ -118,11 +174,38 @@ def update_project(project_id: int, project_in: ProjectUpdate, db: Session = Dep
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise NotFoundException("Project not found")
-    for field, value in project_in.model_dump(exclude_unset=True).items():
+    before = _project_snapshot(project)
+    values = project_in.model_dump(exclude_unset=True, exclude={"project_no"})
+    payload = project_in.model_dump(exclude_unset=True)
+    if "project_no" in payload:
+        values["code"] = payload["project_no"]
+    if "department_ids" in values:
+        values["department_ids"] = _validate_project_departments(db, values["department_ids"])
+    for field, value in values.items():
         setattr(project, field, value)
+    db.flush()
+    _record_project_history(db, project, before, "updated")
     db.commit()
     db.refresh(project)
+    project.patent_count = len(project.patents)
     return project
+
+
+@router.get("/projects/{project_id}/history")
+def list_project_history(project_id: int, db: Session = Depends(get_db)):
+    if not db.query(Project.id).filter(Project.id == project_id).first():
+        raise NotFoundException("Project not found")
+    rows = db.query(ProjectHistory).filter(
+        ProjectHistory.project_id == project_id,
+    ).order_by(ProjectHistory.id.desc()).all()
+    return [{
+        "id": row.id,
+        "action": row.action,
+        "changed_by": row.changed_by,
+        "changes": row.changes or {},
+        "snapshot": row.snapshot or {},
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    } for row in rows]
 
 
 @router.delete("/projects/{project_id}")
@@ -130,8 +213,16 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise NotFoundException("Project not found")
+    from app.config import settings
+    from app.models import ProjectAttachment
+    attachments = db.query(ProjectAttachment).filter(ProjectAttachment.project_id == project_id).all()
+    paths = [(settings.FILES_DIR / attachment.file_path).resolve() for attachment in attachments]
+    root = (settings.FILES_DIR / "attachments").resolve()
     db.delete(project)
     db.commit()
+    for path in paths:
+        if path.is_relative_to(root) and path.exists():
+            path.unlink()
     return {"success": True}
 
 

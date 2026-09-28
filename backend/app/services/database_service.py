@@ -28,6 +28,11 @@ class DatabaseService:
         # denormalized column can lag after imports/MCP updates, and placeholder
         # identity rows are intentionally hidden from user-facing patent lists.
         for database in databases:
+            if database.is_default:
+                database.patent_count = db.query(func.count(Patent.id)).filter(
+                    Patent.title != "待补全",
+                ).scalar() or 0
+                continue
             database.patent_count = db.query(func.count(Patent.id)).filter(
                 and_(
                     Patent.title != "待补全",
@@ -479,17 +484,20 @@ class DatabaseService:
 
     @staticmethod
     def refresh_patent_count(db: Session, database_id: int) -> int:
-        count = db.query(func.count(Patent.id)).filter(and_(
-            Patent.title != "待补全",
-            or_(
-                Patent.database_id == database_id,
-                db.query(PatentDatabaseMembership.id).filter(
-                    PatentDatabaseMembership.patent_id == Patent.id,
-                    PatentDatabaseMembership.database_id == database_id,
-                ).exists(),
-            ),
-        )).scalar()
         database = db.query(PatentDatabase).filter(PatentDatabase.id == database_id).first()
+        if database and database.is_default:
+            count = db.query(func.count(Patent.id)).filter(Patent.title != "待补全").scalar()
+        else:
+            count = db.query(func.count(Patent.id)).filter(and_(
+                Patent.title != "待补全",
+                or_(
+                    Patent.database_id == database_id,
+                    db.query(PatentDatabaseMembership.id).filter(
+                        PatentDatabaseMembership.patent_id == Patent.id,
+                        PatentDatabaseMembership.database_id == database_id,
+                    ).exists(),
+                ),
+            )).scalar()
         if database:
             database.patent_count = count or 0
             db.add(database)

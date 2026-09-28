@@ -1243,7 +1243,7 @@ function ProjectInformationTab({ patent, formData, editing, updateField, project
         <ProjectLinksPanel patent={patent} formData={formData} editing={editing} updateField={updateField} projects={projects} onProjectsChanged={onProjectsChanged} />
       </section>
       <section className="identity-section">
-        <div className="identity-section-heading"><div><h3>项目相关附件</h3><p>记录附件对应的项目背景或用途，可为每个附件补充备注。</p></div></div>
+        <div className="identity-section-heading"><div><h3>专利附件</h3><p>用于说明专利本身；项目资料及项目与专利关系说明在对应项目 Wiki 中管理。</p></div></div>
         <AttachmentsTab patent={patent} onRefresh={onProjectsChanged} />
       </section>
       <section className="identity-section">

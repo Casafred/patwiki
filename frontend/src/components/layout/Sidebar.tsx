@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useLocation } from 'react-router-dom'
 import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Page } from '../../App'
@@ -55,6 +54,7 @@ const NAV_SECTIONS: Array<{ key: SidebarSectionKey; label: string; items: NavDes
     label: '系统管理',
     items: [
       { page: 'management', label: '业务管理台', icon: 'dashboard', hint: '字段、模板与业务规则配置' },
+      { page: 'attachments', label: '附件库', icon: 'file', hint: '统一查找专利与项目附件' },
       { page: 'sharing', label: '协作与权限', icon: 'users', hint: '成员、角色与权限管理' },
     ],
   },
@@ -68,7 +68,6 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCollapse }: SidebarProps) {
-  const location = useLocation()
   const {
     currentProductId, setCurrentProductId, setProducts,
     databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
@@ -82,7 +81,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   const [deletingDatabase, setDeletingDatabase] = useState(false)
 
   const currentDatabase = databases.find(d => d.id === currentDatabaseId) ?? null
-  const isGlobalMasterTable = location.pathname === '/patents' && !new URLSearchParams(location.search).has('db')
+  const isGlobalMasterTable = currentDatabase?.is_default === true
 
   const toggleSection = (key: SidebarSectionKey) => {
     setExpandedSections(previous => {
@@ -131,7 +130,8 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
     if (page === 'patents') {
       setCurrentProductId(null)
       setCurrentViewId(null)
-      onNavigate('patents', null)
+      const masterDatabaseId = databases.find(database => database.is_default)?.id ?? currentDatabaseId
+      onNavigate('patents', masterDatabaseId)
     } else {
       onNavigate(page, currentDatabaseId)
     }
@@ -248,26 +248,17 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         </div>
         <select
           className="database-select"
-          value={isGlobalMasterTable ? 'all' : currentDatabaseId ?? ''}
-          onChange={(e) => {
-            if (e.target.value === 'all') {
-              setCurrentProductId(null)
-              setCurrentViewId(null)
-              onNavigate('patents', null)
-            } else {
-              handleDatabaseChange(Number(e.target.value))
-            }
-          }}
-          aria-label="选择全库主表或专利库"
+          value={currentDatabaseId ?? ''}
+          onChange={(e) => handleDatabaseChange(Number(e.target.value))}
+          aria-label="选择专利库"
         >
-          <option value="all">全部数据库（去重）</option>
           {databases.length === 0 && <option value="">无可用库</option>}
           {databases.map(d => (
             <option key={d.id} value={d.id}>{d.name}</option>
           ))}
         </select>
         {isGlobalMasterTable ? (
-          <div className="database-meta">{totalPatents.toLocaleString()} 条去重专利</div>
+          <div className="database-meta">{(currentDatabase?.patent_count ?? totalPatents).toLocaleString()} 条专利</div>
         ) : currentDatabase && (
           <div className="database-meta">{currentDatabase.patent_count ?? 0} 条专利</div>
         )}

@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-28.2"
+CURRENT_MIGRATION_VERSION = "2026-09-28.3"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -95,6 +95,16 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("patent_projects", "assigned_to_id", "ALTER TABLE patent_projects ADD COLUMN assigned_to_id INTEGER REFERENCES people(id)"),
     _column("patent_projects", "linked_at", "ALTER TABLE patent_projects ADD COLUMN linked_at DATETIME"),
     _column("patent_databases", "owner_id", "ALTER TABLE patent_databases ADD COLUMN owner_id INTEGER REFERENCES users(id)"),
+    _column("projects", "department_ids", "ALTER TABLE projects ADD COLUMN department_ids JSON NOT NULL DEFAULT '[]'"),
+    _column("projects", "project_level", "ALTER TABLE projects ADD COLUMN project_level VARCHAR(30)"),
+    _column("projects", "project_type", "ALTER TABLE projects ADD COLUMN project_type VARCHAR(30)"),
+    _column("projects", "brands", "ALTER TABLE projects ADD COLUMN brands JSON NOT NULL DEFAULT '[]'"),
+    _column("projects", "project_manager", "ALTER TABLE projects ADD COLUMN project_manager VARCHAR(100)"),
+    _column("projects", "research_owner", "ALTER TABLE projects ADD COLUMN research_owner VARCHAR(100)"),
+    _column("projects", "shipping_regions", "ALTER TABLE projects ADD COLUMN shipping_regions TEXT"),
+    _column("projects", "current_stage", "ALTER TABLE projects ADD COLUMN current_stage VARCHAR(30)"),
+    _column("projects", "product_model", "ALTER TABLE projects ADD COLUMN product_model VARCHAR(100)"),
+    _column("projects", "product_category", "ALTER TABLE projects ADD COLUMN product_category VARCHAR(200)"),
     _column("patent_histories", "source_view_id", "ALTER TABLE patent_histories ADD COLUMN source_view_id INTEGER REFERENCES patent_views(id)"),
     _column("patent_histories", "source_view_name", "ALTER TABLE patent_histories ADD COLUMN source_view_name VARCHAR(200)"),
     _column("patent_views", "layout_type", "ALTER TABLE patent_views ADD COLUMN layout_type VARCHAR(30) DEFAULT 'table'"),

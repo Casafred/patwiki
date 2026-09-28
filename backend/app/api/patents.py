@@ -32,6 +32,7 @@ from app.models import (
 from app.core.exceptions import NotFoundException
 from app.core.exceptions import BadRequestException
 from app.services.patent_identity_service import list_patent_identifiers, normalize_publication_number
+from app.services.patent_database_scope import in_database
 from app.services.relation_service import (
     find_existing_patent_by_number,
     parse_patent_numbers,
@@ -279,7 +280,7 @@ def get_patent_family(patent_id: int, db: Session = Depends(get_db)):
     if root.family_id is not None:
         members = db.query(PatentModel).filter(
             PatentModel.family_id == root.family_id,
-            PatentModel.database_id == root.database_id,
+            in_database(root.database_id),
         ).order_by(
             (PatentModel.id == root.id).desc(),
             PatentModel.filing_date.desc(),
@@ -491,7 +492,7 @@ def get_patent_graph(
             if family_ids:
                 family_members = db.query(PatentModel).filter(
                     PatentModel.family_id.in_(family_ids),
-                    PatentModel.database_id == root.database_id,
+                    in_database(root.database_id),
                 ).all()
                 for member in family_members:
                     patents_by_id[member.id] = member
@@ -523,7 +524,7 @@ def get_patent_graph(
             }
             citation_patents = db.query(PatentModel).filter(
                 PatentModel.id.in_(citation_patent_ids)
-            ).filter(PatentModel.database_id == root.database_id).all() if citation_patent_ids else []
+            ).filter(in_database(root.database_id)).all() if citation_patent_ids else []
             citation_patents_by_id = {patent.id: patent for patent in citation_patents}
             for citation in citation_rows:
                 citing = citation_patents_by_id.get(citation.citing_patent_id)

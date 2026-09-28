@@ -16,6 +16,7 @@ from app.models import (
     patent_project,
 )
 from app.services.patent_service import PatentService, SYSTEM_FIELDS
+from app.services.patent_database_scope import in_database
 
 
 _execution_stack: ContextVar[tuple[tuple[int, int], ...]] = ContextVar(
@@ -336,7 +337,7 @@ class AutomationEngine:
             if last_run and current - last_run < timedelta(minutes=int(interval)):
                 results.append({"rule_id": rule.id, "status": "skipped", "reason": "not_due"})
                 continue
-            patent_ids = [row.id for row in db.query(Patent.id).filter(Patent.database_id == rule.database_id).all()]
+            patent_ids = [row.id for row in db.query(Patent.id).filter(in_database(rule.database_id)).all()]
             if not patent_ids:
                 rule.last_executed_at = current
                 db.add(rule)

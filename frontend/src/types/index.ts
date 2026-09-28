@@ -541,13 +541,24 @@ export interface Product {
 export interface Project {
   id: number
   name: string
-  code?: string
-  product_id?: number
-  description?: string
-  module?: string
-  start_date?: string
-  end_date?: string
-  status?: string
+  project_no?: string | null
+  code?: string | null
+  product_id?: number | null
+  product_category?: string | null
+  department_ids: number[]
+  project_level?: string | null
+  project_type?: string | null
+  brands: string[]
+  project_manager?: string | null
+  research_owner?: string | null
+  shipping_regions?: string | null
+  current_stage?: string | null
+  product_model?: string | null
+  description?: string | null
+  module?: string | null
+  start_date?: string | null
+  end_date?: string | null
+  status?: string | null
   patent_count?: number
   created_at: string
   updated_at: string
@@ -1193,6 +1204,11 @@ export interface FieldMeta {
 export interface AttachmentMeta {
   id: string
   attachment_id: number
+  attachment_type?: 'patent' | 'project'
+  patent_id?: number | null
+  project_id?: number | null
+  scope?: 'patent' | 'project' | 'project_patent' | string
+  owner_label?: string
   filename: string
   file_path?: string
   file_size: number
@@ -1213,6 +1229,15 @@ export interface AttachmentMeta {
   width?: number | null
   height?: number | null
   is_image?: boolean
+}
+
+export interface ProjectHistoryEntry {
+  id: number
+  action: 'created' | 'updated' | string
+  changed_by: string
+  changes: Record<string, { before?: unknown; after?: unknown }>
+  snapshot: Record<string, unknown>
+  created_at?: string | null
 }
 
 export type DashboardCardType = 'metric' | 'bar' | 'pie' | 'donut' | 'line' | 'progress' | 'table' | 'stacked' | 'heatmap'

@@ -38,7 +38,7 @@ from app.models.organization import (
 )
 
 # 项目
-from app.models.project import Project
+from app.models.project import Project, ProjectHistory, ProjectAttachment
 
 # 标签
 from app.models.tag import TagGroup, Tag
@@ -155,7 +155,7 @@ __all__ = [
     # organization
     "Department", "Person", "ProductLine", "Product",
     # project
-    "Project",
+    "Project", "ProjectHistory", "ProjectAttachment",
     # tag
     "TagGroup", "Tag",
     # field

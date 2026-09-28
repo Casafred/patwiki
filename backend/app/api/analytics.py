@@ -18,6 +18,7 @@ from app.models import (
 )
 from app.services.field_registry import SYSTEM_FIELD_KEYS
 from app.services.patent_service import PatentService
+from app.services.patent_database_scope import in_database
 from app.config import settings
 
 router = APIRouter(tags=["analytics"])
@@ -98,7 +99,7 @@ def column_stats(req: ColumnStatsRequest, db: Session = Depends(get_db)):
 def _apply_common_filters(query, req):
     """通用筛选条件应用"""
     if getattr(req, "database_id", None):
-        query = query.filter(Patent.database_id == req.database_id)
+        query = query.filter(in_database(req.database_id))
     if getattr(req, "product_id", None):
         query = query.filter(Patent.product_id == req.product_id)
     if getattr(req, "project_id", None):

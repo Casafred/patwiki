@@ -1258,7 +1258,7 @@ class PatentService:
                 func.count(Patent.id).label("count"),
             ).outerjoin(Patent, Patent.product_id == Product.id)
             if database_id is not None:
-                products_q = products_q.filter((Patent.database_id == database_id) | (Patent.id.is_(None)))
+                products_q = products_q.filter(or_(in_database(database_id), Patent.id.is_(None)))
             if patent_ids is not None:
                 products_q = products_q.filter(Patent.id.in_(patent_ids) if patent_ids else False)
             products = products_q.group_by(Product.id, Product.name).order_by(desc("count")).limit(20).all()

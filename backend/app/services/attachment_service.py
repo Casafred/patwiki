@@ -12,9 +12,10 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Attachment, Patent, PatentDatabaseMembership
+from app.models import Attachment, Patent
 from app.services.field_registry import get_all_fields_meta
 from app.services.patent_service import PatentService
+from app.services.patent_database_scope import in_database
 
 
 class AttachmentService:
@@ -56,10 +57,7 @@ class AttachmentService:
     def _patent(db: Session, database_id: int, patent_id: int) -> Patent:
         patent = db.query(Patent).filter(
             Patent.id == patent_id,
-            (Patent.database_id == database_id) | db.query(PatentDatabaseMembership.id).filter(
-                PatentDatabaseMembership.database_id == database_id,
-                PatentDatabaseMembership.patent_id == Patent.id,
-            ).exists(),
+            in_database(database_id),
         ).first()
         if not patent:
             raise ValueError("专利不属于指定数据库")
@@ -70,6 +68,9 @@ class AttachmentService:
         return {
             "id": f"att_{attachment.id}",
             "attachment_id": attachment.id,
+            "attachment_type": "patent",
+            "patent_id": attachment.patent_id,
+            "scope": "patent",
             "filename": attachment.filename,
             "file_path": attachment.file_path,
             "file_size": attachment.file_size,

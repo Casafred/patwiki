@@ -22,6 +22,7 @@ from app.schemas.schemas import ImportBatchResponse, StatsResponse
 from app.services.import_service import IMPORT_SKIP_FIELD, ImportService
 from app.services.excel_image_service import extract_embedded_images
 from app.services.patent_service import PatentService
+from app.services.patent_database_scope import in_database
 from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
 from app.services.merge_service import merge_patent_data, _is_empty
 from app.services.patent_identity_service import (
@@ -649,7 +650,7 @@ def _legacy_confirm_import(
             for i in range(0, len(app_nums_list), DEDUP_CHUNK):
                 chunk = app_nums_list[i:i + DEDUP_CHUNK]
                 existing_patents = db.query(Patent).filter(
-                    Patent.database_id == database_id,
+                    in_database(database_id),
                     Patent.application_number.in_(chunk),
                 ).all()
                 for p in existing_patents:
@@ -664,7 +665,7 @@ def _legacy_confirm_import(
             for i in range(0, len(pub_nums_list), DEDUP_CHUNK):
                 chunk = pub_nums_list[i:i + DEDUP_CHUNK]
                 existing_patents_pub = db.query(Patent).filter(
-                    Patent.database_id == database_id,
+                    in_database(database_id),
                     Patent.publication_number.in_(chunk),
                 ).all()
                 for p in existing_patents_pub:

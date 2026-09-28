@@ -27,7 +27,7 @@ from app.schemas.schemas import (
 )
 from app.services.view_service import ViewService
 from app.services.form_service import FormService
-from app.models import PatentView, ViewLocalField
+from app.models import PatentDatabase, PatentView, ViewLocalField
 from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(prefix="/views", tags=["views"])
@@ -47,6 +47,8 @@ def list_views(
     # Existing local databases may predate the additive business-view columns.
     # Reconcile the idempotent defaults before returning the workspace scope.
     if database_id is not None:
+        if not db.query(PatentDatabase.id).filter(PatentDatabase.id == database_id).first():
+            raise NotFoundException("Patent database not found")
         ViewService.ensure_default_business_views(db, database_id)
     views = ViewService.list_views(
         db,

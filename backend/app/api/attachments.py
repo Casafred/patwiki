@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Attachment, Patent
+from app.models import Attachment, Patent, Project, ProjectAttachment
 from app.services.attachment_service import AttachmentService
+from app.services.project_attachment_service import ProjectAttachmentService
 from app.core.exceptions import BadRequestException, NotFoundException
 
 
@@ -46,6 +47,85 @@ def list_patent_attachments(
     if not db.query(Patent).filter(Patent.id == patent_id).first():
         raise NotFoundException("Patent not found")
     return AttachmentService.list_for_patent(db, patent_id, field_key)
+
+
+@router.get("/library")
+def list_attachment_library(db: Session = Depends(get_db)):
+    items = []
+    for attachment in db.query(Attachment).order_by(Attachment.uploaded_at.desc(), Attachment.id.desc()).all():
+        item = AttachmentService._metadata(attachment)
+        patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first()
+        item["owner_label"] = f"专利 · {patent.title if patent else '已删除专利'}"
+        items.append(item)
+    for attachment in db.query(ProjectAttachment).order_by(ProjectAttachment.uploaded_at.desc(), ProjectAttachment.id.desc()).all():
+        item = ProjectAttachmentService._metadata(attachment)
+        project = db.query(Project).filter(Project.id == attachment.project_id).first()
+        patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first() if attachment.patent_id else None
+        item["owner_label"] = f"项目 · {project.name if project else '已删除项目'}"
+        if patent:
+            item["owner_label"] += f" · 关联专利：{patent.title}"
+        items.append(item)
+    return sorted(items, key=lambda item: item.get("uploaded_at") or "", reverse=True)
+
+
+@router.get("/projects/{project_id}")
+def list_project_attachments(project_id: int, db: Session = Depends(get_db)):
+    try:
+        return ProjectAttachmentService.list_for_project(db, project_id)
+    except ValueError as exc:
+        raise NotFoundException(str(exc)) from exc
+
+
+@router.post("/projects/{project_id}")
+def upload_project_attachment(
+    project_id: int,
+    scope: str = Form("project"),
+    patent_id: int | None = Form(None),
+    note: str | None = Form(None),
+    uploaded_by: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ProjectAttachmentService.upload(
+            db, project_id, file, scope=scope, patent_id=patent_id,
+            note=note, uploaded_by=uploaded_by,
+        )
+    except ValueError as exc:
+        raise BadRequestException(str(exc)) from exc
+
+
+@router.get("/project/{attachment_id}/download")
+def download_project_attachment(attachment_id: int, db: Session = Depends(get_db)):
+    try:
+        return _file_response(ProjectAttachmentService.get(db, attachment_id), inline=False)
+    except ValueError as exc:
+        raise NotFoundException(str(exc)) from exc
+
+
+@router.get("/project/{attachment_id}/preview")
+def preview_project_attachment(attachment_id: int, db: Session = Depends(get_db)):
+    try:
+        return _file_response(ProjectAttachmentService.get(db, attachment_id), inline=True)
+    except ValueError as exc:
+        raise NotFoundException(str(exc)) from exc
+
+
+@router.patch("/project/{attachment_id}")
+def update_project_attachment(attachment_id: int, body: AttachmentNoteUpdate, db: Session = Depends(get_db)):
+    try:
+        return ProjectAttachmentService.update_note(db, attachment_id, body.note)
+    except ValueError as exc:
+        raise NotFoundException(str(exc)) from exc
+
+
+@router.delete("/project/{attachment_id}")
+def delete_project_attachment(attachment_id: int, db: Session = Depends(get_db)):
+    try:
+        ProjectAttachmentService.delete(db, attachment_id)
+    except ValueError as exc:
+        raise NotFoundException(str(exc)) from exc
+    return {"success": True}
 
 
 def _file_response(attachment: Attachment, inline: bool) -> FileResponse:

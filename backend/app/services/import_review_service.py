@@ -26,6 +26,7 @@ from app.services.patent_identity_service import (
     ensure_patent_identifiers, find_patents_by_identifier_specs_bulk,
     identifier_specs_from_values,
 )
+from app.services.patent_database_scope import in_database
 from app.models.database_membership import PatentDatabaseMembership
 
 REVIEW_ACTIONS = {"adopt", "keep_existing", "fill_empty", "ignore", "quarantine"}
@@ -1031,7 +1032,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
         ).first()
         if target_database:
             target_database.patent_count = db.query(func.count(Patent.id)).filter(or_(
-                Patent.database_id == database_id,
+                in_database(database_id),
                 db.query(PatentDatabaseMembership.id).filter(
                     PatentDatabaseMembership.patent_id == Patent.id,
                     PatentDatabaseMembership.database_id == database_id,
