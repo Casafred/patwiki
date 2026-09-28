@@ -1,5 +1,5 @@
 """Database engine, session dependency and startup migration boundary."""
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -11,7 +11,7 @@ connect_args = {"check_same_thread": False} if "sqlite" in settings.DATABASE_URL
 engine = create_engine(
     settings.DATABASE_URL,
     connect_args=connect_args,
-    echo=settings.DEBUG,
+    echo=False,
 )
 
 
@@ -84,23 +84,8 @@ def _ensure_master_views():
 
 def _backfill_database_memberships(db):
     """Backfill the multi-database visibility projection once at startup."""
-    from app.models import Patent, PatentDatabaseMembership
-
-    rows = db.query(Patent.id, Patent.database_id).filter(Patent.database_id.isnot(None)).all()
-    if not rows:
-        return
-    existing = {
-        (patent_id, database_id)
-        for patent_id, database_id in db.query(
-            PatentDatabaseMembership.patent_id,
-            PatentDatabaseMembership.database_id,
-        ).all()
-    }
-    additions = [
-        PatentDatabaseMembership(patent_id=patent_id, database_id=database_id)
-        for patent_id, database_id in rows
-        if (patent_id, database_id) not in existing
-    ]
-    if additions:
-        db.add_all(additions)
-        db.commit()
+    db.execute(text(
+        "INSERT OR IGNORE INTO patent_database_memberships (patent_id, database_id) "
+        "SELECT id, database_id FROM patents WHERE database_id IS NOT NULL"
+    ))
+    db.commit()

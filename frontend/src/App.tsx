@@ -17,7 +17,7 @@ import ManagementPage from './components/management/ManagementPage'
 import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
 import { SharedFormView } from './components/views/FormView'
 import Icon from './components/common/Icon'
-import { productApi, customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
+import { customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
 
@@ -120,7 +120,7 @@ function WorkspaceApp() {
     }
   })
   const {
-    setProducts, setCustomFields, setTags, setProjects,
+    setCustomFields, setTags, setProjects,
     setDatabases, setCurrentDatabaseId, currentDatabaseId,
     setViews, setCurrentViewId, currentViewId,
     bumpDataVersion,
@@ -129,6 +129,7 @@ function WorkspaceApp() {
   const queryDatabaseId = Number(searchParams.get('db'))
   const requestedDatabaseId = routeDatabaseId || (Number.isInteger(queryDatabaseId) && queryDatabaseId > 0 ? queryDatabaseId : null)
   const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
+  const isGlobalMasterTable = location.pathname === '/patents' && !searchParams.has('db')
 
   // 用 ref 保存 URL 中的 view 参数，供视图加载 effect 读取，
   // 避免 effect 依赖 searchParamsString（每次翻页/搜索/排序 URL 变化都会
@@ -141,6 +142,12 @@ function WorkspaceApp() {
   }, [searchParams])
 
   useEffect(() => {
+    if (isGlobalMasterTable) {
+      lastLoadedViewsDatabaseId.current = null
+      setViews([])
+      if (currentViewId !== null) setCurrentViewId(null)
+      return
+    }
     if (activeDatabaseId === null) return
     if (lastLoadedViewsDatabaseId.current === activeDatabaseId && currentViewId !== null) return
     // 本 effect 仅在库切换时运行（不依赖 searchParamsString）。
@@ -171,18 +178,16 @@ function WorkspaceApp() {
     }
     void loadViews()
     return () => { cancelled = true }
-  }, [activeDatabaseId, currentViewId, setCurrentViewId, setViews])
+  }, [activeDatabaseId, currentViewId, isGlobalMasterTable, setCurrentViewId, setViews])
 
   const loadMeta = useCallback(async () => {
     try {
-      const [products, fields, tags, projects, databases] = await Promise.all([
-        productApi.list(),
+      const [fields, tags, projects, databases] = await Promise.all([
         customFieldApi.list(),
         tagApi.list(),
         projectApi.list(),
         databaseApi.list(),
       ])
-      setProducts(products)
       setCustomFields(fields)
       setTags(tags)
       setProjects(projects)
@@ -193,7 +198,7 @@ function WorkspaceApp() {
       // URL 中的库优先于本地默认库，保证刷新后仍停留在原工作区。
       if (requestedDatabase) {
         if (currentDatabaseId !== requestedDatabase.id) setCurrentDatabaseId(requestedDatabase.id)
-      } else if (currentDatabaseId === null && databases.length > 0) {
+      } else if (useAppStore.getState().currentDatabaseId === null && databases.length > 0) {
         const def = databases.find(d => d.is_default) || databases[0]
         setCurrentDatabaseId(def.id)
       }
@@ -202,7 +207,7 @@ function WorkspaceApp() {
     } finally {
       setInitializing(false)
     }
-  }, [currentDatabaseId, requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProducts, setProjects, setTags])
+  }, [requestedDatabaseId, setCustomFields, setCurrentDatabaseId, setDatabases, setProjects, setTags])
 
   useEffect(() => {
     void loadMeta()
@@ -211,10 +216,16 @@ function WorkspaceApp() {
   useEffect(() => {
     if (currentDatabaseId === null || currentViewId === null) return
     const next = new URLSearchParams(searchParams)
+    if (isGlobalMasterTable) {
+      next.delete('db')
+      next.delete('view')
+      if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
+      return
+    }
     if (!routeDatabaseId) next.set('db', String(currentDatabaseId))
     next.set('view', String(currentViewId))
     if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
-  }, [currentDatabaseId, currentViewId, routeDatabaseId, searchParams, searchParamsString, setSearchParams])
+  }, [currentDatabaseId, currentViewId, isGlobalMasterTable, routeDatabaseId, searchParams, searchParamsString, setSearchParams])
 
   const handleImportSuccess = () => {
     setShowImport(false)
@@ -227,6 +238,10 @@ function WorkspaceApp() {
 
   const handlePatentClick = (id: number) => {
     const activeDatabaseId = requestedDatabaseId ?? currentDatabaseId
+    if (isGlobalMasterTable) {
+      navigate(`/patents/${id}${location.search}`)
+      return
+    }
     navigate(`${activeDatabaseId ? `/db/${activeDatabaseId}/patents/${id}` : `/patents/${id}`}${location.search}`)
   }
 
@@ -283,7 +298,7 @@ function WorkspaceApp() {
         )}
         <div className="content-area">
           <Routes>
-            <Route index element={<Navigate to={currentDatabaseId ? `/db/${currentDatabaseId}/patents` : '/patents'} replace />} />
+            <Route index element={<Navigate to="/patents" replace />} />
             <Route path="db/:databaseId/patents" element={<DatabaseRouteScope><PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} onOpenImport={() => setShowImport(true)} onOpenSidebar={() => setSidebarOpen(true)} /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/patents/:patentId" element={<DatabaseRouteScope><PatentDetailRoute onOpenSidebar={() => setSidebarOpen(true)} /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/stats" element={<DatabaseRouteScope><StatsPage /></DatabaseRouteScope>} />
@@ -299,7 +314,7 @@ function WorkspaceApp() {
             <Route path="db/:databaseId/governance" element={<DatabaseRouteScope><ImportGovernancePage /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/ai-tasks" element={<DatabaseRouteScope><AITaskMonitor /></DatabaseRouteScope>} />
             <Route path="db/:databaseId/agent-analysis" element={<DatabaseRouteScope><AgentAnalysisPage /></DatabaseRouteScope>} />
-            <Route path="patents" element={<PatentListPage onPatentClick={handlePatentClick} viewId={currentViewId} onOpenImport={() => setShowImport(true)} onOpenSidebar={() => setSidebarOpen(true)} />} />
+            <Route path="patents" element={<PatentListPage onPatentClick={handlePatentClick} viewId={isGlobalMasterTable ? null : currentViewId} onOpenImport={() => setShowImport(true)} onOpenSidebar={() => setSidebarOpen(true)} />} />
             <Route path="patents/:patentId" element={<PatentDetailRoute onOpenSidebar={() => setSidebarOpen(true)} />} />
             <Route path="stats" element={<StatsPage />} />
             <Route path="dashboard" element={<StatsPage />} />

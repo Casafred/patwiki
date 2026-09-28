@@ -1,13 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <meta name="theme-color" content="#f8fafc" />
+    <title>PatWiki</title>
+    <style>
+      html, body, #root { width: 100%; min-height: 100%; margin: 0; }
+      .bootstrap-loading { position: fixed; inset: 0; z-index: 10000; display: grid; place-content: center; justify-items: center; gap: 10px; background: #f8fafc; color: #0f172a; font: 14px system-ui, sans-serif; }
+      .bootstrap-loading-mark { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px; background: #0f766e; color: white; font-size: 17px; font-weight: 700; animation: bootstrap-pulse 1.5s ease-in-out infinite; }
+      .bootstrap-loading-label { color: #64748b; font-size: 12px; }
+      .bootstrap-loading-track { width: 160px; height: 3px; overflow: hidden; border-radius: 99px; background: #dbe5e8; }
+      .bootstrap-loading-track::after { display: block; width: 45%; height: 100%; border-radius: inherit; background: #0f766e; content: ""; animation: bootstrap-progress 1.2s ease-in-out infinite; }
+      @keyframes bootstrap-pulse { 50% { transform: scale(1.04); } }
+      @keyframes bootstrap-progress { from { transform: translateX(-110%); } to { transform: translateX(340%); } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="bootstrap-loading" role="status" aria-live="polite">
+        <div class="bootstrap-loading-mark">PW</div>
+        <strong>正在启动 PatWiki</strong>
+        <span class="bootstrap-loading-label">正在连接本地工作区</span>
+        <div class="bootstrap-loading-track"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { productApi, databaseApi } from '../../api'
 import { useAppStore } from '../../store'
 import type { Page } from '../../App'
@@ -38,7 +39,7 @@ const NAV_SECTIONS: Array<{ key: SidebarSectionKey; label: string; items: NavDes
     key: 'workspace',
     label: '专利工作区',
     items: [
-      { page: 'patents', label: '全部专利', icon: 'table', hint: '浏览、检索与管理当前库全部专利' },
+      { page: 'patents', label: '全部专利', icon: 'table', hint: '浏览、检索与管理全部数据库中的去重专利' },
     ],
   },
   {
@@ -67,10 +68,11 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCollapse }: SidebarProps) {
+  const location = useLocation()
   const {
     currentProductId, setCurrentProductId, setProducts,
     databases, currentDatabaseId, setCurrentDatabaseId, setDatabases,
-    currentUser, setCurrentViewId,
+    currentUser, setCurrentViewId, totalPatents,
   } = useAppStore()
   const [showAddDatabase, setShowAddDatabase] = useState(false)
   const [newDbName, setNewDbName] = useState('')
@@ -80,6 +82,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   const [deletingDatabase, setDeletingDatabase] = useState(false)
 
   const currentDatabase = databases.find(d => d.id === currentDatabaseId) ?? null
+  const isGlobalMasterTable = location.pathname === '/patents' && !new URLSearchParams(location.search).has('db')
 
   const toggleSection = (key: SidebarSectionKey) => {
     setExpandedSections(previous => {
@@ -104,7 +107,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   // 打通关联：监听当前库切换，重新加载产品列表，patent_count 按当前库过滤
   const reloadProducts = useCallback(async () => {
     try {
-      const params = currentDatabaseId === null || currentDatabaseId === undefined
+      const params = isGlobalMasterTable || currentDatabaseId === null || currentDatabaseId === undefined
         ? {}
         : { database_id: currentDatabaseId }
       const refreshed = await productApi.list(params)
@@ -112,16 +115,11 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
     } catch (e) {
       console.error('Failed to reload products:', e)
     }
-  }, [currentDatabaseId, setProducts])
+  }, [currentDatabaseId, isGlobalMasterTable, setProducts])
 
   useEffect(() => {
     reloadProducts()
   }, [reloadProducts])
-
-  const handleProductClick = (productId: number | null) => {
-    setCurrentProductId(productId)
-    onNavigate('patents', currentDatabaseId)
-  }
 
   const isDestinationActive = (page: Page) => (
     page === 'patents'
@@ -131,7 +129,9 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
 
   const handleNavSelect = (page: Page) => {
     if (page === 'patents') {
-      handleProductClick(null)
+      setCurrentProductId(null)
+      setCurrentViewId(null)
+      onNavigate('patents', null)
     } else {
       onNavigate(page, currentDatabaseId)
     }
@@ -139,7 +139,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
 
   // P0-11：库切换
   const handleDatabaseChange = (id: number) => {
-    if (id === currentDatabaseId) return
+    if (id === currentDatabaseId && !isGlobalMasterTable) return
     // URL is the source of truth; App loads the new database's views after navigation.
     setCurrentProductId(null)
     onNavigate('patents', id)
@@ -236,28 +236,39 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         className="sidebar-rail-database"
         onClick={() => onToggleCollapse(false)}
         aria-label="展开并切换专利库"
-        title={`当前库：${currentDatabase?.name ?? '未选择'}（点击展开切换）`}
+        title={isGlobalMasterTable ? '全库主表（点击展开切换专利库）' : `当前库：${currentDatabase?.name ?? '未选择'}（点击展开切换）`}
       >
         <Icon name="database" size={18} />
       </button>
 
       <div className="sidebar-database">
         <div className="sidebar-label-row">
-          <span className="sidebar-label"><Icon name="database" size={12} /> 当前专利库</span>
+          <span className="sidebar-label"><Icon name="database" size={12} /> {isGlobalMasterTable ? '全库主表' : '当前专利库'}</span>
           <span className="sidebar-count">{databases.length}</span>
         </div>
         <select
           className="database-select"
-          value={currentDatabaseId ?? ''}
-          onChange={(e) => handleDatabaseChange(Number(e.target.value))}
-          aria-label="选择当前专利库"
+          value={isGlobalMasterTable ? 'all' : currentDatabaseId ?? ''}
+          onChange={(e) => {
+            if (e.target.value === 'all') {
+              setCurrentProductId(null)
+              setCurrentViewId(null)
+              onNavigate('patents', null)
+            } else {
+              handleDatabaseChange(Number(e.target.value))
+            }
+          }}
+          aria-label="选择全库主表或专利库"
         >
+          <option value="all">全部数据库（去重）</option>
           {databases.length === 0 && <option value="">无可用库</option>}
           {databases.map(d => (
             <option key={d.id} value={d.id}>{d.name}</option>
           ))}
         </select>
-        {currentDatabase && (
+        {isGlobalMasterTable ? (
+          <div className="database-meta">{totalPatents.toLocaleString()} 条去重专利</div>
+        ) : currentDatabase && (
           <div className="database-meta">{currentDatabase.patent_count ?? 0} 条专利</div>
         )}
         {showAddDatabase ? (
@@ -272,7 +283,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         ) : (
           <div className="sidebar-inline-actions">
             <button className="sidebar-link" onClick={() => setShowAddDatabase(true)}>+ 新建专利库</button>
-            {currentDatabase && !currentDatabase.is_default && (
+            {currentDatabase && !currentDatabase.is_default && !isGlobalMasterTable && (
               <button className="sidebar-link danger" onClick={requestDeleteDatabase} title="删除当前库及库内专利">删除</button>
             )}
           </div>

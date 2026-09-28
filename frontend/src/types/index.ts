@@ -42,6 +42,8 @@ export interface Patent {
   cpc_main?: string
   cpc_all?: string
   database_id?: number
+  database_ids?: number[]
+  database_names?: string[]
   product_id?: number
   view_id?: number | null  // P0-14：专利归属的视图（导入到指定视图时设置）
   category?: string

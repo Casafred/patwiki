@@ -31,7 +31,7 @@ PROJECT_ROOT = _get_app_data_dir()
 class Settings(BaseSettings):
     APP_NAME: str = "PatWiki"
     APP_VERSION: str = "0.1.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     DATA_DIR: Path = PROJECT_ROOT
     DATABASE_PATH: Path = DATA_DIR / "patwiki.db"

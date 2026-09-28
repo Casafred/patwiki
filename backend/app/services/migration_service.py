@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-28.1"
+CURRENT_MIGRATION_VERSION = "2026-09-28.2"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -82,6 +82,8 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("patents", "origin_node_uid", "ALTER TABLE patents ADD COLUMN origin_node_uid VARCHAR(80)"),
     _column("patents", "record_version", "ALTER TABLE patents ADD COLUMN record_version INTEGER DEFAULT 1 NOT NULL"),
     _column("patents", "deleted_at", "ALTER TABLE patents ADD COLUMN deleted_at DATETIME"),
+    _column("ai_tasks", "request_content", "ALTER TABLE ai_tasks ADD COLUMN request_content JSON"),
+    _column("ai_tasks", "response_content", "ALTER TABLE ai_tasks ADD COLUMN response_content JSON"),
     _column("patent_databases", "database_uid", "ALTER TABLE patent_databases ADD COLUMN database_uid VARCHAR(100)"),
     _column("patents", "database_id", "ALTER TABLE patents ADD COLUMN database_id INTEGER REFERENCES patent_databases(id)"),
     _column("field_definitions", "source_timestamp", "ALTER TABLE field_definitions ADD COLUMN source_timestamp DATETIME"),

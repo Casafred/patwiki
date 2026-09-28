@@ -565,6 +565,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const searchParamsString = searchParams.toString()
+  const isGlobalMasterTable = location.pathname === '/patents' && !searchParams.has('db')
   const routeDatabaseId = Number(location.pathname.match(/^\/db\/(\d+)(?:\/|$)/)?.[1])
   const queryDatabaseId = Number(searchParams.get('db'))
   const activeDatabaseId = Number.isInteger(routeDatabaseId) && routeDatabaseId > 0
@@ -712,7 +713,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [activeCell, setActiveCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
 
   const tableScopeKey = `${TABLE_POSITION_STORAGE_PREFIX}${JSON.stringify({
-    databaseId: activeDatabaseId ?? null,
+    databaseId: isGlobalMasterTable ? null : activeDatabaseId ?? null,
     viewId: viewId ?? null,
     productId: currentProductId ?? null,
     search: searchText.trim(),
@@ -970,7 +971,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         try {
           const semanticResult = await semanticSearchService.query({
             query: searchText,
-            database_id: activeDatabaseId ?? undefined,
+            database_id: isGlobalMasterTable ? undefined : activeDatabaseId ?? undefined,
             mode: searchMode,
             top_k: requestedPageSize,
             include_explain: false,
@@ -1052,7 +1053,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         sort_order: sortOrder,
       }
       if (searchText) params.search = searchText
-      if (activeDatabaseId !== null && activeDatabaseId !== undefined) {
+      if (!isGlobalMasterTable && activeDatabaseId !== null && activeDatabaseId !== undefined) {
         params.database_id = activeDatabaseId
       }
       if (currentProductId) params.product_id = currentProductId
@@ -1080,7 +1081,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, searchMode, currentProductId, activeDatabaseId, sortField, sortOrder, filterValues, groupByFamily, tableViewMode, viewId, tableScopeKey, setPatents, setLoading])
+  }, [page, pageSize, searchText, searchMode, currentProductId, activeDatabaseId, isGlobalMasterTable, sortField, sortOrder, filterValues, groupByFamily, tableViewMode, viewId, tableScopeKey, setPatents, setLoading])
 
   const loadNextContinuousPage = useCallback(() => {
     if (tableViewMode !== 'continuous' || continuousLoadingRef.current || !continuousHasMoreRef.current) return
@@ -1181,8 +1182,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       if (value) next.set(key, value)
       else next.delete(key)
     }
-    setOrDelete('db', activeDatabaseId === null ? null : String(activeDatabaseId))
-    setOrDelete('view', viewId === null ? null : String(viewId))
+    setOrDelete('db', isGlobalMasterTable || activeDatabaseId === null ? null : String(activeDatabaseId))
+    setOrDelete('view', isGlobalMasterTable || viewId === null ? null : String(viewId))
     setOrDelete('product', currentProductId === null ? null : String(currentProductId))
     setOrDelete('q', searchText.trim() || null)
     setOrDelete('search_mode', searchMode === 'hybrid' ? null : searchMode)
@@ -1192,7 +1193,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setOrDelete('family', groupByFamily ? '1' : null)
     setOrDelete('filters', Object.keys(filterValues).length > 0 ? JSON.stringify(filterValues) : null)
     if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
-  }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, page, searchParams, searchParamsString, searchText, searchMode, setSearchParams, sortField, sortOrder, viewId])
+  }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, isGlobalMasterTable, page, searchParams, searchParamsString, searchText, searchMode, setSearchParams, sortField, sortOrder, viewId])
 
   const saveViewColumnConfig = useCallback(async (columnConfig: ViewColumnConfig[]) => {
     if (!activeView) return
@@ -1329,7 +1330,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
     let cancelled = false
     const timer = window.setTimeout(() => {
-      void searchApi.suggest(query, activeDatabaseId).then(items => {
+      void searchApi.suggest(query, isGlobalMasterTable ? null : activeDatabaseId).then(items => {
         if (!cancelled) {
           setSearchSuggestions(items)
           setActiveSuggestionIndex(-1)
@@ -1346,7 +1347,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [activeDatabaseId, searchInputText])
+  }, [activeDatabaseId, isGlobalMasterTable, searchInputText])
 
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
@@ -2161,7 +2162,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     try {
       const result = await analyticsApi.columnStats({
         field_key: fieldKey,
-        database_id: activeDatabaseId ?? undefined,
+        database_id: isGlobalMasterTable ? undefined : activeDatabaseId ?? undefined,
         product_id: currentProductId || undefined,
       })
       setStatsData(result.items)
@@ -2180,7 +2181,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         field_key: statsFieldKey,
         group_name: tagGroupName.trim() || '自动分类',
         auto_apply_to_patents: autoApplyTags,
-        database_id: activeDatabaseId ?? undefined,
+        database_id: isGlobalMasterTable ? undefined : activeDatabaseId ?? undefined,
         product_id: currentProductId || undefined,
       })
       alert(`已创建标签组"${result.group.name}"，共 ${result.total_tags} 个标签${autoApplyTags ? `，已为 ${result.applied_count} 条专利打标` : ''}`)
@@ -2591,9 +2592,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     }
 
     if (field.field_type === 'attachment') {
+      const attachmentDatabaseId = isGlobalMasterTable && activeDatabaseId !== null
+        ? (patent.database_ids?.includes(activeDatabaseId)
+          ? activeDatabaseId
+          : patent.database_ids?.[0] ?? patent.database_id ?? activeDatabaseId)
+        : activeDatabaseId
       return <AttachmentField
         patentId={patent.id}
-        databaseId={activeDatabaseId}
+        databaseId={attachmentDatabaseId}
         fieldKey={field.key}
         value={value}
         displayMode="thumbnail"
@@ -2705,6 +2711,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           {(patent.category || patent.subcategory) && (
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
               {patent.category}{patent.subcategory ? ` / ${patent.subcategory}` : ''}
+            </div>
+          )}
+          {isGlobalMasterTable && patent.database_names && patent.database_names.length > 0 && (
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+              所属库：{patent.database_names.join('、')}
             </div>
           )}
         </div>
@@ -2873,9 +2884,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 <>
                   <button type="button" className={`menu-item ${groupByFamily ? 'is-active' : ''}`} onClick={() => { close(); void handleFamilyGrouping() }} title="把同族专利聚拢显示"><Icon name="table" /> 同族聚拢 {groupByFamily ? '已开启' : '已关闭'}</button>
                   <button type="button" className="menu-item" onClick={() => { close(); handleExport() }}><Icon name="download" /> 导出数据</button>
-                  <button type="button" className="menu-item menu-item-primary" onClick={() => { close(); setShowWorkFileDialog(true) }} title="按业务模板生成 Excel、Word 或 CSV 工作文件"><Icon name="file" /> 工作文件</button>
-                  <div className="menu-divider" />
-                  <button type="button" className="menu-item menu-item-danger" onClick={() => { close(); setShowClearDatabase(true) }} title="清空当前库内的全部专利，保留库本身（主表也适用）"><Icon name="trash" /> 清空当前库专利</button>
+                  {!isGlobalMasterTable && <button type="button" className="menu-item menu-item-primary" onClick={() => { close(); setShowWorkFileDialog(true) }} title="按业务模板生成 Excel、Word 或 CSV 工作文件"><Icon name="file" /> 工作文件</button>}
+                  {!isGlobalMasterTable && <>
+                    <div className="menu-divider" />
+                    <button type="button" className="menu-item menu-item-danger" onClick={() => { close(); setShowClearDatabase(true) }} title="清空当前库内的全部专利，保留库本身"><Icon name="trash" /> 清空当前库专利</button>
+                  </>}
                 </>
               )}
             </ToolbarMenu>
@@ -2931,17 +2944,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkTag(true)} title="为选中专利批量添加或移除标签">
                 <Icon name="tag" size={13} /> 批量打标签
               </button>
-              <button className="btn btn-xs btn-primary" onClick={() => void openSyncUpdate(selectedIds)} title="从外部数据源预览并确认覆盖更新">
+              {!isGlobalMasterTable && <button className="btn btn-xs btn-primary" onClick={() => void openSyncUpdate(selectedIds)} title="从外部数据源预览并确认覆盖更新">
                 <Icon name="refresh" size={13} /> 外部更新
-              </button>
+              </button>}
             </div>
             <span className="selection-divider" aria-hidden="true" />
             <div className="selection-group" aria-label="移动与更多操作">
-              <ToolbarMenu label="批量移动" icon="move" triggerClassName="btn btn-xs btn-secondary" title="移动到视图、移库或复制为工作副本">
+              <ToolbarMenu label={isGlobalMasterTable ? '批量复制' : '批量移动'} icon={isGlobalMasterTable ? 'copy' : 'move'} triggerClassName="btn btn-xs btn-secondary" title={isGlobalMasterTable ? '复制所选专利到指定库' : '移动到视图、移库或复制为工作副本'}>
                 {(close) => (
                   <>
-                    <button type="button" className="menu-item" onClick={() => { close(); openBulkTransfer('move_view') }}><Icon name="move" /> 移动到视图</button>
-                    <button type="button" className="menu-item" onClick={() => { close(); openBulkTransfer('move_database') }}><Icon name="database" /> 移库</button>
+                    {!isGlobalMasterTable && <button type="button" className="menu-item" onClick={() => { close(); openBulkTransfer('move_view') }}><Icon name="move" /> 移动到视图</button>}
+                    {!isGlobalMasterTable && <button type="button" className="menu-item" onClick={() => { close(); openBulkTransfer('move_database') }}><Icon name="database" /> 移库</button>}
                     <button type="button" className="menu-item" onClick={() => { close(); openBulkTransfer('duplicate') }}><Icon name="copy" /> 复制为工作副本</button>
                   </>
                 )}
@@ -4430,7 +4443,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       {showExportDialog && (
         <ExportDialog
           fields={fields}
-          databaseId={activeDatabaseId}
+          databaseId={isGlobalMasterTable ? null : activeDatabaseId}
           viewId={viewId}
           selectedIds={selectedIds}
           search={searchText}
