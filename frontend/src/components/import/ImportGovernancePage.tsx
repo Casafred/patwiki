@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { fieldApi, importApi } from '../../api'
 import type { FieldMeta, GovernanceAction, GovernanceDecision, GovernanceObservation } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -31,6 +31,9 @@ function formatDate(value?: string | null) {
 }
 
 export default function ImportGovernancePage() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { databaseId } = useParams<{ databaseId: string }>()
   const [searchParams] = useSearchParams()
   const [items, setItems] = useState<GovernanceObservation[]>([])
   const [total, setTotal] = useState(0)
@@ -161,7 +164,10 @@ export default function ImportGovernancePage() {
           <h2 className="page-title">数据治理</h2>
           <p className="page-subtitle">处理未知导入属性，保留来源证据后再决定是否升级为正式字段</p>
         </div>
-        <button className="btn btn-secondary" onClick={() => void loadItems()} disabled={loading}>刷新</button>
+        <div className="workspace-page-actions">
+          <button className="btn btn-secondary" onClick={() => navigate(databaseId ? `/db/${databaseId}/patents${location.search}` : `/patents${location.search}`)}>返回数据表</button>
+          <button className="btn btn-secondary" onClick={() => void loadItems()} disabled={loading}>刷新</button>
+        </div>
       </div>
 
       {error && <div className="management-error" style={{ marginBottom: 12 }}>{error}</div>}

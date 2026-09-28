@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-27.1"
+CURRENT_MIGRATION_VERSION = "2026-09-28.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -144,6 +144,7 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("governance_decisions", "patent_value_after", "ALTER TABLE governance_decisions ADD COLUMN patent_value_after TEXT"),
     _column("governance_decisions", "patent_value_changed", "ALTER TABLE governance_decisions ADD COLUMN patent_value_changed BOOLEAN DEFAULT 0"),
     _column("attachments", "source_type", "ALTER TABLE attachments ADD COLUMN source_type VARCHAR(40) DEFAULT 'manual_upload'"),
+    _column("attachments", "note", "ALTER TABLE attachments ADD COLUMN note TEXT"),
     _column("attachments", "import_batch_id", "ALTER TABLE attachments ADD COLUMN import_batch_id INTEGER REFERENCES import_batches(id)"),
     _column("attachments", "source_sheet", "ALTER TABLE attachments ADD COLUMN source_sheet VARCHAR(200)"),
     _column("attachments", "source_cell", "ALTER TABLE attachments ADD COLUMN source_cell VARCHAR(30)"),
@@ -158,6 +159,7 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("sync_records", "identity_candidate_patent_ids", "ALTER TABLE sync_records ADD COLUMN identity_candidate_patent_ids JSON"),
     _column("connector_definitions", "mcp_catalog_json", "ALTER TABLE connector_definitions ADD COLUMN mcp_catalog_json JSON"),
     _column("connector_definitions", "mcp_catalog_updated_at", "ALTER TABLE connector_definitions ADD COLUMN mcp_catalog_updated_at DATETIME"),
+    _column("connector_definitions", "deleted_at", "ALTER TABLE connector_definitions ADD COLUMN deleted_at DATETIME"),
     _column("semantic_search_profiles", "rerank_provider_id", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_provider_id INTEGER REFERENCES semantic_provider_definitions(id)"),
     _column("semantic_search_profiles", "rerank_model", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_model VARCHAR(200)"),
     _column("semantic_search_profiles", "rerank_enabled", "ALTER TABLE semantic_search_profiles ADD COLUMN rerank_enabled BOOLEAN DEFAULT 0 NOT NULL"),
@@ -181,6 +183,7 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _index("governance_decisions", "ix_governance_decisions_patent_id", "patent_id"),
     _index("governance_reversals", "ix_governance_reversals_decision_batch_id", "decision_batch_id"),
     _index("attachments", "ix_attachments_import_batch_id", "import_batch_id"),
+    _index("connector_definitions", "ix_connector_definitions_deleted_at", "deleted_at"),
     _index("attachments", "ix_attachments_source_type", "source_type"),
     _index("attachments", "ix_attachments_sha256", "sha256"),
     _unique_index("users", "ix_users_user_uid", "user_uid"),

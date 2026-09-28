@@ -51,7 +51,10 @@ def _require_database(db: Session, database_id: int) -> PatentDatabase:
 
 
 def _require_connector(db: Session, connector_id: int) -> ConnectorDefinition:
-    connector = db.query(ConnectorDefinition).filter(ConnectorDefinition.id == connector_id).first()
+    connector = db.query(ConnectorDefinition).filter(
+        ConnectorDefinition.id == connector_id,
+        ConnectorDefinition.deleted_at.is_(None),
+    ).first()
     if not connector:
         raise NotFoundException("连接器不存在")
     return connector
@@ -138,16 +141,27 @@ def _validate_connector_config(values: dict) -> None:
 def list_connectors(db: Session = Depends(get_db)):
     # Demo connectors were seed data only and must not be selectable as an
     # external source for production updates.
-    return {"items": [SyncService.connector_dict(item) for item in db.query(ConnectorDefinition).filter(ConnectorDefinition.provider_type != "demo").order_by(ConnectorDefinition.id).all()]}
+    connectors = db.query(ConnectorDefinition).filter(ConnectorDefinition.provider_type != "demo")
+    active = connectors.filter(ConnectorDefinition.deleted_at.is_(None)).order_by(ConnectorDefinition.id).all()
+    archived = connectors.filter(ConnectorDefinition.deleted_at.is_not(None)).order_by(ConnectorDefinition.id).all()
+    return {
+        "items": [SyncService.connector_dict(item) for item in active],
+        "archived_items": [SyncService.connector_dict(item) for item in archived],
+    }
 
 
 @router.post("/connectors")
 def create_connector(body: ConnectorCreate, db: Session = Depends(get_db)):
-    if db.query(ConnectorDefinition).filter(ConnectorDefinition.code == body.code).first():
+    existing = db.query(ConnectorDefinition).filter(ConnectorDefinition.code == body.code).first()
+    if existing and existing.deleted_at is None:
         raise BadRequestException("连接器 code 已存在")
     values = body.model_dump()
     _validate_connector_config(values)
-    connector = SyncService.create_or_update_connector(db, values)
+    if existing:
+        existing.deleted_at = None
+        connector = SyncService.create_or_update_connector(db, values, existing)
+    else:
+        connector = SyncService.create_or_update_connector(db, values)
     return SyncService.connector_dict(connector)
 
 
@@ -157,6 +171,30 @@ def update_connector(connector_id: int, body: ConnectorUpdate, db: Session = Dep
     values = body.model_dump(exclude_unset=True)
     _validate_connector_config(values)
     connector = SyncService.create_or_update_connector(db, values, connector)
+    return SyncService.connector_dict(connector)
+
+
+@router.delete("/connectors/{connector_id}")
+def delete_connector(connector_id: int, db: Session = Depends(get_db)):
+    connector = _require_connector(db, connector_id)
+    from app.core.time import utc_now_naive
+    connector.deleted_at = utc_now_naive()
+    connector.enabled = False
+    db.commit()
+    return {"success": True, "connector_id": connector_id, "deleted_at": connector.deleted_at.isoformat()}
+
+
+@router.post("/connectors/{connector_id}/restore")
+def restore_connector(connector_id: int, db: Session = Depends(get_db)):
+    connector = db.query(ConnectorDefinition).filter(ConnectorDefinition.id == connector_id).first()
+    if not connector:
+        raise NotFoundException("连接器不存在")
+    if connector.deleted_at is None:
+        raise BadRequestException("连接器当前未删除")
+    connector.deleted_at = None
+    connector.enabled = False
+    db.commit()
+    db.refresh(connector)
     return SyncService.connector_dict(connector)
 
 
@@ -341,6 +379,8 @@ def run_subscription(subscription_id: int, body: RunRequest, db: Session = Depen
 @router.post("/patents/refresh")
 def refresh_patent(body: PatentRefreshRequest, db: Session = Depends(get_db)):
     connector = _require_connector(db, body.connector_id)
+    if not connector.enabled:
+        raise BadRequestException("连接器已停用")
     if body.database_id is None:
         database = db.query(PatentDatabase).filter(PatentDatabase.is_default == True).first()
         if not database:

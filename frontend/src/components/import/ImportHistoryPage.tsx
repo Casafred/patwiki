@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { importApi } from '../../api'
 import type { ImportBatch } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -24,6 +25,9 @@ function formatCount(value: number | undefined) {
 }
 
 export default function ImportHistoryPage() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { databaseId } = useParams<{ databaseId: string }>()
   const { currentDatabaseId, databases } = useAppStore()
   const [batches, setBatches] = useState<ImportBatch[]>([])
   const [statusFilter, setStatusFilter] = useState('')
@@ -82,6 +86,7 @@ export default function ImportHistoryPage() {
           <p className="page-subtitle">{currentDatabaseName ? `当前库：${currentDatabaseName} · ` : ''}查看每次导入的处理结果与异常行数</p>
         </div>
         <div className="workspace-page-actions">
+          <button className="btn btn-secondary" onClick={() => navigate(databaseId ? `/db/${databaseId}/patents${location.search}` : `/patents${location.search}`)}>返回数据表</button>
           <select className="form-input" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
             <option value="">全部状态</option>
             {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}

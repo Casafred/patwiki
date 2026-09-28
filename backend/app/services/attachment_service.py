@@ -74,6 +74,7 @@ class AttachmentService:
             "file_path": attachment.file_path,
             "file_size": attachment.file_size,
             "mime_type": attachment.mime_type,
+            "note": attachment.note,
             "uploaded_by": attachment.uploaded_by,
             "uploaded_at": attachment.uploaded_at.isoformat() if attachment.uploaded_at else None,
             "source_type": attachment.source_type or "manual_upload",
@@ -231,6 +232,37 @@ class AttachmentService:
         if not attachment:
             raise ValueError("附件不存在")
         return attachment
+
+    @classmethod
+    def update_note(cls, db: Session, attachment_id: int, note: str | None) -> dict:
+        attachment = cls.get(db, attachment_id)
+        attachment.note = note.strip() if note and note.strip() else None
+        patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first()
+        if patent:
+            current = dict(patent.custom_fields or {})
+            values = list(current.get(attachment.field_key) or [])
+            found = False
+            for index, item in enumerate(values):
+                if not isinstance(item, dict):
+                    continue
+                item_id = item.get("attachment_id", item.get("id"))
+                if str(item_id) in {str(attachment.id), f"att_{attachment.id}"}:
+                    values[index] = {**item, "note": attachment.note}
+                    found = True
+                    break
+            if not found:
+                values.append(cls._metadata(attachment))
+            PatentService.update_patent(
+                db,
+                patent,
+                {"custom_fields": {attachment.field_key: values}},
+                source="attachment",
+                changed_by="local-user",
+                commit=False,
+            )
+        db.commit()
+        db.refresh(attachment)
+        return cls._metadata(attachment)
 
     @staticmethod
     def path(attachment: Attachment) -> Path:

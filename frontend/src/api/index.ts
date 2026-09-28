@@ -228,6 +228,8 @@ export const attachmentApi = {
     api.post('/attachments/upload', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
   list: (patentId: number, fieldKey?: string): Promise<AttachmentMeta[]> =>
     api.get(`/attachments/patent/${patentId}`, { params: { field_key: fieldKey } }),
+  update: (attachmentId: number, data: { note: string | null }): Promise<AttachmentMeta> =>
+    api.patch(`/attachments/${attachmentId}`, data),
   download: (attachmentId: number, preview = false): Promise<Blob> =>
     api.get(`/attachments/${attachmentId}/${preview ? 'preview' : 'download'}`, { responseType: 'blob' }),
   remove: (attachmentId: number): Promise<{ success: boolean }> =>
@@ -300,7 +302,7 @@ export const semanticSearchApi = {
 }
 
 export const syncApi = {
-  connectors: (): Promise<{ items: SyncConnector[] }> => api.get('/sync/connectors'),
+  connectors: (): Promise<{ items: SyncConnector[]; archived_items?: SyncConnector[] }> => api.get('/sync/connectors'),
   createConnector: (data: {
     code: string
     name: string
@@ -312,6 +314,9 @@ export const syncApi = {
     credential_value?: string
     enabled?: boolean
   }): Promise<SyncConnector> => api.post('/sync/connectors', data),
+  deleteConnector: (id: number): Promise<{ success: boolean; connector_id: number }> => api.delete(`/sync/connectors/${id}`),
+  restoreConnector: (id: number): Promise<SyncConnector> => api.post(`/sync/connectors/${id}/restore`),
+  updateConnector: (id: number, data: { enabled?: boolean }): Promise<SyncConnector> => api.patch(`/sync/connectors/${id}`, data),
   testConnector: (id: number): Promise<{ status: string; message: string; latency_ms?: number | null }> => api.post(`/sync/connectors/${id}/test`),
   discoverConnector: (id: number): Promise<JsonObject> => api.post(`/sync/connectors/${id}/discover`),
   connectorCredentials: (id: number): Promise<{ items: JsonObject[] }> => api.get(`/sync/connectors/${id}/credentials`),

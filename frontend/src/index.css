@@ -3154,6 +3154,19 @@ input[type="checkbox"] {
   color: #475569;
   font-size: 11px;
 }
+.attachment-note-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+  padding: 2px 0 8px 54px;
+  color: #64748b;
+  font-size: 11px;
+}
+.attachment-note-row label { padding-top: 7px; }
+.attachment-note-row textarea { min-width: 0; min-height: 38px; resize: vertical; font-size: 12px; }
+.project-information-layout { display: grid; gap: 18px; }
 .table-zoom-control { display: flex; align-items: center; gap: 8px; }
 .table-zoom-control input[type="range"] { width: 180px; accent-color: var(--teal-600); }
 .table-zoom-control strong { min-width: 42px; color: var(--teal-700); font-size: 12px; text-align: right; }
@@ -6424,6 +6437,13 @@ body {
 }
 .mcp-connector-card-head { justify-content: space-between; }
 .mcp-connector-card-head strong { min-width: 0; overflow: hidden; color: #0f172a; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-connector-identity { display: grid; min-width: 0; gap: 3px; }
+.mcp-connector-identity code,
+.mcp-archived-row code { color: #64748b; font-size: 11px; overflow-wrap: anywhere; }
+.mcp-delete-connector { color: #b91c1c; }
+.mcp-archived-connectors { margin-top: 14px; }
+.mcp-archived-list { display: grid; gap: 6px; }
+.mcp-archived-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }
 .mcp-connector-endpoint {
   overflow: hidden;
   color: #64748b;
@@ -6431,7 +6451,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mcp-connector-actions { display: flex; gap: 8px; margin-top: auto; }
+.mcp-connector-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
 
 .mcp-access-layout {
   display: grid;

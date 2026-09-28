@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { attachmentApi } from '../../api'
 import { BACKEND_URL } from '../../lib/api'
 import type { AttachmentMeta, JsonValue } from '../../types'
@@ -35,8 +35,10 @@ function resolveUrl(relativeUrl: string): string {
 
 export default function AttachmentField({ patentId, databaseId, fieldKey, value, displayMode = 'all', onChange }: AttachmentFieldProps) {
   const [attachments, setAttachments] = useState<AttachmentMeta[]>(normalize(value))
+  const [noteDrafts, setNoteDrafts] = useState<Record<number, string>>(() => Object.fromEntries(normalize(value).map(item => [item.attachment_id, item.note || ''])))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [savedNoteId, setSavedNoteId] = useState<number | null>(null)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const imageAttachments = attachments.filter(item => item.is_image || item.mime_type.startsWith('image/'))
   const displayedAttachments = displayMode === 'thumbnail' ? imageAttachments.slice(0, 1) : attachments
@@ -80,9 +82,27 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
       const created = await attachmentApi.upload(body)
       const next = [...attachments, created]
       setAttachments(next)
+      setNoteDrafts(current => ({ ...current, [created.attachment_id]: created.note || '' }))
       onChange?.(next)
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, '附件上传失败'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveNote = async (attachment: AttachmentMeta) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const updated = await attachmentApi.update(attachment.attachment_id, { note: noteDrafts[attachment.attachment_id] || null })
+      const next = attachments.map(item => item.attachment_id === attachment.attachment_id ? updated : item)
+      setAttachments(next)
+      setNoteDrafts(current => ({ ...current, [attachment.attachment_id]: updated.note || '' }))
+      setSavedNoteId(attachment.attachment_id)
+      onChange?.(next)
+    } catch (requestError: unknown) {
+      setError(getErrorMessage(requestError, '附件备注保存失败'))
     } finally {
       setBusy(false)
     }
@@ -96,6 +116,11 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
       await attachmentApi.remove(attachment.attachment_id)
       const next = attachments.filter(item => item.attachment_id !== attachment.attachment_id)
       setAttachments(next)
+      setNoteDrafts(current => {
+        const next = { ...current }
+        delete next[attachment.attachment_id]
+        return next
+      })
       onChange?.(next)
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, '附件删除失败'))
@@ -108,7 +133,8 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
     <div className="attachment-field" onClick={event => event.stopPropagation()}>
       <div className={`attachment-list attachment-list-${displayMode}`}>
         {displayedAttachments.map(attachment => (
-          <div className="attachment-item" key={attachment.attachment_id}>
+          <Fragment key={attachment.attachment_id}>
+          <div className="attachment-item">
             <div className="attachment-media">
               {attachment.is_image || attachment.mime_type.startsWith('image/') ? (
                 <button
@@ -132,6 +158,26 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
             <button type="button" className="attachment-action" onClick={() => void openFile(attachment, false)}>下载</button>
             <button type="button" className="attachment-action attachment-action-danger" disabled={busy} onClick={() => void remove(attachment)}>删除</button>
           </div>
+          {displayMode === 'all' && <div className="attachment-note-row">
+            <label htmlFor={`attachment-note-${attachment.attachment_id}`}>备注</label>
+            <textarea
+              id={`attachment-note-${attachment.attachment_id}`}
+              className="form-input"
+              rows={2}
+              maxLength={2000}
+              value={noteDrafts[attachment.attachment_id] ?? attachment.note ?? ''}
+              onChange={event => { setSavedNoteId(current => current === attachment.attachment_id ? null : current); setNoteDrafts(current => ({ ...current, [attachment.attachment_id]: event.target.value })) }}
+              placeholder="填写该附件对应的项目、用途或补充说明"
+              disabled={busy}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy || (noteDrafts[attachment.attachment_id] ?? attachment.note ?? '') === (attachment.note || '')}
+              onClick={() => void saveNote(attachment)}
+            >{savedNoteId === attachment.attachment_id ? '已保存' : '保存备注'}</button>
+          </div>}
+          </Fragment>
         ))}
         {displayMode === 'thumbnail' && imageAttachments.length > 1 && <span className="attachment-count">共 {imageAttachments.length} 张</span>}
       </div>

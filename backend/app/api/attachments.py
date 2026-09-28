@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -15,6 +16,10 @@ from app.core.exceptions import BadRequestException, NotFoundException
 
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
+
+
+class AttachmentNoteUpdate(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
 
 
 @router.post("/upload")
@@ -71,6 +76,14 @@ def download_attachment(attachment_id: int, db: Session = Depends(get_db)):
 def preview_attachment(attachment_id: int, db: Session = Depends(get_db)):
     try:
         return _file_response(AttachmentService.get(db, attachment_id), inline=True)
+    except ValueError as exc:
+        raise NotFoundException(str(exc)) from exc
+
+
+@router.patch("/{attachment_id}")
+def update_attachment(attachment_id: int, body: AttachmentNoteUpdate, db: Session = Depends(get_db)):
+    try:
+        return AttachmentService.update_note(db, attachment_id, body.note)
     except ValueError as exc:
         raise NotFoundException(str(exc)) from exc
 

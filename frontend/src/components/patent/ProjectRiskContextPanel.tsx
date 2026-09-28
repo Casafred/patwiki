@@ -245,7 +245,7 @@ export default function ProjectRiskContextPanel({ patent, projects }: Props) {
                 {showSolutionForm ? '收起' : '新增方案版本'}
               </button>
             </div>
-            {linkedProjects.length === 0 && <div className="empty-state-desc">请先在“关联关系”中关联项目。</div>}
+            {linkedProjects.length === 0 && <div className="empty-state-desc">请先在“项目信息”中关联项目。</div>}
             {showSolutionForm && <div style={{ display: 'grid', gap: 10, padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
               <div className="detail-grid">
                 <Field label="项目"><select className="form-input" value={solutionForm.projectId} onChange={event => setSolutionForm({ ...solutionForm, projectId: event.target.value })}>{linkedProjects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></Field>

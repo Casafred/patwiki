@@ -37,7 +37,7 @@ interface PatentDetailPageProps {
   onOpenSidebar?: () => void
 }
 
-type Tab = 'basic' | 'provenance' | 'technical' | 'risk' | 'ai' | 'attachments' | 'custom' | 'relations' | 'comments'
+type Tab = 'basic' | 'project-info' | 'provenance' | 'technical' | 'ai' | 'custom' | 'relations' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
 const LEGAL_STATUS_LABELS: Record<string, string> = {
@@ -277,13 +277,12 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'basic', label: '基础著录' },
+    { key: 'relations', label: '同族与引用关系' },
+    { key: 'project-info', label: '项目信息' },
     { key: 'provenance', label: `来源与审计${history.length > 0 ? ` (${history.length})` : ''}` },
     { key: 'technical', label: '技术信息' },
-    { key: 'risk', label: '风险与应用' },
     { key: 'ai', label: 'AI 分析' },
-    { key: 'attachments', label: '关联附件' },
     { key: 'custom', label: '自定义字段' },
-    { key: 'relations', label: '关联关系' },
     { key: 'comments', label: `评论${openCommentCount > 0 ? ` (${openCommentCount})` : ''}` },
   ]
 
@@ -393,7 +392,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
               <IdentityTab patent={patent} identifiers={identifiers} fieldSources={fieldSources} identityConflicts={identityConflicts} loading={identityLoading} />
             </section>
             <section className="patent-detail-section">
-              <div className="patent-detail-section-heading"><div><h3>修改审计</h3><p>人工、导入、AI 和批量操作的完整变更链。</p></div></div>
+              <div className="patent-detail-section-heading"><div><h3>修改审计</h3><p>人工、导入、AI、批量及 MCP 更新的完整变更链。</p></div></div>
               <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
             </section>
           </div>
@@ -401,8 +400,8 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
         {activeTab === 'technical' && (
           <TechnicalTab patent={patent} formData={formData} editing={editing} updateField={updateField} />
         )}
-        {activeTab === 'risk' && (
-          <RiskTab patent={patent} formData={formData} editing={editing} updateField={updateField} projects={projects} />
+        {activeTab === 'project-info' && (
+          <ProjectInformationTab patent={patent} formData={formData} editing={editing} updateField={updateField} projects={projects} onProjectsChanged={loadPatent} />
         )}
         {activeTab === 'ai' && (
           <AITab
@@ -424,15 +423,10 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
             patent={patent}
             formData={formData}
             tags={tags}
-            projects={projects}
             editing={editing}
             updateField={updateField}
-            onProjectsChanged={loadPatent}
             onPatentNavigate={onPatentNavigate}
           />
-        )}
-        {activeTab === 'attachments' && (
-          <AttachmentsTab patent={patent} />
         )}
         {activeTab === 'comments' && (
           <CommentPanel patentId={patent.id} onCountChange={setOpenCommentCount} />
@@ -446,7 +440,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
   )
 }
 
-function AttachmentsTab({ patent }: { patent: Patent }) {
+function AttachmentsTab({ patent, onRefresh }: { patent: Patent; onRefresh?: () => Promise<void> }) {
   return (
     <div>
       <div style={{ color: '#64748b', fontSize: 13, marginBottom: 14 }}>
@@ -457,6 +451,7 @@ function AttachmentsTab({ patent }: { patent: Patent }) {
         databaseId={patent.database_id ?? null}
         fieldKey="attachments"
         value={patent.custom_fields?.attachments ?? null}
+        onChange={() => { if (onRefresh) void onRefresh() }}
       />
     </div>
   )
@@ -477,6 +472,9 @@ const FIELD_SOURCE_LABELS: Record<string, string> = {
   governance_revert: '治理恢复',
   ai: 'AI',
   api: 'API',
+  attachment: '附件变更',
+  external_sync: 'MCP 外部同步',
+  external_sync_update: 'MCP 更新确认',
 }
 
 function formatDateTime(value?: string | null): string {
@@ -1230,22 +1228,110 @@ function CustomTab({ patent, editing, updateField }: {
   )
 }
 
-// ============ 关联关系 Tab ============
-function RelationsTab({ patent, formData, tags, projects, editing, updateField, onProjectsChanged, onPatentNavigate }: {
+function ProjectInformationTab({ patent, formData, editing, updateField, projects, onProjectsChanged }: {
   patent: Patent
   formData: PatentEditData
-  tags: Tag[]
-  projects: Project[]
   editing: boolean
   updateField: (key: keyof PatentEditData, value: unknown) => void
+  projects: Project[]
   onProjectsChanged: () => Promise<void>
-  onPatentNavigate?: (patentId: number) => void
 }) {
-  const patentTags = patent.tags || []
+  return (
+    <div className="project-information-layout">
+      <section className="identity-section">
+        <div className="identity-section-heading"><div><h3>关联项目</h3><p>项目承载产品方案、项目附件与风险评估上下文。</p></div></div>
+        <ProjectLinksPanel patent={patent} formData={formData} editing={editing} updateField={updateField} projects={projects} onProjectsChanged={onProjectsChanged} />
+      </section>
+      <section className="identity-section">
+        <div className="identity-section-heading"><div><h3>项目相关附件</h3><p>记录附件对应的项目背景或用途，可为每个附件补充备注。</p></div></div>
+        <AttachmentsTab patent={patent} onRefresh={onProjectsChanged} />
+      </section>
+      <section className="identity-section">
+        <div className="identity-section-heading"><div><h3>风险与应用</h3><p>风险案例和应用信息与关联项目一起查看。</p></div></div>
+        <RiskTab patent={patent} formData={formData} editing={editing} updateField={updateField} projects={projects} />
+      </section>
+    </div>
+  )
+}
+
+function ProjectLinksPanel({ patent, formData, editing, updateField, projects, onProjectsChanged }: {
+  patent: Patent
+  formData: PatentEditData
+  editing: boolean
+  updateField: (key: keyof PatentEditData, value: unknown) => void
+  projects: Project[]
+  onProjectsChanged: () => Promise<void>
+}) {
   const patentProjects = patent.projects || []
   const [projectId, setProjectId] = useState('')
   const [projectSaving, setProjectSaving] = useState(false)
   const [projectError, setProjectError] = useState('')
+  const currentProjectIds = editing ? (formData.project_ids ?? patentProjects.map(item => item.id)) : patentProjects.map(item => item.id)
+
+  const saveProjectLinks = async (nextIds: number[]) => {
+    setProjectSaving(true)
+    setProjectError('')
+    try {
+      await patentApi.replaceProjects(patent.id, nextIds)
+      setProjectId('')
+      await onProjectsChanged()
+    } catch (error: unknown) {
+      setProjectError(getErrorMessage(error, '项目关联保存失败'))
+    } finally {
+      setProjectSaving(false)
+    }
+  }
+
+  return (
+    <div>
+      {!editing && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+          <select className="form-input" style={{ minWidth: 240, flex: 1 }} value={projectId} onChange={event => setProjectId(event.target.value)} disabled={projectSaving}>
+            <option value="">选择项目后添加</option>
+            {projects.filter(project => !patentProjects.some(item => item.id === project.id)).map(project => (
+              <option key={project.id} value={project.id}>{project.name}{project.code ? ` · ${project.code}` : ''}</option>
+            ))}
+          </select>
+          <button className="btn btn-secondary" type="button" disabled={!projectId || projectSaving} onClick={() => void saveProjectLinks([...patentProjects.map(project => project.id), Number(projectId)])}>
+            {projectSaving ? '保存中...' : '添加项目'}
+          </button>
+        </div>
+      )}
+      {projectError && <div style={{ color: '#b91c1c', fontSize: 12, marginBottom: 8 }}>{projectError}</div>}
+      {editing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {projects.map(project => {
+            const selected = currentProjectIds.includes(project.id)
+            return <label key={project.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+              <input type="checkbox" checked={selected} onChange={event => updateField('project_ids', event.target.checked ? [...currentProjectIds, project.id] : currentProjectIds.filter(id => id !== project.id))} />
+              {project.name} {project.status && <span style={{ color: '#94a3b8' }}>({project.status})</span>}
+            </label>
+          })}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {patentProjects.length === 0 ? <span style={{ color: '#94a3b8' }}>尚未关联项目</span> : patentProjects.map(project => (
+            <div key={project.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{project.name} {project.module && <span style={{ color: '#94a3b8' }}>· {project.module}</span>}</span>
+              <button className="btn btn-ghost" type="button" disabled={projectSaving} onClick={() => void saveProjectLinks(patentProjects.filter(item => item.id !== project.id).map(item => item.id))} title="移除该项目关联">移除</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============ 同族与引用关系 Tab ============
+function RelationsTab({ patent, formData, tags, editing, updateField, onPatentNavigate }: {
+  patent: Patent
+  formData: PatentEditData
+  tags: Tag[]
+  editing: boolean
+  updateField: (key: keyof PatentEditData, value: unknown) => void
+  onPatentNavigate?: (patentId: number) => void
+}) {
+  const patentTags = patent.tags || []
   const [familyMembers, setFamilyMembers] = useState<PatentFamilyMember[]>([])
   const [familyKey, setFamilyKey] = useState<string | null>(null)
   const [familyLoading, setFamilyLoading] = useState(false)
@@ -1307,22 +1393,6 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
   // 编辑态下从 patent 现有标签初始化，后续变更通过 updateField 写入 formData
   // 这里直接用 patent 数据作为初始选中态，保存时由父组件的 formData 决定
   const currentTagIds = editing ? (formData.tag_ids ?? patentTags.map(t => t.id)) : patentTags.map(t => t.id)
-  const currentProjectIds = editing ? (formData.project_ids ?? patentProjects.map(p => p.id)) : patentProjects.map(p => p.id)
-
-  const saveProjectLinks = async (nextIds: number[]) => {
-    setProjectSaving(true)
-    setProjectError('')
-    try {
-      await patentApi.replaceProjects(patent.id, nextIds)
-      setProjectId('')
-      await onProjectsChanged()
-    } catch (error: unknown) {
-      setProjectError(getErrorMessage(error, '项目关联保存失败'))
-    } finally {
-      setProjectSaving(false)
-    }
-  }
-
   return (
     <div className="detail-grid">
       <Field label="标签" full>
@@ -1365,75 +1435,6 @@ function RelationsTab({ patent, formData, tags, projects, editing, updateField, 
                 }}>
                   ● {tag.name}
                 </span>
-              ))
-            }
-          </div>
-        )}
-      </Field>
-
-      <Field label="关联项目" full>
-        {!editing && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-            <select
-              className="form-input"
-              style={{ minWidth: 240, flex: 1 }}
-              value={projectId}
-              onChange={event => setProjectId(event.target.value)}
-              disabled={projectSaving}
-            >
-              <option value="">选择项目后添加</option>
-              {projects.filter(project => !patentProjects.some(item => item.id === project.id)).map(project => (
-                <option key={project.id} value={project.id}>{project.name}{project.code ? ` · ${project.code}` : ''}</option>
-              ))}
-            </select>
-            <button
-              className="btn btn-secondary"
-              type="button"
-              disabled={!projectId || projectSaving}
-              onClick={() => void saveProjectLinks([...patentProjects.map(project => project.id), Number(projectId)])}
-            >
-              {projectSaving ? '保存中...' : '添加项目'}
-            </button>
-          </div>
-        )}
-        {projectError && !editing && <div style={{ color: '#b91c1c', fontSize: 12, marginBottom: 8 }}>{projectError}</div>}
-        {editing ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {projects.map(proj => {
-              const selected = currentProjectIds.includes(proj.id)
-              return (
-                <label key={proj.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={e => {
-                      const next = e.target.checked
-                        ? [...currentProjectIds, proj.id]
-                        : currentProjectIds.filter((id: number) => id !== proj.id)
-                      updateField('project_ids', next)
-                    }}
-                  />
-                  {proj.name} {proj.status && <span style={{ color: '#94a3b8' }}>({proj.status})</span>}
-                </label>
-              )
-            })}
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {patentProjects.length === 0 ? <span style={{ color: '#94a3b8' }}>-</span> :
-              patentProjects.map(proj => (
-                <div key={proj.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                  <span style={{ flex: 1 }}>{proj.name} {proj.module && <span style={{ color: '#94a3b8' }}>· {proj.module}</span>}</span>
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    disabled={projectSaving}
-                    onClick={() => void saveProjectLinks(patentProjects.filter(item => item.id !== proj.id).map(item => item.id))}
-                    title="移除该项目关联"
-                  >
-                    移除
-                  </button>
-                </div>
               ))
             }
           </div>
@@ -1576,6 +1577,9 @@ const SOURCE_LABELS: Record<string, { label: string; color: string; bg: string }
   ai:      { label: 'AI', color: '#065f46', bg: '#d1fae5' },
   import:  { label: '导入', color: '#92400e', bg: '#fef3c7' },
   api:     { label: 'API', color: '#475569', bg: '#e2e8f0' },
+  attachment: { label: '附件变更', color: '#475569', bg: '#e2e8f0' },
+  external_sync: { label: 'MCP 外部同步', color: '#0f766e', bg: '#ccfbf1' },
+  external_sync_update: { label: 'MCP 更新确认', color: '#0f766e', bg: '#ccfbf1' },
 }
 
 function formatValue(v: string | null | undefined): string {
@@ -1630,7 +1634,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
     batch.histories.push(h)
   })
 
-  const sourceOptions = ['all', 'manual', 'bulk', 'ai', 'import', 'api']
+  const sourceOptions = ['all', 'manual', 'bulk', 'ai', 'import', 'api', 'attachment', 'external_sync', 'external_sync_update']
 
   return (
     <div>

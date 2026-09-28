@@ -22,6 +22,7 @@ type McpTab = 'connectors' | 'monitor' | 'runs'
 export default function ExternalSyncPage() {
   const { currentDatabaseId } = useAppStore()
   const [connectors, setConnectors] = useState<SyncConnector[]>([])
+  const [archivedConnectors, setArchivedConnectors] = useState<SyncConnector[]>([])
   const [subscriptions, setSubscriptions] = useState<SyncSubscription[]>([])
   const [runs, setRuns] = useState<SyncRun[]>([])
   const [observations, setObservations] = useState<ExternalObservation[]>([])
@@ -55,6 +56,7 @@ export default function ExternalSyncPage() {
       ])
       setFields(fieldResult)
       setConnectors(connectorResult.items)
+      setArchivedConnectors(connectorResult.archived_items || [])
       const availableConnector = connectorResult.items.find(item => item.enabled) || connectorResult.items[0]
       setSelectedConnectorId(current => current && connectorResult.items.some(item => item.id === current) ? current : availableConnector?.id || null)
       const savedCatalog = connectorResult.items.find(item => item.transport === 'mcp' && Object.keys(item.mcp_catalog || {}).length > 0)?.mcp_catalog
@@ -98,6 +100,40 @@ export default function ExternalSyncPage() {
       setMessage(`${connector.name}：${result.message}`)
     } catch (testError: unknown) {
       setError(getErrorMessage(testError, '连接器检查失败'))
+    } finally { setBusy(false) }
+  }
+
+  const deleteConnector = async (connector: SyncConnector) => {
+    if (!window.confirm(`从可用连接器中移除“${connector.name}”（${connector.code}）？已有运行记录和审计来源会保留，可在页面下方恢复。`)) return
+    setBusy(true); setError(''); setMessage('')
+    try {
+      await syncApi.deleteConnector(connector.id)
+      setMessage(`${connector.name} 已移至已删除连接器，历史记录已保留`)
+      await load()
+    } catch (deleteError: unknown) {
+      setError(getErrorMessage(deleteError, '连接器移除失败'))
+    } finally { setBusy(false) }
+  }
+
+  const restoreConnector = async (connector: SyncConnector) => {
+    setBusy(true); setError(''); setMessage('')
+    try {
+      await syncApi.restoreConnector(connector.id)
+      setMessage(`${connector.name} 已恢复为停用状态；启用后可重新使用`)
+      await load()
+    } catch (restoreError: unknown) {
+      setError(getErrorMessage(restoreError, '连接器恢复失败'))
+    } finally { setBusy(false) }
+  }
+
+  const toggleConnector = async (connector: SyncConnector) => {
+    setBusy(true); setError(''); setMessage('')
+    try {
+      await syncApi.updateConnector(connector.id, { enabled: !connector.enabled })
+      setMessage(`${connector.name} 已${connector.enabled ? '停用' : '启用'}`)
+      await load()
+    } catch (updateError: unknown) {
+      setError(getErrorMessage(updateError, '连接器状态更新失败'))
     } finally { setBusy(false) }
   }
 
@@ -205,7 +241,7 @@ export default function ExternalSyncPage() {
               {connectors.map(connector => (
                 <div className="mcp-connector-card" key={connector.id}>
                   <div className="mcp-connector-card-head">
-                    <strong title={connector.code}>{connector.name}</strong>
+                    <div className="mcp-connector-identity"><strong>{connector.name}</strong><code>{connector.code}</code></div>
                     <span className={`mcp-chip ${connector.enabled ? 'mcp-chip-ok' : 'mcp-chip-muted'}`}>{connector.enabled ? '已启用' : '已停用'}</span>
                   </div>
                   <div className="mcp-connector-card-tags">
@@ -217,6 +253,8 @@ export default function ExternalSyncPage() {
                   <div className="mcp-connector-actions">
                     <button className="btn btn-secondary" disabled={busy} onClick={() => void testConnector(connector)}>健康检查</button>
                     {connector.transport === 'mcp' && <button className="btn btn-secondary" disabled={busy} onClick={() => void discoverTools(connector)}>发现工具</button>}
+                    <button className="btn btn-secondary" disabled={busy} onClick={() => void toggleConnector(connector)}>{connector.enabled ? '停用' : '启用'}</button>
+                    <button className="btn btn-ghost mcp-delete-connector" disabled={busy} onClick={() => void deleteConnector(connector)}>删除</button>
                   </div>
                 </div>
               ))}
@@ -225,13 +263,25 @@ export default function ExternalSyncPage() {
             <div className="empty-state">暂无连接器。可在下方接入 HimmPat MCP。</div>
           )}
 
+          {archivedConnectors.length > 0 && (
+            <section className="mcp-archived-connectors">
+              <div className="section-heading"><h3>已删除连接器</h3><span>历史记录保留 · 恢复后需手动启用</span></div>
+              <div className="mcp-archived-list">
+                {archivedConnectors.map(connector => <div className="mcp-archived-row" key={connector.id}>
+                  <span><strong>{connector.name}</strong> <code>{connector.code}</code></span>
+                  <button className="btn btn-secondary" disabled={busy} onClick={() => void restoreConnector(connector)}>恢复</button>
+                </div>)}
+              </div>
+            </section>
+          )}
+
           <div className="mcp-access-layout">
             <section className="mcp-panel">
               <div className="section-heading"><h3>接入 HimmPat MCP</h3><span>主站地址 + API Key</span></div>
               <p className="mcp-panel-hint">填写 HimmPat 主站地址和 API Key。应用会分别调用检索、著录项和法律状态服务。</p>
               <div className="mcp-form-grid">
-                <label>连接器 code<input className="form-input" value={mcpCode} onChange={event => setMcpCode(event.target.value)} /></label>
-                <label>连接器名称<input className="form-input" value={mcpName} onChange={event => setMcpName(event.target.value)} /></label>
+                <label>连接器 code<input className="form-input" value={mcpCode} onChange={event => setMcpCode(event.target.value)} /><small>唯一且稳定的机器标识，用来保留连接器及历史引用；相同 code 不能创建两条连接。</small></label>
+                <label>连接器名称<input className="form-input" value={mcpName} onChange={event => setMcpName(event.target.value)} /><small>供用户识别的展示名称，可以调整；provider_type 决定实际调用的适配器。</small></label>
                 <label className="mcp-form-full">MCP 服务入口<input className="form-input" value={mcpEndpoint} onChange={event => setMcpEndpoint(event.target.value)} /></label>
                 <label className="mcp-form-full">API Key<input className="form-input" type="password" value={mcpApiKey} onChange={event => setMcpApiKey(event.target.value)} placeholder="Bearer 后面的 API Key" /></label>
                 <label className="checkbox-label mcp-form-full"><input type="checkbox" checked={mcpEnrichLegal} onChange={event => setMcpEnrichLegal(event.target.checked)} />同步时补全法律状态（可能产生额外供应商调用）</label>
@@ -296,25 +346,30 @@ export default function ExternalSyncPage() {
               <div className="section-heading"><h3>已有监控规则</h3><span>{subscriptions.length} 个 · {currentDatabaseId ? '当前库' : '未选择数据库'}</span></div>
               {subscriptions.length > 0 ? (
                 <div className="mcp-rule-list">
-                  {subscriptions.map(subscription => (
-                    <div className="mcp-rule-card" key={subscription.id}>
-                      <div className="mcp-rule-card-head">
-                        <strong>{subscription.name}</strong>
-                        <span className={`rule-status ${subscription.enabled ? 'enabled' : 'disabled'}`}>{subscription.enabled ? '已启用' : '已停用'}</span>
-                      </div>
-                      <div className="mcp-rule-card-meta">
-                        <span>{subscription.schedule.interval_minutes ? `每 ${String(subscription.schedule.interval_minutes)} 分钟` : '手动'}</span>
-                        <span>{subscription.review_policy}</span>
-                        <span>上次运行：{subscription.last_run_at || '-'}</span>
-                      </div>
-                      <div className="mcp-rule-card-status">
-                        <span className={`mcp-chip ${subscription.last_status === 'succeeded' ? 'mcp-chip-ok' : subscription.last_status ? 'mcp-chip-warn' : 'mcp-chip-muted'}`}>{subscription.last_status || '尚未运行'}</span>
-                        <div className="mcp-rule-card-actions">
-                          <button className="btn btn-secondary" disabled={busy || !subscription.enabled} onClick={() => void runSubscription(subscription)}>立即同步</button>
+                  {subscriptions.map(subscription => {
+                    const connectorBlocked = !subscription.connector_enabled || Boolean(subscription.connector_deleted_at)
+                    const active = subscription.enabled && !connectorBlocked
+                    return (
+                      <div className="mcp-rule-card" key={subscription.id}>
+                        <div className="mcp-rule-card-head">
+                          <strong>{subscription.name}</strong>
+                          <span className={`rule-status ${active ? 'enabled' : 'disabled'}`}>{!subscription.enabled ? '已停用' : subscription.connector_deleted_at ? '连接器已删除' : connectorBlocked ? '连接器已停用' : '已启用'}</span>
+                        </div>
+                        <div className="mcp-rule-card-meta">
+                          {subscription.connector_name && <span>连接器：{subscription.connector_name}</span>}
+                          <span>{subscription.schedule.interval_minutes ? `每 ${String(subscription.schedule.interval_minutes)} 分钟` : '手动'}</span>
+                          <span>{subscription.review_policy}</span>
+                          <span>上次运行：{subscription.last_run_at || '-'}</span>
+                        </div>
+                        <div className="mcp-rule-card-status">
+                          <span className={`mcp-chip ${subscription.last_status === 'succeeded' ? 'mcp-chip-ok' : subscription.last_status ? 'mcp-chip-warn' : 'mcp-chip-muted'}`}>{subscription.last_status || '尚未运行'}</span>
+                          <div className="mcp-rule-card-actions">
+                            <button className="btn btn-secondary" disabled={busy || !active} onClick={() => void runSubscription(subscription)}>立即同步</button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="empty-state">当前数据库还没有监控规则。先在左侧创建一条，之后每次运行都会留档。</div>

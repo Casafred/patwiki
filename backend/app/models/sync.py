@@ -25,6 +25,7 @@ class ConnectorDefinition(Base):
     mcp_catalog_json = Column(JSON, nullable=False, default=dict)
     mcp_catalog_updated_at = Column(DateTime)
     enabled = Column(Boolean, nullable=False, default=True, index=True)
+    deleted_at = Column(DateTime, index=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

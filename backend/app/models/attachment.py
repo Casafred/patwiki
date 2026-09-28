@@ -1,5 +1,5 @@
 """Attachment metadata model. Binary files stay outside the SQLite database."""
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -16,6 +16,7 @@ class Attachment(Base):
     file_path = Column(String(500), nullable=False)
     file_size = Column(Integer, nullable=False)
     mime_type = Column(String(100), nullable=False)
+    note = Column(Text)
     uploaded_by = Column(String(100))
     uploaded_at = Column(DateTime, server_default=func.now())
     # Provenance for imported or linked media.  The binary remains on disk;

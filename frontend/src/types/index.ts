@@ -1195,6 +1195,7 @@ export interface AttachmentMeta {
   file_path?: string
   file_size: number
   mime_type: string
+  note?: string | null
   uploaded_by?: string | null
   uploaded_at?: string | null
   download_url: string
@@ -1280,6 +1281,7 @@ export interface SyncConnector {
   mcp_catalog: JsonObject
   mcp_catalog_updated_at?: string | null
   enabled: boolean
+  deleted_at?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -1294,6 +1296,9 @@ export interface SyncSubscription {
   id: number
   database_id: number
   connector_id: number
+  connector_name?: string | null
+  connector_enabled?: boolean
+  connector_deleted_at?: string | null
   saved_query_id?: number | null
   name: string
   mode: string

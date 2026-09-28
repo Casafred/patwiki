@@ -55,6 +55,7 @@ class SyncService:
             "mcp_catalog": connector.mcp_catalog_json or {},
             "mcp_catalog_updated_at": connector.mcp_catalog_updated_at.isoformat() if connector.mcp_catalog_updated_at else None,
             "enabled": connector.enabled,
+            "deleted_at": connector.deleted_at.isoformat() if connector.deleted_at else None,
             "created_at": connector.created_at.isoformat() if connector.created_at else None,
             "updated_at": connector.updated_at.isoformat() if connector.updated_at else None,
         }
@@ -79,6 +80,9 @@ class SyncService:
             "id": subscription.id,
             "database_id": subscription.database_id,
             "connector_id": subscription.connector_id,
+            "connector_name": subscription.connector.name if subscription.connector else None,
+            "connector_enabled": subscription.connector.enabled if subscription.connector else False,
+            "connector_deleted_at": subscription.connector.deleted_at.isoformat() if subscription.connector and subscription.connector.deleted_at else None,
             "saved_query_id": subscription.saved_query_id,
             "name": subscription.name,
             "mode": subscription.mode,
@@ -227,6 +231,9 @@ class SyncService:
 
     @classmethod
     def run_subscription(cls, db: Session, subscription: SyncSubscription, *, trigger: str = "manual", max_pages: int = 100, owner_id: str | None = None) -> SyncRun:
+        connector_definition = subscription.connector
+        if connector_definition.deleted_at is not None or not connector_definition.enabled:
+            raise ValueError("该同步订阅的连接器已删除或停用")
         owner_id = owner_id or f"local-{uuid.uuid4().hex[:12]}"
         started_at = now()
         if not cls._acquire_lease(db, subscription.id, owner_id, started_at):
@@ -303,10 +310,12 @@ class SyncService:
     @classmethod
     def run_due_subscriptions(cls, db: Session, *, owner_id: str = "local-scheduler", limit: int = 10) -> list[dict[str, Any]]:
         current = now()
-        subscriptions = db.query(SyncSubscription).filter(
+        subscriptions = db.query(SyncSubscription).join(ConnectorDefinition).filter(
             SyncSubscription.enabled == True,
             SyncSubscription.next_run_at.isnot(None),
             SyncSubscription.next_run_at <= current,
+            ConnectorDefinition.enabled == True,
+            ConnectorDefinition.deleted_at.is_(None),
         ).order_by(SyncSubscription.next_run_at, SyncSubscription.id).limit(limit).all()
         results = []
         for subscription in subscriptions:
