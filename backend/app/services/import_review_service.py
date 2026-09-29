@@ -808,6 +808,28 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     by_row: dict[int, list[FieldObservation]] = {}
     for item in staged:
         by_row.setdefault(item.source_row_id, []).append(item)
+    application_numbers = {
+        item.candidate_value.strip() for item in staged
+        if item.canonical_field_key == "application_number" and item.candidate_value
+    }
+    existing_by_application: dict[str, list[Patent]] = {}
+    application_values = sorted(application_numbers)
+    for offset in range(0, len(application_values), 500):
+        for existing in db.query(Patent).filter(
+            Patent.application_number.in_(application_values[offset:offset + 500]),
+        ).all():
+            existing_by_application.setdefault(existing.application_number, []).append(existing)
+    publication_numbers = {
+        item.candidate_value.strip() for item in staged
+        if item.canonical_field_key == "publication_number" and item.candidate_value
+    }
+    existing_by_publication: dict[tuple[str, str], Patent] = {}
+    publication_values = sorted(publication_numbers)
+    for offset in range(0, len(publication_values), 500):
+        for existing in db.query(Patent).filter(
+            Patent.publication_number.in_(publication_values[offset:offset + 500]),
+        ).all():
+            existing_by_publication[(existing.publication_number, (existing.country or "CN").upper())] = existing
     actor = applied_by.strip() or "local-user"
     inserted = updated = unchanged = 0
     errors: list[dict] = []
@@ -816,6 +838,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     pending_relations: list[tuple[Patent, dict]] = []
     new_by_publication: dict[str, Patent] = {}
     new_by_application: dict[tuple[str, str], Patent] = {}
+    new_by_identity: dict[tuple[str, str], Patent] = {}
     row_reports: list[dict] = []
     field_error_details: list[dict] = []
     imported_image_count = 0
@@ -893,6 +916,22 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 patent_ids=(conflicting.id,),
                             )
                     created_in_batch = patent is not None and patent.id in created_ids
+                country = (data.get("country") or "CN").strip().upper()
+                application = (data.get("application_number") or "").strip()
+                if patent is None and application:
+                    patent = new_by_identity.get((application, country))
+                    created_in_batch = patent is not None and patent.id in created_ids
+                # Staging historically resolved by publication only. Resolve
+                # legacy records by application as well before constructing a
+                # new ORM object, otherwise the DB unique constraint aborts
+                # the whole transaction.
+                if patent is None and application:
+                    application_matches = existing_by_application.get(application, [])
+                    patent = next((item for item in application_matches if item.country == country), None)
+                    if patent is None and len(application_matches) == 1:
+                        patent = application_matches[0]
+                if patent is None and publication:
+                    patent = existing_by_publication.get((publication, country))
                 created = False
                 provisional_title = False
                 row_field_errors: list[dict] = []
@@ -901,7 +940,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     create_data: dict[str, Any] = {
                         "database_id": database_id, "source_batch_id": batch.id,
                         "source_row": source.source_row, "publication_number": publication,
-                        "country": data.get("country") or "CN", "title": data.get("title") or "待补全",
+                        "country": country, "title": data.get("title") or "待补全",
                     }
                     for field_key, value in data.items():
                         if field_key in {"custom_fields", "database_id", "source_batch_id", "source_row", "view_id", "product_id"} | PROTECTED_FIELDS:
@@ -935,6 +974,10 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     new_by_publication[publication] = patent
                     if writes_application_number:
                         new_by_application[(country, application_number)] = patent
+                    existing_by_publication[(publication, country)] = patent
+                    if application:
+                        new_by_identity[(application, country)] = patent
+                        existing_by_application.setdefault(application, []).append(patent)
                     created_ids.append(patent.id)
                     inserted += 1
                     created = True
@@ -980,7 +1023,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                         if not item.candidate_value and key not in parse_errors:
                             continue
                         current = current_value(patent, key)
-                        if action == "adopt" and key != "original_links" and not created_in_batch and current != item.current_value:
+                        if action == "adopt" and key != "original_links" and source.patent_id and not created_in_batch and current != item.current_value:
                             detail = {
                                 "row": source.source_row,
                                 "status": "field_conflict",

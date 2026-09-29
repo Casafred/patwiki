@@ -184,7 +184,18 @@ export default function ImportHistoryPage() {
                              <div><span>回撤状态</span><strong>{statusKey === 'rolled_back' ? '已回撤' : '可在导入结果中回撤'}</strong></div>
                            </div>
                            {batch.errors && batch.errors.length > 0 && (
-                             <div className="import-history-detail-errors">本批次保留了 {batch.errors.length} 条错误或字段级提醒，可在导入治理中继续处理。</div>
+                             <div className="import-history-detail-errors">
+                               <strong>错误与字段提醒</strong>
+                               <ul>
+                                 {batch.errors.map((issue, index) => (
+                                   <li key={index}>
+                                     {typeof issue.row === 'number' ? `第 ${issue.row} 行` : '批次'}
+                                     {typeof issue.field === 'string' ? ` · ${issue.field}` : ''}
+                                     {'：'}{String(issue.reason || issue.error || '未记录具体原因')}
+                                   </li>
+                                 ))}
+                               </ul>
+                             </div>
                            )}
                          </div>
                        </td>

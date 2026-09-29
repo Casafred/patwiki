@@ -874,10 +874,11 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
           )}
 
           {step === 'processing' && (
-            <div style={{ textAlign: 'center', padding: 40 }}>
+            <div style={{ textAlign: 'center', padding: 40 }} aria-busy="true" aria-live="polite">
               <div className="spinner" style={{ width: 40, height: 40, margin: '0 auto 16px' }}></div>
+              <div className="import-progress-track" role="progressbar" aria-label="导入处理中"><div className="import-progress-indicator" /></div>
               <p style={{ fontSize: 14, color: '#475569' }}>正在处理数据，请勿关闭窗口...</p>
-              <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>数据量大时可能需要一些时间</p>
+              <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>正在写入专利、索引和审计记录，请耐心等待</p>
             </div>
           )}
 
