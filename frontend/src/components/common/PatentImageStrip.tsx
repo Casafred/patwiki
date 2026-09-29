@@ -5,6 +5,7 @@ import ImageLightbox from './ImageLightbox'
 
 interface PatentImageStripProps {
   attachments: AttachmentMeta[]
+  maxImages?: number
 }
 
 function resolveUrl(relativeUrl: string): string {
@@ -12,15 +13,16 @@ function resolveUrl(relativeUrl: string): string {
   return isTauri ? `${BACKEND_URL}${relativeUrl}` : relativeUrl
 }
 
-export default function PatentImageStrip({ attachments }: PatentImageStripProps) {
+export default function PatentImageStrip({ attachments, maxImages }: PatentImageStripProps) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const images = attachments.filter(item => item.is_image || item.mime_type?.startsWith('image/'))
+  const displayedImages = maxImages ? images.slice(0, maxImages) : images
   if (images.length === 0) return null
   return (
     <div className="patent-image-strip" onClick={event => event.stopPropagation()}>
       <span className="patent-image-strip-label">图片 {images.length}</span>
       <div className="patent-image-strip-list">
-        {images.map((image, index) => (
+        {displayedImages.map((image, index) => (
           <button
             key={image.attachment_id}
             type="button"

@@ -6798,6 +6798,122 @@ body {
   overflow-x: hidden;
 }
 
+.patent-detail-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 18px 22px 30px;
+}
+
+.patent-detail-browser-row {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 22px;
+  border: 1px solid #dce7e7;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(15, 63, 62, .05);
+}
+
+.patent-detail-browser-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #edf2f2;
+}
+
+.patent-detail-browser-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.patent-detail-browser-title {
+  min-width: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+  border: 0;
+  background: transparent;
+  color: #0f766e;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.patent-detail-browser-identity {
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.patent-detail-browser-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  background: #e2e8f0;
+}
+
+.patent-detail-browser-field {
+  min-width: 0;
+  min-height: 74px;
+  padding: 11px 13px;
+  background: #fff;
+}
+
+.patent-detail-browser-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.patent-detail-browser-field-value {
+  min-width: 0;
+  color: #1f2937;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.patent-detail-browser.is-full-image .patent-detail-browser-row {
+  padding-bottom: 26px;
+}
+
+.patent-detail-browser .patent-image-strip {
+  align-items: flex-start;
+  padding: 10px 12px;
+}
+
+.patent-detail-browser .patent-image-strip-list button {
+  width: 96px;
+  height: 72px;
+}
+
+.patent-detail-browser.is-full-image .patent-image-strip-list button {
+  width: 112px;
+  height: 84px;
+}
+
+@media (max-width: 720px) {
+  .patent-detail-browser { padding: 12px 10px 24px; }
+  .patent-detail-browser-row { padding: 14px 12px 16px; }
+  .patent-detail-browser-heading { grid-template-columns: auto minmax(0, 1fr); }
+  .patent-detail-browser-identity { grid-column: 2; }
+  .patent-detail-browser-fields { grid-template-columns: minmax(0, 1fr); }
+}
+
 .project-wiki-section {
   padding: 16px 0 18px;
   border-top: 1px solid #e2e8f0;

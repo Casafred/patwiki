@@ -59,7 +59,7 @@ interface FilterCondition {
 type FilterState = Record<string, FilterCondition>
 type RelationCellData = { links?: LinkRecord[]; value?: JsonValue; aggregation?: string }
 type BulkTransferAction = 'move_database' | 'move_view' | 'duplicate'
-type TableViewMode = 'pagination' | 'continuous'
+type TableViewMode = 'pagination' | 'continuous' | 'detail' | 'full_image'
 type RowHeightLimit = 'auto' | 56 | 72 | 96 | 120
 
 const TABLE_VIEW_MODE_STORAGE_KEY = 'patwiki_table_view_mode'
@@ -122,7 +122,9 @@ function saveTableDataSnapshot(key: string, snapshot: TableDataSnapshot) {
 
 function readTableViewMode(): TableViewMode {
   try {
-    return localStorage.getItem(TABLE_VIEW_MODE_STORAGE_KEY) === 'continuous' ? 'continuous' : 'pagination'
+    const value = localStorage.getItem(TABLE_VIEW_MODE_STORAGE_KEY)
+    if (value === 'continuous' || value === 'detail' || value === 'full_image') return value
+    return 'pagination'
   } catch {
     return 'pagination'
   }
@@ -732,7 +734,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     sortOrder,
     groupByFamily,
     mode: tableViewMode,
-    page: tableViewMode === 'pagination' ? page : null,
+    page: tableViewMode === 'continuous' ? null : page,
   })}`
 
   const readTablePosition = useCallback((): TablePositionSnapshot | null => {
@@ -1041,7 +1043,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             return true
           }
           const groupFields = getViewGroupFields(activeViewForLoad!)
-          if (groupFields.length > 0 && !groupByFamily && !append && tableViewMode === 'pagination') {
+          if (groupFields.length > 0 && !groupByFamily && !append && tableViewMode !== 'continuous') {
             const result = await viewApi.grouped(viewId, {
               page: effectivePage,
               page_size: requestedPageSize,
@@ -1302,7 +1304,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         })
         // Refresh only the loaded window and keep cached rows visible while it
         // is in flight. A fresh cache is already the latest list response.
-        if (tableViewMode === 'pagination' && Date.now() - cached.savedAt > 15000) {
+        if (tableViewMode !== 'continuous' && Date.now() - cached.savedAt > 15000) {
           window.setTimeout(() => {
             void loadPatents(
               page,
@@ -3144,7 +3146,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 <button type="button" className="btn btn-sm btn-secondary datagrid-view-settings-button" onClick={() => setShowTableSettings(true)} title="设置查看模式和行高">
                   <Icon name="sliders" size={14} /> 查看设置
                   <span className="datagrid-view-settings-hint">
-                    {tableViewMode === 'continuous' ? '连续' : '分页'} · {rowHeightLimit === 'auto' ? '自适应' : `${rowHeightLimit}px`}
+                    {tableViewMode === 'continuous' ? '连续' : tableViewMode === 'detail' ? '详情' : tableViewMode === 'full_image' ? '全图' : '分页'} · {rowHeightLimit === 'auto' ? '自适应' : `${rowHeightLimit}px`}
                   </span>
                 </button>
               )}
@@ -3292,6 +3294,32 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             <div className="empty-state-icon" aria-hidden="true">[ ]</div>
             <div style={{ fontSize: 15, fontWeight: 500, color: '#374151', marginBottom: 6 }}>暂无专利数据</div>
             <div style={{ fontSize: 13, color: '#9ca3af' }}>点击右上角"导入"按钮导入专利数据，或先在左侧创建产品分类</div>
+          </div>
+        ) : tableViewMode === 'detail' || tableViewMode === 'full_image' ? (
+          <div className={`patent-detail-browser ${tableViewMode === 'full_image' ? 'is-full-image' : ''}`}>
+            {patents.map((patent, rowIdx) => (
+              <article className="patent-detail-browser-row" key={patent.id}>
+                <div className="patent-detail-browser-heading">
+                  <label className="patent-detail-browser-select" onClick={event => event.stopPropagation()}>
+                    <input type="checkbox" checked={selectedIds.includes(patent.id)} onChange={() => toggleSelect(patent.id)} aria-label={`选择第 ${(page - 1) * pageSize + rowIdx + 1} 条专利`} />
+                    <span>{(page - 1) * pageSize + rowIdx + 1}</span>
+                  </label>
+                  <button type="button" className="patent-detail-browser-title" onClick={() => openPatent(patent.id)}>
+                    {patent.title || patent.publication_number || `专利 #${patent.id}`}
+                  </button>
+                  <span className="patent-detail-browser-identity">{patent.publication_number || '无公开号'}</span>
+                </div>
+                {rowImages(patent).length > 0 && <PatentImageStrip attachments={rowImages(patent)} maxImages={tableViewMode === 'detail' ? 1 : undefined} />}
+                <div className="patent-detail-browser-fields">
+                  {visibleFields.map(field => (
+                    <section className="patent-detail-browser-field" key={field.key}>
+                      <span className="patent-detail-browser-field-label">{field.name}</span>
+                      <div className="patent-detail-browser-field-value">{renderCellContent(patent, field)}</div>
+                    </section>
+                  ))}
+                </div>
+              </article>
+            ))}
           </div>
         ) : (
           <table className="data-grid" style={{ width: 'max-content', minWidth: '100%' }}>
@@ -3638,7 +3666,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     className={`col-sequence ${activeCell?.patentId === p.id ? 'crosshair-row-cell' : ''}`}
                     style={{ width: INDEX_COLUMN_WIDTH, minWidth: INDEX_COLUMN_WIDTH, maxWidth: INDEX_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH, zIndex: 7, background: '#fff', textAlign: 'center', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}
                   >
-                    {(tableViewMode === 'pagination' ? (page - 1) * pageSize : 0) + rowIdx + 1}
+                    {(tableViewMode !== 'continuous' ? (page - 1) * pageSize : 0) + rowIdx + 1}
                   </td>
                   <td className={`col-action ${activeCell?.patentId === p.id ? 'crosshair-row-cell' : ''}`} style={{ width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH, maxWidth: ACTION_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH + INDEX_COLUMN_WIDTH, zIndex: 6, background: '#fff', padding: '4px 6px' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
@@ -3761,7 +3789,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             第 {totalPatents === 0 ? 0 : (page - 1) * pageSize + 1} - {Math.min(page * pageSize, totalPatents)} 条，共 {totalPatents} 条
           </span>
         )}
-        {tableViewMode === 'pagination' && <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {tableViewMode !== 'continuous' && <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <button
             className="btn btn-xs btn-secondary"
             disabled={page <= 1}
@@ -3863,6 +3891,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 {([
                   ['pagination', '分页模式', '适合逐页核对和批量处理'],
                   ['continuous', '连续滚动', '像 Excel 一样向下浏览并加载'],
+                  ['detail', '详情浏览', '每条专利纵向展示所选字段内容'],
+                  ['full_image', '全图浏览', '详情内容与全部图片缩略图'],
                 ] as const).map(([value, label, description]) => (
                   <button
                     key={value}
