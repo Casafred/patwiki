@@ -70,6 +70,8 @@ const INDEX_COLUMN_WIDTH = 56
 const ACTION_COLUMN_WIDTH = 98
 const PUBLICATION_REFERENCE_RE = /(?<![A-Za-z0-9])([A-Za-z]{2}\d+[A-Za-z]{1,3}\d{0,2})(?![A-Za-z0-9])/g
 const TABLE_POSITION_STORAGE_PREFIX = 'patwiki_table_position:'
+const DETAIL_FIELDS_STORAGE_PREFIX = 'patwiki_detail_fields:'
+const DEFAULT_DETAIL_FIELD_KEYS = ['abstract', 'claims', 'applicant', 'inventor', 'filing_date', 'publication_date', 'legal_status']
 
 function safeHttpUrl(value: string): string | null {
   try {
@@ -605,6 +607,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
+  const [showDetailFieldConfig, setShowDetailFieldConfig] = useState(false)
+  const [detailFieldConfig, setDetailFieldConfig] = useState<Record<string, string[]>>({})
   const [pendingColumnDelete, setPendingColumnDelete] = useState<string | null>(null)
   const [showClearDatabase, setShowClearDatabase] = useState(false)
   const [clearingDatabase, setClearingDatabase] = useState(false)
@@ -736,6 +740,26 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     mode: tableViewMode,
     page: tableViewMode === 'continuous' ? null : page,
   })}`
+
+  const detailConfigKey = `${activeView?.id ?? `database-${activeDatabaseId ?? 'global'}`}`
+  const configuredDetailKeys = detailFieldConfig[detailConfigKey]
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`${DETAIL_FIELDS_STORAGE_PREFIX}${detailConfigKey}`)
+      if (raw) {
+        const keys = JSON.parse(raw)
+        if (Array.isArray(keys)) setDetailFieldConfig(current => ({ ...current, [detailConfigKey]: keys.filter(item => typeof item === 'string') }))
+      }
+    } catch { /* local storage is optional */ }
+  }, [detailConfigKey])
+
+  const saveDetailFieldKeys = (keys: string[]) => {
+    const normalized = fields.map(field => field.key).filter(key => keys.includes(key))
+    setDetailFieldConfig(current => ({ ...current, [detailConfigKey]: normalized }))
+    try { localStorage.setItem(`${DETAIL_FIELDS_STORAGE_PREFIX}${detailConfigKey}`, JSON.stringify(normalized)) } catch { /* local storage is optional */ }
+    setShowDetailFieldConfig(false)
+  }
 
   const readTablePosition = useCallback((): TablePositionSnapshot | null => {
     try {
@@ -2788,6 +2812,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         return aOrder - bOrder
       })
   })()
+  const detailVisibleFields = configuredDetailKeys
+    ? configuredDetailKeys.map(key => fields.find(field => field.key === key)).filter((field): field is FieldMeta => Boolean(field))
+    : fields.filter(field => DEFAULT_DETAIL_FIELD_KEYS.includes(field.key)).length > 0
+      ? fields.filter(field => DEFAULT_DETAIL_FIELD_KEYS.includes(field.key))
+      : visibleFields.slice(0, 7)
   const totalPages = Math.ceil(totalPatents / pageSize)
   // 表头复选框反映“当前页是否已全选”，整库全选时仍可能包含未加载的页。
   const allSelected = patents.length > 0 && patents.every(patent => selectedIds.includes(patent.id))
@@ -3136,6 +3165,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => scrollLibraryTo('top')} title="滚动到库顶部（Ctrl/Cmd + Home）" aria-label="滚动到库顶部"><Icon name="chevron-up" size={14} /></button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => scrollLibraryTo('bottom')} title="滚动到库底部（Ctrl/Cmd + End）" aria-label="滚动到库底部"><Icon name="chevron-down" size={14} /></button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
+              {(tableViewMode === 'detail' || tableViewMode === 'full_image') && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowDetailFieldConfig(true)} title="选择详情浏览显示的字段"><Icon name="file" size={14} /> 详情字段{configuredDetailKeys ? ` (${configuredDetailKeys.length})` : ''}</button>}
               {activeView && activeView.layout_type === 'table' && (
                 <>
                   <button type="button" className={`btn btn-sm ${getViewGroupFields(activeView).length > 0 ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setShowGroupConfig(true)} title="按字段分组并折叠展示"><Icon name="table" size={14} /> 分组</button>
@@ -3311,7 +3341,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 </div>
                 {rowImages(patent).length > 0 && <PatentImageStrip attachments={rowImages(patent)} maxImages={tableViewMode === 'detail' ? 1 : undefined} />}
                 <div className="patent-detail-browser-fields">
-                  {visibleFields.map(field => (
+                  {detailVisibleFields.map(field => (
                     <section className="patent-detail-browser-field" key={field.key}>
                       <span className="patent-detail-browser-field-label">{field.name}</span>
                       <div className="patent-detail-browser-field-value">{renderCellContent(patent, field)}</div>
@@ -3947,6 +3977,15 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           onToggleFreeze={handleToggleFreeze}
           onRemove={requestDeleteColumnByKey}
           onReorder={handleReorderFields}
+        />
+      )}
+
+      {showDetailFieldConfig && (
+        <DetailFieldConfigModal
+          fields={fields}
+          selectedKeys={configuredDetailKeys ?? detailVisibleFields.map(field => field.key)}
+          onClose={() => setShowDetailFieldConfig(false)}
+          onSave={saveDetailFieldKeys}
         />
       )}
 
@@ -4904,6 +4943,33 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       </div>
     </div>
   )
+}
+
+function DetailFieldConfigModal({ fields, selectedKeys, onClose, onSave }: {
+  fields: FieldMeta[]
+  selectedKeys: string[]
+  onClose: () => void
+  onSave: (keys: string[]) => void
+}) {
+  const [draft, setDraft] = useState(selectedKeys)
+  const [query, setQuery] = useState('')
+  const filtered = fields.filter(field => `${field.name} ${field.key}`.toLowerCase().includes(query.trim().toLowerCase()))
+  return <Modal title="详情字段" onClose={onClose} width={560}>
+    <div className="detail-field-config">
+      <input className="form-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索字段" aria-label="搜索详情字段" />
+      <div className="detail-field-config-summary">已选择 {draft.length} 个字段</div>
+      <div className="detail-field-config-list">
+        {filtered.map(field => <label key={field.key} className="detail-field-config-option">
+          <input type="checkbox" checked={draft.includes(field.key)} onChange={event => setDraft(current => event.target.checked ? [...current, field.key] : current.filter(key => key !== field.key))} />
+          <span>{field.name}</span>
+        </label>)}
+      </div>
+      <div className="detail-field-config-actions">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>取消</button>
+        <button type="button" className="btn btn-primary" onClick={() => onSave(draft)}>保存</button>
+      </div>
+    </div>
+  </Modal>
 }
 
 function Modal({ title, children, onClose, width = 480 }: {

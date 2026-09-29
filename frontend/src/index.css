@@ -6163,6 +6163,13 @@ body {
 }
 
 .patent-empty-state {
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   min-height: 280px;
   padding: 72px 24px;
 }
@@ -6798,6 +6805,12 @@ body {
   overflow-x: hidden;
 }
 
+.attachment-library-page { width: 100%; padding: 0 20px 40px; }
+.attachment-library-page > .page-header { display: flex; flex-wrap: wrap; padding: 16px 0 0; }
+.attachment-library-page > .page-header > div { min-width: 0; flex: 1 1 280px; }
+.attachment-library-page > .page-header > input { min-width: 0; max-width: 100%; flex: 0 1 280px; }
+.attachment-library-list { min-width: 0; max-width: 100%; }
+
 .patent-detail-browser {
   display: flex;
   flex-direction: column;
@@ -6857,20 +6870,19 @@ body {
 }
 
 .patent-detail-browser-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid #e2e8f0;
-  background: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .patent-detail-browser-field {
   min-width: 0;
-  min-height: 74px;
-  padding: 11px 13px;
+  padding: 14px 4px 16px;
+  border-bottom: 1px solid #edf2f2;
   background: #fff;
 }
+
+.patent-detail-browser-field:last-child { border-bottom: 0; }
 
 .patent-detail-browser-field-label {
   display: block;
@@ -6882,9 +6894,11 @@ body {
 
 .patent-detail-browser-field-value {
   min-width: 0;
+  max-width: 100%;
   color: #1f2937;
   line-height: 1.65;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .patent-detail-browser.is-full-image .patent-detail-browser-row {
@@ -6911,8 +6925,14 @@ body {
   .patent-detail-browser-row { padding: 14px 12px 16px; }
   .patent-detail-browser-heading { grid-template-columns: auto minmax(0, 1fr); }
   .patent-detail-browser-identity { grid-column: 2; }
-  .patent-detail-browser-fields { grid-template-columns: minmax(0, 1fr); }
 }
+
+.detail-field-config { display: grid; gap: 10px; }
+.detail-field-config-summary { color: #64748b; font-size: 12px; }
+.detail-field-config-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 420px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; }
+.detail-field-config-option { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+.detail-field-config-option span { overflow-wrap: anywhere; }
+.detail-field-config-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 .project-wiki-section {
   padding: 16px 0 18px;
@@ -7125,6 +7145,8 @@ body {
   gap: 14px;
   padding: 12px 0;
   border-bottom: 1px solid #e2e8f0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .project-attachment-main,
@@ -7134,6 +7156,7 @@ body {
   flex-direction: column;
   gap: 5px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .project-attachment-main a,
@@ -7151,7 +7174,16 @@ body {
   font-weight: 600;
   cursor: pointer;
   text-align: left;
+  overflow-wrap: anywhere;
 }
+
+.attachment-library-row > div:last-child { display: flex; max-width: 100%; flex-wrap: wrap; }
+
+.attachment-preview-overlay { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, .62); }
+.attachment-preview-dialog { display: flex; flex-direction: column; width: min(1000px, 100%); height: min(760px, 92vh); overflow: hidden; border-radius: 8px; background: #fff; box-shadow: 0 24px 80px rgba(15, 23, 42, .3); }
+.attachment-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; color: #334155; }
+.attachment-preview-header strong { min-width: 0; overflow-wrap: anywhere; }
+.attachment-preview-content { display: block; flex: 1; width: 100%; min-height: 0; border: 0; object-fit: contain; background: #f8fafc; }
 
 .project-attachment-main span,
 .project-attachment-main small,

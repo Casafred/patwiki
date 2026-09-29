@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { attachmentApi } from '../../api'
 import type { AttachmentMeta } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { save as saveDesktopFile } from '@tauri-apps/plugin-dialog'
+import { writeFile as writeDesktopFile } from '@tauri-apps/plugin-fs'
 
 export default function AttachmentLibraryPage() {
   const [items, setItems] = useState<AttachmentMeta[]>([])
@@ -10,6 +12,7 @@ export default function AttachmentLibraryPage() {
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [preview, setPreview] = useState<{ url: string; filename: string; mimeType: string } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -45,30 +48,35 @@ export default function AttachmentLibraryPage() {
     } catch (cause: unknown) { setError(getErrorMessage(cause, '附件删除失败')) }
   }
 
-  const openFile = async (item: AttachmentMeta, preview: boolean) => {
-    const popup = preview ? window.open('', '_blank') : null
+  const openFile = async (item: AttachmentMeta, shouldPreview: boolean) => {
     try {
       const blob = item.attachment_type === 'project'
-        ? await attachmentApi.downloadProject(item.attachment_id, preview)
-        : await attachmentApi.download(item.attachment_id, preview)
-      const url = URL.createObjectURL(blob)
-      if (popup) {
-        popup.location.href = url
-        window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-      } else {
-        const anchor = document.createElement('a')
-        anchor.href = url
-        anchor.download = item.filename
-        document.body.appendChild(anchor)
-        anchor.click()
-        anchor.remove()
-        window.setTimeout(() => URL.revokeObjectURL(url), 5_000)
+        ? await attachmentApi.downloadProject(item.attachment_id, shouldPreview)
+        : await attachmentApi.download(item.attachment_id, shouldPreview)
+      if (!(blob instanceof Blob) || blob.size === 0) throw new Error('附件内容为空')
+      if (shouldPreview) {
+        setPreview({ url: URL.createObjectURL(blob), filename: item.filename, mimeType: item.mime_type })
+        return
       }
+      if ('__TAURI_INTERNALS__' in window) {
+        const path = await saveDesktopFile({ defaultPath: item.filename, filters: [{ name: item.mime_type, extensions: [item.filename.split('.').pop() || 'bin'] }] })
+        if (path) await writeDesktopFile(path, new Uint8Array(await blob.arrayBuffer()))
+        return
+      }
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = item.filename
+      anchor.style.display = 'none'
+      document.body.appendChild(anchor)
+      anchor.click()
+      window.setTimeout(() => { URL.revokeObjectURL(url); anchor.remove() }, 2000)
     } catch (cause: unknown) {
-      popup?.close()
-      setError(getErrorMessage(cause, preview ? '附件预览失败' : '附件下载失败'))
+      setError(getErrorMessage(cause, shouldPreview ? '附件预览失败' : '附件下载失败'))
     }
   }
+
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url) }, [preview])
 
   return <section className="attachment-library-page">
     <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', gap: 16 }}>
@@ -81,5 +89,11 @@ export default function AttachmentLibraryPage() {
       <div className="attachment-library-file"><button type="button" className="attachment-library-file-link" onClick={() => void openFile(item, true)}>{item.filename}</button><span>{item.owner_label || (item.scope === 'project_patent' ? '项目与专利关系说明' : item.attachment_type === 'project' ? '项目资料' : '专利附件')} · {item.mime_type} · {(item.file_size / 1024).toFixed(1)} KB</span>{item.file_path && <small>{item.file_path}</small>}{editingId === item.id ? <div className="attachment-library-note-edit"><input className="form-input" value={note} onChange={event => setNote(event.target.value)} /><button className="btn btn-secondary" onClick={() => void updateNote(item)}>保存</button><button className="btn btn-ghost" onClick={() => setEditingId(null)}>取消</button></div> : <small>备注：{item.note || '无'}</small>}</div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}><button className="btn btn-secondary" onClick={() => void openFile(item, true)}>预览</button><button className="btn btn-secondary" onClick={() => void openFile(item, false)}>下载</button><button className="btn btn-secondary" onClick={() => { setEditingId(item.id); setNote(item.note || '') }}>备注</button><button className="btn btn-danger" onClick={() => void remove(item)}>删除</button></div>
     </article>)}{!loading && visible.length === 0 && <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>没有匹配的附件</div>}</div>
+    {preview && <div className="attachment-preview-overlay" role="dialog" aria-modal="true" onMouseDown={event => { if (event.target === event.currentTarget) setPreview(null) }}>
+      <div className="attachment-preview-dialog">
+        <div className="attachment-preview-header"><strong>{preview.filename}</strong><button type="button" className="btn btn-ghost" onClick={() => setPreview(null)}>关闭</button></div>
+        {preview.mimeType.startsWith('image/') ? <img src={preview.url} alt={preview.filename} className="attachment-preview-content" /> : <iframe title={preview.filename} src={preview.url} className="attachment-preview-content" />}
+      </div>
+    </div>}
   </section>
 }
