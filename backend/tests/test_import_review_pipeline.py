@@ -268,6 +268,53 @@ class ImportReviewPipelineTest(unittest.TestCase):
                 PatentHistory.field_key == "title",
             ).count(), 2)
 
+    def test_existing_application_number_is_resolved_to_one_patent(self):
+        existing = Patent(
+            database_id=self.database.id,
+            application_number="CN201711270772A",
+            publication_number="CN108145667X",
+            country="CN",
+            title="已有专利",
+        )
+        self.db.add(existing)
+        self.db.commit()
+
+        with TemporaryDirectory() as temp_dir:
+            result = self._stage(
+                "公开号,申请号,标题\nCN108145667A,CN201711270772A,新标题\n",
+                {"公开号": "publication_number", "申请号": "application_number", "标题": "title"},
+                Path(temp_dir) / "application_identity.csv",
+            )
+            changes = list_batch_changes(self.db, result["batch_id"])["items"]
+            self.assertTrue(changes)
+            self.assertEqual({item["patent_id"] for item in changes}, {existing.id})
+
+            review_batch(self.db, result["batch_id"], default_action_name="adopt")
+            applied = apply_batch(self.db, result["batch_id"])
+            self.assertEqual(applied["created"], 0)
+            self.assertEqual(self.db.query(Patent).count(), 1)
+            self.db.refresh(existing)
+            self.assertEqual(existing.title, "新标题")
+            self.assertEqual(existing.publication_number, "CN108145667A")
+
+    def test_same_batch_application_number_with_other_publication_is_quarantined(self):
+        with TemporaryDirectory() as temp_dir:
+            result = self._stage(
+                "公开号,申请号,标题\n"
+                "CN108145667A,CN201711270772A,第一条\n"
+                "CN108145667B,CN201711270772A,第二条\n",
+                {"公开号": "publication_number", "申请号": "application_number", "标题": "title"},
+                Path(temp_dir) / "application_conflict.csv",
+            )
+            review_batch(self.db, result["batch_id"], default_action_name="adopt")
+            applied = apply_batch(self.db, result["batch_id"])
+            self.assertEqual(applied["created"], 1)
+            self.assertEqual(applied["errors"], 1)
+            self.assertEqual(
+                self.db.query(Patent).filter(Patent.application_number == "CN201711270772A").count(),
+                1,
+            )
+
     def test_relation_projection_keeps_raw_cell_and_links_only_existing_targets(self):
         current = Patent(
             database_id=self.database.id,

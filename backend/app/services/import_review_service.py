@@ -23,7 +23,8 @@ from app.services.import_service import ImportService, IMPORT_SKIP_FIELD
 from app.services.excel_image_service import ExcelImage, extract_embedded_images
 from app.services.attachment_service import AttachmentService
 from app.services.patent_identity_service import (
-    ensure_patent_identifiers, find_patents_by_identifier_specs_bulk,
+    PatentIdentityConflict, ensure_patent_identifiers,
+    find_patents_by_identifier_specs_bulk,
     identifier_specs_from_values,
 )
 from app.services.patent_database_scope import in_database
@@ -383,9 +384,18 @@ def stage_import(
             parsed_rows[index] = parsed
             data, _, _ = parsed
             publication = (data.get("publication_number") or "").strip()
-            specs = [spec for spec in identifier_specs_from_values(
-                {"publication": publication}, data.get("country"),
-            ) if spec.identifier_type == "publication"]
+            # 公开号是首选识别标准，申请号/授权号是同一实体的补充身份。
+            # All official identifiers are resolved through the PatentIdentifier
+            # index so a row that shares an application number with an existing
+            # Patent enriches it instead of inserting a conflicting duplicate.
+            specs = identifier_specs_from_values(
+                {
+                    "application": data.get("application_number"),
+                    "publication": publication,
+                    "grant": data.get("grant_number"),
+                },
+                data.get("country"),
+            )
             if specs:
                 identity_specs_by_row[index] = specs
         # One flush assigns all source-row ids for observation foreign keys.
@@ -805,6 +815,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     changed_ids: set[int] = set()
     pending_relations: list[tuple[Patent, dict]] = []
     new_by_publication: dict[str, Patent] = {}
+    new_by_application: dict[tuple[str, str], Patent] = {}
     row_reports: list[dict] = []
     field_error_details: list[dict] = []
     imported_image_count = 0
@@ -854,11 +865,33 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     raise ValueError("创建专利时必须采用公开号")
                 patent = db.query(Patent).filter(Patent.id == source.patent_id).first() if source.patent_id else None
                 created_in_batch = False
+                # Staging resolves identity through the PatentIdentifier index,
+                # but two rows in the same batch can still declare the same
+                # application number before any Patent exists. Reuse the patent
+                # created for the first row only when it is the same document;
+                # a different publication number is an identity conflict and is
+                # quarantined instead of guessed, because (application_number,
+                # country) is a database-level unique key.
+                application_number = (data.get("application_number") or "").strip()
+                country = data.get("country") or "CN"
+                writes_application_number = bool(application_number) and any(
+                    item.canonical_field_key == "application_number"
+                    and actions.get(item.id) in {"adopt", "fill_empty"}
+                    for item in items
+                )
                 if patent is None:
-                    # Staging already resolved every valid identity. Pending
-                    # rows are new at apply time; only reuse a patent created
-                    # earlier in this same batch, with no per-row DB lookup.
+                    # Pending rows are new at apply time; reuse a patent created
+                    # earlier in this same batch for the same publication.
                     patent = new_by_publication.get(publication)
+                    if patent is None and writes_application_number:
+                        conflicting = new_by_application.get((country, application_number))
+                        if conflicting is not None:
+                            raise PatentIdentityConflict(
+                                f"申请号 {application_number} 在本批次已对应专利 {conflicting.id}，"
+                                "但公开号不同，已隔离等待人工确认",
+                                identifier=application_number,
+                                patent_ids=(conflicting.id,),
+                            )
                     created_in_batch = patent is not None and patent.id in created_ids
                 created = False
                 provisional_title = False
@@ -900,6 +933,8 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     db.add(patent)
                     db.flush()
                     new_by_publication[publication] = patent
+                    if writes_application_number:
+                        new_by_application[(country, application_number)] = patent
                     created_ids.append(patent.id)
                     inserted += 1
                     created = True
