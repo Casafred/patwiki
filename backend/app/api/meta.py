@@ -107,6 +107,7 @@ def list_projects(
 
 PROJECT_HISTORY_FIELDS = (
     "name", "code", "product_id", "product_category", "department_ids",
+    "product_line_ids",
     "project_level", "project_type", "brands", "project_manager",
     "research_owner", "shipping_regions", "current_stage", "product_model",
     "description", "module", "start_date", "end_date", "status",
@@ -145,6 +146,13 @@ def _validate_project_departments(db: Session, department_ids: list[int] | None)
     return ids
 
 
+def _validate_project_product_lines(db: Session, product_line_ids: list[int] | None):
+    ids = list(dict.fromkeys(int(item) for item in (product_line_ids or [])))
+    if ids and db.query(ProductLine.id).filter(ProductLine.id.in_(ids)).count() != len(ids):
+        raise BadRequestException("所属产品线包含不存在的产品线")
+    return ids
+
+
 @router.get("/projects/{project_id}", response_model=ProjectSchema)
 def get_project(project_id: int, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -159,6 +167,7 @@ def create_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
     values = project_in.model_dump(exclude={"project_no"})
     values["code"] = project_in.project_no if project_in.project_no is not None else project_in.code
     values["department_ids"] = _validate_project_departments(db, values.get("department_ids"))
+    values["product_line_ids"] = _validate_project_product_lines(db, values.get("product_line_ids"))
     project = Project(**values)
     db.add(project)
     db.flush()
@@ -181,6 +190,8 @@ def update_project(project_id: int, project_in: ProjectUpdate, db: Session = Dep
         values["code"] = payload["project_no"]
     if "department_ids" in values:
         values["department_ids"] = _validate_project_departments(db, values["department_ids"])
+    if "product_line_ids" in values:
+        values["product_line_ids"] = _validate_project_product_lines(db, values["product_line_ids"])
     for field, value in values.items():
         setattr(project, field, value)
     db.flush()

@@ -547,6 +547,7 @@ export interface Project {
   product_id?: number | null
   product_category?: string | null
   department_ids: number[]
+  product_line_ids: number[]
   project_level?: string | null
   project_type?: string | null
   brands: string[]

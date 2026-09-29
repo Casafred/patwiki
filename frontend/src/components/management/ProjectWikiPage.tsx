@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { attachmentApi, departmentApi, patentApi, projectApi, productApi } from '../../api'
-import type { AttachmentMeta, Department, Patent, Project, ProjectHistoryEntry, Product } from '../../types'
+import { attachmentApi, patentApi, productApi, productLineApi, projectApi } from '../../api'
+import type { AttachmentMeta, Patent, Product, ProductLine, Project, ProjectHistoryEntry } from '../../types'
 import Icon from '../common/Icon'
 import { getErrorMessage } from '../../lib/errors'
 
 const fieldLabels: Record<string, string> = {
   name: '项目名称', code: '项目号', product_id: '关联产品记录', product_category: '产品分类',
-  department_ids: '所属部门', project_level: '项目等级', project_type: '项目类型', brands: '所涉品牌',
+  department_ids: '所属部门', product_line_ids: '所属产品线', project_level: '项目等级', project_type: '项目类型', brands: '所涉品牌',
   project_manager: '项目管理', research_owner: '研发', shipping_regions: '出货地区',
   current_stage: '当前项目阶段', product_model: '产品型号', description: '项目描述',
   module: '功能模块', start_date: '开始日期', end_date: '结束日期', status: '状态',
@@ -25,8 +25,8 @@ function display(value: unknown): string {
   return String(value)
 }
 
-function fieldValue(project: Project, key: string, departments: Department[], products: Product[]): string {
-  if (key === 'department_ids') return departments.filter(item => (project.department_ids || []).includes(item.id)).map(item => item.name).join('、') || '未填写'
+function fieldValue(project: Project, key: string, productLines: ProductLine[], products: Product[]): string {
+  if (key === 'product_line_ids') return productLines.filter(item => (project.product_line_ids || []).includes(item.id)).map(item => item.name).join('、') || '未填写'
   if (key === 'product_id') return products.find(item => item.id === project.product_id)?.name || '未填写'
   if (key === 'status') return display(project.status)
   if (key === 'current_stage') return display(project.current_stage)
@@ -35,9 +35,9 @@ function fieldValue(project: Project, key: string, departments: Department[], pr
   return display((project as unknown as Record<string, unknown>)[key])
 }
 
-function historyValue(key: string, value: unknown, departments: Department[], products: Product[]): string {
-  if (key === 'department_ids' && Array.isArray(value)) {
-    return departments.filter(item => value.map(Number).includes(item.id)).map(item => item.name).join('、') || '未填写'
+function historyValue(key: string, value: unknown, productLines: ProductLine[], products: Product[]): string {
+  if (key === 'product_line_ids' && Array.isArray(value)) {
+    return productLines.filter(item => value.map(Number).includes(item.id)).map(item => item.name).join('、') || '未填写'
   }
   if (key === 'product_id' && value != null) {
     return products.find(item => item.id === Number(value))?.name || '未填写'
@@ -52,7 +52,7 @@ export default function ProjectWikiPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [history, setHistory] = useState<ProjectHistoryEntry[]>([])
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
-  const [departments, setDepartments] = useState<Department[]>([])
+  const [productLines, setProductLines] = useState<ProductLine[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [patents, setPatents] = useState<Patent[]>([])
   const [loading, setLoading] = useState(true)
@@ -70,14 +70,14 @@ export default function ProjectWikiPage() {
     setLoading(true)
     setError('')
     try {
-      const [loadedProject, loadedHistory, loadedAttachments, loadedDepartments, loadedProducts, patentResponse] = await Promise.all([
+      const [loadedProject, loadedHistory, loadedAttachments, loadedProductLines, loadedProducts, patentResponse] = await Promise.all([
         projectApi.get(id), projectApi.history(id), attachmentApi.listForProject(id),
-        departmentApi.list(), productApi.list(), patentApi.list({ project_id: id, page_size: 100 }),
+        productLineApi.list(), productApi.list(), patentApi.list({ project_id: id, page_size: 100 }),
       ])
       setProject(loadedProject)
       setHistory(loadedHistory)
       setAttachments(loadedAttachments)
-      setDepartments(loadedDepartments)
+      setProductLines(loadedProductLines)
       setProducts(loadedProducts)
       setPatents(patentResponse.items)
     } catch (loadError: unknown) {
@@ -136,11 +136,11 @@ export default function ProjectWikiPage() {
 
   const fields: Array<[string, string | null | undefined]> = [
     ['项目号', project.project_no || project.code], ['项目分类', project.product_category],
-    ['所属部门', fieldValue(project, 'department_ids', departments, products)], ['项目等级', project.project_level],
+    ['所属产品线', fieldValue(project, 'product_line_ids', productLines, products)], ['项目等级', project.project_level],
     ['项目类型', project.project_type], ['所涉品牌', (project.brands || []).join('、')],
     ['项目管理', project.project_manager], ['研发', project.research_owner], ['出货地区', project.shipping_regions],
     ['当前项目阶段', display(project.current_stage)], ['产品型号', project.product_model],
-    ['状态', display(project.status)], ['关联产品记录', fieldValue(project, 'product_id', departments, products)],
+    ['状态', display(project.status)], ['关联产品记录', fieldValue(project, 'product_id', productLines, products)],
     ['开始日期', project.start_date], ['结束日期', project.end_date],
   ]
 
@@ -181,7 +181,7 @@ export default function ProjectWikiPage() {
 
     <section className="project-wiki-section">
       <div className="management-section-title"><strong>信息变更记录</strong><span style={{ color: '#64748b', fontSize: 12 }}>{history.length} 条</span></div>
-      <div className="project-history-list">{history.map(entry => <article key={entry.id} className="project-history-entry"><div className="project-history-meta"><strong>{entry.action === 'created' ? '创建项目' : '更新项目资料'}</strong><span>{entry.created_at ? new Date(entry.created_at).toLocaleString() : ''} · {entry.changed_by}</span></div><div className="project-history-changes">{Object.entries(entry.changes).map(([key, change]) => <div key={key}><span>{fieldLabels[key] || key}</span><s>{historyValue(key, change.before, departments, products)}</s><b>{historyValue(key, change.after, departments, products)}</b></div>)}</div></article>)}{history.length === 0 && <div style={{ color: '#94a3b8', padding: '14px 0' }}>暂无变更记录</div>}</div>
+      <div className="project-history-list">{history.map(entry => <article key={entry.id} className="project-history-entry"><div className="project-history-meta"><strong>{entry.action === 'created' ? '创建项目' : '更新项目资料'}</strong><span>{entry.created_at ? new Date(entry.created_at).toLocaleString() : ''} · {entry.changed_by}</span></div><div className="project-history-changes">{Object.entries(entry.changes).map(([key, change]) => <div key={key}><span>{fieldLabels[key] || key}</span><s>{historyValue(key, change.before, productLines, products)}</s><b>{historyValue(key, change.after, productLines, products)}</b></div>)}</div></article>)}{history.length === 0 && <div style={{ color: '#94a3b8', padding: '14px 0' }}>暂无变更记录</div>}</div>
     </section>
   </div>
 }
