@@ -14,6 +14,8 @@ class Project(Base):
     code = Column(String(50))
     product_id = Column(Integer, ForeignKey("products.id"))
     department_ids = Column(JSON, nullable=False, default=list)
+    # 所属产品线：项目界面按产品线管理里配置的产品线进行多选。
+    product_line_ids = Column(JSON, nullable=False, default=list)
     project_level = Column(String(30))
     project_type = Column(String(30))
     brands = Column(JSON, nullable=False, default=list)

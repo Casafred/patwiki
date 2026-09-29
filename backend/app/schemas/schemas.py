@@ -161,6 +161,7 @@ class ProjectBase(BaseSchema):
     product_id: Optional[int] = None
     product_category: Optional[str] = None
     department_ids: list[int] = Field(default_factory=list)
+    product_line_ids: list[int] = Field(default_factory=list)
     project_level: Optional[str] = None
     project_type: Optional[str] = None
     brands: list[str] = Field(default_factory=list)
@@ -187,6 +188,7 @@ class ProjectUpdate(BaseSchema):
     product_id: Optional[int] = None
     product_category: Optional[str] = None
     department_ids: Optional[list[int]] = None
+    product_line_ids: Optional[list[int]] = None
     project_level: Optional[str] = None
     project_type: Optional[str] = None
     brands: Optional[list[str]] = None

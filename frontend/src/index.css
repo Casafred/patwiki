@@ -1025,6 +1025,32 @@ input, select, textarea {
   cursor: pointer;
 }
 
+.data-grid th.col-checkbox .col-select-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.data-grid th.col-checkbox .col-select-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.data-grid th.col-checkbox .col-select-caret:hover {
+  background: #e5e7eb;
+  color: #334155;
+}
+
 .data-grid th.col-sorted {
   background: #f0f7ff;
 }
@@ -6863,6 +6889,35 @@ body {
 }
 
 .project-multiselect[open] summary::after {
+  content: '^';
+}
+
+.project-multiselect-summary {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 30px 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.project-multiselect-summary::after {
+  content: 'v';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+}
+
+.project-multiselect-summary[aria-expanded='true']::after {
   content: '^';
 }
 

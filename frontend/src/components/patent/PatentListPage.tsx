@@ -614,6 +614,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [showQuickSelect, setShowQuickSelect] = useState(false)
   const [quickSelectRange, setQuickSelectRange] = useState('1-10')
   const [quickSelectLoading, setQuickSelectLoading] = useState(false)
+  // 表头勾选范围菜单（当前页 / 当前库全部 / 按序号范围）
+  const [selectScopeMenu, setSelectScopeMenu] = useState<{ x: number; y: number } | null>(null)
+  const [scopeSelecting, setScopeSelecting] = useState(false)
   const [bulkTransferAction, setBulkTransferAction] = useState<BulkTransferAction | null>(null)
   const [bulkTargetDatabaseId, setBulkTargetDatabaseId] = useState<number | null>(null)
   const [bulkTargetViewId, setBulkTargetViewId] = useState<number | null>(null)
@@ -1442,6 +1445,22 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     }
   }, [contextMenu])
 
+  // 表头勾选范围菜单：点击其他位置或按 Esc 关闭
+  useEffect(() => {
+    if (!selectScopeMenu) return
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.select-scope-menu')) setSelectScopeMenu(null)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectScopeMenu(null) }
+    document.addEventListener('click', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('click', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [selectScopeMenu])
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     setSearchText(searchInputText)
@@ -1654,10 +1673,22 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // 表头复选框只切换当前页；整库范围由旁边的范围菜单选择。
     if (e.target.checked) {
-      setSelectedIds(patents.map(p => p.id))
+      selectCurrentPage()
     } else {
       clearSelection()
+    }
+  }
+
+  // 表头勾选范围菜单
+  const handleHeaderSelectClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (selectScopeMenu) {
+      setSelectScopeMenu(null)
+    } else {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      setSelectScopeMenu({ x: rect.left, y: rect.bottom + 4 })
     }
   }
 
@@ -2261,6 +2292,10 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     if (type === 'header' && data.fieldKey && patents[0]) {
       setActiveCell({ patentId: patents[0].id, fieldKey: data.fieldKey })
     }
+    if (type === 'header' && data.fieldKey) {
+      // 列选中 = 选中当前库该列的全部数据，让列菜单的批量操作作用于整列而不是当前页。
+      void selectAllInScope()
+    }
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
@@ -2324,6 +2359,35 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     const result = await patentApi.list(params)
     return { items: result.items, total: result.total }
   }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, isGlobalMasterTable, patents, searchMode, searchText, sortField, sortOrder, viewId])
+
+  // 读取“当前库（含当前筛选/视图）”的全部专利 ID，用于“勾选当前库全部”和列选中的整列操作。
+  const fetchAllScopeIds = useCallback(async () => {
+    if (searchText && searchMode !== 'keyword') return patentsRef.current.map(item => item.id)
+    const firstPage = await fetchScopePage(1, 1000)
+    const ids = firstPage.items.map(item => item.id)
+    const total = firstPage.total
+    for (let pageNumber = 2; ids.length < total; pageNumber += 1) {
+      const next = await fetchScopePage(pageNumber, 1000)
+      if (next.items.length === 0) break
+      ids.push(...next.items.map(item => item.id))
+    }
+    return ids
+  }, [fetchScopePage, searchMode, searchText])
+
+  const selectCurrentPage = () => setSelectedIds(patentsRef.current.map(item => item.id))
+
+  const selectAllInScope = async () => {
+    if (scopeSelecting) return
+    setScopeSelecting(true)
+    try {
+      const ids = await fetchAllScopeIds()
+      setSelectedIds(ids)
+    } catch (error: unknown) {
+      alert('勾选当前库全部失败: ' + getErrorMessage(error))
+    } finally {
+      setScopeSelecting(false)
+    }
+  }
 
   const writeClipboardText = async (text: string) => {
     try {
@@ -2692,7 +2756,10 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       })
   })()
   const totalPages = Math.ceil(totalPatents / pageSize)
-  const allSelected = patents.length > 0 && selectedIds.length === patents.length
+  // 表头复选框反映“当前页是否已全选”，整库全选时仍可能包含未加载的页。
+  const allSelected = patents.length > 0 && patents.every(patent => selectedIds.includes(patent.id))
+  const someSelected = patents.some(patent => selectedIds.includes(patent.id))
+  const allLibrarySelected = totalPatents > 0 && selectedIds.length >= totalPatents
   const hasActiveFilters = Object.values(filterValues).some(filterConditionHasValue) || !!searchText
 
   useEffect(() => {
@@ -3033,9 +3100,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </ToolbarMenu>
             )}
             <div className="datagrid-view-actions" aria-label="常用表格工具">
-              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowQuickSelect(true)} title="按当前筛选结果的序号快速勾选专利">
-                <Icon name="check" size={14} /> 范围勾选
-              </button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
               {activeView && activeView.layout_type === 'table' && (
                 <>
@@ -3206,8 +3270,26 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             </colgroup>
             <thead>
               <tr>
-                <th className="col-checkbox" style={{ width: 40, minWidth: 40, maxWidth: 40 }}>
-                  <input type="checkbox" checked={allSelected} onChange={handleSelectAll} />
+                <th className="col-checkbox" style={{ width: CHECKBOX_COLUMN_WIDTH, minWidth: CHECKBOX_COLUMN_WIDTH, maxWidth: CHECKBOX_COLUMN_WIDTH }}>
+                  <div className="col-select-header">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={element => { if (element) element.indeterminate = someSelected && !allSelected }}
+                      onChange={handleSelectAll}
+                      title={allSelected ? '取消勾选当前页' : '勾选当前页'}
+                    />
+                    <button
+                      type="button"
+                      className="col-select-caret"
+                      aria-label="选择勾选范围"
+                      aria-expanded={!!selectScopeMenu}
+                      title="选择勾选范围：当前页 / 当前库全部 / 按序号范围"
+                      onClick={handleHeaderSelectClick}
+                    >
+                      <Icon name="chevron-down" size={11} />
+                    </button>
+                  </div>
                 </th>
                 <th className="col-sequence" style={{ width: INDEX_COLUMN_WIDTH, minWidth: INDEX_COLUMN_WIDTH, maxWidth: INDEX_COLUMN_WIDTH, position: 'sticky', left: CHECKBOX_COLUMN_WIDTH, zIndex: 17, background: '#f9fafb' }}>
                   <span style={{ fontSize: 12, color: '#6b7280' }}>序号</span>
@@ -4515,6 +4597,46 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </>
             )
           })()}
+        </div>
+      )}
+
+      {/* 表头勾选范围菜单 */}
+      {selectScopeMenu && (
+        <div
+          className="context-menu select-scope-menu"
+          style={{
+            position: 'fixed',
+            left: Math.max(8, Math.min(selectScopeMenu.x, window.innerWidth - 270)),
+            top: Math.max(8, Math.min(selectScopeMenu.y, window.innerHeight - 220)),
+            zIndex: 1100,
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 8,
+            boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+            minWidth: 236,
+            padding: '4px 0',
+            fontSize: 12,
+          }}
+          onClick={event => event.stopPropagation()}
+        >
+          <div className="menu-heading">选择勾选范围 · 当前库共 {totalPatents} 条</div>
+          <div className={`menu-item${allSelected ? ' is-active' : ''}`} onClick={() => { selectCurrentPage(); setSelectScopeMenu(null) }}>
+            <Icon name="check" /> 勾选当前页（{patents.length} 条）
+          </div>
+          <div
+            className={`menu-item${allLibrarySelected ? ' is-active' : ''}`}
+            style={{ opacity: scopeSelecting ? 0.6 : 1, pointerEvents: scopeSelecting ? 'none' : 'auto' }}
+            onClick={() => { void selectAllInScope(); setSelectScopeMenu(null) }}
+          >
+            <Icon name="database" /> {scopeSelecting ? '读取中…' : `勾选当前库全部（${totalPatents} 条）`}
+          </div>
+          <div className="menu-item" onClick={() => { setShowQuickSelect(true); setSelectScopeMenu(null) }}>
+            <Icon name="filter" /> 按序号范围勾选…
+          </div>
+          <div className="menu-divider" />
+          <div className="menu-item" onClick={() => { clearSelection(); setSelectScopeMenu(null) }}>
+            <Icon name="x" /> 取消勾选
+          </div>
         </div>
       )}
 

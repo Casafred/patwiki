@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   departmentApi,
@@ -43,6 +43,68 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 
 function EmptyState({ text }: { text: string }) {
   return <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>{text}</div>
+}
+
+const BRAND_PRESETS = ['EGO', 'FLEX', 'DEVON', 'SKIL', 'CTR', 'ERBAUER', 'KOBALT']
+
+// 受控多选下拉：点击组件外部或按 Esc 关闭，避免 <details> 打开后无法收起。
+function MultiSelect({
+  options,
+  selected,
+  onChange,
+  placeholder,
+}: {
+  options: Array<{ value: string; label: string }>
+  selected: string[]
+  onChange: (values: string[]) => void
+  placeholder: string
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
+  return (
+    <div className="project-multiselect" ref={wrapperRef}>
+      <button
+        type="button"
+        className="project-multiselect-summary"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+      >
+        {selected.length ? `已选 ${selected.length} 项` : placeholder}
+      </button>
+      {open && (
+        <div className="project-multiselect-options">
+          {options.length === 0 && <span style={{ color: '#94a3b8', fontSize: 12 }}>暂无可选项</span>}
+          {options.map(option => (
+            <label key={option.value}>
+              <input
+                type="checkbox"
+                checked={selected.includes(option.value)}
+                onChange={event => onChange(event.target.checked
+                  ? [...selected, option.value]
+                  : selected.filter(value => value !== option.value))}
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function TableShell({ children }: { children: React.ReactNode }) {
@@ -113,7 +175,7 @@ interface ProjectForm {
   project_no: string
   product_id: string
   product_category: string
-  department_ids: string[]
+  product_line_ids: string[]
   project_level: string
   project_type: string
   brands: string
@@ -167,7 +229,7 @@ interface ProductLineForm {
 }
 
 const emptyProduct: ProductForm = { name: '', code: '', product_line_id: '', owner_id: '', category: '', description: '', is_active: true }
-const emptyProject: ProjectForm = { name: '', project_no: '', product_id: '', product_category: '', department_ids: [], project_level: '', project_type: '', brands: '', project_manager: '', research_owner: '', shipping_regions: '', current_stage: '', product_model: '', module: '', status: 'in_progress', start_date: '', end_date: '', description: '' }
+const emptyProject: ProjectForm = { name: '', project_no: '', product_id: '', product_category: '', product_line_ids: [], project_level: '', project_type: '', brands: '', project_manager: '', research_owner: '', shipping_regions: '', current_stage: '', product_model: '', module: '', status: 'in_progress', start_date: '', end_date: '', description: '' }
 const emptyTag: TagForm = { name: '', group_id: '', color: '#3b82f6', description: '' }
 const emptyTagGroup: TagGroupForm = { name: '', color: '#64748b', description: '' }
 const emptyDepartment: DepartmentForm = { name: '', code: '', department_type: 'other', parent_id: '', description: '' }
@@ -245,6 +307,11 @@ export default function ManagementPage() {
   const productLineNameById = useMemo(() => new Map(productLines.map(line => [line.id, line.name])), [productLines])
   const productNameById = useMemo(() => new Map(products.map(product => [product.id, product.name])), [products])
   const personNameById = useMemo(() => new Map(people.map(person => [person.id, person.name])), [people])
+  // 项目“产品分类”的下拉选项来自产品管理中维护的分类，去重后排序。
+  const productCategories = useMemo(
+    () => Array.from(new Set(products.map(product => product.category).filter((value): value is string => !!value))).sort(),
+    [products],
+  )
 
   const beginCreate = () => {
     setError('')
@@ -286,7 +353,7 @@ export default function ManagementPage() {
         name: projectForm.name.trim(), project_no: projectForm.project_no.trim() || (editingProjectId ? null : undefined),
         product_id: optionalNumber(projectForm.product_id), module: projectForm.module.trim() || (editingProjectId ? null : undefined),
         product_category: projectForm.product_category.trim() || (editingProjectId ? null : undefined),
-        department_ids: projectForm.department_ids.map(Number),
+        product_line_ids: projectForm.product_line_ids.map(Number),
         project_level: projectForm.project_level || (editingProjectId ? null : undefined),
         project_type: projectForm.project_type || (editingProjectId ? null : undefined),
         brands: projectForm.brands.split(',').map(value => value.trim()).filter(Boolean),
@@ -393,12 +460,12 @@ export default function ManagementPage() {
 
   const renderProjects = () => (
     <>
-      <ManagementHeader title="项目管理" description="维护项目资料、所属部门和业务阶段；打开项目可查看 Wiki、关联附件及变更记录。" onCreate={() => { beginCreate(); setShowProjectForm(true) }} createLabel="新增项目" />
+      <ManagementHeader title="项目管理" description="维护项目资料、所属产品线和业务阶段；打开项目可查看 Wiki、关联附件及变更记录。" onCreate={() => { beginCreate(); setShowProjectForm(true) }} createLabel="新增项目" />
       {(showProjectForm || editingProjectId !== null) && <div className="management-form">
         <div className="management-form-grid">
           <FormField label="项目名称"><input className="form-input" style={inputStyle} value={projectForm.name} onChange={e => setProjectForm({ ...projectForm, name: e.target.value })} /></FormField>
           <FormField label="项目号"><input className="form-input" style={inputStyle} value={projectForm.project_no} onChange={e => setProjectForm({ ...projectForm, project_no: e.target.value })} /></FormField>
-          <FormField label="产品分类"><input className="form-input" style={inputStyle} list="project-product-categories" value={projectForm.product_category} onChange={e => setProjectForm({ ...projectForm, product_category: e.target.value })} /><datalist id="project-product-categories">{Array.from(new Set(products.map(product => product.category).filter(Boolean))).map(category => <option key={category} value={category} />)}</datalist></FormField>
+          <FormField label="产品分类"><select className="form-input" style={inputStyle} value={projectForm.product_category} onChange={e => setProjectForm({ ...projectForm, product_category: e.target.value })}><option value="">未设置</option>{productCategories.map(category => <option key={category} value={category}>{category}</option>)}</select></FormField>
           <FormField label="项目等级"><select className="form-input" style={inputStyle} value={projectForm.project_level} onChange={e => setProjectForm({ ...projectForm, project_level: e.target.value })}><option value="">未设置</option><option value="NEW">NEW</option><option value="RESKIN">RESKIN</option></select></FormField>
           <FormField label="项目类型"><select className="form-input" style={inputStyle} value={projectForm.project_type} onChange={e => setProjectForm({ ...projectForm, project_type: e.target.value })}><option value="">未设置</option><option value="OBM">OBM</option><option value="OEM">OEM</option><option value="ODM">ODM</option></select></FormField>
           <FormField label="当前项目阶段"><select className="form-input" style={inputStyle} value={projectForm.current_stage} onChange={e => setProjectForm({ ...projectForm, current_stage: e.target.value })}><option value="">未设置</option><option value="pre_research">预研</option>{['TR1', 'TR2', 'TR3', 'TR4', 'TR5'].map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></FormField>
@@ -410,15 +477,15 @@ export default function ManagementPage() {
           <FormField label="开始日期"><input className="form-input" style={inputStyle} type="date" value={projectForm.start_date} onChange={e => setProjectForm({ ...projectForm, start_date: e.target.value })} /></FormField>
           <FormField label="结束日期"><input className="form-input" style={inputStyle} type="date" value={projectForm.end_date} onChange={e => setProjectForm({ ...projectForm, end_date: e.target.value })} /></FormField>
         </div>
-        <FormField label="所属部门"><details className="project-multiselect"><summary>{projectForm.department_ids.length ? `已选 ${projectForm.department_ids.length} 个部门` : '选择部门'}</summary><div className="project-multiselect-options">{departments.map(department => <label key={department.id}><input type="checkbox" checked={projectForm.department_ids.includes(String(department.id))} onChange={event => setProjectForm({ ...projectForm, department_ids: event.target.checked ? [...projectForm.department_ids, String(department.id)] : projectForm.department_ids.filter(id => id !== String(department.id)) })} />{department.name}</label>)}</div></details></FormField>
-        <FormField label="所涉品牌"><details className="project-multiselect"><summary>{projectForm.brands ? projectForm.brands : '选择品牌'}</summary><div className="project-multiselect-options">{['EGO', 'FLEX', 'DEVON', 'SKIL', 'CTR', 'ERBAUER', 'KOBALT'].map(brand => { const brands = projectForm.brands.split(',').map(value => value.trim()).filter(Boolean); return <label key={brand}><input type="checkbox" checked={brands.includes(brand)} onChange={event => setProjectForm({ ...projectForm, brands: [...new Set(event.target.checked ? [...brands, brand] : brands.filter(value => value !== brand))].join(', ') })} />{brand}</label> })}</div></details><input className="form-input" style={inputStyle} placeholder="自定义品牌，可用逗号分隔" value={projectForm.brands.split(',').map(value => value.trim()).filter(value => !['EGO', 'FLEX', 'DEVON', 'SKIL', 'CTR', 'ERBAUER', 'KOBALT'].includes(value)).join(', ')} onChange={event => { const preset = projectForm.brands.split(',').map(value => value.trim()).filter(value => ['EGO', 'FLEX', 'DEVON', 'SKIL', 'CTR', 'ERBAUER', 'KOBALT'].includes(value)); setProjectForm({ ...projectForm, brands: [...preset, ...event.target.value.split(',').map(value => value.trim()).filter(Boolean)].join(', ') }) }} /></FormField>
+        <FormField label="所属产品线"><MultiSelect options={productLines.map(line => ({ value: String(line.id), label: line.name }))} selected={projectForm.product_line_ids} onChange={values => setProjectForm({ ...projectForm, product_line_ids: values })} placeholder="选择产品线" /></FormField>
+        <FormField label="所涉品牌"><MultiSelect options={BRAND_PRESETS.map(brand => ({ value: brand, label: brand }))} selected={projectForm.brands.split(',').map(value => value.trim()).filter(value => BRAND_PRESETS.includes(value))} onChange={presets => { const customBrands = projectForm.brands.split(',').map(value => value.trim()).filter(value => value && !BRAND_PRESETS.includes(value)); setProjectForm({ ...projectForm, brands: [...presets, ...customBrands].join(', ') }) }} placeholder="选择品牌" /><input className="form-input" style={{ ...inputStyle, marginTop: 8 }} placeholder="自定义品牌，可用逗号分隔" value={projectForm.brands.split(',').map(value => value.trim()).filter(value => value && !BRAND_PRESETS.includes(value)).join(', ')} onChange={event => { const presets = projectForm.brands.split(',').map(value => value.trim()).filter(value => BRAND_PRESETS.includes(value)); setProjectForm({ ...projectForm, brands: [...presets, ...event.target.value.split(',').map(value => value.trim()).filter(Boolean)].join(', ') }) }} /></FormField>
         <div style={{ marginTop: 12 }}><FormField label="项目描述"><textarea className="form-input" style={{ ...inputStyle, minHeight: 64 }} value={projectForm.description} onChange={e => setProjectForm({ ...projectForm, description: e.target.value })} /></FormField></div>
         <div className="management-form-actions"><button className="btn btn-primary" disabled={saving} onClick={() => void saveProject()}>{saving ? '保存中...' : editingProjectId ? '保存修改' : '创建项目'}</button><button className="btn btn-secondary" onClick={() => { setEditingProjectId(null); setProjectForm(emptyProject); setShowProjectForm(false) }}>取消</button></div>
       </div>}
-      <TableShell><TableHead><Th>项目</Th><Th>项目分类</Th><Th>等级 / 类型</Th><Th>部门</Th><Th>阶段 / 状态</Th><Th>专利数</Th><Th>操作</Th></TableHead><tbody>{projects.map(project => {
+      <TableShell><TableHead><Th>项目</Th><Th>项目分类</Th><Th>等级 / 类型</Th><Th>产品线</Th><Th>阶段 / 状态</Th><Th>专利数</Th><Th>操作</Th></TableHead><tbody>{projects.map(project => {
         const legacyStatus = project.status === 'active' || project.status === 'planned' ? 'in_progress' : project.status === 'completed' ? 'shipped' : project.status === 'archived' ? 'paused' : project.status
-        const departmentsForProject = departments.filter(department => (project.department_ids || []).includes(department.id)).map(department => department.name).join('、')
-        return <tr key={project.id}><Td><button type="button" onClick={() => navigate(`/projects/${project.id}`)} style={{ border: 0, background: 'transparent', color: '#1d4ed8', padding: 0, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }}>{project.name}</button>{(project.project_no || project.code) && <div style={{ color: '#94a3b8', marginTop: 3 }}>{project.project_no || project.code}</div>}</Td><Td>{project.product_category || productNameById.get(project.product_id ?? 0) || '-'}</Td><Td>{[project.project_level, project.project_type].filter(Boolean).join(' / ') || '-'}</Td><Td>{departmentsForProject || '-'}</Td><Td>{project.current_stage || '-'} · {legacyStatus === 'paused' ? '暂停' : legacyStatus === 'shipped' ? '已出货' : '进行中'}</Td><Td>{project.patent_count ?? 0}</Td><Td><RowActions onEdit={() => { setEditingProjectId(project.id); setProjectForm({ ...emptyProject, name: project.name, project_no: project.project_no || project.code || '', product_id: project.product_id ? String(project.product_id) : '', product_category: project.product_category || '', department_ids: (project.department_ids || []).map(String), project_level: project.project_level || '', project_type: project.project_type || '', brands: (project.brands || []).join(', '), project_manager: project.project_manager || '', research_owner: project.research_owner || '', shipping_regions: project.shipping_regions || '', current_stage: project.current_stage || '', product_model: project.product_model || '', module: project.module || '', status: legacyStatus || 'in_progress', start_date: project.start_date || '', end_date: project.end_date || '', description: project.description || '' }) }} onDelete={() => void remove(`项目“${project.name}”`, () => projectApi.delete(project.id), () => setProjects(current => current.filter(item => item.id !== project.id)))} /></Td></tr>
+        const productLinesForProject = productLines.filter(line => (project.product_line_ids || []).includes(line.id)).map(line => line.name).join('、')
+        return <tr key={project.id}><Td><button type="button" onClick={() => navigate(`/projects/${project.id}`)} style={{ border: 0, background: 'transparent', color: '#1d4ed8', padding: 0, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }}>{project.name}</button>{(project.project_no || project.code) && <div style={{ color: '#94a3b8', marginTop: 3 }}>{project.project_no || project.code}</div>}</Td><Td>{project.product_category || productNameById.get(project.product_id ?? 0) || '-'}</Td><Td>{[project.project_level, project.project_type].filter(Boolean).join(' / ') || '-'}</Td><Td>{productLinesForProject || '-'}</Td><Td>{project.current_stage || '-'} · {legacyStatus === 'paused' ? '暂停' : legacyStatus === 'shipped' ? '已出货' : '进行中'}</Td><Td>{project.patent_count ?? 0}</Td><Td><RowActions onEdit={() => { setEditingProjectId(project.id); setProjectForm({ ...emptyProject, name: project.name, project_no: project.project_no || project.code || '', product_id: project.product_id ? String(project.product_id) : '', product_category: project.product_category || '', product_line_ids: (project.product_line_ids || []).map(String), project_level: project.project_level || '', project_type: project.project_type || '', brands: (project.brands || []).join(', '), project_manager: project.project_manager || '', research_owner: project.research_owner || '', shipping_regions: project.shipping_regions || '', current_stage: project.current_stage || '', product_model: project.product_model || '', module: project.module || '', status: legacyStatus || 'in_progress', start_date: project.start_date || '', end_date: project.end_date || '', description: project.description || '' }) }} onDelete={() => void remove(`项目“${project.name}”`, () => projectApi.delete(project.id), () => setProjects(current => current.filter(item => item.id !== project.id)))} /></Td></tr>
       })}</tbody></TableShell>{projects.length === 0 && <EmptyState text="暂无项目" />}
     </>
   )
