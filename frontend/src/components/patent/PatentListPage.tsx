@@ -766,6 +766,28 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     try { sessionStorage.setItem(tableScopeKey, JSON.stringify(snapshot)) } catch { /* session storage is optional */ }
   }, [page, tableScopeKey])
 
+  const scrollLibraryTo = useCallback((edge: 'top' | 'bottom') => {
+    const element = tableWrapperRef.current
+    if (!element) return
+    element.scrollTo({
+      top: edge === 'top' ? 0 : element.scrollHeight,
+      behavior: 'smooth',
+    })
+  }, [])
+
+  useEffect(() => {
+    const handleLibraryShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.isContentEditable || (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      if (event.key !== 'Home' && event.key !== 'End') return
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) return
+      event.preventDefault()
+      scrollLibraryTo(event.key === 'Home' ? 'top' : 'bottom')
+    }
+    document.addEventListener('keydown', handleLibraryShortcut)
+    return () => document.removeEventListener('keydown', handleLibraryShortcut)
+  }, [scrollLibraryTo])
+
   const openPatent = useCallback((patentId: number) => {
     saveTablePosition()
     onPatentClick(patentId)
@@ -3109,6 +3131,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </ToolbarMenu>
             )}
             <div className="datagrid-view-actions" aria-label="常用表格工具">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => scrollLibraryTo('top')} title="滚动到库顶部（Ctrl/Cmd + Home）" aria-label="滚动到库顶部"><Icon name="chevron-up" size={14} /></button>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => scrollLibraryTo('bottom')} title="滚动到库底部（Ctrl/Cmd + End）" aria-label="滚动到库底部"><Icon name="chevron-down" size={14} /></button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
               {activeView && activeView.layout_type === 'table' && (
                 <>
