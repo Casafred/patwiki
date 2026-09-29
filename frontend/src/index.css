@@ -4697,6 +4697,9 @@ body {
 
 .main-content {
   background: var(--canvas);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .header {
@@ -4782,6 +4785,9 @@ body {
 
 .content-area {
   background: var(--canvas);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .datagrid-toolbar {
@@ -6788,6 +6794,8 @@ body {
   flex-direction: column;
   gap: 18px;
   min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .project-wiki-section {
@@ -7016,6 +7024,17 @@ body {
 .attachment-library-file a {
   color: #1d4ed8;
   overflow-wrap: anywhere;
+}
+.attachment-library-file-link {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
 }
 
 .project-attachment-main span,

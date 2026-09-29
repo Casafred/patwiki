@@ -8,6 +8,7 @@ from app.models import (
     Product, ProductLine, Project, ProjectHistory, Tag, TagGroup,
     CustomField, Department, Person, CustomFieldType,
     Patent,
+    User,
 )
 from app.schemas.schemas import (
     Product as ProductSchema, ProductCreate, ProductUpdate,
@@ -62,7 +63,10 @@ def list_products(
 
 @router.post("/products", response_model=ProductSchema)
 def create_product(product_in: ProductCreate, db: Session = Depends(get_db)):
-    product = Product(**product_in.model_dump())
+    values = product_in.model_dump()
+    if values.get("owner_user_id") is not None and not db.query(User.id).filter(User.id == values["owner_user_id"], User.is_active == True).first():
+        raise BadRequestException("产品负责人账号不存在或已停用")
+    product = Product(**values)
     db.add(product)
     db.commit()
     db.refresh(product)
@@ -74,7 +78,10 @@ def update_product(product_id: int, product_in: ProductUpdate, db: Session = Dep
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise NotFoundException("Product not found")
-    for field, value in product_in.model_dump(exclude_unset=True).items():
+    values = product_in.model_dump(exclude_unset=True)
+    if values.get("owner_user_id") is not None and not db.query(User.id).filter(User.id == values["owner_user_id"], User.is_active == True).first():
+        raise BadRequestException("产品负责人账号不存在或已停用")
+    for field, value in values.items():
         setattr(product, field, value)
     db.commit()
     db.refresh(product)

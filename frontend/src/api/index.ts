@@ -240,6 +240,8 @@ export const attachmentApi = {
     api.patch(`/attachments/${attachmentId}`, data),
   download: (attachmentId: number, preview = false): Promise<Blob> =>
     api.get(`/attachments/${attachmentId}/${preview ? 'preview' : 'download'}`, { responseType: 'blob' }),
+  downloadProject: (attachmentId: number, preview = false): Promise<Blob> =>
+    api.get(`/attachments/project/${attachmentId}/${preview ? 'preview' : 'download'}`, { responseType: 'blob' }),
   remove: (attachmentId: number): Promise<{ success: boolean }> =>
     api.delete(`/attachments/${attachmentId}`),
 }

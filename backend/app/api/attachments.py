@@ -55,7 +55,7 @@ def list_attachment_library(db: Session = Depends(get_db)):
     for attachment in db.query(Attachment).order_by(Attachment.uploaded_at.desc(), Attachment.id.desc()).all():
         item = AttachmentService._metadata(attachment)
         patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first()
-        item["owner_label"] = f"专利 · {patent.title if patent else '已删除专利'}"
+        item["owner_label"] = f"专利 · {patent.publication_number if patent and patent.publication_number else '无公开号'} · {patent.title if patent else '已删除专利'}"
         items.append(item)
     for attachment in db.query(ProjectAttachment).order_by(ProjectAttachment.uploaded_at.desc(), ProjectAttachment.id.desc()).all():
         item = ProjectAttachmentService._metadata(attachment)
@@ -63,7 +63,7 @@ def list_attachment_library(db: Session = Depends(get_db)):
         patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first() if attachment.patent_id else None
         item["owner_label"] = f"项目 · {project.name if project else '已删除项目'}"
         if patent:
-            item["owner_label"] += f" · 关联专利：{patent.title}"
+            item["owner_label"] += f" · 关联专利：{patent.publication_number if patent.publication_number else '无公开号'} · {patent.title}"
         items.append(item)
     return sorted(items, key=lambda item: item.get("uploaded_at") or "", reverse=True)
 

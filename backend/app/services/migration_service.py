@@ -121,6 +121,7 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("custom_fields", "formula_config", "ALTER TABLE custom_fields ADD COLUMN formula_config JSON"),
     _column("patents", "view_id", "ALTER TABLE patents ADD COLUMN view_id INTEGER REFERENCES patent_views(id)"),
     _column("people", "user_id", "ALTER TABLE people ADD COLUMN user_id INTEGER REFERENCES users(id)"),
+    _column("products", "owner_user_id", "ALTER TABLE products ADD COLUMN owner_user_id INTEGER REFERENCES users(id)"),
     _column("users", "department_id", "ALTER TABLE users ADD COLUMN department_id INTEGER REFERENCES departments(id)"),
     _column("users", "employee_no", "ALTER TABLE users ADD COLUMN employee_no VARCHAR(50)"),
     _column("users", "group_id", "ALTER TABLE users ADD COLUMN group_id INTEGER REFERENCES departments(id)"),

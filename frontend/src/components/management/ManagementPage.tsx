@@ -5,6 +5,7 @@ import {
   personApi,
   productApi,
   productLineApi,
+  sharingApi,
   projectApi,
   tagApi,
   tagGroupApi,
@@ -14,6 +15,7 @@ import type {
   Person,
   Product,
   ProductLine,
+  User,
   Project,
   Tag,
   TagGroup,
@@ -165,6 +167,7 @@ interface ProductForm {
   code: string
   product_line_id: string
   owner_id: string
+  owner_user_id: string
   category: string
   description: string
   is_active: boolean
@@ -228,7 +231,7 @@ interface ProductLineForm {
   description: string
 }
 
-const emptyProduct: ProductForm = { name: '', code: '', product_line_id: '', owner_id: '', category: '', description: '', is_active: true }
+const emptyProduct: ProductForm = { name: '', code: '', product_line_id: '', owner_id: '', owner_user_id: '', category: '', description: '', is_active: true }
 const emptyProject: ProjectForm = { name: '', project_no: '', product_id: '', product_category: '', product_line_ids: [], project_level: '', project_type: '', brands: '', project_manager: '', research_owner: '', shipping_regions: '', current_stage: '', product_model: '', module: '', status: 'in_progress', start_date: '', end_date: '', description: '' }
 const emptyTag: TagForm = { name: '', group_id: '', color: '#3b82f6', description: '' }
 const emptyTagGroup: TagGroupForm = { name: '', color: '#64748b', description: '' }
@@ -252,6 +255,7 @@ export default function ManagementPage() {
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [people, setPeople] = useState<Person[]>([])
+  const [accounts, setAccounts] = useState<User[]>([])
   const [productLines, setProductLines] = useState<ProductLine[]>([])
 
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
@@ -269,6 +273,8 @@ export default function ManagementPage() {
   const [editingProductLineId, setEditingProductLineId] = useState<number | null>(null)
   const [productLineForm, setProductLineForm] = useState<ProductLineForm>(emptyProductLine)
   const [showProductForm, setShowProductForm] = useState(false)
+  const [bulkCategoryText, setBulkCategoryText] = useState('')
+  const [bulkCategorySaving, setBulkCategorySaving] = useState(false)
   const [showProjectForm, setShowProjectForm] = useState(false)
   const [showTagForm, setShowTagForm] = useState(false)
   const [showTagGroupForm, setShowTagGroupForm] = useState(false)
@@ -280,9 +286,9 @@ export default function ManagementPage() {
     setLoading(true)
     setError('')
     try {
-      const [loadedProducts, loadedProjects, loadedTags, loadedGroups, loadedDepartments, loadedPeople, loadedLines] = await Promise.all([
+      const [loadedProducts, loadedProjects, loadedTags, loadedGroups, loadedDepartments, loadedPeople, loadedLines, loadedUsers] = await Promise.all([
         productApi.list(), projectApi.list(), tagApi.list(), tagGroupApi.list(),
-        departmentApi.list(), personApi.list(), productLineApi.list(),
+        departmentApi.list(), personApi.list(), productLineApi.list(), sharingApi.listUsers(),
       ])
       setProducts(loadedProducts)
       setProjects(loadedProjects)
@@ -291,6 +297,7 @@ export default function ManagementPage() {
       setDepartments(loadedDepartments)
       setPeople(loadedPeople)
       setProductLines(loadedLines)
+      setAccounts(loadedUsers)
     } catch (loadError: unknown) {
       setError(getErrorMessage(loadError, '管理数据加载失败'))
     } finally {
@@ -309,7 +316,7 @@ export default function ManagementPage() {
   const personNameById = useMemo(() => new Map(people.map(person => [person.id, person.name])), [people])
   // 项目“产品分类”的下拉选项来自产品管理中维护的分类，去重后排序。
   const productCategories = useMemo(
-    () => Array.from(new Set(products.map(product => product.category).filter((value): value is string => !!value))).sort(),
+    () => Array.from(new Set(products.flatMap(product => [product.name, product.category]).filter((value): value is string => !!value))).sort(),
     [products],
   )
 
@@ -336,6 +343,7 @@ export default function ManagementPage() {
       const payload = {
         name: productForm.name.trim(), code: productForm.code.trim() || undefined,
         product_line_id: optionalNumber(productForm.product_line_id), owner_id: optionalNumber(productForm.owner_id),
+        owner_user_id: optionalNumber(productForm.owner_user_id),
         category: productForm.category.trim() || undefined, description: productForm.description.trim() || undefined,
         is_active: productForm.is_active,
       }
@@ -343,6 +351,16 @@ export default function ManagementPage() {
       setProducts(current => editingProductId ? current.map(item => item.id === result.id ? result : item) : [...current, result])
       setEditingProductId(null); setProductForm(emptyProduct); setShowProductForm(false)
     } catch (actionError: unknown) { fail(actionError) } finally { setSaving(false) }
+  }
+
+  const saveBulkCategories = async () => {
+    const names = [...new Set(bulkCategoryText.split(/\r?\n/).map(value => value.trim()).filter(Boolean))]
+    if (!names.length) return
+    setBulkCategorySaving(true); setError('')
+    try {
+      const created = await Promise.all(names.map(name => productApi.create({ name, category: name, is_active: true })))
+      setProducts(current => [...current, ...created]); setBulkCategoryText('')
+    } catch (cause) { fail(cause) } finally { setBulkCategorySaving(false) }
   }
 
   const saveProject = async () => {
@@ -445,7 +463,7 @@ export default function ManagementPage() {
             <FormField label="产品名称"><input className="form-input" style={inputStyle} value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} /></FormField>
             <FormField label="产品编码"><input className="form-input" style={inputStyle} value={productForm.code} onChange={e => setProductForm({ ...productForm, code: e.target.value })} /></FormField>
             <FormField label="产品线"><select className="form-input" style={inputStyle} value={productForm.product_line_id} onChange={e => setProductForm({ ...productForm, product_line_id: e.target.value })}><option value="">未关联</option>{productLines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}</select></FormField>
-            <FormField label="负责人"><select className="form-input" style={inputStyle} value={productForm.owner_id} onChange={e => setProductForm({ ...productForm, owner_id: e.target.value })}><option value="">未指定</option>{people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></FormField>
+            <FormField label="负责人账号"><select className="form-input" style={inputStyle} value={productForm.owner_user_id} onChange={e => setProductForm({ ...productForm, owner_user_id: e.target.value })}><option value="">未指定</option>{accounts.filter(account => account.is_active !== false).map(account => <option key={account.id} value={account.id}>{account.display_name || account.username}{account.employee_no ? ` · ${account.employee_no}` : ` · ${account.username}`}</option>)}</select></FormField>
             <FormField label="分类"><input className="form-input" style={inputStyle} value={productForm.category} onChange={e => setProductForm({ ...productForm, category: e.target.value })} /></FormField>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 20, color: '#475569', fontSize: 12 }}><input type="checkbox" checked={productForm.is_active} onChange={e => setProductForm({ ...productForm, is_active: e.target.checked })} />启用</label>
           </div>
@@ -453,7 +471,11 @@ export default function ManagementPage() {
           <div className="management-form-actions"><button className="btn btn-primary" disabled={saving} onClick={() => void saveProduct()}>{saving ? '保存中...' : editingProductId ? '保存修改' : '创建产品'}</button><button className="btn btn-secondary" onClick={() => { setEditingProductId(null); setProductForm(emptyProduct); setShowProductForm(false) }}>取消</button></div>
         </div>
       )}
-      <TableShell><TableHead><Th>产品</Th><Th>编码</Th><Th>产品线</Th><Th>负责人</Th><Th>专利数</Th><Th>状态</Th><Th>操作</Th></TableHead><tbody>{products.map(product => <tr key={product.id}><Td><strong>{product.name}</strong>{product.category && <div style={{ color: '#94a3b8', marginTop: 3 }}>{product.category}</div>}</Td><Td muted>{product.code || '-'}</Td><Td>{productLineNameById.get(product.product_line_id ?? 0) || '-'}</Td><Td>{personNameById.get(product.owner_id ?? 0) || '-'}</Td><Td>{product.patent_count ?? 0}</Td><Td>{product.is_active === false ? '已停用' : '启用'}</Td><Td><RowActions onEdit={() => { setEditingProductId(product.id); setProductForm({ name: product.name, code: product.code || '', product_line_id: product.product_line_id ? String(product.product_line_id) : '', owner_id: product.owner_id ? String(product.owner_id) : '', category: product.category || '', description: product.description || '', is_active: product.is_active !== false }) }} onDelete={() => void remove(`产品“${product.name}”`, () => productApi.delete(product.id), () => setProducts(current => current.filter(item => item.id !== product.id)))} /></Td></tr>)}</tbody></TableShell>
+      <div className="management-form compact">
+        <FormField label="批量录入产品品类"><textarea className="form-input" style={{ ...inputStyle, minHeight: 90 }} value={bulkCategoryText} onChange={event => setBulkCategoryText(event.target.value)} placeholder="每行一个品类名称，可直接粘贴整列文本" /></FormField>
+        <div className="management-form-actions"><button className="btn btn-secondary" disabled={bulkCategorySaving || !bulkCategoryText.trim()} onClick={() => void saveBulkCategories()}>{bulkCategorySaving ? '创建中…' : '逐行创建品类'}</button></div>
+      </div>
+      <TableShell><TableHead><Th>产品</Th><Th>编码</Th><Th>产品线</Th><Th>负责人账号</Th><Th>专利数</Th><Th>状态</Th><Th>操作</Th></TableHead><tbody>{products.map(product => <tr key={product.id}><Td><strong>{product.name}</strong>{product.category && <div style={{ color: '#94a3b8', marginTop: 3 }}>{product.category}</div>}</Td><Td muted>{product.code || '-'}</Td><Td>{productLineNameById.get(product.product_line_id ?? 0) || '-'}</Td><Td>{accounts.find(account => account.id === product.owner_user_id)?.display_name || accounts.find(account => account.id === product.owner_user_id)?.username || personNameById.get(product.owner_id ?? 0) || '-'}</Td><Td>{product.patent_count ?? 0}</Td><Td>{product.is_active === false ? '已停用' : '启用'}</Td><Td><RowActions onEdit={() => { setEditingProductId(product.id); setProductForm({ name: product.name, code: product.code || '', product_line_id: product.product_line_id ? String(product.product_line_id) : '', owner_id: product.owner_id ? String(product.owner_id) : '', owner_user_id: product.owner_user_id ? String(product.owner_user_id) : '', category: product.category || '', description: product.description || '', is_active: product.is_active !== false }) }} onDelete={() => void remove(`产品“${product.name}”`, () => productApi.delete(product.id), () => setProducts(current => current.filter(item => item.id !== product.id)))} /></Td></tr>)}</tbody></TableShell>
       {products.length === 0 && <EmptyState text="暂无产品" />}
     </>
   )

@@ -846,7 +846,7 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
           ) : <div className="field-value">{formatApiDate(patent.priority_date)}</div>}
       </Field>
 
-      <Field label="所属产品">
+      <Field label="产品品类">
         {editing ? (
           <select className="form-input" value={formData.product_id || ''} onChange={e => updateField('product_id', e.target.value ? Number(e.target.value) : null)}>
             <option value="">未关联</option>

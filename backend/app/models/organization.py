@@ -67,6 +67,7 @@ class Product(Base):
     code = Column(String(50))
     product_line_id = Column(Integer, ForeignKey("product_lines.id"))
     owner_id = Column(Integer, ForeignKey("people.id"))
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     description = Column(Text)
     category = Column(String(100))
     is_active = Column(Boolean, default=True)
@@ -75,5 +76,6 @@ class Product(Base):
 
     product_line = relationship("ProductLine", back_populates="products")
     owner = relationship("Person", back_populates="owned_products")
+    owner_user = relationship("User", foreign_keys=[owner_user_id])
     projects = relationship("Project", back_populates="product")
     patents = relationship("Patent", back_populates="product")

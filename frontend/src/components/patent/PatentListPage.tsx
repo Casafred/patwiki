@@ -13,7 +13,7 @@ import {
   syncService as syncApi,
   semanticSearchService,
 } from '../../services'
-import { databaseApi } from '../../api'
+import { databaseApi, tagApi as tagManagementApi } from '../../api'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
@@ -658,6 +658,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [bulkTagIds, setBulkTagIds] = useState<number[]>([])
   const [bulkTagMode, setBulkTagMode] = useState<'add' | 'remove' | 'replace'>('add')
   const [bulkTagLoading, setBulkTagLoading] = useState(false)
+  const [bulkCategoryTag, setBulkCategoryTag] = useState('')
   const [filterValues, setFilterValues] = useState<FilterState>(() => readFilterParam(searchParams))
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [relationData, setRelationData] = useState<Record<string, Record<number, RelationCellData>>>({})
@@ -2553,17 +2554,25 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   const handleBulkTagSave = async () => {
-    if (bulkTagIds.length === 0) {
+    let tagIds = bulkTagIds
+    if (bulkCategoryTag) {
+      const existing = tagsList.find(tag => tag.name === bulkCategoryTag)
+      const categoryTag = existing || await tagManagementApi.create({ name: bulkCategoryTag, color: '#0f766e' })
+      if (!existing) setTagsList(current => [...current, categoryTag])
+      tagIds = [...new Set([...tagIds, categoryTag.id])]
+    }
+    if (tagIds.length === 0) {
       alert('请至少选择一个标签')
       return
     }
     try {
-      const result = await patentApi.bulkTag(selectedIds, bulkTagIds, bulkTagMode)
+      const result = await patentApi.bulkTag(selectedIds, tagIds, bulkTagMode)
       const actionText = bulkTagMode === 'add' ? '添加' : bulkTagMode === 'remove' ? '移除' : '替换'
       alert(`已为 ${result.updated_count} 条专利${actionText}标签`)
       setShowBulkTag(false)
       setBulkTagIds([])
       setBulkTagMode('add')
+      setBulkCategoryTag('')
       clearSelection()
       loadPatents()
     } catch (error: unknown) {
@@ -3954,8 +3963,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 </select>
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>技术分类</label>
-                <input className="form-input" value={bulkCategory} onChange={e => setBulkCategory(e.target.value)} placeholder="如：光学/成像" />
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>产品品类</label>
+                <input className="form-input" list="patent-product-categories" value={bulkCategory} onChange={e => setBulkCategory(e.target.value)} placeholder="选择或输入产品品类" />
+                <datalist id="patent-product-categories">{Array.from(new Set(products.flatMap(product => [product.name, product.category]).filter(Boolean))).map(category => <option key={category} value={category} />)}</datalist>
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>申请人</label>
@@ -4065,6 +4075,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </p>
             </div>
             <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>快速使用产品品类作为标签</label>
+              <select className="form-input" value={bulkCategoryTag} onChange={event => setBulkCategoryTag(event.target.value)}>
+                <option value="">不添加产品品类标签</option>
+                {Array.from(new Set(products.flatMap(product => [product.name, product.category]).filter(Boolean))).map(category => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </div>
+            <div>
               <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
                 选择标签 {bulkTagLoading && '（加载中...）'}
               </label>
@@ -4107,7 +4124,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             )}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary" onClick={() => setShowBulkTag(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleBulkTagSave} disabled={bulkTagIds.length === 0}>
+              <button className="btn btn-primary" onClick={handleBulkTagSave} disabled={bulkTagIds.length === 0 && !bulkCategoryTag}>
                 确认
               </button>
             </div>

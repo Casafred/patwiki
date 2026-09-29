@@ -25,6 +25,29 @@ function display(value: unknown): string {
   return String(value)
 }
 
+async function openProjectAttachment(item: AttachmentMeta, preview: boolean) {
+  const popup = preview ? window.open('', '_blank') : null
+  try {
+    const blob = await attachmentApi.downloadProject(item.attachment_id, preview)
+    const url = URL.createObjectURL(blob)
+    if (popup) {
+      popup.location.href = url
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } else {
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = item.filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 5_000)
+    }
+  } catch (cause) {
+    popup?.close()
+    throw cause
+  }
+}
+
 function fieldValue(project: Project, key: string, productLines: ProductLine[], products: Product[]): string {
   if (key === 'product_line_ids') return productLines.filter(item => (project.product_line_ids || []).includes(item.id)).map(item => item.name).join('、') || '未填写'
   if (key === 'product_id') return products.find(item => item.id === project.product_id)?.name || '未填写'
@@ -168,14 +191,14 @@ export default function ProjectWikiPage() {
           <button type="button" className={scope === 'project' ? 'active' : ''} onClick={() => setScope('project')}>项目资料</button>
           <button type="button" className={scope === 'project_patent' ? 'active' : ''} onClick={() => setScope('project_patent')}>项目与专利关系说明</button>
         </div>
-        {scope === 'project_patent' && <select className="form-input" value={patentId} onChange={event => setPatentId(event.target.value)}><option value="">选择关联专利</option>{patents.map(patent => <option key={patent.id} value={patent.id}>{patent.application_number || patent.publication_number || patent.title} · {patent.title}</option>)}</select>}
+        {scope === 'project_patent' && <select className="form-input" value={patentId} onChange={event => setPatentId(event.target.value)}><option value="">选择关联专利</option>{patents.map(patent => <option key={patent.id} value={patent.id}>{patent.publication_number || '无公开号'} · {patent.title}</option>)}</select>}
         <input type="file" onChange={event => setUploadFile(event.target.files?.[0] || null)} />
         <input className="form-input" placeholder="附件备注" value={uploadNote} onChange={event => setUploadNote(event.target.value)} />
         <button className="btn btn-primary" disabled={!uploadFile || saving || (scope === 'project_patent' && !patentId)} onClick={() => void upload()}><Icon name="file" size={15} />{saving ? '上传中…' : '上传附件'}</button>
       </div>
       <div className="project-attachment-list">{attachments.map(item => <article key={item.id} className="project-attachment-row">
-        <div className="project-attachment-main"><a href={item.download_url} target="_blank" rel="noreferrer">{item.filename}</a><span>{item.scope === 'project_patent' ? `项目/专利关系说明 · ${patents.find(patent => patent.id === item.patent_id)?.title || `专利 #${item.patent_id}`}` : '项目资料'} · {(item.file_size / 1024).toFixed(1)} KB</span>{editingNoteId === item.attachment_id ? <div className="project-attachment-note-edit"><input className="form-input" value={editingNote} onChange={event => setEditingNote(event.target.value)} /><button className="btn btn-secondary" onClick={() => void saveNote(item.attachment_id)}>保存备注</button><button className="btn btn-ghost" onClick={() => setEditingNoteId(null)}>取消</button></div> : <small>{item.note || '无备注'}</small>}</div>
-        <div style={{ display: 'flex', gap: 6 }}><button className="btn btn-secondary" onClick={() => { setEditingNoteId(item.attachment_id); setEditingNote(item.note || '') }}>备注</button><button className="btn btn-danger" onClick={() => void removeAttachment(item)}>删除</button></div>
+        <div className="project-attachment-main"><button type="button" className="attachment-library-file-link" onClick={() => void openProjectAttachment(item, true).catch(cause => setError(getErrorMessage(cause, '附件预览失败')))}>{item.filename}</button><span>{item.scope === 'project_patent' ? `项目/专利关系说明 · ${patents.find(patent => patent.id === item.patent_id)?.publication_number || '无公开号'} · ${patents.find(patent => patent.id === item.patent_id)?.title || `专利 #${item.patent_id}`}` : '项目资料'} · {(item.file_size / 1024).toFixed(1)} KB</span>{editingNoteId === item.attachment_id ? <div className="project-attachment-note-edit"><input className="form-input" value={editingNote} onChange={event => setEditingNote(event.target.value)} /><button className="btn btn-secondary" onClick={() => void saveNote(item.attachment_id)}>保存备注</button><button className="btn btn-ghost" onClick={() => setEditingNoteId(null)}>取消</button></div> : <small>{item.note || '无备注'}</small>}</div>
+        <div style={{ display: 'flex', gap: 6 }}><button className="btn btn-secondary" onClick={() => void openProjectAttachment(item, true).catch(cause => setError(getErrorMessage(cause, '附件预览失败')))}>预览</button><button className="btn btn-secondary" onClick={() => void openProjectAttachment(item, false).catch(cause => setError(getErrorMessage(cause, '附件下载失败')))}>下载</button><button className="btn btn-secondary" onClick={() => { setEditingNoteId(item.attachment_id); setEditingNote(item.note || '') }}>备注</button><button className="btn btn-danger" onClick={() => void removeAttachment(item)}>删除</button></div>
       </article>)}{attachments.length === 0 && <div style={{ color: '#94a3b8', padding: '14px 0' }}>暂无项目附件</div>}</div>
     </section>
 

@@ -127,6 +127,7 @@ class ProductBase(BaseSchema):
     code: Optional[str] = None
     product_line_id: Optional[int] = None
     owner_id: Optional[int] = None
+    owner_user_id: Optional[int] = None
     description: Optional[str] = None
     category: Optional[str] = None
     is_active: Optional[bool] = True
@@ -141,6 +142,7 @@ class ProductUpdate(BaseSchema):
     code: Optional[str] = None
     product_line_id: Optional[int] = None
     owner_id: Optional[int] = None
+    owner_user_id: Optional[int] = None
     description: Optional[str] = None
     category: Optional[str] = None
     is_active: Optional[bool] = None

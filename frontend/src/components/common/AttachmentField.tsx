@@ -48,25 +48,27 @@ export default function AttachmentField({ patentId, databaseId, fieldKey, value,
     if (index >= 0) setLightboxIndex(index)
   }
 
-  const openFile = (attachment: AttachmentMeta, preview: boolean) => {
-    // Use direct URL navigation instead of fetching a blob. The backend already
-    // sets Content-Disposition: inline (preview) / attachment (download), so the
-    // browser/webview handles display or save natively. This avoids the fragile
-    // pattern of pre-opening a blank popup and navigating it to a blob: URL
-    // after an async gap, which fails in Tauri's webview and triggers popup
-    // blockers in browsers.
-    const url = resolveUrl(preview ? attachment.preview_url : attachment.download_url)
-    const a = document.createElement('a')
-    a.href = url
-    if (preview) {
-      a.target = '_blank'
-      a.rel = 'noopener'
-    } else {
-      a.download = attachment.filename
+  const openFile = async (attachment: AttachmentMeta, preview: boolean) => {
+    const popup = preview ? window.open('', '_blank') : null
+    try {
+      const blob = await attachmentApi.download(attachment.attachment_id, preview)
+      const url = URL.createObjectURL(blob)
+      if (popup) {
+        popup.location.href = url
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      } else {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = attachment.filename
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        window.setTimeout(() => URL.revokeObjectURL(url), 5_000)
+      }
+    } catch (requestError: unknown) {
+      popup?.close()
+      setError(getErrorMessage(requestError, preview ? '附件预览失败' : '附件下载失败'))
     }
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
   }
 
   const upload = async (file: File) => {

@@ -531,6 +531,7 @@ export interface Product {
   code?: string
   product_line_id?: number
   owner_id?: number
+  owner_user_id?: number
   description?: string
   category?: string
   is_active?: boolean
