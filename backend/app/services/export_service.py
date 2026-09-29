@@ -40,10 +40,24 @@ def _json_safe(value: Any) -> Any:
 class ExportService:
     """统一处理视图筛选、字段投影和文件格式化。"""
 
+    BUSINESS_VIEW_KEYS = {
+        "risk_meeting_statistics", "company_filing_category", "ip_risk_control",
+        "ip_application_control", "product_category_master", "daily_patent_accumulation",
+    }
+
+    @staticmethod
+    def _business_view_field_keys(view) -> list[str]:
+        columns = [item for item in (view.column_config or []) if isinstance(item, dict) and item.get("visible", True)]
+        columns.sort(key=lambda item: item.get("order", 0))
+        return list(dict.fromkeys(str(item.get("key")) for item in columns if item.get("key")))
+
     @staticmethod
     def ensure_default_templates(db: Session, database_id: int) -> list[PatentExportTemplate]:
         """为新建数据库补齐系统工作文件模板，保持与启动初始化幂等。"""
         from app.models import PatentView
+        from app.services.view_service import ViewService
+
+        ViewService.ensure_default_business_views(db, database_id)
 
         view_by_key = {
             view.template_key: view
@@ -52,7 +66,11 @@ class ExportService:
         }
         definitions = [
             ("risk_meeting_excel", "风险会风险统计表 · Excel", "excel", "risk_meeting_statistics", ["application_number", "publication_number", "title", "country", "risk_level", "risk_description", "legal_status"], "risk_level"),
+            ("company_filing_category_excel", "品类我司专利申请类 · Excel", "excel", "company_filing_category", ["application_number", "publication_number", "title", "category", "subcategory", "applicant", "filing_date", "legal_status"], None),
+            ("ip_risk_control_excel", "IP事务管控表之风险管控表 · Excel", "excel", "ip_risk_control", ["application_number", "publication_number", "title", "applicant", "category", "risk_level", "risk_description", "legal_status"], None),
             ("ip_application_control_excel", "IP事务管控表之申请管控表 · Excel", "excel", "ip_application_control", ["application_number", "publication_number", "grant_number", "title", "applicant", "inventor", "agent", "filing_date", "publication_date", "grant_date", "application_status", "legal_status"], None),
+            ("product_category_master_excel", "产品品类数据总库 · Excel", "excel", "product_category_master", ["application_number", "publication_number", "title", "category", "subcategory", "module", "ipc_main", "applicant", "legal_status"], None),
+            ("daily_patent_accumulation_excel", "日常相关专利积累 · Excel", "excel", "daily_patent_accumulation", ["application_number", "publication_number", "title", "country", "category", "subcategory", "applicant", "ipc_main", "legal_status", "notes"], None),
             ("patent_analysis_work_file", "专利检索分析工作文件 · Word", "word", "daily_patent_accumulation", ["publication_number", "title", "abstract", "claims", "applicant", "inventor", "ipc_main", "priority_date", "legal_status", "risk_level", "notes"], None),
             ("daily_patent_accumulation_csv", "日常相关专利积累 · CSV", "csv", "daily_patent_accumulation", ["application_number", "publication_number", "title", "country", "category", "subcategory", "applicant", "ipc_main", "legal_status", "notes"], None),
         ]
@@ -79,6 +97,11 @@ class ExportService:
                     is_system=True,
                 )
                 db.add(template)
+            else:
+                view = view_by_key.get(view_key)
+                if template.is_system and view and template.view_id != view.id:
+                    template.view_id = view.id
+                    db.add(template)
             result.append(template)
         db.commit()
         for template in result:
@@ -157,6 +180,8 @@ class ExportService:
                 view_id = template.view_id
             if field_keys is None:
                 field_keys = list(template.field_keys or []) or None
+            if template.is_system and template.view and template.view.template_key in cls.BUSINESS_VIEW_KEYS:
+                field_keys = cls._business_view_field_keys(template.view) or field_keys
             merged_template_filters = dict(template.filter_config or {})
             merged_template_filters.update(filters or {})
             filters = merged_template_filters
@@ -182,6 +207,8 @@ class ExportService:
                 configured_groups = (view.group_by_config or {}).get("fields", [])
                 if configured_groups:
                     group_by = configured_groups[0].get("field")
+            if field_keys is None and view.template_key in cls.BUSINESS_VIEW_KEYS:
+                field_keys = cls._business_view_field_keys(view) or None
         if template is not None and not sort_by:
             template_sort = template.sort_config or {}
             sort_by = template_sort.get("sort_by")

@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException
+from app.core.time import utc_now_naive
+from app.services.patent_database_scope import in_database
 from app.database import get_db
 from app.integrations.contracts import ProviderIdentifier
 from app.integrations.credentials import CredentialStoreError, validate_credential_ref
@@ -17,6 +19,7 @@ from app.models import (
     SavedPatentQuery,
     SyncRun,
     SyncSubscription,
+    Patent,
     SyncUpdateBatch,
     WatchEvent,
 )
@@ -331,12 +334,29 @@ def create_subscription(body: SubscriptionCreate, db: Session = Depends(get_db))
         query = db.query(SavedPatentQuery).filter(SavedPatentQuery.id == body.saved_query_id).first()
         if not query or query.database_id != body.database_id:
             raise BadRequestException("检索式不存在或不属于目标数据库")
-    values = body.model_dump()
-    if body.enabled and not body.schedule_json:
+    values = body.model_dump(exclude={"tracked_patent_ids", "status_strategies"})
+    tracked_patent_ids = list(dict.fromkeys(body.tracked_patent_ids))
+    if tracked_patent_ids:
+        matches = db.query(Patent.id).filter(Patent.id.in_(tracked_patent_ids), in_database(body.database_id)).all()
+        if len(matches) != len(tracked_patent_ids):
+            raise BadRequestException("指定专利必须全部属于当前数据库")
+        values["mode"] = "tracked_patents"
+        values["scope_json"] = {**(values.get("scope_json") or {}), "patent_ids": tracked_patent_ids}
+    schedule = dict(values.get("schedule_json") or {})
+    if body.status_strategies:
+        schedule["status_strategies"] = body.status_strategies
+    _validate_schedule(schedule)
+    values["schedule_json"] = schedule
+    if body.enabled and not schedule:
         values["schedule_json"] = {"interval_minutes": 1440}
     if values.get("enabled"):
-        from app.core.time import utc_now_naive
-        values["next_run_at"] = utc_now_naive()
+        if schedule.get("run_at") or schedule.get("start_at"):
+            values["next_run_at"] = SyncService.next_run_at(schedule) or utc_now_naive()
+        else:
+            values["next_run_at"] = utc_now_naive()
+    for patent_id in list((values.get("scope_json") or {}).get("patent_ids") or []):
+        if not db.query(Patent.id).filter(Patent.id == int(patent_id)).first():
+            raise BadRequestException(f"指定专利不存在：{patent_id}")
     return SyncService.subscription_dict(SyncService.create_subscription(db, values))
 
 
@@ -346,6 +366,13 @@ def update_subscription(subscription_id: int, body: SubscriptionUpdate, db: Sess
     if not subscription:
         raise NotFoundException("同步订阅不存在")
     values = body.model_dump(exclude_unset=True)
+    if "status_strategies" in values:
+        strategy = values.pop("status_strategies") or {}
+        schedule = dict(values.get("schedule_json") or subscription.schedule_json or {})
+        schedule["status_strategies"] = strategy
+        values["schedule_json"] = schedule
+    if "schedule_json" in values:
+        _validate_schedule(values["schedule_json"] or {})
     if "saved_query_id" in values and values["saved_query_id"] is not None:
         query = db.query(SavedPatentQuery).filter(SavedPatentQuery.id == values["saved_query_id"]).first()
         if not query or query.database_id != subscription.database_id:
@@ -353,11 +380,64 @@ def update_subscription(subscription_id: int, body: SubscriptionUpdate, db: Sess
     for key, value in values.items():
         setattr(subscription, key, value)
     if values.get("enabled") is True and subscription.next_run_at is None:
-        from app.core.time import utc_now_naive
         subscription.next_run_at = utc_now_naive()
+    if "schedule_json" in values and subscription.enabled:
+        schedule = subscription.schedule_json or {}
+        subscription.next_run_at = SyncService.next_run_at(schedule) if schedule.get("run_at") or schedule.get("start_at") else utc_now_naive()
+        if subscription.mode in {"patent_list", "tracked_patents"}:
+            due_times = []
+            strategies = schedule.get("status_strategies") or {}
+            for tracked in subscription.tracked_patents:
+                patent = db.query(Patent).filter(Patent.id == tracked.patent_id).first()
+                status = str(getattr(patent.legal_status, "value", patent.legal_status) or "unknown") if patent else "unknown"
+                policy = strategies.get(status) or {}
+                tracked.enabled = bool(policy.get("enabled", True))
+                tracked.next_run_at = subscription.next_run_at if tracked.enabled else None
+                if tracked.next_run_at:
+                    due_times.append(tracked.next_run_at)
+            subscription.next_run_at = min(due_times) if due_times else None
     db.commit()
     db.refresh(subscription)
     return SyncService.subscription_dict(subscription)
+
+
+def _validate_schedule(schedule: dict) -> None:
+    from app.models import LegalStatus
+    from datetime import datetime
+
+    if schedule.get("interval_days") is not None:
+        try:
+            days = int(schedule["interval_days"])
+        except (TypeError, ValueError) as exc:
+            raise BadRequestException("扫描间隔天数必须是整数") from exc
+        if days < 1 or days > 3650:
+            raise BadRequestException("扫描间隔天数必须在 1 到 3650 天之间")
+    if schedule.get("interval_minutes") is not None:
+        try:
+            minutes = int(schedule["interval_minutes"])
+        except (TypeError, ValueError) as exc:
+            raise BadRequestException("扫描间隔分钟必须是整数") from exc
+        if minutes < 1 or minutes > 525600:
+            raise BadRequestException("扫描间隔分钟必须在 1 到 525600 分钟之间")
+    raw_run_at = schedule.get("run_at") or schedule.get("start_at")
+    if raw_run_at:
+        try:
+            datetime.fromisoformat(str(raw_run_at).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise BadRequestException("指定触发时间格式无效") from exc
+    known_statuses = {item.value for item in LegalStatus} | {"unknown"}
+    for status, policy in (schedule.get("status_strategies") or {}).items():
+        if status not in known_statuses:
+            raise BadRequestException(f"未知法律状态策略：{status}")
+        if not isinstance(policy, dict):
+            raise BadRequestException(f"法律状态 {status} 的扫描策略必须是对象")
+        if policy.get("interval_days") is not None:
+            try:
+                days = int(policy["interval_days"])
+            except (TypeError, ValueError) as exc:
+                raise BadRequestException(f"法律状态 {status} 的间隔天数必须是整数") from exc
+            if days < 1 or days > 3650:
+                raise BadRequestException(f"法律状态 {status} 的间隔天数必须在 1 到 3650 天之间")
 
 
 @router.post("/subscriptions/{subscription_id}/run")

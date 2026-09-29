@@ -27,7 +27,7 @@ from app.schemas.schemas import (
 )
 from app.services.view_service import ViewService
 from app.services.form_service import FormService
-from app.models import PatentDatabase, PatentView, ViewLocalField
+from app.models import PatentDatabase, PatentDatabaseMembership, PatentView, ViewLocalField
 from app.core.exceptions import BadRequestException, NotFoundException
 
 router = APIRouter(prefix="/views", tags=["views"])
@@ -308,8 +308,8 @@ def add_patents_to_view(
     payload: ViewPatentMembershipRequest,
     db: Session = Depends(get_db),
 ):
-    """把指定专利加入视图（设置 patent.view_id）。"""
-    from app.models import Patent as PatentModel
+    """把指定专利加入视图；一条专利可同时加入多个业务视图。"""
+    from app.models import Patent as PatentModel, PatentViewMembership
     view = ViewService.get_view(db, view_id)
     if not view:
         raise NotFoundException("View not found")
@@ -318,11 +318,17 @@ def add_patents_to_view(
     patents = db.query(PatentModel).filter(PatentModel.id.in_(payload.patent_ids)).all()
     count = 0
     for p in patents:
-        if p.database_id != view.database_id:
+        if p.database_id != view.database_id and not db.query(PatentDatabaseMembership).filter_by(patent_id=p.id, database_id=view.database_id).first():
             continue
-        p.view_id = view_id
-        db.add(p)
-        count += 1
+        membership = db.query(PatentViewMembership).filter_by(patent_id=p.id, view_id=view_id).first()
+        if not membership:
+            db.add(PatentViewMembership(patent_id=p.id, view_id=view_id, added_by="local-user"))
+            count += 1
+        # Keep the legacy single-view projection populated for old clients,
+        # without evicting a patent from another view.
+        if p.view_id is None:
+            p.view_id = view_id
+            db.add(p)
     db.commit()
     return {"success": True, "updated_count": count}
 
@@ -333,17 +339,24 @@ def remove_patents_from_view(
     payload: ViewPatentMembershipRequest,
     db: Session = Depends(get_db),
 ):
-    """把指定专利从视图中移出（清空 patent.view_id）。"""
-    from app.models import Patent as PatentModel
+    """把指定专利从视图中移出，不影响它在其他视图中的成员关系。"""
+    from app.models import Patent as PatentModel, PatentViewMembership
     patents = db.query(PatentModel).filter(
         PatentModel.id.in_(payload.patent_ids),
-        PatentModel.view_id == view_id,
     ).all()
     count = 0
     for p in patents:
-        p.view_id = None
-        db.add(p)
-        count += 1
+        membership = db.query(PatentViewMembership).filter_by(patent_id=p.id, view_id=view_id).first()
+        if membership:
+            db.delete(membership)
+            count += 1
+        if p.view_id == view_id:
+            fallback = db.query(PatentViewMembership).filter(
+                PatentViewMembership.patent_id == p.id,
+                PatentViewMembership.view_id != view_id,
+            ).order_by(PatentViewMembership.created_at.asc()).first()
+            p.view_id = fallback.view_id if fallback else None
+            db.add(p)
     db.commit()
     return {"success": True, "updated_count": count}
 

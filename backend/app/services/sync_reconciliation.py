@@ -267,7 +267,15 @@ def process_record(db: Session, run: SyncRun, subscription: SyncSubscription, re
         if not db.query(PatentDatabaseMembership).filter_by(patent_id=patent.id, database_id=subscription.database_id).first():
             db.add(PatentDatabaseMembership(patent_id=patent.id, database_id=subscription.database_id))
         ensure_patent_identifiers(db, patent, source_system="external")
-    configured_fields = (subscription.scope_json or {}).get("update_fields")
+    scope = subscription.scope_json or {}
+    configured_fields = scope.get("update_fields")
+    # Tracked patents may use a narrower field set by legal status.  This is
+    # evaluated against the provider's current state for the record, so one
+    # subscription can safely monitor granted and pending patents differently.
+    status_value = str(record.fields.get("legal_status") or "unknown")
+    status_strategy = (scope.get("status_strategies") or {}).get(status_value) or {}
+    if isinstance(status_strategy.get("update_fields"), list):
+        configured_fields = status_strategy["update_fields"]
     selected_fields = set(configured_fields) if isinstance(configured_fields, list) else SAFE_EXTERNAL_FIELDS | {"legal_status"}
     for field_key, value in record.fields.items():
         if field_key not in SAFE_EXTERNAL_FIELDS or field_key not in selected_fields or value is None:

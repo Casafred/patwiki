@@ -338,6 +338,9 @@ export const syncApi = {
     schedule_json?: JsonObject
     review_policy?: string
     enabled?: boolean
+    mode?: string
+    tracked_patent_ids?: number[]
+    status_strategies?: JsonObject
   }): Promise<SyncSubscription> => api.post('/sync/subscriptions', data),
   subscriptions: (databaseId?: number | null): Promise<{ items: SyncSubscription[] }> => api.get('/sync/subscriptions', { params: { database_id: databaseId ?? undefined } }),
   runSubscription: (id: number, maxPages = 100): Promise<SyncRun> => api.post(`/sync/subscriptions/${id}/run`, { trigger: 'manual', max_pages: maxPages }),

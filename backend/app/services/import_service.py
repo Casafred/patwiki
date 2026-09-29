@@ -1,9 +1,12 @@
 from datetime import datetime
 from typing import Optional, Any
 from io import BytesIO
+import json
 import re
+from urllib.parse import urlsplit
 
 import pandas as pd
+from openpyxl import load_workbook
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException
@@ -28,6 +31,9 @@ STANDARD_FIELD_MAPPINGS = {
     "公开编号": "publication_number",
     "公开（公告）号": "publication_number",
     "公开公告号": "publication_number",
+    "原文链接": "original_links",
+    "专利原文链接": "original_links",
+    "专利链接": "original_links",
     "publication number": "publication_number",
     "publication no": "publication_number",
     "publication no.": "publication_number",
@@ -191,6 +197,135 @@ class ImportService:
         df.columns = columns
 
         return df, columns
+
+    @staticmethod
+    def extract_excel_hyperlinks(
+        file_content: bytes,
+        filename: str,
+        sheet_name: str | int | None = None,
+    ) -> dict[int, dict[str, str]]:
+        """Return valid HTTP(S) cell hyperlinks keyed by Excel source row.
+
+        Pandas intentionally exposes the displayed cell value but drops the
+        hyperlink relationship. Read the workbook once with openpyxl and keep
+        the URL beside the source row for the review/apply stages.
+        """
+        suffix = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
+        if suffix not in {"xlsx", "xls"} or not file_content:
+            return {}
+        try:
+            if suffix == "xls":
+                import xlrd
+
+                workbook = xlrd.open_workbook(file_contents=file_content)
+                worksheet = workbook.sheet_by_index(0) if sheet_name is None else (
+                    workbook.sheet_by_index(sheet_name)
+                    if isinstance(sheet_name, int)
+                    else workbook.sheet_by_name(str(sheet_name))
+                )
+                headers = {
+                    index + 1: str(value).strip()
+                    for index, value in enumerate(worksheet.row_values(0))
+                    if str(value).strip()
+                }
+                links: dict[int, dict[str, str]] = {}
+                for hyperlink in (getattr(worksheet, "hyperlink_list", []) or []):
+                    url = str(getattr(hyperlink, "url_or_path", "") or "").strip()
+                    row_number = int(getattr(hyperlink, "rowx", -1)) + 1
+                    column_number = int(getattr(hyperlink, "colx", -1)) + 1
+                    if row_number < 2 or column_number not in headers or not _is_http_url(url):
+                        continue
+                    links.setdefault(row_number, {})[headers[column_number]] = url
+                workbook.release_resources()
+                return links
+            workbook = load_workbook(BytesIO(file_content), read_only=False, data_only=False)
+            if sheet_name is None:
+                worksheet = workbook.active
+            elif isinstance(sheet_name, int):
+                worksheet = workbook.worksheets[sheet_name]
+            else:
+                worksheet = workbook[str(sheet_name)]
+            headers = {
+                cell.column: str(cell.value).strip()
+                for cell in worksheet[1]
+                if cell.value is not None and str(cell.value).strip()
+            }
+            links: dict[int, dict[str, str]] = {}
+            for row in worksheet.iter_rows(min_row=2):
+                for cell in row:
+                    target = cell.hyperlink.target if cell.hyperlink else None
+                    if not target and isinstance(cell.value, str):
+                        match = re.match(r'=HYPERLINK\("([^"\n]+)"', cell.value, re.IGNORECASE)
+                        target = match.group(1) if match else None
+                    if not target or not _is_http_url(target) or cell.column not in headers:
+                        continue
+                    links.setdefault(cell.row, {})[headers[cell.column]] = target.strip()
+            workbook.close()
+            return links
+        except Exception:
+            # A malformed hyperlink relationship must not block an otherwise
+            # valid import; the displayed cell value remains available.
+            return {}
+
+    @staticmethod
+    def original_link_candidates(row: dict, mapping: dict, patent_data: dict) -> list[dict[str, Any]]:
+        raw_links = row.get("__excel_hyperlinks__") or {}
+        if isinstance(raw_links, str):
+            try:
+                raw_links = json.loads(raw_links)
+            except (TypeError, json.JSONDecodeError):
+                raw_links = {}
+        if not isinstance(raw_links, dict):
+            return []
+        raw_links = dict(raw_links)
+        for column, target in mapping.items():
+            value = str(row.get(column) or "").strip()
+            if target == "original_links" and _is_http_url(value):
+                raw_links.setdefault(column, value)
+
+        custom = patent_data.get("custom_fields") or {}
+        merged: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in custom.get("original_links") or []:
+            if not isinstance(item, dict):
+                continue
+            key = (str(item.get("identifier_type")), str(item.get("identifier_value")))
+            merged[key] = {
+                **item,
+                "urls": list(item.get("urls") or []),
+                "source_columns": list(item.get("source_columns") or []),
+            }
+
+        identifiers = {
+            "publication": str(patent_data.get("publication_number") or "").strip(),
+            "grant": str(patent_data.get("grant_number") or "").strip(),
+        }
+        for column, raw_url in raw_links.items():
+            url = str(raw_url or "").strip()
+            if not _is_http_url(url):
+                continue
+            source_text = str(row.get(column) or "").strip().casefold()
+            target = str(mapping.get(column) or "").strip()
+            if target in {"publication_number", "grant_number"}:
+                identifier_types = ["publication" if target == "publication_number" else "grant"]
+            else:
+                matched = [kind for kind, value in identifiers.items() if value and source_text == value.casefold()]
+                identifier_types = matched or [kind for kind, value in identifiers.items() if value]
+            for identifier_type in identifier_types:
+                identifier_value = identifiers.get(identifier_type, "")
+                if not identifier_value:
+                    continue
+                key = (identifier_type, identifier_value)
+                item = merged.setdefault(key, {
+                    "identifier_type": identifier_type,
+                    "identifier_value": identifier_value,
+                    "urls": [],
+                    "source_columns": [],
+                })
+                if url not in item["urls"]:
+                    item["urls"].append(url)
+                if str(column) not in item["source_columns"]:
+                    item["source_columns"].append(str(column))
+        return list(merged.values())
 
     @staticmethod
     def suggest_mapping(columns: list[str], db: Session) -> tuple[dict[str, str], list[dict[str, str]]]:
@@ -483,6 +618,16 @@ class ImportService:
                 # import service.  Never serialize them into Patent JSON.
                 if field_key == "attachments":
                     continue
+                if field_key == "original_links":
+                    raw_hyperlinks = row.get("__excel_hyperlinks__") or {}
+                    if isinstance(raw_hyperlinks, str):
+                        try:
+                            raw_hyperlinks = json.loads(raw_hyperlinks)
+                        except (TypeError, json.JSONDecodeError):
+                            raw_hyperlinks = {}
+                    if not _is_http_url(value) and excel_col not in raw_hyperlinks:
+                        raise ValueError(f"字段 '{excel_col}' 的原文链接不是有效网址")
+                    continue
 
                 if field_key in all_custom_fields:
                     if all_custom_fields[field_key].field_type in (CustomFieldType.FORMULA, CustomFieldType.ATTACHMENT):
@@ -529,6 +674,10 @@ class ImportService:
                 field_errors[field_key] = str(exc)
 
         data["custom_fields"] = custom
+        original_links = ImportService.original_link_candidates(row, mapping, data)
+        if original_links:
+            custom["original_links"] = original_links
+            data["custom_fields"] = custom
         return data, virtual, field_errors
 
 
@@ -539,3 +688,17 @@ def _append_relation_raw_value(existing: Any, value: str) -> str:
     if str(existing) == value:
         return str(existing)
     return f"{existing}\n{value}"
+
+
+def _is_http_url(value: str) -> bool:
+    try:
+        text = str(value).strip()
+        if any(character.isspace() or ord(character) < 32 for character in text):
+            return False
+        parsed = urlsplit(text)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return False
+        parsed.port
+        return True
+    except ValueError:
+        return False

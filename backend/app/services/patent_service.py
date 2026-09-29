@@ -4,13 +4,14 @@ from datetime import datetime, date
 import json
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.attributes import set_committed_value
-from sqlalchemy import func, or_, and_, desc, text, String, inspect
+from sqlalchemy import func, or_, and_, desc, text, String, inspect, exists
 
 from app.models import (
     Patent, Product, Project, Tag, CustomField,
     patent_tag, patent_project, LegalStatus, PatentType,
     PatentHistory, PatentProjectLink,
     PatentDatabaseMembership, PatentDatabase,
+    PatentViewMembership,
     FieldObservation,
     ProjectRole, RiskLevel, RelationType, DocumentRole,
 )
@@ -337,6 +338,19 @@ class PatentService:
                 if condition is None:
                     continue
                 operator, value = condition
+                if key == "view_id" and operator in {"eq", "contains"}:
+                    try:
+                        view_id_value = int(value)
+                    except (TypeError, ValueError):
+                        continue
+                    query = query.filter(or_(
+                        Patent.view_id == view_id_value,
+                        exists().where(
+                            PatentViewMembership.patent_id == Patent.id,
+                            PatentViewMembership.view_id == view_id_value,
+                        ),
+                    ))
+                    continue
                 if key in SYSTEM_FIELDS and hasattr(Patent, key):
                     predicate = _apply_filter_expression(getattr(Patent, key), operator, value)
                     if predicate is not None:
@@ -895,9 +909,12 @@ class PatentService:
         # The main table intentionally spans the whole source library, while
         # a saved view is a narrower explicit scope.
         if source_view_id is not None:
+            from app.models import PatentViewMembership
             mismatched = [
                 patent_id for patent_id in ids
-                if by_id[patent_id].view_id != source_view_id
+                if by_id[patent_id].view_id != source_view_id and not db.query(PatentViewMembership.id).filter_by(
+                    patent_id=patent_id, view_id=source_view_id,
+                ).first()
             ]
             if mismatched:
                 raise BadRequestException(
@@ -1001,10 +1018,20 @@ class PatentService:
 
         moved_count = 0
         for patent in patents:
+            from app.models import PatentViewMembership
             old_view_id = patent.view_id
-            if old_view_id == target_view_id:
+            existing_memberships = db.query(PatentViewMembership).filter(
+                PatentViewMembership.patent_id == patent.id,
+            ).all()
+            existing_view_ids = {membership.view_id for membership in existing_memberships}
+            expected_view_ids = {target_view_id} if target_view_id is not None else set()
+            if old_view_id == target_view_id and existing_view_ids == expected_view_ids:
                 continue
             moved_count += 1
+            for membership in existing_memberships:
+                db.delete(membership)
+            if target_view_id is not None:
+                db.add(PatentViewMembership(patent_id=patent.id, view_id=target_view_id, added_by="local-user"))
             patent.view_id = target_view_id
             db.add(PatentHistory(
                 patent_id=patent.id,

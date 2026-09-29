@@ -129,6 +129,9 @@ class Patent(Base):
     product = relationship("Product", back_populates="patents")
     family = relationship("PatentFamily", back_populates="patents")
     view = relationship("PatentView", foreign_keys=[view_id])
+    view_memberships = relationship(
+        "PatentViewMembership", back_populates="patent", cascade="all, delete-orphan",
+    )
     tags = relationship("Tag", secondary="patent_tags", back_populates="patents")
     projects = relationship("Project", secondary="patent_projects", back_populates="patents")
     citing_patents = relationship(

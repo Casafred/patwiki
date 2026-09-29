@@ -86,6 +86,30 @@ class SyncSubscription(Base):
     saved_query = relationship("SavedPatentQuery")
     cursor = relationship("SyncCursor", back_populates="subscription", uselist=False, cascade="all, delete-orphan")
     runs = relationship("SyncRun", back_populates="subscription", cascade="all, delete-orphan")
+    tracked_patents = relationship("SyncTrackedPatent", back_populates="subscription", cascade="all, delete-orphan")
+
+
+class SyncTrackedPatent(Base):
+    """Per-patent schedule state for manually curated monitoring lists."""
+    __tablename__ = "sync_tracked_patents"
+    __table_args__ = (
+        UniqueConstraint("subscription_id", "patent_id", name="uq_sync_tracked_patent"),
+        Index("ix_sync_tracked_patents_due", "subscription_id", "enabled", "next_run_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("sync_subscriptions.id", ondelete="CASCADE"), nullable=False, index=True)
+    patent_id = Column(Integer, ForeignKey("patents.id", ondelete="CASCADE"), nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    next_run_at = Column(DateTime, index=True)
+    last_run_at = Column(DateTime)
+    last_status = Column(String(30))
+    last_error_message = Column(Text)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    subscription = relationship("SyncSubscription", back_populates="tracked_patents")
+    patent = relationship("Patent")
 
 
 class SyncCursor(Base):

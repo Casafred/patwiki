@@ -188,6 +188,7 @@ def get_patent_identity_conflicts(patent_id: int, db: Session = Depends(get_db))
             "resolution_reason": source_row.resolution_reason,
             "candidate_patent_ids": candidates,
             "source_row_values": source_row.raw_row,
+            "source_row_hyperlinks": source_row.hyperlinks or {},
             "observations": [
                 {
                     "id": item.id,

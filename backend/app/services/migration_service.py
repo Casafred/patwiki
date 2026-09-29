@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-28.3"
+CURRENT_MIGRATION_VERSION = "2026-09-28.5"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -142,6 +142,7 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("patent_histories", "source_row", "ALTER TABLE patent_histories ADD COLUMN source_row INTEGER"),
     _column("patent_histories", "source_field_name", "ALTER TABLE patent_histories ADD COLUMN source_field_name VARCHAR(500)"),
     _column("import_source_rows", "candidate_patent_ids", "ALTER TABLE import_source_rows ADD COLUMN candidate_patent_ids JSON"),
+    _column("import_source_rows", "hyperlinks", "ALTER TABLE import_source_rows ADD COLUMN hyperlinks JSON NOT NULL DEFAULT '{}'"),
     _column("governance_decisions", "mapping_version", "ALTER TABLE governance_decisions ADD COLUMN mapping_version VARCHAR(100)"),
     _column("governance_decisions", "decision_batch_id", "ALTER TABLE governance_decisions ADD COLUMN decision_batch_id VARCHAR(64)"),
     _column("governance_decisions", "before_field_resolution", "ALTER TABLE governance_decisions ADD COLUMN before_field_resolution VARCHAR(30)"),
@@ -501,6 +502,11 @@ def run_pending_migrations(
 
         Base.metadata.create_all(bind=bind)
         _apply_operations(bind, operations)
+        with bind.begin() as connection:
+            connection.execute(text(
+                "INSERT OR IGNORE INTO patent_view_memberships (patent_id, view_id) "
+                "SELECT id, view_id FROM patents WHERE view_id IS NOT NULL"
+            ))
         _backfill_collaboration_uids(bind)
         integrity_after = _integrity_check(bind)
         counts_after = _table_counts(bind)

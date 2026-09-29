@@ -290,7 +290,7 @@ function buildViewColumnConfig(view: PatentView, fields: FieldMeta[]): ViewColum
       key: field.key,
       // 关系原始列属于信息中心的正式只读投影。历史视图没有保存这些新列
       // 时默认展示；用户明确隐藏后仍以视图配置为准。
-      visible: column?.visible ?? (configured.length === 0 || ['family_members', 'cited_patents', 'citing_patents'].includes(field.key)
+      visible: column?.visible ?? (configured.length === 0 || ['family_members', 'cited_patents', 'citing_patents', 'original_links'].includes(field.key)
         ? field.visible !== false
         : false),
       width: column?.width ?? field.width ?? DEFAULT_COLUMN_WIDTH,
@@ -611,6 +611,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [viewConfigNotice, setViewConfigNotice] = useState('')
   const [showBulkEdit, setShowBulkEdit] = useState(false)
   const [showBulkTag, setShowBulkTag] = useState(false)
+  const [showQuickSelect, setShowQuickSelect] = useState(false)
+  const [quickSelectRange, setQuickSelectRange] = useState('1-10')
+  const [quickSelectLoading, setQuickSelectLoading] = useState(false)
   const [bulkTransferAction, setBulkTransferAction] = useState<BulkTransferAction | null>(null)
   const [bulkTargetDatabaseId, setBulkTargetDatabaseId] = useState<number | null>(null)
   const [bulkTargetViewId, setBulkTargetViewId] = useState<number | null>(null)
@@ -686,6 +689,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [showWorkFileDialog, setShowWorkFileDialog] = useState(false)
+  const [showAddToView, setShowAddToView] = useState(false)
+  const [addToViewId, setAddToViewId] = useState<number | null>(null)
   const [showSyncUpdate, setShowSyncUpdate] = useState(false)
   const [syncUpdatePatentIds, setSyncUpdatePatentIds] = useState<number[]>([])
   const [syncUpdateConnectors, setSyncUpdateConnectors] = useState<SyncConnector[]>([])
@@ -2253,6 +2258,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const handleContextMenu = (e: React.MouseEvent, type: 'row' | 'header', data: { patentId?: number; fieldKey?: string }) => {
     e.preventDefault()
     e.stopPropagation()
+    if (type === 'header' && data.fieldKey && patents[0]) {
+      setActiveCell({ patentId: patents[0].id, fieldKey: data.fieldKey })
+    }
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
@@ -2260,6 +2268,162 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       patentId: data.patentId,
       fieldKey: data.fieldKey,
     })
+  }
+
+  const handleAddToView = async () => {
+    if (!addToViewId || selectedIds.length === 0) return
+    try {
+      const result = await viewApi.addPatents(addToViewId, selectedIds)
+      setShowAddToView(false)
+      alert(`已将 ${result.updated_count} 条专利加入业务视图`)
+      clearSelection()
+    } catch (error: unknown) {
+      alert(`加入业务视图失败：${getErrorMessage(error)}`)
+    }
+  }
+
+  const fetchScopePage = useCallback(async (requestedPage: number, requestedPageSize: number) => {
+    if (searchText && searchMode !== 'keyword') {
+      return { items: requestedPage === 1 ? patents : [], total: patents.length }
+    }
+    const extraFilters: JsonObject = {}
+    Object.entries(filterValues).forEach(([key, condition]) => {
+      if (filterConditionHasValue(condition)) extraFilters[key] = condition as unknown as JsonValue
+    })
+    const activeViewForQuery = viewId === null
+      ? undefined
+      : viewsRef.current.find(view => view.id === viewId && view.database_id === activeDatabaseId)
+    if (activeViewForQuery) {
+      const params = {
+        page: requestedPage,
+        page_size: requestedPageSize,
+        search: searchText || undefined,
+        sort_by: sortField,
+        sort_order: sortOrder,
+        group_by_family: groupByFamily,
+        extra_filters: extraFilters,
+      }
+      if (getViewGroupFields(activeViewForQuery).length > 0 && !groupByFamily) {
+        const result = await viewApi.grouped(activeViewForQuery.id, params)
+        return { items: flattenGroups(result.groups), total: result.total }
+      }
+      const result = await viewApi.listPatents(activeViewForQuery.id, params)
+      return { items: result.items as Patent[], total: result.total }
+    }
+    const params: JsonObject = {
+      page: requestedPage,
+      page_size: requestedPageSize,
+      sort_by: sortField,
+      sort_order: sortOrder,
+    }
+    if (searchText) params.search = searchText
+    if (!isGlobalMasterTable && activeDatabaseId != null) params.database_id = activeDatabaseId
+    if (currentProductId) params.product_id = currentProductId
+    if (groupByFamily) params.group_by_family = true
+    if (Object.keys(extraFilters).length) params.filters = JSON.stringify(extraFilters)
+    const result = await patentApi.list(params)
+    return { items: result.items, total: result.total }
+  }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, isGlobalMasterTable, patents, searchMode, searchText, sortField, sortOrder, viewId])
+
+  const writeClipboardText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      const copied = document.execCommand('copy')
+      textarea.remove()
+      if (!copied) throw new Error('clipboard unavailable')
+    }
+  }
+
+  const columnValueText = (patent: Patent, fieldKey: string) => {
+    const value = getFieldValue(patent, fieldKey)
+    if (value == null) return ''
+    if (fieldKey === 'original_links' && Array.isArray(value)) {
+      return value.flatMap(item => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+        const urls = (item as JsonObject).urls
+        return Array.isArray(urls) ? urls.filter((url): url is string => typeof url === 'string') : []
+      }).join(' | ')
+    }
+    if (typeof value === 'object') return JSON.stringify(value)
+    return String(value)
+  }
+
+  const toTsvCell = (value: string) => /[\t\r\n"]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+
+  const handleCopyColumn = async (fieldKey: string) => {
+    try {
+      const firstPage = await fetchScopePage(1, 1000)
+      const rows = [...firstPage.items]
+      const total = firstPage.total
+      for (let pageNumber = 2; rows.length < total; pageNumber += 1) {
+        const next = await fetchScopePage(pageNumber, 1000)
+        if (next.items.length === 0) break
+        rows.push(...next.items)
+      }
+      await writeClipboardText(rows.map(patent => toTsvCell(columnValueText(patent, fieldKey))).join('\r\n'))
+      setContextMenu(null)
+    } catch {
+      alert('复制整列失败，请确认浏览器允许访问剪贴板后重试')
+    }
+  }
+
+  const handleQuickSelectRange = async () => {
+    const intervals: Array<[number, number]> = []
+    for (const segment of quickSelectRange.split(',')) {
+      const match = segment.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/)
+      if (!match) {
+        alert('请输入序号或范围，例如 1-10,15,20-25')
+        return
+      }
+      const start = Number(match[1])
+      const end = Number(match[2] || match[1])
+      if (start < 1 || end < start) {
+        alert('序号范围无效，请使用从小到大的正整数')
+        return
+      }
+      intervals.push([start, end])
+    }
+    if (intervals.length === 0) return
+
+    setQuickSelectLoading(true)
+    try {
+      const isSemanticResult = !!searchText && searchMode !== 'keyword'
+      const total = isSemanticResult ? patents.length : (await fetchScopePage(1, 1)).total
+      if (intervals.some(([, end]) => end > total)) {
+        alert(`当前筛选结果共 ${total} 条，范围不能超过 ${total}`)
+        return
+      }
+      const pageSizeForRange = 1000
+      const pages = new Set<number>()
+      intervals.forEach(([start, end]) => {
+        for (let pageNumber = Math.ceil(start / pageSizeForRange); pageNumber <= Math.ceil(end / pageSizeForRange); pageNumber += 1) {
+          pages.add(pageNumber)
+        }
+      })
+      const selected = new Set(selectedIds)
+      for (const pageNumber of [...pages].sort((a, b) => a - b)) {
+        const result = isSemanticResult
+          ? { items: patents, total: patents.length }
+          : await fetchScopePage(pageNumber, pageSizeForRange)
+        result.items.forEach((patent, index) => {
+          const sequence = (pageNumber - 1) * pageSizeForRange + index + 1
+          if (intervals.some(([start, end]) => sequence >= start && sequence <= end)) selected.add(patent.id)
+        })
+      }
+      setSelectedIds([...selected])
+      setShowQuickSelect(false)
+    } catch (error: unknown) {
+      alert('按范围勾选失败: ' + getErrorMessage(error))
+    } finally {
+      setQuickSelectLoading(false)
+    }
   }
 
   // 复制单元格值到剪贴板
@@ -2517,7 +2681,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         const configuredColumn = configByKey.get(field.key)
         return configuredColumn?.visible === true || (
           configuredColumn === undefined
-          && ['family_members', 'cited_patents', 'citing_patents'].includes(field.key)
+          && ['family_members', 'cited_patents', 'citing_patents', 'original_links'].includes(field.key)
           && field.visible !== false
         )
       })
@@ -2589,6 +2753,26 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
     if (isEditing) {
       return renderCellEditor(patent, field, value)
+    }
+
+    if (field.key === 'original_links' && Array.isArray(value)) {
+      const entries = value.filter(item => !!item && typeof item === 'object' && !Array.isArray(item)) as unknown as JsonObject[]
+      return entries.length ? (
+        <div style={{ display: 'grid', gap: 5 }}>
+          {entries.map((entry, index) => {
+            const identifierType = entry.identifier_type === 'grant' ? '授权号' : '公开号'
+            const identifierValue = String(entry.identifier_value || '')
+            const urls = Array.isArray(entry.urls) ? entry.urls.filter((url): url is string => typeof url === 'string') : []
+            return <div key={`${identifierType}-${identifierValue}-${index}`}>
+              <div style={{ color: '#64748b', fontSize: 11 }}>{identifierType} {identifierValue}</div>
+              {urls.map((rawUrl, urlIndex) => {
+                const url = safeHttpUrl(rawUrl)
+                return url ? <a key={`${url}-${urlIndex}`} href={url} target="_blank" rel="noreferrer noopener" onClick={event => event.stopPropagation()} style={{ color: '#2563eb', display: 'block', overflowWrap: 'anywhere' }}>{url}</a> : null
+              })}
+            </div>
+          })}
+        </div>
+      ) : <span style={{ color: '#94a3b8' }}>-</span>
     }
 
     if (field.field_type === 'attachment') {
@@ -2849,6 +3033,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </ToolbarMenu>
             )}
             <div className="datagrid-view-actions" aria-label="常用表格工具">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowQuickSelect(true)} title="按当前筛选结果的序号快速勾选专利">
+                <Icon name="check" size={14} /> 范围勾选
+              </button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
               {activeView && activeView.layout_type === 'table' && (
                 <>
@@ -2938,6 +3125,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             </div>
             <span className="selection-divider" aria-hidden="true" />
             <div className="selection-group" aria-label="批量编辑与更新">
+              <button className="btn btn-xs btn-secondary" onClick={() => { setAddToViewId(null); setShowAddToView(true) }} title="把选中的专利加入一个或多个业务视图">
+                <Icon name="table" size={13} /> 加入业务视图
+              </button>
               <button className="btn btn-xs btn-secondary" onClick={() => setShowBulkEdit(true)} title="批量修改选中专利的字段值">
                 <Icon name="edit" size={13} /> 批量编辑
               </button>
@@ -3615,6 +3805,24 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         />
       )}
 
+      {showQuickSelect && (
+        <Modal title="按序号范围勾选" onClose={() => setShowQuickSelect(false)} width={420}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <label style={{ display: 'grid', gap: 6, fontSize: 12, color: '#475569' }}>
+              当前筛选结果序号
+              <input className="form-input" value={quickSelectRange} onChange={event => setQuickSelectRange(event.target.value)} placeholder="1-10, 15, 20-25" autoFocus />
+            </label>
+            <div style={{ color: '#64748b', fontSize: 12 }}>可输入单个序号或多个范围；新范围会加入当前已勾选记录。</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn btn-secondary" onClick={() => setShowQuickSelect(false)}>取消</button>
+              <button className="btn btn-primary" onClick={() => void handleQuickSelectRange()} disabled={quickSelectLoading}>
+                {quickSelectLoading ? '读取记录...' : '勾选范围'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {showBulkEdit && (
         <Modal title={`批量编辑 ${selectedIds.length} 条专利`} onClose={() => setShowBulkEdit(false)} width={520}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -4200,14 +4408,16 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           className="context-menu"
           style={{
             position: 'fixed',
-            left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 240)),
-            top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 260)),
+            left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 300)),
+            top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - (contextMenu.type === 'header' ? 760 : 260))),
             zIndex: 1100,
             background: '#fff',
             border: '1px solid #e5e7eb',
             borderRadius: 8,
             boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
-            minWidth: 200,
+            minWidth: contextMenu.type === 'header' ? 280 : 200,
+            maxHeight: 'calc(100vh - 16px)',
+            overflowY: 'auto',
             padding: '4px 0',
             fontSize: 12,
           }}
@@ -4258,6 +4468,27 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     {field.field_type}
                   </span>
                 </div>
+                <div className="menu-item" onClick={() => void handleCopyColumn(field.key)} title={`复制当前筛选结果中的 ${totalPatents} 个单元格值，使用制表符换行格式`}>
+                  <Icon name="copy" /> 复制整列值（{totalPatents} 行）
+                </div>
+                <div className="menu-divider" />
+                <div className="menu-heading">已勾选 {selectedIds.length} 条 · 批量操作</div>
+                <div className="menu-item menu-item-ai" onClick={() => { setQuickAnalyzePatentIds(selectedIds); setShowQuickAnalyze(true) }} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}>
+                  <Icon name="sparkles" /> AI 快速分析
+                </div>
+                {selectedIds.length === 1 && <div className="menu-item menu-item-ai" onClick={() => { setJevAnalyzePatentIds(selectedIds); setShowJEVAnalyze(true) }}><Icon name="sparkles" /> JEV 标引</div>}
+                <div className="menu-item" onClick={() => setShowBulkEdit(true)} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}><Icon name="edit" /> 批量编辑</div>
+                <div className="menu-item" onClick={() => setShowBulkTag(true)} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}><Icon name="tag" /> 批量打标签</div>
+                {!isGlobalMasterTable && <div className="menu-item" onClick={() => void openSyncUpdate(selectedIds)} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}><Icon name="refresh" /> 外部更新</div>}
+                <div className="menu-item" onClick={() => openBulkTransfer('duplicate')} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}><Icon name="copy" /> 复制为工作副本</div>
+                {!isGlobalMasterTable && <>
+                  <div className="menu-item" onClick={() => openBulkTransfer('move_view')} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}><Icon name="move" /> 移动到视图</div>
+                  <div className="menu-item" onClick={() => openBulkTransfer('move_database')} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}><Icon name="database" /> 移库</div>
+                </>}
+                <div className="menu-item" onClick={() => void handleBulkRollbackBefore()} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}><Icon name="history" /> 批量回滚</div>
+                <div className="menu-item menu-item-danger" onClick={handleBulkDelete} style={{ opacity: selectedIds.length ? 1 : 0.5, pointerEvents: selectedIds.length ? 'auto' : 'none' }}><Icon name="trash" /> 批量删除</div>
+                <div className="menu-divider" />
+                <div className="menu-item" onClick={clearSelection}><Icon name="x" /> 取消勾选</div>
                 <div className="menu-item" onClick={() => { setActiveHeaderMenu(null); handleSort(field.key) }}>
                   {sortField === field.key && sortOrder === 'asc' ? '↓ 降序排列' : '↑ 升序排列'}
                 </div>
@@ -4454,11 +4685,28 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       {showWorkFileDialog && (
         <WorkFileDialog
           databaseId={activeDatabaseId}
+          viewId={activeView && !activeView.is_department_master ? viewId : null}
+          fields={fields}
           selectedIds={selectedIds}
           search={searchText}
           filters={filterValues as unknown as JsonObject}
           onClose={() => setShowWorkFileDialog(false)}
         />
+      )}
+      {showAddToView && (
+        <Modal title={`加入业务视图（${selectedIds.length} 条）`} onClose={() => setShowAddToView(false)} width={460}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <p style={{ margin: 0, color: '#64748b', fontSize: 12 }}>同一专利可以同时加入多个业务视图。加入后，导出模板会按该视图的固定字段投影生成工作文件。</p>
+            <select className="form-input" value={addToViewId ?? ''} onChange={event => setAddToViewId(event.target.value ? Number(event.target.value) : null)}>
+              <option value="">请选择业务视图</option>
+              {views.filter(view => view.database_id === activeDatabaseId && !view.is_archived && !view.is_department_master && view.layout_type === 'table').map(view => <option key={view.id} value={view.id}>{view.name}</option>)}
+            </select>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn btn-secondary" type="button" onClick={() => setShowAddToView(false)}>取消</button>
+              <button className="btn btn-primary" type="button" disabled={!addToViewId} onClick={() => void handleAddToView()}>加入并保留原视图</button>
+            </div>
+          </div>
+        </Modal>
       )}
       </div>
     </div>

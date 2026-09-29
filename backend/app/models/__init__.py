@@ -83,7 +83,7 @@ from app.models.governance import ImportSourceRow, FieldObservation, GovernanceD
 from app.models.user import User, DatabaseMembership
 
 # 视图（小表）—— P0-13 新增
-from app.models.view import PatentView, ViewLocalField, PatentViewFieldValue
+from app.models.view import PatentView, PatentViewMembership, ViewLocalField, PatentViewFieldValue
 
 # 表单视图公开提交链接
 from app.models.form import FormShareLink
@@ -111,6 +111,7 @@ from app.models.sync import (
     ConnectorCredential,
     SavedPatentQuery,
     SyncSubscription,
+    SyncTrackedPatent,
     SyncCursor,
     SyncRun,
     ExternalSnapshot,
@@ -175,7 +176,7 @@ __all__ = [
     # user / membership
     "User", "DatabaseMembership",
     # view (P0-13)
-    "PatentView", "ViewLocalField", "PatentViewFieldValue",
+    "PatentView", "PatentViewMembership", "ViewLocalField", "PatentViewFieldValue",
     "FormShareLink",
     # history
     "PatentHistory",
@@ -190,7 +191,7 @@ __all__ = [
     "FieldRegistrySnapshot", "SourceTableDefinition",
     "FieldDefinition", "SourceFieldMapping",
     "ConnectorDefinition", "ConnectorCredential", "SavedPatentQuery",
-    "SyncSubscription", "SyncCursor", "SyncRun", "ExternalSnapshot",
+    "SyncSubscription", "SyncTrackedPatent", "SyncCursor", "SyncRun", "ExternalSnapshot",
     "SyncRecord", "ExternalFactObservation", "LegalStatusEvent", "WatchEvent",
     "SyncDeadLetter", "SyncLease", "SyncUpdateBatch", "SyncUpdateItem",
     "SemanticProviderDefinition", "SemanticSearchProfile", "SemanticIndex", "SemanticIndexJob",

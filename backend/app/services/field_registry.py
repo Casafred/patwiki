@@ -168,6 +168,37 @@ class PatentAttachmentFieldHandler(FieldHandler):
         record.custom_fields = values
 
 
+class PatentOriginalLinksFieldHandler(FieldHandler):
+    """Structured source URLs grouped by publication/grant identifier."""
+
+    definition: FieldMeta = {
+        "key": "original_links",
+        "name": "原文链接",
+        "field_type": "longtext",
+        "group_name": "著录项目",
+        "options": None,
+        "width": 280,
+        "sortable": False,
+        "filterable": False,
+        "editable": False,
+        "frozen": False,
+        "visible": True,
+        "is_system": False,
+        "description": "从 Excel 单元格超链接读取的专利原文链接；公开号和授权号分别保存并增量去重",
+    }
+
+    def list_fields(self, db=None) -> list[FieldMeta]:
+        return [dict(self.definition)]
+
+    def read_value(self, record: Any, key: str) -> Any:
+        return (getattr(record, "custom_fields", None) or {}).get(key)
+
+    def write_value(self, record: Any, key: str, value: Any) -> None:
+        values = dict(getattr(record, "custom_fields", None) or {})
+        values[key] = value
+        record.custom_fields = values
+
+
 class FieldRegistry:
     """可扩展字段处理器注册表。"""
 
@@ -758,7 +789,7 @@ SYSTEM_FIELD_DEFINITIONS = [
 SYSTEM_FIELD_HANDLERS = tuple(SystemFieldHandler(definition) for definition in SYSTEM_FIELD_DEFINITIONS)
 SYSTEM_FIELDS_REGISTRY = [handler.list_fields()[0] for handler in SYSTEM_FIELD_HANDLERS]
 SYSTEM_FIELD_KEYS = {field["key"] for field in SYSTEM_FIELDS_REGISTRY}
-FIELD_REGISTRY = FieldRegistry((*SYSTEM_FIELD_HANDLERS, PatentAttachmentFieldHandler(), CustomFieldHandler()))
+FIELD_REGISTRY = FieldRegistry((*SYSTEM_FIELD_HANDLERS, PatentAttachmentFieldHandler(), PatentOriginalLinksFieldHandler(), CustomFieldHandler()))
 
 
 def get_system_field_meta(key: str) -> FieldMeta | None:

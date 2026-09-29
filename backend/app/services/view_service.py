@@ -170,7 +170,7 @@ class ViewService:
         # P0-14：成员型视图——自动在 filter_config 中注入 view_id 过滤
         if membership_based and not is_department_master:
             merged_filter = dict(view.filter_config or {})
-            merged_filter["view_id"] = view.id
+            merged_filter["view_id"] = {"eq": view.id}
             view.filter_config = merged_filter
             db.add(view)
             db.commit()
@@ -355,6 +355,15 @@ class ViewService:
                 PatentView.template_key == definition["key"],
             ).first()
             if existing:
+                # Every predefined business view is an explicit membership
+                # projection.  Keep the legacy filter key so old clients can
+                # still query it through PatentService.
+                expected_filter = dict(existing.filter_config or {})
+                expected_filter["view_id"] = {"eq": existing.id}
+                if (existing.filter_config or {}) != expected_filter:
+                    existing.filter_config = expected_filter
+                    db.add(existing)
+                    db.commit()
                 # Default templates are additive: introduce newly required
                 # business projections without overwriting user column choices.
                 if definition["key"] == "ip_risk_control":
@@ -387,6 +396,7 @@ class ViewService:
                 sort_config={"sort_by": "filing_date", "sort_order": "desc"},
                 group_by_config=definition["group"],
                 template_key=definition["key"],
+                membership_based=True,
             ))
         return created
 

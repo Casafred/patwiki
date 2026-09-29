@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { syncApi } from '../../api'
+import { patentApi, syncApi } from '../../api'
 import { fieldService as fieldApi } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
-import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, SyncConnector, SyncRun, SyncSubscription } from '../../types'
+import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, Patent, SyncConnector, SyncRun, SyncSubscription } from '../../types'
 
 const EXTERNAL_UPDATE_FIELDS = [
   ['publication_date', '公开日'], ['grant_date', '授权日'], ['legal_status', '法律状态'],
@@ -30,6 +30,13 @@ export default function ExternalSyncPage() {
   const [applicant, setApplicant] = useState('')
   const [expression, setExpression] = useState('')
   const [intervalMinutes, setIntervalMinutes] = useState('1440')
+  const [scheduleMode, setScheduleMode] = useState<'minutes' | 'days' | 'date'>('minutes')
+  const [intervalDays, setIntervalDays] = useState('7')
+  const [runAt, setRunAt] = useState('')
+  const [trackedPatentText, setTrackedPatentText] = useState('')
+  const [trackedPatents, setTrackedPatents] = useState<Patent[]>([])
+  const [selectedTrackedPatentIds, setSelectedTrackedPatentIds] = useState<number[]>([])
+  const [statusStrategyJson, setStatusStrategyJson] = useState('{\n  "granted": { "interval_days": 30 },\n  "pending": { "interval_days": 7 },\n  "unknown": { "interval_days": 14 }\n}')
   const [targetFields, setTargetFields] = useState<string[]>(['publication_date', 'legal_status', 'title', 'abstract'])
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [busy, setBusy] = useState(false)
@@ -47,12 +54,13 @@ export default function ExternalSyncPage() {
   const load = useCallback(async () => {
     if (!currentDatabaseId) return
     try {
-      const [connectorResult, subscriptionResult, runResult, observationResult, fieldResult] = await Promise.all([
+      const [connectorResult, subscriptionResult, runResult, observationResult, fieldResult, patentResult] = await Promise.all([
         syncApi.connectors(),
         syncApi.subscriptions(currentDatabaseId),
         syncApi.runs(),
         syncApi.observations(),
         fieldApi.list(),
+        patentApi.list({ database_id: currentDatabaseId, page: 1, page_size: 500 }),
       ])
       setFields(fieldResult)
       setConnectors(connectorResult.items)
@@ -64,6 +72,7 @@ export default function ExternalSyncPage() {
       setSubscriptions(subscriptionResult.items)
       setRuns(runResult.items)
       setObservations(observationResult.items)
+      setTrackedPatents(patentResult.items)
     } catch (loadError: unknown) {
       setError(getErrorMessage(loadError, '同步数据加载失败'))
     }
@@ -77,12 +86,26 @@ export default function ExternalSyncPage() {
     if (!currentDatabaseId || !selectedConnectorId || !name.trim()) return
     setBusy(true); setError(''); setMessage('')
     try {
+      if (scheduleMode === 'date' && !runAt) throw new Error('请选择首次触发时间')
+      const typedPatentIds = trackedPatentText.split(/[\s,，;；]+/).map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0)
+      const trackedPatentIds = Array.from(new Set([...selectedTrackedPatentIds, ...typedPatentIds]))
+      let statusStrategies: JsonObject = {}
+      if (statusStrategyJson.trim()) {
+        try { statusStrategies = JSON.parse(statusStrategyJson) as JsonObject } catch { throw new Error('法律状态策略必须是有效 JSON') }
+      }
+      const schedule = scheduleMode === 'days'
+        ? { interval_days: Number(intervalDays) || 1 }
+        : scheduleMode === 'date'
+          ? { run_at: new Date(runAt).toISOString(), repeat_days: Number(intervalDays) || 0 }
+          : { interval_minutes: Number(intervalMinutes) || 1440 }
       await syncApi.createSubscription({
         database_id: currentDatabaseId,
         connector_id: selectedConnectorId,
         name: name.trim(),
         scope_json: { applicant: applicant.trim() || undefined, expression: expression.trim() || undefined, update_fields: targetFields },
-        schedule_json: { interval_minutes: Number(intervalMinutes) || 1440 },
+        schedule_json: schedule,
+        tracked_patent_ids: trackedPatentIds,
+        status_strategies: statusStrategies,
         review_policy: 'safe_auto_apply',
         enabled: true,
       })
@@ -330,10 +353,17 @@ export default function ExternalSyncPage() {
               <div className="mcp-form-grid">
                 <label className="mcp-form-full">数据连接器<select className="form-input" value={selectedConnectorId || ''} onChange={event => setSelectedConnectorId(Number(event.target.value) || null)}><option value="">请选择连接器</option>{connectors.map(connector => <option key={connector.id} value={connector.id}>{connector.name} · {connector.provider_type}</option>)}</select></label>
                 <label>订阅名称<input className="form-input" value={name} onChange={event => setName(event.target.value)} /></label>
-                <label>同步间隔（分钟）<input className="form-input" type="number" min="1" value={intervalMinutes} onChange={event => setIntervalMinutes(event.target.value)} /></label>
+                <label>触发方式<select className="form-input" value={scheduleMode} onChange={event => setScheduleMode(event.target.value as 'minutes' | 'days' | 'date')}><option value="minutes">按分钟（兼容）</option><option value="days">每隔天数</option><option value="date">指定年月日</option></select></label>
+                {scheduleMode === 'minutes' && <label>同步间隔（分钟）<input className="form-input" type="number" min="1" value={intervalMinutes} onChange={event => setIntervalMinutes(event.target.value)} /></label>}
+                {scheduleMode === 'days' && <label>每隔天数<input className="form-input" type="number" min="1" value={intervalDays} onChange={event => setIntervalDays(event.target.value)} /></label>}
+                {scheduleMode === 'date' && <><label>首次触发时间<input className="form-input" type="datetime-local" value={runAt} onChange={event => setRunAt(event.target.value)} /></label><label>重复间隔天数（可选）<input className="form-input" type="number" min="0" value={intervalDays} onChange={event => setIntervalDays(event.target.value)} /></label></>}
                 <label className="mcp-form-full">申请人<input className="form-input" value={applicant} onChange={event => setApplicant(event.target.value)} placeholder="可选，按申请人圈定监控范围" /></label>
                 <label className="mcp-form-full">关键词表达式<input className="form-input" value={expression} onChange={event => setExpression(event.target.value)} placeholder="可选，例如：(芯片 OR 半导体) AND 封装" /></label>
+                <label className="mcp-form-full">手动跟踪库内专利 ID（逗号/空格分隔）<input className="form-input" value={trackedPatentText} onChange={event => setTrackedPatentText(event.target.value)} placeholder="留空表示按申请人或关键词检索；例如 12, 18, 25" /></label>
               </div>
+              <div className="mcp-panel-hint">可选专利：{trackedPatents.slice(0, 8).map(item => `${item.id} ${item.publication_number || item.application_number || ''}`).join('、')}{trackedPatents.length > 8 ? '…' : ''}</div>
+              {trackedPatents.length > 0 && <details style={{ marginTop: 8 }}><summary style={{ cursor: 'pointer', fontSize: 12, color: '#475569' }}>从当前库勾选专利（已选 {selectedTrackedPatentIds.length} 件）</summary><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 5, maxHeight: 180, overflow: 'auto', marginTop: 8 }}>{trackedPatents.slice(0, 100).map(item => <label key={item.id} className="checkbox-label"><input type="checkbox" checked={selectedTrackedPatentIds.includes(item.id)} onChange={event => setSelectedTrackedPatentIds(previous => event.target.checked ? [...previous, item.id] : previous.filter(id => id !== item.id))} />#{item.id} {item.publication_number || item.application_number || item.title}</label>)}</div></details>}
+              <label className="mcp-form-full" style={{ display: 'block', marginTop: 10 }}>按法律状态设置扫描策略（JSON；键为 legal_status，支持 interval_days、enabled、update_fields）<textarea className="form-input" rows={4} value={statusStrategyJson} onChange={event => setStatusStrategyJson(event.target.value)} /></label>
               <fieldset className="mcp-target-fields">
                 <legend>允许自动更新的目标字段</legend>
                 <p>当前库字段名称可以调整，但需映射到对应规范属性。法律事件仍作为来源历史保存；只有勾选的属性会更新当前值。</p>
@@ -357,7 +387,8 @@ export default function ExternalSyncPage() {
                         </div>
                         <div className="mcp-rule-card-meta">
                           {subscription.connector_name && <span>连接器：{subscription.connector_name}</span>}
-                          <span>{subscription.schedule.interval_minutes ? `每 ${String(subscription.schedule.interval_minutes)} 分钟` : '手动'}</span>
+                          <span>{subscription.schedule.interval_days ? `每 ${String(subscription.schedule.interval_days)} 天` : subscription.schedule.run_at ? `指定 ${String(subscription.schedule.run_at).slice(0, 16)}` : subscription.schedule.interval_minutes ? `每 ${String(subscription.schedule.interval_minutes)} 分钟` : '手动'}</span>
+                          {subscription.tracked_patent_count ? <span>跟踪 {subscription.tracked_patent_count} 件</span> : null}
                           <span>{subscription.review_policy}</span>
                           <span>上次运行：{subscription.last_run_at || '-'}</span>
                         </div>

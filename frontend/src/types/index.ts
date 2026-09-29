@@ -112,6 +112,7 @@ export interface PatentIdentityConflict {
   resolution_reason?: string | null
   candidate_patent_ids: number[]
   source_row_values: JsonObject
+  source_row_hyperlinks?: Record<string, string>
   observations: {
     id: number
     source_field_name: string
@@ -1044,6 +1045,7 @@ export interface ImportChangeReview {
   source_table_title?: string | null
   worksheet_name?: string | null
   source_row_values?: JsonObject
+  source_row_hyperlinks?: Record<string, string>
 }
 
 export type GovernanceAction = 'retain_source' | 'ignore' | 'map_existing' | 'propose_field'
@@ -1071,6 +1073,7 @@ export interface GovernanceObservation {
   decided_by?: string | null
   decided_at?: string | null
   source_row_values?: JsonObject
+  source_row_hyperlinks?: Record<string, string>
   created_at?: string | null
 }
 
@@ -1336,6 +1339,7 @@ export interface SyncSubscription {
   next_run_at?: string | null
   last_run_at?: string | null
   last_status?: string | null
+  tracked_patent_count?: number
 }
 
 export interface SyncRun {

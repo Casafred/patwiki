@@ -104,6 +104,7 @@ export const customFieldService = {
 }
 
 export const viewService = {
+  addPatents: (...args: Parameters<typeof viewApi.addPatents>) => viewApi.addPatents(...args),
   update: (...args: Parameters<typeof viewApi.update>) => viewApi.update(...args),
   grouped: (...args: Parameters<typeof viewApi.grouped>) => viewApi.grouped(...args),
   listPatents: (...args: Parameters<typeof viewApi.listPatents>) => viewApi.listPatents(...args),

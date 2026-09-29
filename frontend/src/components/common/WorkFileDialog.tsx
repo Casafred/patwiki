@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { exportApi } from '../../api'
-import type { JsonObject, JsonValue, PatentExportTemplate } from '../../types'
+import type { FieldMeta, JsonObject, JsonValue, PatentExportTemplate } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { save as saveDesktopFile } from '@tauri-apps/plugin-dialog'
 import { writeFile as writeDesktopFile } from '@tauri-apps/plugin-fs'
 
 interface WorkFileDialogProps {
   databaseId?: number | null
+  viewId?: number | null
+  fields?: FieldMeta[]
   selectedIds?: number[]
   search?: string
   filters?: JsonObject
@@ -63,20 +65,53 @@ async function download(blob: Blob, template: PatentExportTemplate) {
   return true
 }
 
-export default function WorkFileDialog({ databaseId, selectedIds = [], search, filters, onClose }: WorkFileDialogProps) {
+export default function WorkFileDialog({ databaseId, viewId, fields = [], selectedIds = [], search, filters, onClose }: WorkFileDialogProps) {
   const [templates, setTemplates] = useState<PatentExportTemplate[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [scope, setScope] = useState<'selected' | 'filtered' | 'database'>(
-    selectedIds.length > 0 ? 'selected' : (search?.trim() || Object.keys(filters || {}).length > 0) ? 'filtered' : 'database',
+  const [editingFields, setEditingFields] = useState(false)
+  const [fieldDraft, setFieldDraft] = useState('')
+  const [scope, setScope] = useState<'selected' | 'view' | 'filtered' | 'database'>(
+    selectedIds.length > 0 ? 'selected' : viewId ? 'view' : (search?.trim() || Object.keys(filters || {}).length > 0) ? 'filtered' : 'database',
   )
   const selectedTemplate = useMemo(
     () => templates.find(template => template.id === selectedId) || null,
     [selectedId, templates],
   )
+
+  const beginEditFields = () => {
+    if (!selectedTemplate) return
+    setFieldDraft(selectedTemplate.field_keys.join(', '))
+    setEditingFields(true)
+  }
+
+  const saveTemplateFields = async () => {
+    if (!selectedTemplate) return
+    const keys = fieldDraft.split(/[\n,，]/).map(item => item.trim()).filter(Boolean)
+    setError('')
+    try {
+      const updated = await exportApi.updateTemplate(selectedTemplate.id, {
+        database_id: selectedTemplate.database_id,
+        template_key: selectedTemplate.template_key,
+        name: selectedTemplate.name,
+        description: selectedTemplate.description || undefined,
+        output_format: selectedTemplate.output_format,
+        field_keys: keys,
+        filter_config: selectedTemplate.filter_config,
+        sort_config: selectedTemplate.sort_config,
+        group_by: selectedTemplate.group_by,
+        view_id: selectedTemplate.view_id ?? viewId ?? null,
+      })
+      setTemplates(previous => previous.map(item => item.id === updated.id ? updated : item))
+      setEditingFields(false)
+      setSuccess('模板字段已保存，版本号已递增。')
+    } catch (requestError: unknown) {
+      setError(getErrorMessage(requestError, '模板字段保存失败'))
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -108,6 +143,7 @@ export default function WorkFileDialog({ databaseId, selectedIds = [], search, f
       const payload: JsonObject = {
         database_id: databaseId ?? null,
         template_id: selectedTemplate.id,
+        view_id: scope === 'view' ? (viewId ?? selectedTemplate.view_id ?? null) : null,
         patent_ids: scope === 'selected' ? selectedIds : null,
         search: scope === 'database' ? null : search?.trim() || null,
         filters: (scope === 'database' ? {} : toExportFilters(filters)) as unknown as JsonValue,
@@ -176,18 +212,26 @@ export default function WorkFileDialog({ databaseId, selectedIds = [], search, f
                     <dl className="work-file-meta">
                       <div><dt>格式</dt><dd>{FORMAT_LABELS[selectedTemplate.output_format] || selectedTemplate.output_format}</dd></div>
                       <div><dt>字段</dt><dd>{selectedTemplate.field_keys.length} 个固定字段</dd></div>
-                      <div><dt>关联视图</dt><dd>{selectedTemplate.view_id ? `视图 #${selectedTemplate.view_id}` : '当前数据库'}</dd></div>
+                      <div><dt>关联视图</dt><dd>{selectedTemplate.view_id ? `视图 #${selectedTemplate.view_id}` : viewId ? `当前视图 #${viewId}` : '当前数据库'}</dd></div>
                       <div><dt>当前条件</dt><dd>{search?.trim() || Object.keys(filters || {}).length > 0 ? '叠加当前搜索/筛选' : '使用模板默认条件'}</dd></div>
                     </dl>
                     <label className="work-file-scope">
                       <span>数据范围</span>
-                      <select value={scope} onChange={event => setScope(event.target.value as 'selected' | 'filtered' | 'database')}>
+                      <select value={scope} onChange={event => setScope(event.target.value as 'selected' | 'view' | 'filtered' | 'database')}>
                         <option value="selected" disabled={selectedIds.length === 0}>已选 {selectedIds.length} 条专利</option>
+                        {viewId && <option value="view">当前业务视图成员</option>}
                         <option value="filtered">当前搜索和筛选</option>
                         <option value="database">整个专利库</option>
                       </select>
                     </label>
                     <div className="work-file-note">导出结果不会创建第二份专利数据。Excel 会附带“导出说明”页，Word 会附带模板版本和字段来源说明。</div>
+                    <div className="work-file-fields-editor">
+                      <div className="work-file-fields-heading"><span>固定字段：{selectedTemplate.field_keys.length} 个</span><button type="button" className="btn btn-ghost btn-sm" onClick={beginEditFields}>编辑字段</button></div>
+                      {editingFields && <>
+                        <textarea className="form-input" rows={4} value={fieldDraft} onChange={event => setFieldDraft(event.target.value)} placeholder={fields.length ? fields.map(field => field.key).join(', ') : '用逗号分隔字段 key'} />
+                        <div className="work-file-fields-actions"><button type="button" className="btn btn-primary btn-sm" onClick={() => void saveTemplateFields()}>保存模板</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditingFields(false)}>取消</button></div>
+                      </>}
+                    </div>
                   </>
                 )}
               </div>

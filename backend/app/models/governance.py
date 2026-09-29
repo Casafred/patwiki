@@ -17,6 +17,9 @@ class ImportSourceRow(Base):
     import_batch_id = Column(Integer, ForeignKey("import_batches.id", ondelete="CASCADE"), nullable=False, index=True)
     source_row = Column(Integer, nullable=False)
     raw_row = Column(JSON, nullable=False)
+    # Excel cell hyperlinks are retained separately from displayed values so
+    # imports can append source URLs without changing the source cell text.
+    hyperlinks = Column(JSON, nullable=False, default=dict)
     row_hash = Column(String(128), index=True)
     resolution_status = Column(String(30), nullable=False, default="unmapped_retained", index=True)
     resolution_reason = Column(Text)

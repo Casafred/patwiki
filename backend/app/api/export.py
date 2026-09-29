@@ -49,6 +49,10 @@ class ExportTemplateRequest(BaseModel):
 
 
 def _template_to_dict(template: PatentExportTemplate) -> dict[str, Any]:
+    field_keys = template.field_keys or []
+    view = template.view
+    if template.is_system and view and view.template_key in ExportService.BUSINESS_VIEW_KEYS:
+        field_keys = ExportService._business_view_field_keys(view) or field_keys
     return {
         "id": template.id,
         "database_id": template.database_id,
@@ -57,7 +61,7 @@ def _template_to_dict(template: PatentExportTemplate) -> dict[str, Any]:
         "name": template.name,
         "description": template.description,
         "output_format": template.output_format,
-        "field_keys": template.field_keys or [],
+        "field_keys": field_keys,
         "filter_config": template.filter_config or {},
         "sort_config": template.sort_config or {},
         "group_by": template.group_by,
@@ -202,6 +206,17 @@ def update_export_template(template_id: int, body: ExportTemplateRequest, db: Se
         if field == "template_key":
             value = value.strip()
         setattr(template, field, value)
+    if template.is_system and template.view and template.view.template_key in ExportService.BUSINESS_VIEW_KEYS:
+        selected = list(dict.fromkeys(body.field_keys))
+        current = {item.get("key"): item for item in (template.view.column_config or []) if isinstance(item, dict) and item.get("key")}
+        for key in selected:
+            current.setdefault(key, {"key": key, "visible": True, "width": 150, "order": len(current)})
+        for key, item in current.items():
+            item["visible"] = key in selected
+            if key in selected:
+                item["order"] = selected.index(key)
+        template.view.column_config = list(current.values())
+        db.add(template.view)
     template.version = (template.version or 0) + 1
     db.add(template)
     db.commit()

@@ -53,6 +53,8 @@ class SubscriptionCreate(BaseModel):
     mode: str = "query"
     scope_json: dict[str, Any] = Field(default_factory=dict)
     schedule_json: dict[str, Any] = Field(default_factory=dict)
+    tracked_patent_ids: list[int] = Field(default_factory=list, max_length=500)
+    status_strategies: dict[str, Any] = Field(default_factory=dict)
     review_policy: str = "safe_auto_apply"
     enabled: bool = True
 
@@ -62,6 +64,7 @@ class SubscriptionUpdate(BaseModel):
     saved_query_id: int | None = None
     scope_json: dict[str, Any] | None = None
     schedule_json: dict[str, Any] | None = None
+    status_strategies: dict[str, Any] | None = None
     review_policy: str | None = None
     enabled: bool | None = None
 

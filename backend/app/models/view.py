@@ -72,6 +72,33 @@ class PatentView(Base):
     form_share_links = relationship(
         "FormShareLink", back_populates="view", cascade="all, delete-orphan",
     )
+    patent_memberships = relationship(
+        "PatentViewMembership", back_populates="view", cascade="all, delete-orphan",
+    )
+
+
+class PatentViewMembership(Base):
+    """Explicit membership for a saved business view.
+
+    A patent may belong to any number of views.  The legacy ``Patent.view_id``
+    column remains as a compatibility projection for old imports and bulk
+    move commands, while this table is the source of truth for template views.
+    """
+    __tablename__ = "patent_view_memberships"
+    __table_args__ = (
+        UniqueConstraint("patent_id", "view_id", name="uq_patent_view_membership"),
+        Index("ix_patent_view_memberships_view", "view_id"),
+        Index("ix_patent_view_memberships_patent", "patent_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    patent_id = Column(Integer, ForeignKey("patents.id", ondelete="CASCADE"), nullable=False)
+    view_id = Column(Integer, ForeignKey("patent_views.id", ondelete="CASCADE"), nullable=False)
+    added_by = Column(String(100))
+    created_at = Column(DateTime, server_default=func.now())
+
+    patent = relationship("Patent", back_populates="view_memberships")
+    view = relationship("PatentView", back_populates="patent_memberships")
 
 
 class ViewLocalField(Base):

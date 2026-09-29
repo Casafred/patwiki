@@ -113,6 +113,8 @@ def default_action(observation: FieldObservation) -> str:
     # a new file to add, not a replacement of the existing projection.
     if observation.canonical_field_key == "attachments" and observation.difference_type in {"new", "content"}:
         return "adopt"
+    if observation.canonical_field_key == "original_links" and observation.difference_type in {"new", "content"}:
+        return "adopt"
     if observation.patent_id is None:
         return "adopt"
     if observation.difference_type == "new":
@@ -158,6 +160,7 @@ def observation_payload(item: FieldObservation, source: ImportSourceRow, batch: 
         "decided_by": item.decided_by,
         "decided_at": item.decided_at.isoformat() if item.decided_at else None,
         "source_row_values": source.raw_row,
+        "source_row_hyperlinks": source.hyperlinks or {},
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
 
@@ -280,6 +283,31 @@ def add_observations(
         )
         item.proposed_action = default_action(item)
         db.add(item)
+    original_links = (data or {}).get("custom_fields", {}).get("original_links") or []
+    if original_links:
+        raw_urls = list(dict.fromkeys(
+            url
+            for link in original_links
+            for url in link.get("urls", [])
+        ))
+        current = current_value(patent, "original_links")
+        candidate = json.dumps(original_links, ensure_ascii=False, sort_keys=True)
+        item = FieldObservation(
+            import_batch_id=batch.id,
+            source_row_id=source.id,
+            patent_id=patent.id if patent else None,
+            source_field_name="Excel 单元格超链接",
+            source_column_index=None,
+            canonical_field_key="original_links",
+            raw_value="\n".join(raw_urls),
+            normalized_value=candidate,
+            current_value=current,
+            candidate_value=candidate,
+            difference_type="quarantined" if source.resolution_status == "quarantined" else difference_type(current, candidate),
+            field_resolution="quarantined" if source.resolution_status == "quarantined" else "mapped",
+        )
+        item.proposed_action = default_action(item)
+        db.add(item)
     return unknown_count
 
 
@@ -291,6 +319,7 @@ def stage_import(
     artifact_path: str | None = None,
 ) -> dict:
     df, columns = ImportService.parse_excel(content, filename, sheet_name)
+    excel_hyperlinks = ImportService.extract_excel_hyperlinks(content, filename, sheet_name)
     embedded_images = extract_embedded_images(content, filename, sheet_name, columns)
     embedded_image_columns = {
         image.source_field_name for image in embedded_images if image.source_field_name
@@ -343,11 +372,13 @@ def stage_import(
                 import_batch_id=batch.id,
                 source_row=index + 2,
                 raw_row=parsed_row,
+                hyperlinks=excel_hyperlinks.get(index + 2, {}),
                 row_hash=row_hash(parsed_row),
             )
             staged_sources.append(source)
             parsed = ImportService._row_to_patent_data_tolerant(
-                parsed_row, mapping, db, custom_fields_cache=custom_cache,
+                {**parsed_row, "__excel_hyperlinks__": source.hyperlinks},
+                mapping, db, custom_fields_cache=custom_cache,
             )
             parsed_rows[index] = parsed
             data, _, _ = parsed
@@ -594,11 +625,41 @@ def write_value(patent: Patent, field_key: str, value: str) -> tuple[Any, Any]:
     new = coerce_value(field_key, value)
     if field_key in RELATION_FIELDS:
         patent.custom_fields = {**(patent.custom_fields or {}), field_key: value}
+    elif field_key == "original_links":
+        existing = (patent.custom_fields or {}).get(field_key) or []
+        additions = json.loads(value) if isinstance(value, str) else value
+        merged = _merge_original_links(existing, additions)
+        patent.custom_fields = {**(patent.custom_fields or {}), field_key: merged}
+        new = merged
     elif field_key in SYSTEM_FIELD_KEYS:
         setattr(patent, field_key, new)
     else:
         patent.custom_fields = {**(patent.custom_fields or {}), field_key: new}
     return old, new
+
+
+def _merge_original_links(existing: list, additions: list) -> list:
+    merged = [dict(item, urls=list(item.get("urls") or []), source_columns=list(item.get("source_columns") or [])) for item in existing if isinstance(item, dict)]
+    by_identity = {
+        (item.get("identifier_type"), item.get("identifier_value")): item
+        for item in merged
+    }
+    for addition in additions:
+        if not isinstance(addition, dict):
+            continue
+        key = (addition.get("identifier_type"), addition.get("identifier_value"))
+        target = by_identity.get(key)
+        if target is None:
+            target = {**addition, "urls": [], "source_columns": []}
+            merged.append(target)
+            by_identity[key] = target
+        for url in addition.get("urls") or []:
+            if url not in target["urls"]:
+                target["urls"].append(url)
+        for column in addition.get("source_columns") or []:
+            if column not in target["source_columns"]:
+                target["source_columns"].append(column)
+    return merged
 
 
 def import_storage_value(item: FieldObservation) -> str:
@@ -782,7 +843,8 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     })
                     continue
                 data, virtual, parse_errors = ImportService._row_to_patent_data_tolerant(
-                    source.raw_row, mapping, db,
+                    {**source.raw_row, "__excel_hyperlinks__": source.hyperlinks or {}},
+                    mapping, db,
                 )
                 publication = (data.get("publication_number") or "").strip()
                 items = by_row.get(source.id, [])
@@ -883,7 +945,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                         if not item.candidate_value and key not in parse_errors:
                             continue
                         current = current_value(patent, key)
-                        if action == "adopt" and not created_in_batch and current != item.current_value:
+                        if action == "adopt" and key != "original_links" and not created_in_batch and current != item.current_value:
                             detail = {
                                 "row": source.source_row,
                                 "status": "field_conflict",

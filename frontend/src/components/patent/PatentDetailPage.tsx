@@ -20,6 +20,7 @@ import type {
   PatentIdentityConflict,
   PatentFamilyMember,
   PatentCitationItem,
+  JsonObject,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDate, formatApiDateTime, formatApiTime } from '../../lib/date'
@@ -505,6 +506,10 @@ function IdentityTab({ patent, identifiers, fieldSources, identityConflicts, loa
     { label: '公开号', value: patent.publication_number },
     { label: '授权号', value: patent.grant_number },
   ]
+  const originalLinks = patent.custom_fields?.original_links
+  const originalLinkEntries = Array.isArray(originalLinks)
+    ? originalLinks.filter(item => !!item && typeof item === 'object' && !Array.isArray(item)) as unknown as JsonObject[]
+    : []
 
   return (
     <div className="identity-tab-content">
@@ -541,6 +546,34 @@ function IdentityTab({ patent, identifiers, fieldSources, identityConflicts, loa
           ))}
         </div>
       </section>
+
+      {originalLinkEntries.length > 0 && (
+        <section className="identity-section">
+          <div className="identity-section-heading">
+            <div>
+              <h3>专利原文链接</h3>
+              <p>按公开号和授权号分别归档；重复导入的相同网址会去重，新网址会追加。</p>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {originalLinkEntries.map((item, index) => {
+              const identifierType = item.identifier_type === 'grant' ? '授权号' : '公开号'
+              const urls = Array.isArray(item.urls) ? item.urls.filter((url): url is string => typeof url === 'string') : []
+              return <div key={`${identifierType}-${String(item.identifier_value || '')}-${index}`} style={{ display: 'grid', gap: 4 }}>
+                <strong>{identifierType} {String(item.identifier_value || '')}</strong>
+                {urls.map((rawUrl, urlIndex) => {
+                  let validUrl = ''
+                  try {
+                    const parsed = new URL(rawUrl)
+                    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') validUrl = parsed.toString()
+                  } catch { /* Invalid historic links remain hidden from navigation. */ }
+                  return validUrl ? <a key={`${validUrl}-${urlIndex}`} href={validUrl} target="_blank" rel="noreferrer noopener" style={{ color: '#2563eb', overflowWrap: 'anywhere' }}>{validUrl}</a> : null
+                })}
+              </div>
+            })}
+          </div>
+        </section>
+      )}
 
       {identityConflicts.length > 0 && (
         <section className="identity-section identity-conflict-section">

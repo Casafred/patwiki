@@ -229,8 +229,32 @@ def _apply_patent_update(patent: Patent, data: dict):
         current = dict(patent.custom_fields or {})
         for k, v in custom_fields_data.items():
             if not _is_empty(v):
-                current[k] = v
+                current[k] = _merge_original_links(current.get(k) or [], v) if k == "original_links" else v
         patent.custom_fields = current
+
+
+def _merge_original_links(existing: list, additions: list) -> list:
+    merged = [
+        {**item, "urls": list(item.get("urls") or []), "source_columns": list(item.get("source_columns") or [])}
+        for item in existing if isinstance(item, dict)
+    ]
+    by_identity = {(item.get("identifier_type"), item.get("identifier_value")): item for item in merged}
+    for addition in additions or []:
+        if not isinstance(addition, dict):
+            continue
+        key = (addition.get("identifier_type"), addition.get("identifier_value"))
+        target = by_identity.get(key)
+        if target is None:
+            target = {**addition, "urls": [], "source_columns": []}
+            merged.append(target)
+            by_identity[key] = target
+        for url in addition.get("urls") or []:
+            if url not in target["urls"]:
+                target["urls"].append(url)
+        for column in addition.get("source_columns") or []:
+            if column not in target["source_columns"]:
+                target["source_columns"].append(column)
+    return merged
 
 
 def _text_value(value):
@@ -446,6 +470,48 @@ def _record_field_observations(
                 source_row=source_row.source_row,
                 source_field_name=column,
             ))
+    original_links = (patent_data or {}).get("custom_fields", {}).get("original_links") or []
+    if original_links:
+        urls = list(dict.fromkeys(url for link in original_links for url in link.get("urls", [])))
+        candidate = _text_value(original_links)
+        current_before = before_values.get("original_links")
+        current_after = _current_value(patent, "original_links")
+        source_only = patent is None and resolution_status != "quarantined"
+        difference = (
+            "quarantined" if resolution_status == "quarantined"
+            else "unknown" if source_only
+            else _difference_type(current_before, candidate)
+        )
+        db.add(FieldObservation(
+            import_batch_id=batch.id,
+            source_row_id=source_row.id,
+            patent_id=patent.id if patent else None,
+            source_field_name="Excel 单元格超链接",
+            source_column_index=None,
+            canonical_field_key="original_links",
+            raw_value="\n".join(urls),
+            normalized_value=candidate,
+            current_value=current_after,
+            candidate_value=candidate,
+            difference_type=difference,
+            field_resolution="quarantined" if resolution_status == "quarantined" else "unmapped_retained" if source_only else "mapped",
+            proposed_action="quarantine" if resolution_status == "quarantined" else "retain" if source_only else "adopt" if difference in {"new", "content"} else "keep_existing",
+            final_decision=("retained" if source_only else "adopted" if final_decision == "kept" or difference in {"new", "content"} else final_decision or "kept"),
+        ))
+        if patent:
+            db.add(PatentHistory(
+                patent_id=patent.id,
+                field_key="original_links",
+                field_display_name="原文链接",
+                old_value=current_before,
+                new_value=candidate,
+                source="import",
+                changed_by="import",
+                import_batch_id=batch.id,
+                source_table_title=batch.source_table_title,
+                source_row=source_row.source_row,
+                source_field_name="Excel 单元格超链接",
+            ))
     return unknown_count
 def _legacy_confirm_import(
     req: ConfirmImportRequest,
@@ -529,6 +595,7 @@ def _legacy_confirm_import(
         db.flush()
 
         df, columns = ImportService.parse_excel(content, filename, req.sheet_name)
+        excel_hyperlinks = ImportService.extract_excel_hyperlinks(content, filename, req.sheet_name)
         mapping_issues = ImportService.validate_mapping(columns, mapping, db)
         blocking_mapping_issues = [
             issue for issue in mapping_issues
@@ -572,6 +639,7 @@ def _legacy_confirm_import(
                 import_batch_id=batch.id,
                 source_row=idx + 2,
                 raw_row=row_dict,
+                hyperlinks=excel_hyperlinks.get(idx + 2, {}),
                 row_hash=_row_hash(row_dict),
             )
             db.add(source_row)
@@ -579,7 +647,8 @@ def _legacy_confirm_import(
             source_rows[idx] = source_row
             try:
                 patent_data, virtual, field_errors = ImportService._row_to_patent_data_tolerant(
-                    row_dict, mapping, db, custom_fields_cache=custom_fields_cache
+                    {**row_dict, "__excel_hyperlinks__": source_row.hyperlinks},
+                    mapping, db, custom_fields_cache=custom_fields_cache
                 )
                 if field_errors.get("publication_number"):
                     raise ValueError(field_errors["publication_number"])
@@ -757,6 +826,7 @@ def _legacy_confirm_import(
                         current_patent = None
                         if existing:
                             before_values = _snapshot_values(existing, mapping)
+                            before_values["original_links"] = _current_value(existing, "original_links")
                             duplicates_count += 1
                             if req.update_on_duplicate:
                                 merged = merge_patent_data(existing, patent_data)
@@ -784,9 +854,10 @@ def _legacy_confirm_import(
                                     existing_in_batch = all_pub_nums.get((pub_num, country))
                                 if existing_in_batch:
                                     duplicates_count += 1
+                                    before_values = _snapshot_values(existing_in_batch, mapping)
+                                    before_values["original_links"] = _current_value(existing_in_batch, "original_links")
                                     if req.update_on_duplicate:
                                         merged = merge_patent_data(existing_in_batch, patent_data)
-                                        before_values = _snapshot_values(existing_in_batch, mapping)
                                         _apply_patent_update(existing_in_batch, merged)
                                         updated += 1
                                         current_patent = existing_in_batch
@@ -832,6 +903,13 @@ def _legacy_confirm_import(
                                     all_pub_nums[(pub_num, country)] = patent
 
                         if current_patent is not None:
+                            link_additions = (patent_data.get("custom_fields") or {}).get("original_links") or []
+                            if link_additions:
+                                current_custom = dict(current_patent.custom_fields or {})
+                                current_custom["original_links"] = _merge_original_links(
+                                    current_custom.get("original_links") or [], link_additions,
+                                )
+                                current_patent.custom_fields = current_custom
                             memberships = {(row.database_id, row.patent_id) for row in db.query(
                                 PatentDatabaseMembership.database_id, PatentDatabaseMembership.patent_id
                             ).filter(PatentDatabaseMembership.patent_id == current_patent.id).all()}
@@ -1187,6 +1265,7 @@ def _observation_to_dict(observation: FieldObservation, source_row: ImportSource
         "decided_by": observation.decided_by,
         "decided_at": observation.decided_at.isoformat() if observation.decided_at else None,
         "source_row_values": source_row.raw_row,
+        "source_row_hyperlinks": source_row.hyperlinks or {},
         "created_at": observation.created_at.isoformat() if observation.created_at else None,
     }
 
