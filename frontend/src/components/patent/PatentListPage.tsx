@@ -726,6 +726,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const tableWrapperRef = useRef<HTMLDivElement>(null)
   const restoredScopeRef = useRef<string | null>(null)
   const [activeCell, setActiveCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
+  const [scrollEdges, setScrollEdges] = useState({ atTop: true, atBottom: true })
 
   const tableScopeKey = `${TABLE_POSITION_STORAGE_PREFIX}${JSON.stringify({
     databaseId: isGlobalMasterTable ? null : activeDatabaseId ?? null,
@@ -800,6 +801,26 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       behavior: 'smooth',
     })
   }, [])
+
+  // 悬浮快捷按钮只在真正可滚动、且不在对应边缘时出现，避免遮挡内容。
+  const updateScrollEdges = useCallback((node?: HTMLDivElement | null) => {
+    const element = node ?? tableWrapperRef.current
+    if (!element) return
+    const maxScroll = element.scrollHeight - element.clientHeight
+    const atTop = element.scrollTop <= 1
+    const atBottom = maxScroll <= 1 || element.scrollTop >= maxScroll - 1
+    setScrollEdges(prev => (prev.atTop === atTop && prev.atBottom === atBottom ? prev : { atTop, atBottom }))
+  }, [])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => updateScrollEdges())
+    const handleResize = () => updateScrollEdges()
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [patents, tableViewMode, viewId, updateScrollEdges])
 
   useEffect(() => {
     const handleLibraryShortcut = (event: KeyboardEvent) => {
@@ -1176,6 +1197,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         savedAt: Date.now(),
       } satisfies TablePositionSnapshot))
     } catch { /* session storage is optional */ }
+    updateScrollEdges(element)
     if (tableViewMode !== 'continuous') return
     const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
     if (remaining < 320) loadNextContinuousPage()
@@ -3071,7 +3093,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       <aside className="workbench-view-sidebar" aria-label="工作台视图">
         <ViewSwitcher onOpenView={() => undefined} />
       </aside>
-      <div className="workbench-main" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+      <div className="workbench-main" style={{ display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0, flex: 1 }}>
       <div className="datagrid-toolbar">
         <div className="datagrid-toolbar-heading">
           {onOpenSidebar && (
@@ -3806,6 +3828,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </table>
         )}
       </div>
+
+      {(activeView?.layout_type === 'table' || !activeView) && !(scrollEdges.atTop && scrollEdges.atBottom) && (
+        <div className="datagrid-scroll-fab" role="group" aria-label="滚动到顶部或底部">
+          <button type="button" className="btn btn-sm btn-secondary" onClick={() => scrollLibraryTo('top')} disabled={scrollEdges.atTop} title="滚动到库顶部（Ctrl/Cmd + Home）" aria-label="滚动到库顶部"><Icon name="chevron-up" size={16} /></button>
+          <button type="button" className="btn btn-sm btn-secondary" onClick={() => scrollLibraryTo('bottom')} disabled={scrollEdges.atBottom} title="滚动到库底部（Ctrl/Cmd + End）" aria-label="滚动到库底部"><Icon name="chevron-down" size={16} /></button>
+        </div>
+      )}
 
       {(activeView?.layout_type === 'table' || !activeView) && <div className="datagrid-footer">
         {tableViewMode === 'continuous' ? (

@@ -5924,7 +5924,31 @@ body {
 .workbench-view-sidebar .nav-section { margin: 0 0 8px; color: var(--ink-800); font-size: 13px; font-weight: 700; }
 .workbench-view-sidebar .view-switcher-control { display: flex; gap: 5px; }
 .workbench-view-sidebar .view-switcher-select { min-width: 0; flex: 1; }
-.workbench-main { overflow: hidden; }
+.workbench-main { overflow: hidden; position: relative; }
+/* 表页右下角常驻的滚动快捷按钮：滚动时始终可见 */
+.datagrid-scroll-fab {
+  position: absolute;
+  right: 20px;
+  bottom: 64px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .95);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .16);
+  backdrop-filter: blur(4px);
+}
+.datagrid-scroll-fab .btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+}
+.datagrid-scroll-fab .btn:disabled { opacity: .35; cursor: default; }
 @media (max-width: 880px) {
   .workbench-view-sidebar { width: 188px; flex-basis: 188px; }
 }
