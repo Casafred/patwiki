@@ -847,11 +847,64 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
             PatentDatabaseMembership.database_id == database_id,
         ).all()
     }
+
+    # Every row is applied inside its own SAVEPOINT. A row that violates a
+    # database constraint (e.g. the (application_number, country) unique key)
+    # must only roll back itself: without a savepoint a failed flush poisons
+    # the whole Session, every later row then raises PendingRollbackError and
+    # the entire batch is aborted. The bookkeeping below is snapshotted so a
+    # rolled-back row cannot leave stale counters or lookup entries pointing
+    # at Patents that no longer exist.
+    def _bookkeeping_snapshot() -> dict[str, Any]:
+        return {
+            "inserted": inserted,
+            "updated": updated,
+            "unchanged": unchanged,
+            "created_ids": len(created_ids),
+            "changed_ids": set(changed_ids),
+            "pending_relations": len(pending_relations),
+            "row_reports": len(row_reports),
+            "field_error_details": len(field_error_details),
+            "errors": len(errors),
+            "target_membership": set(target_membership_patent_ids),
+            "new_by_publication": dict(new_by_publication),
+            "new_by_application": dict(new_by_application),
+            "new_by_identity": dict(new_by_identity),
+            "existing_by_publication": dict(existing_by_publication),
+            "existing_by_application": {key: list(value) for key, value in existing_by_application.items()},
+        }
+
+    def _restore_bookkeeping(snapshot: dict[str, Any]) -> None:
+        nonlocal inserted, updated, unchanged
+        inserted = snapshot["inserted"]
+        updated = snapshot["updated"]
+        unchanged = snapshot["unchanged"]
+        del created_ids[snapshot["created_ids"]:]
+        del pending_relations[snapshot["pending_relations"]:]
+        del row_reports[snapshot["row_reports"]:]
+        del field_error_details[snapshot["field_error_details"]:]
+        del errors[snapshot["errors"]:]
+        changed_ids.clear()
+        changed_ids.update(snapshot["changed_ids"])
+        target_membership_patent_ids.clear()
+        target_membership_patent_ids.update(snapshot["target_membership"])
+        for name, mapping in (
+            ("new_by_publication", new_by_publication),
+            ("new_by_application", new_by_application),
+            ("new_by_identity", new_by_identity),
+            ("existing_by_publication", existing_by_publication),
+            ("existing_by_application", existing_by_application),
+        ):
+            mapping.clear()
+            mapping.update(snapshot[name])
+
     try:
         for index, _ in enumerate(df.iterrows()):
             source = rows[index] if index < len(rows) else None
             if source is None:
                 continue
+            savepoint = None
+            snapshot = None
             try:
                 if source.resolution_status in {"quarantined", "retained_source_row", "skipped_empty_row"}:
                     if source.resolution_status != "quarantined":
@@ -876,6 +929,8 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                         "reason": source.resolution_reason or "来源行已隔离",
                     })
                     continue
+                snapshot = _bookkeeping_snapshot()
+                savepoint = db.begin_nested()
                 data, virtual, parse_errors = ImportService._row_to_patent_data_tolerant(
                     {**source.raw_row, "__excel_hyperlinks__": source.hyperlinks or {}},
                     mapping, db,
@@ -930,6 +985,19 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     patent = next((item for item in application_matches if item.country == country), None)
                     if patent is None and len(application_matches) == 1:
                         patent = application_matches[0]
+                # The in-memory lookups are keyed by staged candidate strings,
+                # which can drift from what is actually stored on legacy rows
+                # (e.g. a field-level quarantine or a normalization mismatch).
+                # Probe the database with the value that would be inserted so a
+                # legacy duplicate is updated instead of tripping the
+                # (application_number, country) unique key at flush time.
+                if patent is None and application:
+                    patent = db.query(Patent).filter(
+                        func.upper(func.trim(Patent.application_number)) == application.upper(),
+                        func.upper(func.trim(func.coalesce(Patent.country, "CN"))) == country,
+                    ).first()
+                    if patent is not None:
+                        created_in_batch = patent.id in created_ids
                 if patent is None and publication:
                     patent = existing_by_publication.get((publication, country))
                 created = False
@@ -1148,7 +1216,19 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                 if row_field_errors:
                     applied_report["field_errors"] = row_field_errors
                 row_reports.append(applied_report)
+                # Persist the row inside its own savepoint *before* releasing
+                # it. Otherwise this row's still-pending objects would be
+                # flushed together with a later row and a failure there would
+                # silently undo this already-counted row.
+                db.flush()
+                savepoint.commit()
+                savepoint = None
             except Exception as exc:
+                # Roll back only this row so the Session stays usable and the
+                # remaining rows in the batch can still be applied.
+                if savepoint is not None:
+                    savepoint.rollback()
+                    _restore_bookkeeping(snapshot)
                 source.resolution_status = "quarantined"
                 source.resolution_reason = str(exc)
                 errors.append({"row": source.source_row, "status": "apply_error", "reason": str(exc)})
