@@ -141,6 +141,27 @@ def _apply_filter_expression(expression, operator: str, value: Any):
     return None
 
 
+def _group_order_expression(field_key: str):
+    """把视图分组字段映射为可排序的 SQL 表达式。
+
+    取值口径与 ViewService._get_item_field_value 保持一致：带前缀的
+    custom_fields. / ai_fields. 指向 JSON 子键，裸键优先取系统列、否则取
+    custom_fields；view_local.* 只存在于视图投影中，无法参与 SQL 排序。
+    """
+    if field_key.startswith("custom_fields."):
+        return func.json_extract(Patent.custom_fields, f'$.{field_key[len("custom_fields."):]}')
+    if field_key.startswith("ai_fields."):
+        return func.json_extract(Patent.ai_fields, f'$.{field_key[len("ai_fields."):]}')
+    if field_key.startswith("view_local."):
+        return None
+    column = Patent.__table__.c.get(field_key)
+    if column is not None:
+        return column
+    if field_key in SYSTEM_FIELDS:
+        return None
+    return func.json_extract(Patent.custom_fields, f'$.{field_key}')
+
+
 class PatentService:
     @staticmethod
     def _history_value_for_field(field_key: str, raw: str | None):
@@ -247,6 +268,7 @@ class PatentService:
         custom_filters: Optional[dict[str, Any]] = None,
         filters: Optional[dict[str, Any]] = None,
         group_by_family: bool = False,
+        group_order_fields: Optional[list[tuple[str, str]]] = None,
     ) -> tuple[list[Patent], int]:
         query = db.query(Patent).options(
             joinedload(Patent.tags),
@@ -390,6 +412,20 @@ class PatentService:
                 Patent.family_id.isnot(None),
             ).group_by(Patent.family_id).all()
             family_size_map = {row.fid: row.cnt for row in family_size_rows}
+
+        # 视图配置了分组字段时，先按分组字段排序。这样普通列表接口（连续滚动）
+        # 与分组接口（分页/详情/全图）返回的行顺序完全一致；否则连续滚动按
+        # sort_by 排、而分组接口按分组字段排，前几行会对不上。
+        if group_order_fields and not group_by_family:
+            for field_key, direction in group_order_fields:
+                expression = _group_order_expression(field_key)
+                if expression is None:
+                    continue
+                # 空值位置与分组接口保持一致：升序时空值在最后，降序时在最前。
+                if direction == "desc":
+                    query = query.order_by(expression.desc().nullsfirst())
+                else:
+                    query = query.order_by(expression.asc().nullslast())
 
         # P2-8：同族聚拢模式 —— 把同族专利排在一起（family_id 非空的在前，按 family_id 分组，组内按申请日倒序）
         if group_by_family:

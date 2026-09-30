@@ -1115,6 +1115,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             sort_by: sortField,
             sort_order: sortOrder,
             group_by_family: groupByFamily,
+            // 连续滚动走的是普通列表接口（跳过分组接口），这里要求后端按
+            // 视图分组字段排序，使行顺序与分页/详情/全图（分组接口）一致。
+            order_by_view_grouping: true,
             extra_filters: viewFilters,
           })
           if (myRequestId !== loadPatentsRequestId.current) return false

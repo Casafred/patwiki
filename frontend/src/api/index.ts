@@ -132,6 +132,7 @@ export const viewApi = {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_by_family?: boolean
+    order_by_view_grouping?: boolean
     extra_filters?: JsonObject
   } = {}): Promise<ViewPatentListResponse> => {
     const { extra_filters, ...query } = params

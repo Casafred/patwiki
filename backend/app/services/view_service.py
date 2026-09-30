@@ -413,12 +413,15 @@ class ViewService:
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
         group_by_family: bool = False,
+        order_by_view_grouping: bool = False,
     ) -> tuple[list[Patent], int]:
         """获取视图中的专利列表。
 
         - 应用视图自身的 filter_config
         - 合并 extra_filters（前端临时筛选）
         - 应用视图的 sort_config 作为默认排序
+        - order_by_view_grouping 为真时，先按视图分组字段排序，使普通列表
+          接口与分组接口返回一致的行顺序（连续滚动需要）
         """
         merged_filters = dict(view.filter_config or {})
         if extra_filters:
@@ -426,6 +429,17 @@ class ViewService:
 
         sort_by = sort_by or (view.sort_config or {}).get("sort_by")
         sort_order = sort_order or (view.sort_config or {}).get("sort_order", "asc")
+
+        group_order_fields = None
+        if order_by_view_grouping and not group_by_family:
+            config = view.group_by_config
+            fields = config.get("fields") if isinstance(config, dict) else config
+            if isinstance(fields, list):
+                group_order_fields = [
+                    (field["field"], field.get("direction", "asc"))
+                    for field in fields
+                    if isinstance(field, dict) and field.get("field")
+                ] or None
 
         patents, total = PatentService.list_patents(
             db,
@@ -437,6 +451,7 @@ class ViewService:
             sort_by=sort_by,
             sort_order=sort_order,
             group_by_family=group_by_family,
+            group_order_fields=group_order_fields,
         )
         return patents, total
 
@@ -866,6 +881,7 @@ class ViewService:
             extra_filters=extra_filters, search=search,
             sort_by=sort_by, sort_order=sort_order,
             group_by_family=group_by_family,
+            order_by_view_grouping=True,
         )
         local_values = {}
         if patents:
