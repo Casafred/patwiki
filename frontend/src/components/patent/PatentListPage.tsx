@@ -1333,7 +1333,10 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     if (fields.length > 0) {
       const cached = tableDataCache.get(tableScopeKey)
       const position = readTablePosition()
-      if (cached) {
+      // 空快照一律视为未命中：否则一次竞态写回的“空结果”会被缓存到当前
+      // scope，之后切回同一库/同一筛选条件时命中缓存直接渲染空表，而且不再
+      // 触发请求——必须点别处才能刷新。空库最多多发一次请求，代价可接受。
+      if (cached && cached.items.length > 0) {
         patentsRef.current = cached.items
         totalPatentsRef.current = cached.total
         continuousPageRef.current = cached.continuousPage
@@ -1600,7 +1603,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     void patentApi.rebuildFamilies(activeDatabaseId).then(() => {
       setCollapsedFamilyKeys(new Set())
       setGroupedGroups([])
-      return loadPatents(1, false, pageSize, true)
+      // 切库后重建同族时不能用 preserveVisible：该模式下 applyItems 会把响应
+      // 合并进“当前可见窗口”，而切库瞬间 patentsRef 可能刚被清空或仍是旧库数据，
+      // 于是会写回空结果并缓存到当前 scope，表现为“切库后一直没有数据，点一下
+      // 其它切换按钮才刷新出来”。这里按切库处理，整窗替换为响应结果。
+      return loadPatents(1, false, pageSize, false)
     }).catch(error => {
       familyRebuildDatabaseRef.current = null
       console.error('Failed to rebuild family relations:', error)
