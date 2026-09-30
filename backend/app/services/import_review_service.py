@@ -208,23 +208,28 @@ def add_observations(
         if target == IMPORT_SKIP_FIELD:
             continue
         if column_images:
+            # 嵌入图片本身就是这一列的值：即使单元格文本为空也要进入审查。
+            # 关键：图片永远不能被静默丢弃。即便该列被映射到其它字段（例如
+            # 「附图说明」被模糊匹配成 notes），这里仍为图片单独生成一条
+            # attachments 观察记录；若该列还有文本，则文本继续走下方常规映射，
+            # 两条观察彼此独立，既保留文本又不丢图片。
             image_names = ", ".join(image.filename for image in column_images)
             marker = f"[嵌入图片] {image_names}"
+            current = current_value(patent, "attachments")
+            diff = "quarantined" if source.resolution_status == "quarantined" else difference_type(current, image_names)
+            item = FieldObservation(
+                import_batch_id=batch.id, source_row_id=source.id,
+                patent_id=patent.id if patent else None,
+                source_field_name=column, source_column_index=index,
+                canonical_field_key="attachments", raw_value=marker,
+                normalized_value=image_names, current_value=current,
+                candidate_value=image_names, difference_type=diff,
+                field_resolution="quarantined" if source.resolution_status == "quarantined" else "mapped",
+            )
+            item.proposed_action = default_action(item)
+            db.add(item)
             if target == "attachments":
-                value = marker
-                current = current_value(patent, target)
-                diff = "quarantined" if source.resolution_status == "quarantined" else difference_type(current, image_names)
-                item = FieldObservation(
-                    import_batch_id=batch.id, source_row_id=source.id,
-                    patent_id=patent.id if patent else None,
-                    source_field_name=column, source_column_index=index,
-                    canonical_field_key="attachments", raw_value=marker,
-                    normalized_value=image_names, current_value=current,
-                    candidate_value=image_names, difference_type=diff,
-                    field_resolution="quarantined" if source.resolution_status == "quarantined" else "mapped",
-                )
-                item.proposed_action = default_action(item)
-                db.add(item)
+                # 该列专职承载图片，无需再生成第二条文本观察记录。
                 continue
             if not value:
                 continue

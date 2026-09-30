@@ -99,6 +99,36 @@ class ExcelEmbeddedImageTest(unittest.TestCase):
                 self.assertEqual(len(patent.custom_fields["attachments"]), 1)
                 self.assertTrue(patent.custom_fields["attachments"][0]["preview_url"].endswith("/preview"))
 
+    def test_image_column_mapped_to_other_field_still_imports_image(self):
+        content = self.workbook_bytes()
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact = root / "images.xlsx"
+            artifact.write_bytes(content)
+            with patch.object(settings, "FILES_DIR", root / "files"):
+                result = stage_import(
+                    self.db,
+                    content=content,
+                    filename="images.xlsx",
+                    sheet_name="专利数据",
+                    mapping={"公开号": "publication_number", "标题": "title", "附图": "notes"},
+                    database_id=self.database.id,
+                    artifact_path=str(artifact),
+                )
+                self.assertEqual(result["embedded_image_count"], 1)
+                changes = list_batch_changes(self.db, result["batch_id"])["items"]
+                image_changes = [item for item in changes if item["canonical_field_key"] == "attachments"]
+                self.assertEqual(len(image_changes), 1)
+                self.assertIn("image", image_changes[0]["candidate_value"])
+
+                review_batch(self.db, result["batch_id"], default_action_name="adopt")
+                applied = apply_batch(self.db, result["batch_id"])
+                self.assertEqual(applied["created"], 1)
+
+                patent = self.db.query(Patent).filter(Patent.publication_number == "CN123456789A1").one()
+                self.assertEqual(self.db.query(Attachment).count(), 1)
+                self.assertEqual(len(patent.custom_fields["attachments"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
