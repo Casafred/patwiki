@@ -1435,7 +1435,12 @@ def _stringify(v: Any) -> Optional[str]:
 
 
 def _patent_to_dict(patent: Patent) -> dict:
-    """轻量级 Patent → dict，包含主要字段。"""
+    """Patent → dict。
+
+    列表接口（含前端「详情模式」）会直接按字段渲染数据表列，因此这里必须
+    覆盖字段注册表暴露的全部系统字段。早期版本只序列化一个「轻量级」子集，
+    导致权利要求、技术三要素等列即使库里已有值也显示为空。
+    """
     return {
         "id": patent.id,
         "application_number": patent.application_number,
@@ -1443,23 +1448,46 @@ def _patent_to_dict(patent: Patent) -> dict:
         "grant_number": patent.grant_number,
         "title": patent.title,
         "abstract": patent.abstract,
+        "claims": patent.claims,
         "applicant": patent.applicant,
         "inventor": patent.inventor,
+        "assignee": patent.assignee,
+        "agent": patent.agent,
         "country": patent.country,
         "patent_type": patent.patent_type.value if patent.patent_type else None,
         "filing_date": patent.filing_date.isoformat() if patent.filing_date else None,
         "publication_date": patent.publication_date.isoformat() if patent.publication_date else None,
         "grant_date": patent.grant_date.isoformat() if patent.grant_date else None,
+        "priority_date": patent.priority_date.isoformat() if patent.priority_date else None,
+        "priority_number": patent.priority_number,
+        "priority_country": patent.priority_country,
         "legal_status": patent.legal_status.value if patent.legal_status else None,
+        "legal_status_date": patent.legal_status_date.isoformat() if patent.legal_status_date else None,
+        "legal_status_details": patent.legal_status_details,
+        "ipc_main": patent.ipc_main,
+        "ipc_all": patent.ipc_all,
+        "cpc_main": patent.cpc_main,
+        "cpc_all": patent.cpc_all,
         "category": patent.category,
         "subcategory": patent.subcategory,
         "module": patent.module,
         "has_risk": patent.has_risk,
         "risk_level": patent.risk_level.value if patent.risk_level else None,
+        "risk_description": patent.risk_description,
+        "technical_problem": patent.technical_problem,
+        "technical_effect": patent.technical_effect,
+        "technical_solution": patent.technical_solution,
+        "application_status": patent.application_status,
+        "scope_description": patent.scope_description,
         "notes": patent.notes,
+        "product_id": patent.product_id,
         "custom_fields": dict(patent.custom_fields or {}),
         "ai_fields": dict(patent.ai_fields or {}),
         "database_id": patent.database_id,
+        "created_at": patent.created_at.isoformat() if patent.created_at else None,
+        "updated_at": patent.updated_at.isoformat() if patent.updated_at else None,
+        "tags": [{"id": tag.id, "name": tag.name, "color": tag.color} for tag in (patent.tags or [])],
+        "projects": [{"id": project.id, "name": project.name} for project in (patent.projects or [])],
         # 同族聚拢字段：视图查询走的是本序列化函数，必须与大表直查保持一致，
         # 否则前端在视图路径下拿不到 family_id/family_size，磁吸聚拢会消失。
         "family_id": patent.family_id,

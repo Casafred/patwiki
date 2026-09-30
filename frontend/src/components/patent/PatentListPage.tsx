@@ -3349,29 +3349,63 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           </div>
         ) : tableViewMode === 'detail' || tableViewMode === 'full_image' ? (
           <div className={`patent-detail-browser ${tableViewMode === 'full_image' ? 'is-full-image' : ''}`}>
-            {patents.map((patent, rowIdx) => (
-              <article className="patent-detail-browser-row" key={patent.id}>
-                <div className="patent-detail-browser-heading">
-                  <label className="patent-detail-browser-select" onClick={event => event.stopPropagation()}>
-                    <input type="checkbox" checked={selectedIds.includes(patent.id)} onChange={() => toggleSelect(patent.id)} aria-label={`选择第 ${(page - 1) * pageSize + rowIdx + 1} 条专利`} />
-                    <span>{(page - 1) * pageSize + rowIdx + 1}</span>
-                  </label>
-                  <button type="button" className="patent-detail-browser-title" onClick={() => openPatent(patent.id)}>
-                    {patent.title || patent.publication_number || `专利 #${patent.id}`}
-                  </button>
-                  <span className="patent-detail-browser-identity">{patent.publication_number || '无公开号'}</span>
-                </div>
-                {rowImages(patent).length > 0 && <PatentImageStrip attachments={rowImages(patent)} maxImages={tableViewMode === 'detail' ? 1 : undefined} />}
-                <div className="patent-detail-browser-fields">
-                  {detailVisibleFields.map(field => (
-                    <section className="patent-detail-browser-field" key={field.key}>
-                      <span className="patent-detail-browser-field-label">{field.name}</span>
-                      <div className="patent-detail-browser-field-value">{renderCellContent(patent, field)}</div>
-                    </section>
-                  ))}
-                </div>
-              </article>
-            ))}
+            {familyDisplayPatents.map((patent, rowIdx) => {
+              // P2-8：详情模式同样遵循同族聚拢——族首显示分组标签，行内显示同族徽章。
+              const familyKey = groupByFamily && patent.family_id ? `family:${patent.family_id}` : null
+              const isFamilyStart = !!familyKey && familyFirstIds.has(patent.id)
+              const isFamilyCollapsed = !!familyKey && collapsedFamilyKeys.has(familyKey)
+              if (familyKey && isFamilyCollapsed && !isFamilyStart) return null
+              return (
+                <Fragment key={patent.id}>
+                  {isFamilyStart && (
+                    <div
+                      className="patent-detail-browser-family-header"
+                      onClick={() => setCollapsedFamilyKeys(previous => {
+                        const next = new Set(previous)
+                        if (familyKey && next.has(familyKey)) next.delete(familyKey)
+                        else if (familyKey) next.add(familyKey)
+                        return next
+                      })}
+                    >
+                      <span className="family-group-toggle">{isFamilyCollapsed ? '›' : '⌄'}</span>
+                      <strong>{patent.family_key || `同族 ${patent.family_id}`}</strong>
+                      <span className="family-group-count">{patent.family_size || 1} 件独立专利</span>
+                    </div>
+                  )}
+                  <article className="patent-detail-browser-row" key={patent.id}>
+                    <div className="patent-detail-browser-heading">
+                      <label className="patent-detail-browser-select" onClick={event => event.stopPropagation()}>
+                        <input type="checkbox" checked={selectedIds.includes(patent.id)} onChange={() => toggleSelect(patent.id)} aria-label={`选择第 ${(page - 1) * pageSize + rowIdx + 1} 条专利`} />
+                        <span>{(page - 1) * pageSize + rowIdx + 1}</span>
+                      </label>
+                      <button type="button" className="patent-detail-browser-title" onClick={() => openPatent(patent.id)}>
+                        {patent.title || patent.publication_number || `专利 #${patent.id}`}
+                      </button>
+                      <span className="patent-detail-browser-meta">
+                        <span className="patent-detail-browser-identity">{patent.publication_number || '无公开号'}</span>
+                        {groupByFamily && patent.family_id && (
+                          <span
+                            className="family-badge"
+                            title={`同族 ${patent.family_id}，共 ${patent.family_size ?? 1} 件`}
+                          >
+                            族{patent.family_id}{patent.family_size ? `·${patent.family_size}` : ''}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    {rowImages(patent).length > 0 && <PatentImageStrip attachments={rowImages(patent)} maxImages={tableViewMode === 'detail' ? 1 : undefined} />}
+                    <div className="patent-detail-browser-fields">
+                      {detailVisibleFields.map(field => (
+                        <section className="patent-detail-browser-field" key={field.key}>
+                          <span className="patent-detail-browser-field-label">{field.name}</span>
+                          <div className="patent-detail-browser-field-value">{renderCellContent(patent, field)}</div>
+                        </section>
+                      ))}
+                    </div>
+                  </article>
+                </Fragment>
+              )
+            })}
           </div>
         ) : (
           <table className="data-grid" style={{ width: 'max-content', minWidth: '100%' }}>

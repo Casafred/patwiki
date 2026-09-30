@@ -6886,11 +6886,44 @@ body {
   cursor: pointer;
 }
 
+.patent-detail-browser-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
 .patent-detail-browser-identity {
   color: #64748b;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.family-badge {
+  display: inline-block;
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.patent-detail-browser-family-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid #dbe5e7;
+  border-radius: 6px;
+  background: #f0fdfa;
+  color: #134e4a;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .patent-detail-browser-fields {
@@ -6948,7 +6981,7 @@ body {
   .patent-detail-browser { padding: 12px 10px 24px; }
   .patent-detail-browser-row { padding: 14px 12px 16px; }
   .patent-detail-browser-heading { grid-template-columns: auto minmax(0, 1fr); }
-  .patent-detail-browser-identity { grid-column: 2; }
+  .patent-detail-browser-meta { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
 }
 
 .detail-field-config { display: grid; gap: 10px; }
