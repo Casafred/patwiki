@@ -663,7 +663,8 @@ class ImportService:
                         normalized_publication = normalize_publication_number(value)
                         if not normalized_publication:
                             raise ValueError(
-                                f"字段 '{excel_col}' 的公开号格式无法识别：{value}（应为国别+数字+文献类型代码）"
+                                f"字段 '{excel_col}' 的公开号格式无法识别：{value}"
+                                "（应为国别+数字+文献类型代码，可含字母系列，如 USRE46827E1、BRPI1003518B1）"
                             )
                         data[field_key] = normalized_publication
                     else:

@@ -23,7 +23,7 @@ from app.services.import_service import ImportService, IMPORT_SKIP_FIELD
 from app.services.excel_image_service import ExcelImage, extract_embedded_images
 from app.services.attachment_service import AttachmentService
 from app.services.patent_identity_service import (
-    PatentIdentityConflict, ensure_patent_identifiers,
+    ensure_patent_identifiers,
     find_patents_by_identifier_specs_bulk,
     identifier_specs_from_values,
 )
@@ -964,12 +964,12 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     if patent is None and writes_application_number:
                         conflicting = new_by_application.get((country, application_number))
                         if conflicting is not None:
-                            raise PatentIdentityConflict(
-                                f"申请号 {application_number} 在本批次已对应专利 {conflicting.id}，"
-                                "但公开号不同，已隔离等待人工确认",
-                                identifier=application_number,
-                                patent_ids=(conflicting.id,),
-                            )
+                            # 同一申请号即同一件专利。US 等法域下同一申请会先有预公开号
+                            # （A1）、后有授权号（B1/B2），两行公开号不同也不应隔离。
+                            # 这里复用已建专利；本行不同的公开号仅作为额外公开号进入
+                            # PatentIdentifier 索引（见下方 publication_number 保护），
+                            # 不覆盖已存在的公开号，从而不丢数据。
+                            patent = conflicting
                     created_in_batch = patent is not None and patent.id in created_ids
                 country = (data.get("country") or "CN").strip().upper()
                 application = (data.get("application_number") or "").strip()
@@ -1133,6 +1133,22 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 )
                                 continue
                             storage_value = import_storage_value(item)
+                            if (
+                                key == "publication_number"
+                                and current
+                                and str(storage_value or "").strip()
+                                and str(storage_value).strip() != str(current).strip()
+                            ):
+                                # 同申请号合并：同一件专利可能先有预公开号、后有授权号。
+                                # 保留已有主公开号，本行公开号仅作为额外公开号由
+                                # PatentIdentifier 索引保留（下方 ensure_patent_identifiers），
+                                # 不覆盖，也不隔离，避免丢失来源数据。
+                                add_import_history(
+                                    db, patent=patent, item=item, batch=batch,
+                                    source=source, old_value=current,
+                                    new_value=current, actor=actor,
+                                )
+                                continue
                             try:
                                 old, _ = write_value(patent, key, storage_value)
                             except Exception as exc:

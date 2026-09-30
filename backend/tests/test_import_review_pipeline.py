@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models import (
     Citation, ImportBatchStatus, ImportSourceRow, Patent, PatentDatabase,
-    PatentDatabaseMembership, PatentHistory,
+    PatentDatabaseMembership, PatentHistory, PatentIdentifier,
 )
 from app.services.import_service import ImportService
 from app.services.field_registry import get_all_fields_meta
@@ -295,9 +295,19 @@ class ImportReviewPipelineTest(unittest.TestCase):
             self.assertEqual(self.db.query(Patent).count(), 1)
             self.db.refresh(existing)
             self.assertEqual(existing.title, "新标题")
-            self.assertEqual(existing.publication_number, "CN108145667A")
+            # 同申请号即同一件专利：保留已有主公开号，来源中的不同公开号仅作为
+            # 额外公开号进入身份索引，不再覆盖已存在的公开号。
+            self.assertEqual(existing.publication_number, "CN108145667X")
+            self.assertEqual(
+                self.db.query(PatentIdentifier).filter(
+                    PatentIdentifier.patent_id == existing.id,
+                    PatentIdentifier.identifier_type == "publication",
+                    PatentIdentifier.normalized_value == "CN108145667A",
+                ).count(),
+                1,
+            )
 
-    def test_same_batch_application_number_with_other_publication_is_quarantined(self):
+    def test_same_batch_application_number_with_other_publication_merges_into_one_patent(self):
         with TemporaryDirectory() as temp_dir:
             result = self._stage(
                 "公开号,申请号,标题\n"
@@ -308,12 +318,22 @@ class ImportReviewPipelineTest(unittest.TestCase):
             )
             review_batch(self.db, result["batch_id"], default_action_name="adopt")
             applied = apply_batch(self.db, result["batch_id"])
+            # 同一申请号、不同公开号不再隔离，而是合并为同一件专利。
             self.assertEqual(applied["created"], 1)
-            self.assertEqual(applied["errors"], 1)
-            self.assertEqual(
-                self.db.query(Patent).filter(Patent.application_number == "CN201711270772A").count(),
-                1,
-            )
+            self.assertEqual(applied["errors"], 0)
+            patents = self.db.query(Patent).filter(Patent.application_number == "CN201711270772A").all()
+            self.assertEqual(len(patents), 1)
+            patent = patents[0]
+            self.assertEqual(patent.publication_number, "CN108145667A")
+            publication_values = {
+                item.normalized_value
+                for item in self.db.query(PatentIdentifier).filter(
+                    PatentIdentifier.patent_id == patent.id,
+                    PatentIdentifier.identifier_type == "publication",
+                ).all()
+            }
+            self.assertIn("CN108145667A", publication_values)
+            self.assertIn("CN108145667B", publication_values)
 
     def test_relation_projection_keeps_raw_cell_and_links_only_existing_targets(self):
         current = Patent(

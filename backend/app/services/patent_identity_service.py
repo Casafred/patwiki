@@ -25,7 +25,7 @@ _KIND_CODE_RE = re.compile(r"(?P<kind>[A-Z]{1,3}\d{0,2})$")
 _JURISDICTION_RE = re.compile(r"^(?P<jurisdiction>[A-Z]{2,3})(?P<body>.+)$")
 _SEPARATOR_RE = re.compile(r"[\s\-_/:.,，、;；()（）\[\]{}]+")
 _PUBLICATION_NUMBER_RE = re.compile(
-    r"^(?P<jurisdiction>[A-Z]{2,3})(?P<number>\d+)(?P<kind>[A-Z]{1,3}\d{0,2})$"
+    r"^(?P<jurisdiction>[A-Z]{2,3})(?P<prefix>[A-Z]*)(?P<number>\d+)(?P<kind>[A-Z]{1,3}\d{0,2})$"
 )
 
 
@@ -62,11 +62,13 @@ def normalize_publication_number(
 ) -> str:
     """Normalize a publication number used as the cross-record link key.
 
-    Publication numbers are deliberately stricter than the general identity
-    parser: they must contain a two-letter jurisdiction, a numeric body, and a
-    document kind code.  Some exports prefix Japanese numbers with a padding
-    zero (for example ``JP01234567A1``); that zero is removed before matching.
-    The raw spelling remains in import evidence and PatentIdentifier.raw_values.
+    Publication numbers are stricter than the general identity parser: they
+    must contain a two/three-letter jurisdiction, an optional alphabetic series
+    (for example ``RE`` in ``USRE46827E1`` or ``PI`` in ``BRPI1003518B1``), a
+    numeric body, and a document kind code.  Some exports prefix Japanese
+    numbers with a padding zero (for example ``JP01234567A1``); that zero is
+    removed before matching.  The raw spelling remains in import evidence and
+    PatentIdentifier.raw_values.
     """
     normalized = _clean_identifier(raw_value)
     if not normalized:
@@ -81,7 +83,7 @@ def normalize_publication_number(
     number = match.group("number")
     if match.group("jurisdiction") == "JP":
         number = number.lstrip("0") or "0"
-    return f"{match.group('jurisdiction')}{number}{match.group('kind')}"
+    return f"{match.group('jurisdiction')}{match.group('prefix')}{number}{match.group('kind')}"
 
 
 def _parse_parts(normalized: str, default_jurisdiction: Optional[str]) -> tuple[str, Optional[str], Optional[str]]:
@@ -136,6 +138,13 @@ def parse_identifier(
     if not raw or not normalized:
         return None
     normalized, jurisdiction, kind_code = _parse_parts(normalized, default_jurisdiction)
+    if identifier_type == "publication":
+        # 带字母系列（USRE…/BRPI…）的公开号会被 _JURISDICTION_RE 贪婪地
+        # 读成三字母法域（USR）；这里以严格的公开号结构为准回填法域与类型码。
+        publication_match = _PUBLICATION_NUMBER_RE.fullmatch(normalized)
+        if publication_match:
+            jurisdiction = publication_match.group("jurisdiction")
+            kind_code = publication_match.group("kind")
     if identifier_type == "external":
         jurisdiction = jurisdiction or None
     return IdentifierSpec(

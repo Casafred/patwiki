@@ -493,7 +493,7 @@ class PatentService:
             from app.services.patent_identity_service import normalize_publication_number
             normalized_publication = normalize_publication_number(data["publication_number"])
             if not normalized_publication:
-                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码")
+                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码（可含字母系列，如 USRE46827E1）")
             data["publication_number"] = normalized_publication
         custom_fields = data.pop("custom_fields", {}) or {}
         relation_fields = RELATION_FIELD_KEYS.intersection(custom_fields)
@@ -572,7 +572,7 @@ class PatentService:
             from app.services.patent_identity_service import normalize_publication_number
             normalized_publication = normalize_publication_number(update_data["publication_number"])
             if not normalized_publication:
-                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码")
+                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码（可含字母系列，如 USRE46827E1）")
             update_data["publication_number"] = normalized_publication
 
         tag_ids = update_data.pop("tag_ids", None)

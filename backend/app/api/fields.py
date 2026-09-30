@@ -61,7 +61,7 @@ def update_cell(
             from app.services.patent_identity_service import normalize_publication_number
             value = normalize_publication_number(value)
             if not value:
-                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码")
+                raise BadRequestException("公开号格式无法识别，应为国别字母+数字+文献类型代码（可含字母系列，如 USRE46827E1）")
         if field_key in ("filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date") and value:
             try:
                 value = date.fromisoformat(value)
