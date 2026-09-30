@@ -3194,8 +3194,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </ToolbarMenu>
             )}
             <div className="datagrid-view-actions" aria-label="常用表格工具">
-              <button type="button" className="btn btn-sm btn-secondary" onClick={() => scrollLibraryTo('top')} title="滚动到库顶部（Ctrl/Cmd + Home）" aria-label="滚动到库顶部"><Icon name="chevron-up" size={14} /></button>
-              <button type="button" className="btn btn-sm btn-secondary" onClick={() => scrollLibraryTo('bottom')} title="滚动到库底部（Ctrl/Cmd + End）" aria-label="滚动到库底部"><Icon name="chevron-down" size={14} /></button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
               {(tableViewMode === 'detail' || tableViewMode === 'full_image') && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowDetailFieldConfig(true)} title="选择详情浏览显示的字段"><Icon name="file" size={14} /> 详情字段{configuredDetailKeys ? ` (${configuredDetailKeys.length})` : ''}</button>}
               {activeView && activeView.layout_type === 'table' && (
