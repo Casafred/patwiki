@@ -44,20 +44,22 @@ class Envelope(WireModel):
 
 
 class SnapshotRecord(WireModel):
-    entity_type: Literal["patent"] = "patent"
+    entity_type: Literal["patent", "patent_tombstone"] = "patent"
+    operation: Literal["upsert", "delete"] = "upsert"
     entity_uid: str = Field(pattern=UID_PATTERN)
     record_version: int = Field(ge=1)
     origin_node_uid: str = Field(pattern=UID_PATTERN)
     updated_at: str | None = None
     scope: dict = Field(default_factory=dict)
-    payload: dict
+    payload: dict = Field(default_factory=dict)
+    base_version: int = Field(default=0, ge=0)
     field_provenance: dict = Field(default_factory=dict)
 
 
 class SnapshotManifest(WireModel):
     package_id: str = Field(pattern=UID_PATTERN)
     profile: Literal["patent-snapshot-v1"] = PROFILE
-    package_type: Literal["snapshot"] = "snapshot"
+    package_type: Literal["snapshot", "department_publication"] = "snapshot"
     created_at: str
     expires_at: str
     created_by: dict
@@ -229,7 +231,7 @@ def decode(
             if len(line) > MAX_LINE_BYTES + 1 or len(records) >= MAX_RECORDS:
                 raise ValueError("record limits exceeded")
             record = SnapshotRecord.model_validate_json(line).model_dump()
-            if record["entity_uid"] in seen or set(record["payload"]) != set(manifest["fields"]):
+            if record["entity_uid"] in seen or (record["operation"] == "upsert" and set(record["payload"]) != set(manifest["fields"] )) or (record["operation"] == "delete" and record["entity_type"] != "patent_tombstone"):
                 raise ValueError("duplicate identity or unexpected field")
             seen.add(record["entity_uid"])
             records.append(record)

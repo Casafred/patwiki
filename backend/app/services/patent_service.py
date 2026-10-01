@@ -638,6 +638,19 @@ class PatentService:
 
         def _make_history(field: str, old_value, new_value) -> PatentHistory:
             """构造历史记录（自动注入来源视图信息）。"""
+            if patent.entity_uid and source not in {"collaboration_sync", "department_publication"}:
+                from app.models.collaboration_sync import SyncEntityFieldState, SyncFieldOverlay
+                baseline = db.query(SyncEntityFieldState).filter_by(
+                    entity_uid=patent.entity_uid, field_key=field).order_by(SyncEntityFieldState.updated_at.desc()).first()
+                if baseline is not None:
+                    overlay = db.query(SyncFieldOverlay).filter_by(entity_uid=patent.entity_uid, field_key=field).first()
+                    if overlay is None:
+                        overlay = SyncFieldOverlay(entity_uid=patent.entity_uid, field_key=field)
+                        db.add(overlay)
+                    overlay.baseline_value = baseline.last_value
+                    overlay.local_value = _stringify_value(new_value)
+                    overlay.reason = source
+                    overlay.status = "pending"
             return PatentHistory(
                 patent_id=patent.id,
                 field_key=field,
@@ -1207,7 +1220,8 @@ class PatentService:
             return False
         if patent.entity_uid:
             db.add(SyncTombstone(entity_uid=patent.entity_uid, entity_type="patent",
-                                 base_version=patent.record_version or 1))
+                                 base_version=patent.record_version or 1,
+                                 scope_json={"database_id": patent.database_id}))
         from app.services.semantic_index_service import SemanticIndexService
         from app.models.semantic_search import SemanticIndexOutbox
         # The outbox still has a non-null FK to patents.id in deployed SQLite

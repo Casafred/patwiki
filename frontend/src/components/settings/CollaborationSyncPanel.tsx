@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { collaborationSyncApi, databaseApi, productApi } from '../../api'
 import type { CollaborationIdentity, CollaborationPackage, PatentDatabase, Product } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import SyncAggregationPanel from './SyncAggregationPanel'
 
 const TOKEN_KEY = 'patwiki_collaboration_token'
 const fields = [
@@ -471,6 +472,7 @@ export default function CollaborationSyncPanel() {
         </div>
       </div>
 
+      {isAdmin && <SyncAggregationPanel databases={databases} packages={packages} />}
       <div style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 12 }}>
         <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>同步包收发记录</h4>
         {packages.length === 0 ? <div style={{ fontSize: 12, color: '#64748b' }}>暂无同步包</div> : packages.map((item: CollaborationPackage) => <div key={item.package_uid} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', alignItems: 'center', gap: 8, borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><span style={{ overflowWrap: 'anywhere' }}>{item.direction === 'inbox' ? '收到' : '发出'} · {item.package_uid} · {item.count} 条 · {item.status} · {item.signature_status === 'trusted' || item.signature_status === 'signed' ? '签名' : item.signature_status === 'signed_untrusted' ? '待信任' : '未签名'}</span>{item.direction === 'outbox' && <button style={buttonStyle} onClick={() => void collaborationSyncApi.download(item.package_uid).then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${item.package_uid}.pwshare`; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载</button>}{item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status) && <button style={buttonStyle} disabled={busy || !databases.length} onClick={() => void handlePreviewApply(item.package_uid)}>预览主表应用</button>}<button style={buttonStyle} onClick={() => void handleShowRecords(item.package_uid)}>查看只读记录</button></div>)}

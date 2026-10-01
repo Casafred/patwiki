@@ -78,6 +78,7 @@ def _unique_index(table: str, name: str, column: str) -> SchemaOperation:
 SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("patent_databases", "kind", "ALTER TABLE patent_databases ADD COLUMN kind VARCHAR(30) NOT NULL DEFAULT 'personal'"),
     _column("collaboration_sync_aggregation_batches", "publication_package_uid", "ALTER TABLE collaboration_sync_aggregation_batches ADD COLUMN publication_package_uid VARCHAR(80)"),
+    _column("collaboration_sync_tombstones", "scope_json", "ALTER TABLE collaboration_sync_tombstones ADD COLUMN scope_json JSON"),
     _column("collaboration_sync_entity_field_states", "accepted_package_uid", "ALTER TABLE collaboration_sync_entity_field_states ADD COLUMN accepted_package_uid VARCHAR(80)"),
     _column("collaboration_sync_entity_field_states", "source_exported_at", "ALTER TABLE collaboration_sync_entity_field_states ADD COLUMN source_exported_at DATETIME"),
     _column("patent_histories", "change_uid", "ALTER TABLE patent_histories ADD COLUMN change_uid VARCHAR(80)"),

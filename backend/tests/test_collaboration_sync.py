@@ -33,6 +33,18 @@ class CollaborationSyncTest(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
+    def test_delete_record_has_explicit_plan_and_requires_target_permission(self):
+        self.row.entity_type = "patent_tombstone"
+        self.row.entity_uid = self.patent.entity_uid
+        self.row.payload_json = {}
+        self.db.commit()
+        with patch.object(sync, "roles", return_value={"system_admin"}):
+            plans, conflicts = sync._merge_plan(self.db, 1, self.package, self.database, [self.row], None)
+        self.assertEqual(plans[0]["operation"], "delete")
+        self.assertEqual(conflicts, [])
+        with patch.object(sync, "roles", return_value={"member"}), self.assertRaises(HTTPException):
+            sync._merge_plan(self.db, 1, self.package, self.database, [self.row], None)
+
     def test_confirmed_uid_alias_resolves_later_package_without_numbers(self):
         resolved = sync._batch_local_patents(self.db, [self.row], "node_remote")
         self.assertEqual(resolved[self.row.id].id, self.patent.id)

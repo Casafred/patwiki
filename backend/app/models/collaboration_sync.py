@@ -295,6 +295,22 @@ class SyncEntityFieldState(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class SyncFieldOverlay(Base):
+    """Local edits layered over the last accepted remote baseline."""
+    __tablename__ = "collaboration_sync_field_overlays"
+    __table_args__ = (UniqueConstraint("entity_uid", "field_key", name="uq_collab_field_overlay"),)
+    id = Column(Integer, primary_key=True, index=True)
+    entity_uid = Column(String(100), nullable=False, index=True)
+    field_key = Column(String(200), nullable=False)
+    baseline_value = Column(JSON, nullable=True)
+    local_value = Column(JSON, nullable=True)
+    editor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason = Column(Text, nullable=True)
+    status = Column(String(30), nullable=False, default="pending")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class SyncChange(Base):
     __tablename__ = "collaboration_sync_changes"
 
@@ -339,6 +355,7 @@ class SyncTombstone(Base):
     deleted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     deleted_at = Column(DateTime, server_default=func.now())
     base_version = Column(Integer, nullable=False, default=0)
+    scope_json = Column(JSON, nullable=False, default=dict)
 
 
 class SyncAuditEvent(Base):
