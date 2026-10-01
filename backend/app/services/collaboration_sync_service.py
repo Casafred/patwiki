@@ -19,7 +19,7 @@ from app.models import LegalStatus, Patent, PatentDatabase, PatentDatabaseMember
 from app.services.patent_identity_service import ensure_patent_identifiers
 from app.models.collaboration_sync import (
     CollaborationCredential, PermissionGrant, SyncConflict, SyncEntityFieldState,
-    SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice,
+    SyncAggregationBatch, SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice,
 )
 from app.services.collaboration_identity_service import PASSWORDS, audit, roles, uid, workspace_dir
 from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, encode, file_hash
@@ -967,6 +967,109 @@ def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:
              "record_version": row.record_version, "scope": row.scope_json, "payload": row.payload_json,
              "field_provenance": row.field_provenance}
             for row in db.query(SyncPackageRecord).filter(SyncPackageRecord.package_id == package.id).limit(1000).all()]
+
+
+def _batch_dict(batch: SyncAggregationBatch) -> dict:
+    return {"batch_uid": batch.batch_uid, "name": batch.name, "target_database_id": batch.target_database_id,
+            "status": batch.status, "package_uids": batch.package_uids or [], "preview": batch.preview_json or {},
+            "created_by": batch.created_by, "created_at": batch.created_at.isoformat() if batch.created_at else None,
+            "submitted_at": batch.submitted_at.isoformat() if batch.submitted_at else None,
+            "publication_package_uid": batch.publication_package_uid}
+
+
+def create_aggregation_batch(db: Session, user_id: int, name: str, target_database_id: int,
+                             package_uids: list[str]) -> dict:
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以创建汇总批次")
+    database = db.get(PatentDatabase, target_database_id)
+    if not database or database.is_archived or (database.kind or "personal") != "department_master":
+        raise HTTPException(404, "目标部门总库不存在或已归档")
+    package_uids = list(dict.fromkeys(package_uids))
+    packages = db.query(SyncPackage).filter(SyncPackage.package_uid.in_(package_uids)).all() if package_uids else []
+    if len(packages) != len(package_uids):
+        raise HTTPException(404, "部分同步包不存在")
+    if any(package.direction != "inbox" for package in packages):
+        raise HTTPException(400, "汇总批次只能收集已导入的成员同步包")
+    batch = SyncAggregationBatch(batch_uid=uid("agg"), name=name.strip(), target_database_id=database.id,
+                                 package_uids=package_uids, created_by=user_id)
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return _batch_dict(batch)
+
+
+def preview_aggregation_batch(db: Session, user_id: int, batch_uid: str) -> dict:
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以预审汇总批次")
+    batch = db.query(SyncAggregationBatch).filter_by(batch_uid=batch_uid).first()
+    if not batch:
+        raise HTTPException(404, "汇总批次不存在")
+    database = db.get(PatentDatabase, batch.target_database_id)
+    summary = {"auto_merge": 0, "new": 0, "deleted": 0, "conflict": 0, "unmatched": 0, "unchanged": 0, "packages": []}
+    for package_uid in batch.package_uids or []:
+        package = db.query(SyncPackage).filter_by(package_uid=package_uid).first()
+        if not package:
+            continue
+        records = db.query(SyncPackageRecord).filter_by(package_id=package.id).order_by(SyncPackageRecord.id).all()
+        try:
+            plans, conflicts = _merge_plan(db, user_id, package, database, records, None)
+            counts = {"auto_merge": sum(1 for item in plans if item["patent"] is not None and item["updates"] and not item["conflicts"]),
+                      "new": sum(1 for item in plans if item["patent"] is None), "conflict": len(conflicts),
+                      "unchanged": sum(1 for item in plans if item["patent"] is not None and not item["updates"] and not item["conflicts"]),
+                      "deleted": 0, "unmatched": 0}
+        except HTTPException as exc:
+            counts = {"auto_merge": 0, "new": 0, "deleted": 0, "conflict": 0, "unchanged": 0,
+                      "unmatched": len(records), "error": str(exc.detail)}
+        for key in ("auto_merge", "new", "deleted", "conflict", "unchanged", "unmatched"):
+            summary[key] += counts.get(key, 0)
+        summary["packages"].append({"package_uid": package_uid, "count": len(records), **counts})
+    batch.preview_json = summary
+    db.commit()
+    return _batch_dict(batch)
+
+
+def submit_aggregation_batch(db: Session, user_id: int, batch_uid: str, request) -> dict:
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以提交汇总批次")
+    batch = db.query(SyncAggregationBatch).filter_by(batch_uid=batch_uid).first()
+    if not batch:
+        raise HTTPException(404, "汇总批次不存在")
+    if batch.status == "submitted":
+        return _batch_dict(batch)
+    database = db.get(PatentDatabase, batch.target_database_id)
+    results = []
+    for package_uid in batch.package_uids or []:
+        package = db.query(SyncPackage).filter_by(package_uid=package_uid).first()
+        if not package or package.status == "applied":
+            continue
+        apply_request = type("BatchApplyRequest", (), {"database_id": database.id, "edit_password": request.edit_password,
+            "decisions": request.decisions})()
+        results.append(apply_package(db, user_id, package_uid, apply_request))
+    batch.status = "submitted"
+    batch.submitted_at = utc_now_naive()
+    batch.preview_json = {**(batch.preview_json or {}), "submit_results": results}
+    db.commit()
+    return _batch_dict(batch)
+
+
+def publish_aggregation_batch(db: Session, user_id: int, batch_uid: str, request) -> dict:
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以发布部门总库")
+    batch = db.query(SyncAggregationBatch).filter_by(batch_uid=batch_uid).first()
+    if not batch or batch.status != "submitted":
+        raise HTTPException(409, "汇总批次尚未提交，不能发布")
+    if batch.publication_package_uid:
+        return _batch_dict(batch)
+    export_request = type("PublicationRequest", (), {
+        "database_ids": [batch.target_database_id], "patent_ids": None, "product_ids": None,
+        "fields": request.fields, "recipient_names": request.recipient_names,
+        "include_attachments": False, "password": request.password, "expires_days": request.expires_days,
+    })()
+    result = export_package(db, user_id, export_request)
+    batch.publication_package_uid = result["package_uid"]
+    batch.status = "published"
+    db.commit()
+    return {**_batch_dict(batch), "publication": result}
 
 
 def export_path(db: Session, user_id: int, package_uid: str) -> Path:

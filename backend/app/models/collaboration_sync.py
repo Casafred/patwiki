@@ -178,6 +178,25 @@ class SyncPackage(Base):
     applied_at = Column(DateTime, nullable=True)
 
 
+class SyncAggregationBatch(Base):
+    """Weekly administrator review container for imported member packages."""
+
+    __tablename__ = "collaboration_sync_aggregation_batches"
+    __table_args__ = (Index("ix_collab_aggregation_status", "status"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_uid = Column(String(80), unique=True, nullable=False, index=True)
+    target_database_id = Column(Integer, ForeignKey("patent_databases.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    status = Column(String(30), nullable=False, default="open")
+    package_uids = Column(JSON, nullable=False, default=list)
+    preview_json = Column(JSON, nullable=False, default=dict)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    submitted_at = Column(DateTime, nullable=True)
+    publication_package_uid = Column(String(80), nullable=True, index=True)
+
+
 class SyncPackageMember(Base):
     __tablename__ = "collaboration_sync_package_members"
     __table_args__ = (

@@ -20,7 +20,7 @@ from app.models.collaboration_sync import (
 )
 from app.schemas.collaboration_sync import (
     AccountRequest, AccountRoleRequest, BootstrapRequest, ExportRequest, LibraryGrantRequest, PeerRequest,
-    ActiveRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ResponsibilityRequest, UnitRequest,
+    ActiveRequest, AggregationBatchCreateRequest, AggregationBatchPublishRequest, AggregationBatchSubmitRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ResponsibilityRequest, UnitRequest,
 )
 from app.services.collaboration_identity_service import (
     PASSWORDS, audit, bootstrap, create_account, identity, login, logout, require_admin, roles,
@@ -30,6 +30,8 @@ from app.services.collaboration_sync_service import (
     export_package, import_package, inspect_package, list_packages,
     export_path, package_records, preview_export, read_upload, EXPORT_FIELDS,
     device_signing_identity,
+    create_aggregation_batch, preview_aggregation_batch, submit_aggregation_batch,
+    publish_aggregation_batch,
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
@@ -474,3 +476,25 @@ def get_package_records(package_uid: str, user: User = Depends(current_user), db
 def download_package(package_uid: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return FileResponse(export_path(db, user.id, package_uid), media_type="application/vnd.patwiki.pwshare",
                         filename=f"{package_uid}.pwshare")
+
+
+@router.post("/aggregation-batches")
+def create_sync_aggregation_batch(request: AggregationBatchCreateRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return create_aggregation_batch(db, user.id, request.name, request.target_database_id, request.package_uids)
+
+
+@router.post("/aggregation-batches/{batch_uid}/preview")
+def preview_sync_aggregation_batch(batch_uid: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return preview_aggregation_batch(db, user.id, batch_uid)
+
+
+@router.post("/aggregation-batches/{batch_uid}/submit")
+def submit_sync_aggregation_batch(batch_uid: str, request: AggregationBatchSubmitRequest,
+                                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return submit_aggregation_batch(db, user.id, batch_uid, request)
+
+
+@router.post("/aggregation-batches/{batch_uid}/publish")
+def publish_sync_aggregation_batch(batch_uid: str, request: AggregationPublishRequest,
+                                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return publish_aggregation_batch(db, user.id, batch_uid, request)

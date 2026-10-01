@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Base
 import app.models
-from app.models import Patent, PatentDatabase, PatentHistory, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
+from app.models import Patent, PatentDatabase, PatentHistory, SyncAggregationBatch, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
 from app.services import collaboration_sync_service as sync
 
 
@@ -18,7 +18,7 @@ class CollaborationSyncTest(unittest.TestCase):
         self.engine = create_engine("sqlite://")
         Base.metadata.create_all(self.engine)
         self.db = Session(self.engine)
-        self.database = PatentDatabase(name="Sync", code="SYNC")
+        self.database = PatentDatabase(name="Sync", code="SYNC", kind="department_master")
         self.patent = Patent(database=self.database, entity_uid="pat_local", title="Local", publication_number="CN123456789A")
         self.package = SyncPackage(package_uid="pkg_test", path="unused", file_hash="hash", direction="inbox",
                                    manifest_json={"origin_node_uid": "node_remote", "created_at": "2026-10-01T00:00:00Z"})
@@ -87,3 +87,17 @@ class CollaborationSyncTest(unittest.TestCase):
         self.assertEqual(len(set(ids)), 2)
         self.db.expire_all()
         self.assertEqual([row.change_uid for row in rows], ids)
+
+    def test_aggregation_batch_collects_packages_and_previews_categories(self):
+        with patch.object(sync, "roles", return_value={"system_admin"}), patch.object(
+            sync, "_merge_plan", return_value=([
+                {"patent": self.patent, "updates": {"title": "Next"}, "conflicts": []},
+                {"patent": None, "updates": {}, "conflicts": []},
+            ], []),
+        ):
+            created = sync.create_aggregation_batch(self.db, 1, "第1周汇总", self.database.id, [self.package.package_uid])
+            preview = sync.preview_aggregation_batch(self.db, 1, created["batch_uid"])
+        self.assertEqual(preview["status"], "open")
+        self.assertEqual(preview["preview"]["auto_merge"], 1)
+        self.assertEqual(preview["preview"]["new"], 1)
+        self.assertEqual(self.db.query(SyncAggregationBatch).count(), 1)

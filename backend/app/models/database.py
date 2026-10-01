@@ -22,6 +22,7 @@ class PatentDatabase(Base):
     color = Column(String(20))
     icon = Column(String(50))
     is_default = Column(Boolean, default=False)
+    kind = Column(String(30), nullable=False, default="personal", index=True)
     is_archived = Column(Boolean, default=False)
     patent_count = Column(Integer, default=0)
     sort_order = Column(Integer, default=0)

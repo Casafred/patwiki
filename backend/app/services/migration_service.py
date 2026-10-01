@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-10-01.1"
+CURRENT_MIGRATION_VERSION = "2026-10-01.3"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -76,6 +76,8 @@ def _unique_index(table: str, name: str, column: str) -> SchemaOperation:
 # tables and model-defined indexes are handled by Base.metadata.create_all;
 # these entries cover columns/indexes that create_all cannot add to an old DB.
 SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
+    _column("patent_databases", "kind", "ALTER TABLE patent_databases ADD COLUMN kind VARCHAR(30) NOT NULL DEFAULT 'personal'"),
+    _column("collaboration_sync_aggregation_batches", "publication_package_uid", "ALTER TABLE collaboration_sync_aggregation_batches ADD COLUMN publication_package_uid VARCHAR(80)"),
     _column("collaboration_sync_entity_field_states", "accepted_package_uid", "ALTER TABLE collaboration_sync_entity_field_states ADD COLUMN accepted_package_uid VARCHAR(80)"),
     _column("collaboration_sync_entity_field_states", "source_exported_at", "ALTER TABLE collaboration_sync_entity_field_states ADD COLUMN source_exported_at DATETIME"),
     _column("patent_histories", "change_uid", "ALTER TABLE patent_histories ADD COLUMN change_uid VARCHAR(80)"),
@@ -249,6 +251,10 @@ def _backfill_collaboration_uids(bind: Engine) -> None:
         connection.execute(text(
             "UPDATE patent_histories SET change_uid = 'chg_' || lower(hex(randomblob(16))) "
             "WHERE change_uid IS NULL"
+        ))
+        connection.execute(text(
+            "UPDATE patent_databases SET kind = 'department_master' "
+            "WHERE is_default = 1 AND (kind IS NULL OR kind = 'personal')"
         ))
 
 

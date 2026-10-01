@@ -92,3 +92,21 @@ class ApplyPackageRequest(RequestModel):
     database_id: int
     edit_password: str | None = Field(default=None, min_length=10, max_length=200)
     decisions: list[SyncConflictDecision] = Field(default_factory=list, max_length=20000)
+
+
+class AggregationBatchCreateRequest(RequestModel):
+    name: str = Field(min_length=1, max_length=200)
+    target_database_id: int
+    package_uids: list[str] = Field(default_factory=list, max_length=500)
+
+
+class AggregationBatchSubmitRequest(RequestModel):
+    edit_password: str | None = Field(default=None, min_length=10, max_length=200)
+    decisions: list[SyncConflictDecision] = Field(default_factory=list, max_length=20000)
+
+
+class AggregationPublishRequest(RequestModel):
+    recipient_names: list[str] = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=10, max_length=200)
+    fields: list[str] = Field(default_factory=lambda: ["title", "publication_number", "application_number", "legal_status"])
+    expires_days: int = Field(default=30, ge=1, le=365)

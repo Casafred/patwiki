@@ -68,6 +68,7 @@ class DatabaseService:
         color: Optional[str] = None,
         icon: Optional[str] = None,
         owner_id: Optional[int] = None,
+        kind: str = "personal",
     ) -> PatentDatabase:
         # 自动生成 code（如未提供）
         if not code:
@@ -90,6 +91,7 @@ class DatabaseService:
             icon=icon,
             sort_order=db.query(PatentDatabase).count(),
             owner_id=owner_id,
+            kind=kind if kind in {"personal", "department_master", "shared"} else "personal",
         )
         db.add(database)
         db.commit()
@@ -514,6 +516,7 @@ class DatabaseService:
             "color": database.color,
             "icon": database.icon,
             "is_default": database.is_default,
+            "kind": database.kind or "personal",
             "is_archived": database.is_archived,
             "patent_count": database.patent_count,
             "sort_order": database.sort_order,

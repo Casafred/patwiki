@@ -3,7 +3,7 @@
 库是专利数据的顶层品类容器。
 P0-13：新增 /databases/{id}/master-view 端点，获取或创建部门总表视图。
 """
-from typing import Optional
+from typing import Literal, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -26,6 +26,7 @@ class DatabaseCreateRequest(BaseModel):
     color: Optional[str] = None
     icon: Optional[str] = None
     owner_id: Optional[int] = None
+    kind: Literal["personal", "department_master", "shared"] = "personal"
 
 
 class DatabaseUpdateRequest(BaseModel):
@@ -75,6 +76,7 @@ def create_database(
         color=req.color,
         icon=req.icon,
         owner_id=owner_id,
+        kind=req.kind,
     )
     return DatabaseService.to_dict(database)
 
