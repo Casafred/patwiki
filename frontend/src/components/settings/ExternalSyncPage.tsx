@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { patentApi, syncApi } from '../../api'
+import { useSearchParams } from 'react-router-dom'
+import { syncApi } from '../../api'
 import { fieldService as fieldApi } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
-import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, Patent, SyncConnector, SyncRun, SyncSubscription } from '../../types'
+import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, SyncConnector, SyncRun, SyncSubscription } from '../../types'
 
 const EXTERNAL_UPDATE_FIELDS = [
   ['publication_date', '公开日'], ['grant_date', '授权日'], ['legal_status', '法律状态'],
@@ -20,6 +21,7 @@ function countValue(run: SyncRun, key: string): string {
 type McpTab = 'connectors' | 'monitor' | 'runs'
 
 export default function ExternalSyncPage() {
+  const [searchParams] = useSearchParams()
   const { currentDatabaseId } = useAppStore()
   const [connectors, setConnectors] = useState<SyncConnector[]>([])
   const [archivedConnectors, setArchivedConnectors] = useState<SyncConnector[]>([])
@@ -33,9 +35,11 @@ export default function ExternalSyncPage() {
   const [scheduleMode, setScheduleMode] = useState<'minutes' | 'days' | 'date'>('minutes')
   const [intervalDays, setIntervalDays] = useState('7')
   const [runAt, setRunAt] = useState('')
-  const [trackedPatentText, setTrackedPatentText] = useState('')
-  const [trackedPatents, setTrackedPatents] = useState<Patent[]>([])
   const [selectedTrackedPatentIds, setSelectedTrackedPatentIds] = useState<number[]>([])
+  const [monitorMode, setMonitorMode] = useState<'applicant' | 'expression' | 'publication'>('applicant')
+  const [publicationText, setPublicationText] = useState('')
+  const [publicationMatches, setPublicationMatches] = useState<{ patent_id: number; publication_number?: string; application_number?: string; title: string; country?: string; ungranted: boolean }[]>([])
+  const [unmatchedPublications, setUnmatchedPublications] = useState<string[]>([])
   const [statusStrategyJson, setStatusStrategyJson] = useState('{\n  "granted": { "interval_days": 30 },\n  "pending": { "interval_days": 7 },\n  "unknown": { "interval_days": 14 }\n}')
   const [targetFields, setTargetFields] = useState<string[]>(['publication_date', 'legal_status', 'title', 'abstract'])
   const [fields, setFields] = useState<FieldMeta[]>([])
@@ -54,13 +58,12 @@ export default function ExternalSyncPage() {
   const load = useCallback(async () => {
     if (!currentDatabaseId) return
     try {
-      const [connectorResult, subscriptionResult, runResult, observationResult, fieldResult, patentResult] = await Promise.all([
+      const [connectorResult, subscriptionResult, runResult, observationResult, fieldResult] = await Promise.all([
         syncApi.connectors(),
         syncApi.subscriptions(currentDatabaseId),
         syncApi.runs(),
         syncApi.observations(),
         fieldApi.list(),
-        patentApi.list({ database_id: currentDatabaseId, page: 1, page_size: 500 }),
       ])
       setFields(fieldResult)
       setConnectors(connectorResult.items)
@@ -72,7 +75,6 @@ export default function ExternalSyncPage() {
       setSubscriptions(subscriptionResult.items)
       setRuns(runResult.items)
       setObservations(observationResult.items)
-      setTrackedPatents(patentResult.items)
     } catch (loadError: unknown) {
       setError(getErrorMessage(loadError, '同步数据加载失败'))
     }
@@ -82,13 +84,25 @@ export default function ExternalSyncPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load() }, [load])
 
+  useEffect(() => {
+    const ids = (searchParams.get('patent_ids') || '').split(',').map(Number).filter(id => Number.isInteger(id) && id > 0)
+    if (ids.length) {
+      setActiveTab('monitor')
+      setMonitorMode('publication')
+      setSelectedTrackedPatentIds(ids)
+      if (currentDatabaseId) void syncApi.resolvePublications({ database_id: currentDatabaseId, patent_ids: ids }).then(result => setPublicationMatches(result.matched)).catch(() => undefined)
+    }
+  }, [searchParams, currentDatabaseId])
+
   const createSubscription = async () => {
     if (!currentDatabaseId || !selectedConnectorId || !name.trim()) return
     setBusy(true); setError(''); setMessage('')
     try {
       if (scheduleMode === 'date' && !runAt) throw new Error('请选择首次触发时间')
-      const typedPatentIds = trackedPatentText.split(/[\s,，;；]+/).map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0)
-      const trackedPatentIds = Array.from(new Set([...selectedTrackedPatentIds, ...typedPatentIds]))
+      const trackedPatentIds = monitorMode === 'publication' ? publicationMatches.filter(item => selectedTrackedPatentIds.includes(item.patent_id)).map(item => item.patent_id) : []
+      if (monitorMode === 'publication' && trackedPatentIds.length === 0) throw new Error('请先匹配公开号并确认选择专利')
+      if (monitorMode === 'applicant' && !applicant.trim()) throw new Error('请输入申请人')
+      if (monitorMode === 'expression' && !expression.trim()) throw new Error('请输入检索式')
       let statusStrategies: JsonObject = {}
       if (statusStrategyJson.trim()) {
         try { statusStrategies = JSON.parse(statusStrategyJson) as JsonObject } catch { throw new Error('法律状态策略必须是有效 JSON') }
@@ -102,7 +116,8 @@ export default function ExternalSyncPage() {
         database_id: currentDatabaseId,
         connector_id: selectedConnectorId,
         name: name.trim(),
-        scope_json: { applicant: applicant.trim() || undefined, expression: expression.trim() || undefined, update_fields: targetFields },
+        mode: monitorMode === 'publication' ? 'tracked_patents' : monitorMode,
+        scope_json: { applicant: monitorMode === 'applicant' ? applicant.trim() : undefined, expression: monitorMode === 'expression' ? expression.trim() : undefined, update_fields: targetFields },
         schedule_json: schedule,
         tracked_patent_ids: trackedPatentIds,
         status_strategies: statusStrategies,
@@ -357,12 +372,16 @@ export default function ExternalSyncPage() {
                 {scheduleMode === 'minutes' && <label>同步间隔（分钟）<input className="form-input" type="number" min="1" value={intervalMinutes} onChange={event => setIntervalMinutes(event.target.value)} /></label>}
                 {scheduleMode === 'days' && <label>每隔天数<input className="form-input" type="number" min="1" value={intervalDays} onChange={event => setIntervalDays(event.target.value)} /></label>}
                 {scheduleMode === 'date' && <><label>首次触发时间<input className="form-input" type="datetime-local" value={runAt} onChange={event => setRunAt(event.target.value)} /></label><label>重复间隔天数（可选）<input className="form-input" type="number" min="0" value={intervalDays} onChange={event => setIntervalDays(event.target.value)} /></label></>}
-                <label className="mcp-form-full">申请人<input className="form-input" value={applicant} onChange={event => setApplicant(event.target.value)} placeholder="可选，按申请人圈定监控范围" /></label>
-                <label className="mcp-form-full">关键词表达式<input className="form-input" value={expression} onChange={event => setExpression(event.target.value)} placeholder="可选，例如：(芯片 OR 半导体) AND 封装" /></label>
-                <label className="mcp-form-full">手动跟踪库内专利 ID（逗号/空格分隔）<input className="form-input" value={trackedPatentText} onChange={event => setTrackedPatentText(event.target.value)} placeholder="留空表示按申请人或关键词检索；例如 12, 18, 25" /></label>
+                <label className="mcp-form-full">跟踪方式<select className="form-input" value={monitorMode} onChange={event => { setMonitorMode(event.target.value as typeof monitorMode); setSelectedTrackedPatentIds([]); setPublicationMatches([]) }}><option value="applicant">申请人跟踪</option><option value="expression">检索式跟踪</option><option value="publication">专利公开号跟踪</option></select></label>
+                {monitorMode === 'applicant' && <label className="mcp-form-full">申请人<input className="form-input" value={applicant} onChange={event => setApplicant(event.target.value)} placeholder="输入申请人名称" /></label>}
+                {monitorMode === 'expression' && <label className="mcp-form-full">检索式<input className="form-input" value={expression} onChange={event => setExpression(event.target.value)} placeholder="例如：(芯片 OR 半导体) AND 封装" /></label>}
+                {monitorMode === 'publication' && <>
+                  <label className="mcp-form-full">批量输入公开号<textarea className="form-input" rows={5} value={publicationText} onChange={event => setPublicationText(event.target.value)} placeholder="每行一个，例如 CN123456789A、US20240123456A1" /></label>
+                  <div className="mcp-form-full"><button className="btn btn-secondary" disabled={busy || !currentDatabaseId || !publicationText.trim()} onClick={() => { setBusy(true); void syncApi.resolvePublications({ database_id: currentDatabaseId!, publications: publicationText.split(/[\s,，;；]+/).filter(Boolean) }).then(result => { setPublicationMatches(result.matched); setUnmatchedPublications(result.unmatched); setSelectedTrackedPatentIds(result.matched.map(item => item.patent_id)) }).catch(error => setError(getErrorMessage(error, '公开号匹配失败'))).finally(() => setBusy(false)) }}>匹配当前库</button>
+                    {publicationMatches.length > 0 && <div className="mcp-publication-matches"><strong>匹配到 {publicationMatches.length} 件，请确认后加入跟踪</strong>{publicationMatches.map(item => <label key={item.patent_id} className="checkbox-label"><input type="checkbox" checked={selectedTrackedPatentIds.includes(item.patent_id)} onChange={event => setSelectedTrackedPatentIds(old => event.target.checked ? [...old, item.patent_id] : old.filter(id => id !== item.patent_id))} />{item.publication_number || '无公开号'} · {item.title}{item.ungranted ? ' · 未授权公开' : ''}</label>)}</div>}
+                    {unmatchedPublications.length > 0 && <small>未匹配：{unmatchedPublications.join('、')}</small>}</div>
+                </>}
               </div>
-              <div className="mcp-panel-hint">可选专利：{trackedPatents.slice(0, 8).map(item => `${item.id} ${item.publication_number || item.application_number || ''}`).join('、')}{trackedPatents.length > 8 ? '…' : ''}</div>
-              {trackedPatents.length > 0 && <details style={{ marginTop: 8 }}><summary style={{ cursor: 'pointer', fontSize: 12, color: '#475569' }}>从当前库勾选专利（已选 {selectedTrackedPatentIds.length} 件）</summary><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 5, maxHeight: 180, overflow: 'auto', marginTop: 8 }}>{trackedPatents.slice(0, 100).map(item => <label key={item.id} className="checkbox-label"><input type="checkbox" checked={selectedTrackedPatentIds.includes(item.id)} onChange={event => setSelectedTrackedPatentIds(previous => event.target.checked ? [...previous, item.id] : previous.filter(id => id !== item.id))} />#{item.id} {item.publication_number || item.application_number || item.title}</label>)}</div></details>}
               <label className="mcp-form-full" style={{ display: 'block', marginTop: 10 }}>按法律状态设置扫描策略（JSON；键为 legal_status，支持 interval_days、enabled、update_fields）<textarea className="form-input" rows={4} value={statusStrategyJson} onChange={event => setStatusStrategyJson(event.target.value)} /></label>
               <fieldset className="mcp-target-fields">
                 <legend>允许自动更新的目标字段</legend>

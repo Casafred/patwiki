@@ -557,6 +557,8 @@ class PatentService:
 
         db.add(patent)
         db.flush()
+        from app.services.publication_governance_service import classify_patent
+        classify_patent(db, patent)
         # Every canonical patent is visible in the default master database;
         # retain the originating database as an additional membership.
         default_database = db.query(PatentDatabase).filter(PatentDatabase.is_default == True).first()
@@ -685,6 +687,10 @@ class PatentService:
         if tag_ids is not None:
             tags = db.query(Tag).filter(Tag.id.in_(tag_ids)).all()
             patent.tags = tags
+
+        if "publication_number" in changed_fields or "application_number" in changed_fields:
+            from app.services.publication_governance_service import classify_patent
+            classify_patent(db, patent)
 
         if project_ids is not None:
             PatentService.set_patent_projects(db, patent, project_ids, commit=False)

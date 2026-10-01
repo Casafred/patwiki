@@ -49,6 +49,7 @@ class ImportBatch(Base):
     source_table_title = Column(String(500))
     worksheet_name = Column(String(200))
     source_system = Column(String(200))
+    import_note = Column(Text)
     mapping_version = Column(String(100))
     file_hash = Column(String(128), index=True)
     artifact_path = Column(String(1000))

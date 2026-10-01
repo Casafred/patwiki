@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ClipboardEvent } from 'react'
 import { importApi, databaseApi, viewApi } from '../../api'
 import { fieldService } from '../../services'
@@ -80,6 +81,7 @@ function importReportReason(report: { status?: string; reason?: string; error?: 
 }
 
 export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
+  const navigate = useNavigate()
   const {
     currentDatabaseId,
     databases,
@@ -96,6 +98,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [selectedSheet, setSelectedSheet] = useState<string | null>(null)
+  const [importNote, setImportNote] = useState('')
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [selectedDatabaseId, setSelectedDatabaseId] = useState<number | ''>(
     currentDatabaseId ?? ''
@@ -297,6 +300,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
         currentDatabaseId,
         selectedViewId || undefined,
         selectedSheet || undefined,
+        importNote.trim() || undefined,
       )
       // The confirmation endpoint only stages source evidence. Patent rows are
       // not changed until the review screen is explicitly applied.
@@ -317,7 +321,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     } finally {
       setImporting(false)
     }
-  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId, selectedSheet])
+  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId, selectedSheet, importNote])
 
   const handleApplyReviewedImport = useCallback(async () => {
     if (!importResult?.batch_id) return
@@ -804,6 +808,11 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                 )}
               </div>
 
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: '#475569', display: 'block', marginBottom: 4 }}>本次导入备注（可选）</label>
+                <textarea className="form-input" rows={2} value={importNote} onChange={event => setImportNote(event.target.value)} placeholder="例如：2025 年度海外竞争对手清单，来自研发部邮件" />
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <button className="btn btn-secondary" onClick={() => setStep('upload')}>返回</button>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -942,6 +951,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+                {importResult.batch_id && <button className="btn btn-secondary" onClick={() => { onSuccess(); navigate(`/db/${importResult.database_id || currentDatabaseId}/governance?batch_id=${importResult.batch_id}`) }}>查看本批待治理数据</button>}
                 {(importResult.unmapped_retained || 0) > 0 && importResult.batch_id && (
                   <button className="btn btn-secondary" onClick={downloadUnmapped}>下载本批待治理字段 CSV</button>
                 )}

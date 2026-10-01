@@ -322,6 +322,7 @@ def stage_import(
     mapping: dict[str, str], database_id: int, product_id: int | None = None,
     project_id: int | None = None, view_id: int | None = None,
     source_table_title: str | None = None, source_system: str | None = None,
+    import_note: str | None = None,
     artifact_path: str | None = None,
 ) -> dict:
     df, columns = ImportService.parse_excel(content, filename, sheet_name)
@@ -345,6 +346,7 @@ def stage_import(
     batch = ImportBatch(
         filename=filename, source_table_title=source_table_title or Path(filename).stem,
         worksheet_name=sheet_name, source_system=source_system,
+        import_note=import_note,
         mapping_version="v2-review", file_hash=hashlib.sha256(content).hexdigest(),
         artifact_path=artifact_path, status=ImportBatchStatus.PROCESSING,
          started_at=utc_now_naive(), total_rows=len(df), mapping_config=mapping,
@@ -562,8 +564,9 @@ def list_batch_changes(db: Session, batch_id: int, *, only_differences: bool = F
     query = db.query(FieldObservation).filter(FieldObservation.import_batch_id == batch_id)
     if only_differences:
         query = query.filter(FieldObservation.difference_type.in_(["new", "content", "format"]))
+    total = query.count()
     items = query.order_by(FieldObservation.source_row_id.asc(), FieldObservation.source_column_index.asc()).limit(limit).all()
-    return {"batch_id": batch.id, "status": batch.status.value, "total": len(items),
+    return {"batch_id": batch.id, "status": batch.status.value, "total": total,
             "items": [observation_payload(item, source_by_id[item.source_row_id], batch)
                       for item in items if item.source_row_id in source_by_id]}
 
@@ -711,6 +714,7 @@ def add_import_history(
         changed_by=actor,
         import_batch_id=batch.id,
         source_table_title=batch.source_table_title,
+        source_import_note=batch.import_note,
         source_row=source.source_row,
         source_field_name=item.source_field_name,
     ))
@@ -1044,6 +1048,8 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     patent.custom_fields = custom
                     db.add(patent)
                     db.flush()
+                    from app.services.publication_governance_service import classify_patent
+                    classify_patent(db, patent)
                     new_by_publication[publication] = patent
                     if writes_application_number:
                         new_by_application[(country, application_number)] = patent
@@ -1074,16 +1080,8 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                             new_value=import_storage_value(item),
                             actor=actor,
                         )
-                    imported_image_count += apply_embedded_images(
-                        db,
-                        patent=patent,
-                        images=embedded_images_by_row.get(source.source_row, []),
-                        items=items,
-                        actions=actions,
-                        batch=batch,
-                        source=source,
-                        actor=actor,
-                    )
+                    # Excel drawings are retained in source evidence and are
+                    # intentionally never promoted to the attachment library.
                 else:
                     row_changes = 0
                     for item in items:
@@ -1188,16 +1186,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 source=source, old_value=current,
                                 new_value=current, actor=actor,
                             )
-                    attachments_added = apply_embedded_images(
-                        db,
-                        patent=patent,
-                        images=embedded_images_by_row.get(source.source_row, []),
-                        items=items,
-                        actions=actions,
-                        batch=batch,
-                        source=source,
-                        actor=actor,
-                    )
+                    attachments_added = 0
                     if row_changes or attachments_added:
                         updated += 1
                         changed_ids.add(patent.id)

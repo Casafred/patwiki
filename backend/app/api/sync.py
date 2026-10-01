@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, NotFoundException
@@ -41,9 +42,43 @@ from app.schemas.sync import (
 from app.services.sync_service import SyncService
 from app.services.sync_update_service import SyncUpdateService
 from app.integrations.registry import get_connector
+from app.services.patent_identity_service import normalize_publication_number
+from app.services.publication_governance_service import classify_database, publication_parts
 
 
 router = APIRouter(prefix="/sync", tags=["external-sync"])
+
+
+class PublicationMatchRequest(BaseModel):
+    database_id: int
+    publications: list[str] = Field(default_factory=list, max_length=500)
+    patent_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+@router.post("/resolve-publications")
+def resolve_publications(body: PublicationMatchRequest, db: Session = Depends(get_db)):
+    _require_database(db, body.database_id)
+    requested = list(dict.fromkeys(filter(None, (normalize_publication_number(value) for value in body.publications))))
+    candidates = db.query(Patent).filter(in_database(body.database_id)).filter(
+        (Patent.publication_number.in_(requested)) | (Patent.id.in_(body.patent_ids or [-1]))
+    ).all()
+    matched = []
+    found = set()
+    for patent in candidates:
+        normalized = normalize_publication_number(patent.publication_number)
+        if normalized in requested or patent.id in body.patent_ids:
+            found.add(normalized)
+            _, country, kind = publication_parts(patent.publication_number)
+            matched.append({"patent_id": patent.id, "publication_number": patent.publication_number,
+                            "application_number": patent.application_number, "title": patent.title,
+                            "country": country or patent.country, "ungranted": kind.startswith("A") if kind else False})
+    return {"matched": matched, "unmatched": [number for number in requested if number not in found]}
+
+
+@router.post("/databases/{database_id}/classify-publications")
+def classify_publications(database_id: int, db: Session = Depends(get_db)):
+    _require_database(db, database_id)
+    return {"updated": classify_database(db, database_id)}
 
 
 def _require_database(db: Session, database_id: int) -> PatentDatabase:

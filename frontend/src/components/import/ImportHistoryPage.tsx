@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { importApi } from '../../api'
-import type { ImportBatch } from '../../types'
+import type { ImportBatch, ImportChangeReview, ImportReviewAction } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDateTime } from '../../lib/date'
 import { useAppStore } from '../../store'
@@ -34,6 +34,11 @@ export default function ImportHistoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expandedBatchIds, setExpandedBatchIds] = useState<Set<number>>(new Set())
+  const [reviewBatchId, setReviewBatchId] = useState<number | null>(null)
+  const [reviewChanges, setReviewChanges] = useState<ImportChangeReview[]>([])
+  const [reviewTotal, setReviewTotal] = useState(0)
+  const [reviewActions, setReviewActions] = useState<Record<number, ImportReviewAction>>({})
+  const [reviewBusy, setReviewBusy] = useState(false)
 
   const summary = batches.reduce((result, batch) => ({
     batches: result.batches + 1,
@@ -69,6 +74,48 @@ export default function ImportHistoryPage() {
       else next.add(batchId)
       return next
     })
+  }
+
+  const openReview = async (batchId: number) => {
+    setReviewBusy(true)
+    setError('')
+    try {
+      const result = await importApi.getChanges(batchId)
+      setReviewChanges(result.items)
+      setReviewTotal(result.total)
+      setReviewActions(Object.fromEntries(result.items.map(item => [item.id, item.review_action])))
+      setReviewBatchId(batchId)
+      setExpandedBatchIds(current => new Set(current).add(batchId))
+    } catch (cause) {
+      setError(getErrorMessage(cause, '导入审查加载失败'))
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  const applyReviewed = async (batchId: number) => {
+    setReviewBusy(true)
+    setError('')
+    try {
+      await importApi.reviewBatch(batchId, {
+        items: Object.entries(reviewActions).map(([id, action]) => ({ observation_id: Number(id), action })),
+      })
+      await importApi.applyBatch(batchId)
+      setReviewBatchId(null)
+      await loadBatches()
+    } catch (cause) {
+      setError(getErrorMessage(cause, '执行导入失败，批次仍可继续审查'))
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  const rollback = async (batchId: number) => {
+    if (!window.confirm('确认撤回这次导入？系统会删除本批新建记录，并恢复本批修改前的字段值。')) return
+    setReviewBusy(true)
+    try { await importApi.rollbackBatch(batchId); await loadBatches() }
+    catch (cause) { setError(getErrorMessage(cause, '导入撤回失败')) }
+    finally { setReviewBusy(false) }
   }
 
   useEffect(() => {
@@ -177,12 +224,38 @@ export default function ImportHistoryPage() {
                              <div><span>来源表标题</span><strong>{batch.source_table_title || '未记录'}</strong></div>
                              <div><span>工作表</span><strong>{batch.worksheet_name || '默认工作表'}</strong></div>
                              <div><span>来源系统</span><strong>{batch.source_system || '人工导入'}</strong></div>
+                             <div><span>导入备注</span><strong>{batch.import_note || '未填写'}</strong></div>
                              <div><span>已处理行数</span><strong>{formatCount(batch.processed_rows)} / {formatCount(batch.total_rows)}</strong></div>
                              <div><span>字段更新</span><strong>{formatCount(batch.updated_count)} 条记录</strong></div>
                              <div><span>错误明细</span><strong>{formatCount(batch.error_count)} 条</strong></div>
                              <div><span>文件指纹</span><strong>{batch.file_hash ? batch.file_hash.slice(0, 12) : '未记录'}</strong></div>
                              <div><span>回撤状态</span><strong>{statusKey === 'rolled_back' ? '已回撤' : '可在导入结果中回撤'}</strong></div>
                            </div>
+                           <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                             {statusKey === 'review_required' && <button className="btn btn-primary" disabled={reviewBusy} onClick={() => void openReview(batch.id)}>继续审查并执行</button>}
+                             {statusKey === 'completed' && <button className="btn btn-secondary" onClick={() => navigate(databaseId ? `/db/${databaseId}/patents` : `/db/${currentDatabaseId}/patents`)}>查看目标数据库</button>}
+                             {statusKey === 'completed' && <button className="btn btn-danger" disabled={reviewBusy} onClick={() => void rollback(batch.id)}>撤回本次导入</button>}
+                             <button className="btn btn-secondary" onClick={() => navigate(`${databaseId ? `/db/${databaseId}` : currentDatabaseId ? `/db/${currentDatabaseId}` : ''}/governance?batch_id=${batch.id}`)}>查看本批待治理数据</button>
+                           </div>
+                           {reviewBatchId === batch.id && <div style={{ marginTop: 14 }}>
+                             <strong>字段审查 · {reviewChanges.length} / {reviewTotal} 个来源值</strong>
+                             {reviewTotal > reviewChanges.length && <div style={{ color: '#64748b', fontSize: 12, marginTop: 4 }}>当前显示前 {reviewChanges.length} 项，其余项目将按系统建议处理。</div>}
+                             <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
+                               <table className="data-grid"><thead><tr><th>行</th><th>来源字段</th><th>当前值</th><th>导入值</th><th>处理</th></tr></thead>
+                                 <tbody>{reviewChanges.map(item => <tr key={item.id}>
+                                   <td>{item.source_row}</td><td>{item.source_field_name}</td>
+                                   <td>{item.current_value || '-'}</td><td>{item.candidate_value || item.raw_value || '-'}</td>
+                                   <td><select className="form-input" value={reviewActions[item.id] || item.review_action} onChange={event => setReviewActions(current => ({ ...current, [item.id]: event.target.value as ImportReviewAction }))}>
+                                     <option value="keep_existing">保留现有值</option>
+                                     {item.field_resolution === 'mapped' && <option value="adopt">采用导入值</option>}
+                                     {item.field_resolution === 'mapped' && <option value="fill_empty">仅填充空值</option>}
+                                     <option value="ignore">忽略本单元格</option><option value="quarantine">隔离待处理</option>
+                                   </select></td>
+                                 </tr>)}</tbody>
+                               </table>
+                             </div>
+                             <button className="btn btn-primary" style={{ marginTop: 10 }} disabled={reviewBusy} onClick={() => void applyReviewed(batch.id)}>确认并执行导入</button>
+                           </div>}
                            {batch.errors && batch.errors.length > 0 && (
                              <div className="import-history-detail-errors">
                                <strong>错误与字段提醒</strong>

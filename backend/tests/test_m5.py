@@ -138,7 +138,15 @@ class M5ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"%PDF-1.7 test")
         self.assertEqual(self.client.delete(f"/attachments/{attachment.id}").status_code, 200)
-        self.assertEqual(self.db.query(Attachment).count(), 0)
+        deleted = self.db.query(Attachment).one()
+        self.assertIsNotNone(deleted.deleted_at)
+        self.assertTrue(AttachmentService.path(deleted).exists())
+        self.assertEqual(self.client.get("/attachments/library").json(), [])
+        trash = self.client.get("/attachments/trash").json()
+        self.assertEqual(len(trash), 1)
+        self.assertEqual(self.client.post("/attachments/trash/restore", json=[{"attachment_type": "patent", "attachment_id": attachment.id}]).json()["restored"], 1)
+        self.assertEqual(len(self.client.get("/attachments/library").json()), 1)
+        self.assertIsNone(self.db.query(Attachment).one().deleted_at)
 
     def test_dashboard_card_data_and_api_lifecycle(self):
         dashboard = Dashboard(

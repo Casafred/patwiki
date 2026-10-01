@@ -84,5 +84,6 @@ class ProjectAttachment(Base):
     note = Column(Text)
     uploaded_by = Column(String(100))
     uploaded_at = Column(DateTime, server_default=func.now())
+    deleted_at = Column(DateTime, nullable=True, index=True)
 
     project = relationship("Project", back_populates="attachments")

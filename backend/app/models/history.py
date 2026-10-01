@@ -34,6 +34,7 @@ class PatentHistory(Base):
     # Import provenance shown in the patent Wiki timeline.
     import_batch_id = Column(Integer, ForeignKey("import_batches.id", ondelete="SET NULL"), nullable=True, index=True)
     source_table_title = Column(String(500), nullable=True)
+    source_import_note = Column(Text, nullable=True)
     source_row = Column(Integer, nullable=True)
     source_field_name = Column(String(500), nullable=True)
     source_view_name = Column(String(200), nullable=True)  # 冗余存储视图名，视图删除后仍可读

@@ -7050,6 +7050,73 @@ body {
   flex-direction: column;
 }
 
+.management-hero {
+  margin: 24px 28px 18px;
+  padding: 26px 30px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  color: #effaf7;
+  background: linear-gradient(120deg, #123d3b 0%, #17645e 62%, #238078 100%);
+  border-radius: 14px;
+  box-shadow: 0 12px 28px rgba(16, 66, 62, .18);
+}
+.management-hero h2 { margin: 7px 0 5px; font-size: 27px; letter-spacing: -.02em; }
+.management-hero p { margin: 0; max-width: 620px; color: rgba(239, 250, 247, .76); font-size: 13px; line-height: 1.7; }
+.management-kicker { color: #9fe1d5; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.management-hero .btn-primary { background: #d9f7ef; color: #14534c; border: 0; box-shadow: none; }
+.management-overview-grid { margin: 0 28px 18px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.management-overview-card { padding: 16px 18px; background: #fff; border: 1px solid #dce9e6; border-radius: 10px; box-shadow: 0 4px 14px rgba(22, 35, 41, .04); }
+.management-overview-card.accent { border-color: #9ed8cd; background: #f1fbf8; }
+.management-overview-card span, .management-overview-card small { display: block; color: #71828a; font-size: 11px; }
+.management-overview-card strong { display: block; margin: 7px 0 4px; color: #18353a; font-size: 25px; }
+.management-product-tools { margin: 0 28px 16px; padding: 11px; display: flex; align-items: center; gap: 10px; background: #f4f8f7; border: 1px solid #dbe9e6; border-radius: 10px; }
+.management-search { min-width: 240px; flex: 1; display: flex; align-items: center; gap: 8px; padding: 0 11px; height: 34px; background: #fff; border: 1px solid #d7e4e1; border-radius: 7px; color: #79918e; }
+.management-search input { width: 100%; border: 0; outline: 0; background: transparent; color: #29464a; font-size: 12px; }
+.management-product-tools > .form-input { width: 170px; height: 34px; }
+.management-segmented { display: flex; padding: 3px; background: #e5efed; border-radius: 7px; }
+.management-segmented button { padding: 6px 10px; border: 0; border-radius: 5px; color: #617875; background: transparent; font-size: 11px; cursor: pointer; }
+.management-segmented button.active { background: #fff; color: #17645e; box-shadow: 0 1px 4px rgba(23, 100, 94, .14); font-weight: 700; }
+.management-bulk-popover { position: relative; color: #17645e; font-size: 11px; white-space: nowrap; }
+.management-bulk-popover summary { cursor: pointer; padding: 8px 7px; }
+.management-bulk-popover > div { position: absolute; z-index: 3; right: 0; top: 34px; width: 230px; padding: 12px; background: #fff; border: 1px solid #dbe9e6; border-radius: 8px; box-shadow: 0 12px 26px rgba(22, 35, 41, .14); }
+.management-bulk-popover textarea { min-height: 78px; margin-bottom: 8px; }
+.management-product-grid { margin: 0 28px; display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 14px; }
+.management-product-card { padding: 18px; background: #fff; border: 1px solid #dce9e6; border-radius: 11px; box-shadow: 0 5px 16px rgba(22, 35, 41, .045); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.management-product-card:hover { transform: translateY(-2px); border-color: #9ed8cd; box-shadow: 0 10px 24px rgba(22, 80, 73, .11); }
+.management-product-card-top, .management-product-actions, .management-product-stats { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.management-product-mark { width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 36px; border-radius: 9px; background: #dff4ef; color: #17645e; font-weight: 800; }
+.management-product-title { min-width: 0; flex: 1; }
+.management-product-title strong, .management-product-title span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.management-product-title strong { color: #203d41; font-size: 14px; }
+.management-product-title span { margin-top: 3px; color: #8a9b9d; font-size: 11px; }
+.management-status-dot { color: #207568; font-size: 11px; font-weight: 700; }
+.management-status-dot.inactive { color: #9b6c4b; }
+.management-product-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 15px 0 10px; }
+.management-product-tags span { padding: 4px 7px; color: #47736d; background: #edf7f4; border-radius: 4px; font-size: 10px; }
+.management-product-card p { min-height: 36px; margin: 0 0 16px; color: #71828a; font-size: 12px; line-height: 1.55; }
+.management-product-stats { justify-content: flex-start; gap: 28px; padding: 12px 0; border-top: 1px solid #edf2f1; border-bottom: 1px solid #edf2f1; }
+.management-product-stats div { min-width: 74px; }
+.management-product-stats strong, .management-product-stats span { display: block; }
+.management-product-stats strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #24464a; font-size: 14px; }
+.management-product-stats span { margin-top: 3px; color: #8a9b9d; font-size: 10px; }
+.management-product-actions { justify-content: flex-start; margin-top: 14px; }
+.management-product-actions > .btn { flex: 1; }
+.management-product-actions .btn { font-size: 11px; }
+.management-tabs .management-tab small { margin-left: 6px; padding: 2px 6px; border-radius: 10px; background: #edf4f2; color: #6f8985; font-size: 10px; }
+.management-tabs .management-tab.active small { background: #d8f0eb; color: #17645e; }
+@media (max-width: 780px) { .management-hero { margin: 18px 16px; padding: 22px; flex-direction: column; align-items: flex-start; } .management-overview-grid { margin: 0 16px 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); } .management-product-tools { margin: 0 16px 14px; flex-wrap: wrap; } .management-search { flex-basis: 100%; } .management-product-tools > .form-input { flex: 1; } .management-product-grid { margin: 0 16px; grid-template-columns: 1fr; } }
+
+.attachment-library-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 14px 0; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+.attachment-library-filters { display: flex; gap: 8px; }
+.attachment-library-type-summary { display: flex; gap: 6px; flex-wrap: wrap; }
+.attachment-library-type-summary button { border: 1px solid #cbd5e1; border-radius: 999px; padding: 6px 10px; background: #fff; color: #475569; cursor: pointer; }
+.attachment-library-type-summary button.is-active { border-color: #0f766e; background: #ecfdf5; color: #0f766e; }
+.attachment-library-group { margin-bottom: 16px; }
+.attachment-library-group h3 { margin: 0; padding: 9px 0; border-bottom: 1px solid #cbd5e1; color: #334155; font-size: 13px; }
+.attachment-library-group h3 span { margin-left: 5px; color: #64748b; font-weight: 400; }
+
 .project-wiki-patents button {
   display: flex;
   justify-content: space-between;

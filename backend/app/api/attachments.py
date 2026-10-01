@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Attachment, Patent, Project, ProjectAttachment
+from app.core.time import utc_now_naive
 from app.services.attachment_service import AttachmentService
 from app.services.project_attachment_service import ProjectAttachmentService
 from app.core.exceptions import BadRequestException, NotFoundException
@@ -52,12 +53,12 @@ def list_patent_attachments(
 @router.get("/library")
 def list_attachment_library(db: Session = Depends(get_db)):
     items = []
-    for attachment in db.query(Attachment).order_by(Attachment.uploaded_at.desc(), Attachment.id.desc()).all():
+    for attachment in db.query(Attachment).filter(Attachment.deleted_at.is_(None)).order_by(Attachment.uploaded_at.desc(), Attachment.id.desc()).all():
         item = AttachmentService._metadata(attachment)
         patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first()
         item["owner_label"] = f"专利 · {patent.publication_number if patent and patent.publication_number else '无公开号'} · {patent.title if patent else '已删除专利'}"
         items.append(item)
-    for attachment in db.query(ProjectAttachment).order_by(ProjectAttachment.uploaded_at.desc(), ProjectAttachment.id.desc()).all():
+    for attachment in db.query(ProjectAttachment).filter(ProjectAttachment.deleted_at.is_(None)).order_by(ProjectAttachment.uploaded_at.desc(), ProjectAttachment.id.desc()).all():
         item = ProjectAttachmentService._metadata(attachment)
         project = db.query(Project).filter(Project.id == attachment.project_id).first()
         patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first() if attachment.patent_id else None
@@ -66,6 +67,58 @@ def list_attachment_library(db: Session = Depends(get_db)):
             item["owner_label"] += f" · 关联专利：{patent.publication_number if patent.publication_number else '无公开号'} · {patent.title}"
         items.append(item)
     return sorted(items, key=lambda item: item.get("uploaded_at") or "", reverse=True)
+
+@router.get("/trash")
+def list_attachment_trash(db: Session = Depends(get_db)):
+    items = []
+    for attachment in db.query(Attachment).filter(Attachment.deleted_at.is_not(None)).all():
+        item = AttachmentService._metadata(attachment)
+        item["deleted_at"] = attachment.deleted_at.isoformat()
+        item["owner_label"] = f"专利 #{attachment.patent_id}"
+        items.append(item)
+    for attachment in db.query(ProjectAttachment).filter(ProjectAttachment.deleted_at.is_not(None)).all():
+        item = ProjectAttachmentService._metadata(attachment)
+        item["deleted_at"] = attachment.deleted_at.isoformat()
+        item["owner_label"] = f"项目 #{attachment.project_id}"
+        items.append(item)
+    return sorted(items, key=lambda item: item.get("deleted_at") or "", reverse=True)
+
+@router.post("/trash/restore")
+def restore_attachments(items: list[dict], db: Session = Depends(get_db)):
+    restored = 0
+    for item in items:
+        model = ProjectAttachment if item.get("attachment_type") == "project" else Attachment
+        attachment = db.query(model).filter(model.id == item.get("attachment_id")).first()
+        if attachment and attachment.deleted_at is not None:
+            attachment.deleted_at = None
+            if isinstance(attachment, Attachment):
+                patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first()
+                if patent:
+                    custom = dict(patent.custom_fields or {})
+                    values = list(custom.get(attachment.field_key) or [])
+                    if not any(isinstance(value, dict) and value.get("attachment_id") == attachment.id for value in values):
+                        values.append(AttachmentService._metadata(attachment))
+                    patent.custom_fields = {**custom, attachment.field_key: values}
+            restored += 1
+    db.commit()
+    return {"restored": restored}
+
+@router.post("/bulk-delete")
+def bulk_delete_attachments(items: list[dict], db: Session = Depends(get_db)):
+    deleted = 0
+    for item in items:
+        attachment_id = item.get("attachment_id")
+        if item.get("attachment_type") == "project":
+            attachment = db.query(ProjectAttachment).filter(ProjectAttachment.id == attachment_id, ProjectAttachment.deleted_at.is_(None)).first()
+            if attachment:
+                ProjectAttachmentService.delete(db, attachment_id)
+                deleted += 1
+        else:
+            attachment = db.query(Attachment).filter(Attachment.id == attachment_id, Attachment.deleted_at.is_(None)).first()
+            if attachment:
+                AttachmentService.delete(db, attachment_id)
+                deleted += 1
+    return {"deleted": deleted}
 
 
 @router.get("/projects/{project_id}")

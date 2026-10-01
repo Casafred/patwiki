@@ -108,6 +108,7 @@ class ProjectAttachmentService:
             raise ValueError("项目不存在")
         return [cls._metadata(item) for item in db.query(ProjectAttachment).filter(
             ProjectAttachment.project_id == project_id,
+            ProjectAttachment.deleted_at.is_(None),
         ).order_by(ProjectAttachment.id.desc()).all()]
 
     @classmethod
@@ -128,8 +129,5 @@ class ProjectAttachmentService:
     @classmethod
     def delete(cls, db: Session, attachment_id: int) -> None:
         item = cls.get(db, attachment_id)
-        target = AttachmentService.path(item)
-        db.delete(item)
+        item.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
-        if target.exists():
-            target.unlink()

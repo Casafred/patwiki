@@ -22,6 +22,7 @@ from app.services.import_review_service import (
 )
 from app.services.patent_identity_service import ensure_patent_identifiers
 from app.services.patent_service import PatentService
+from app.api.imports import _unmapped_observation_query
 
 
 class ImportReviewPipelineTest(unittest.TestCase):
@@ -76,6 +77,17 @@ class ImportReviewPipelineTest(unittest.TestCase):
             self.assertEqual(result["row_reports"][0]["status"], "retained_source_row")
             self.assertEqual(result["row_reports"][1]["status"], "skipped_empty_row")
             self.assertEqual(self.db.query(Patent).count(), 0)
+
+            governance = _unmapped_observation_query(
+                self.db, database_id=self.database.id,
+            ).all()
+            self.assertEqual({item.source_field_name for item, _, _ in governance}, {"标题", "线索"})
+            other_database = PatentDatabase(name="其他库")
+            self.db.add(other_database)
+            self.db.commit()
+            self.assertEqual(_unmapped_observation_query(
+                self.db, database_id=other_database.id,
+            ).count(), 0)
 
             source = self.db.query(ImportSourceRow).filter(
                 ImportSourceRow.import_batch_id == result["batch_id"],

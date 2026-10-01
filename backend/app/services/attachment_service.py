@@ -222,7 +222,7 @@ class AttachmentService:
 
     @classmethod
     def list_for_patent(cls, db: Session, patent_id: int, field_key: Optional[str] = None) -> list[dict]:
-        query = db.query(Attachment).filter(Attachment.patent_id == patent_id)
+        query = db.query(Attachment).filter(Attachment.patent_id == patent_id, Attachment.deleted_at.is_(None))
         if field_key:
             query = query.filter(Attachment.field_key == field_key.removeprefix("custom_fields."))
         return [cls._metadata(item) for item in query.order_by(Attachment.id).all()]
@@ -288,9 +288,6 @@ class AttachmentService:
                 {"custom_fields": {attachment.field_key: current}},
                 source="attachment",
             )
-        target = cls.path(attachment)
-        db.delete(attachment)
+        attachment.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
-        if target.exists():
-            target.unlink()
         return True

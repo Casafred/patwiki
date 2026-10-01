@@ -688,6 +688,7 @@ function IdentityTab({ patent, identifiers, fieldSources, identityConflicts, loa
                   <span>{formatDateTime(source.last_changed_at)}</span>
                   {source.last_source_view_name && <span>视图：{source.last_source_view_name}</span>}
                   {source.source_table_title && <span>来源表：{source.source_table_title}</span>}
+                  {source.source_import_note && <span>导入备注：{source.source_import_note}</span>}
                   {source.source_row && <span>第 {source.source_row} 行</span>}
                 </div>
               </div>
@@ -1747,6 +1748,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
                           <span className="history-import-batch-count" style={{ marginLeft: 'auto', fontSize: 11, color: '#a16207', whiteSpace: 'nowrap' }}>
                             {item.histories.length} 项字段变更{rows.length > 0 ? ` · 来源行 ${rows.join('、')}` : ''}
                           </span>
+                          {first.source_import_note && <span style={{ fontSize: 11, color: '#92400e' }}>备注：{first.source_import_note}</span>}
                         </button>
                         {isExpanded && (
                           <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>

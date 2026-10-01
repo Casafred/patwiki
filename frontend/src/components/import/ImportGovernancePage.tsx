@@ -4,6 +4,7 @@ import { fieldApi, importApi } from '../../api'
 import type { FieldMeta, GovernanceAction, GovernanceDecision, GovernanceObservation } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDateTime } from '../../lib/date'
+import { useAppStore } from '../../store'
 
 const ACTION_LABELS: Record<GovernanceAction, string> = {
   retain_source: '保留来源',
@@ -34,6 +35,7 @@ export default function ImportGovernancePage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { databaseId } = useParams<{ databaseId: string }>()
+  const { currentDatabaseId } = useAppStore()
   const [searchParams] = useSearchParams()
   const [items, setItems] = useState<GovernanceObservation[]>([])
   const [total, setTotal] = useState(0)
@@ -41,7 +43,7 @@ export default function ImportGovernancePage() {
   const pageSize = 50
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [sourceField, setSourceField] = useState('')
-  const [batchId, setBatchId] = useState('')
+  const [batchId, setBatchId] = useState(() => searchParams.get('batch_id')?.replace(/\D/g, '') || '')
   const [patentId, setPatentId] = useState(() => searchParams.get('patent_id')?.replace(/\D/g, '') || '')
   const [sourceRowId, setSourceRowId] = useState(() => searchParams.get('source_row_id')?.replace(/\D/g, '') || '')
   const [mappingBySource, setMappingBySource] = useState<Record<string, string>>({})
@@ -65,6 +67,7 @@ export default function ImportGovernancePage() {
         batch_id: batchId.trim() ? Number(batchId) : undefined,
         patent_id: patentId.trim() ? Number(patentId) : undefined,
         source_row_id: sourceRowId.trim() ? Number(sourceRowId) : undefined,
+        database_id: databaseId ? Number(databaseId) : currentDatabaseId ?? undefined,
         offset,
         limit: pageSize,
       })
@@ -77,7 +80,7 @@ export default function ImportGovernancePage() {
       setLoading(false)
     }
     return null
-  }, [batchId, offset, pageSize, patentId, sourceField, sourceRowId])
+  }, [batchId, currentDatabaseId, databaseId, offset, pageSize, patentId, sourceField, sourceRowId])
 
   useEffect(() => {
     // Synchronize the table with the current filters.
@@ -162,7 +165,7 @@ export default function ImportGovernancePage() {
       <div className="page-header">
         <div>
           <h2 className="page-title">数据治理</h2>
-          <p className="page-subtitle">处理未知导入属性，保留来源证据后再决定是否升级为正式字段</p>
+          <p className="page-subtitle">待治理字段保存在来源记录中；隔离或待补身份的整行需修正来源后重新导入</p>
         </div>
         <div className="workspace-page-actions">
           <button className="btn btn-secondary" onClick={() => navigate(databaseId ? `/db/${databaseId}/patents${location.search}` : `/patents${location.search}`)}>返回数据表</button>
@@ -189,7 +192,7 @@ export default function ImportGovernancePage() {
           <input type="checkbox" checked={adoptedValue} onChange={event => setAdoptedValue(event.target.checked)} />
           映射时采用来源值覆盖已有值
         </label>
-        <span style={{ marginLeft: 'auto', color: '#64748b', fontSize: 12 }}>待处理 {total} 条，本页 {items.length} 条</span>
+        <span style={{ marginLeft: 'auto', color: '#64748b', fontSize: 12 }}>待处理 {total} 个字段值，本页 {items.length} 个</span>
       </div>
 
       <div className="management-table" style={{ overflowX: 'auto' }}>
@@ -222,7 +225,7 @@ export default function ImportGovernancePage() {
                       <div title={item.filename}>{compact(item.filename)}</div>
                       <small>{compact(item.source_table_title)} / {compact(item.worksheet_name)}</small>
                     </td>
-                    <td>{item.patent_id ? `#${item.patent_id}` : '待补身份'}<br /><small>第 {item.source_row} 行</small></td>
+                    <td>{item.patent_id ? `#${item.patent_id}` : '未入专利库'}<br /><small>批次 #{item.batch_id} / 第 {item.source_row} 行</small>{item.source_row_reason && <small title={item.source_row_reason} style={{ display: 'block' }}>{compact(item.source_row_reason)}</small>}</td>
                     <td><strong>{item.source_field_name}</strong><br /><small>{item.field_resolution}</small></td>
                     <td title={item.raw_value || ''}>{compact(item.raw_value)}</td>
                     <td title={item.current_value || ''}>{compact(item.current_value)}</td>
@@ -240,13 +243,13 @@ export default function ImportGovernancePage() {
                       </select>
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', minWidth: 260 }}>
+                      {item.field_resolution === 'quarantined' || item.source_row_status === 'retained_source_row' || item.source_row_status === 'quarantined' ? <small>来源行待修正；原始值已保存，修正后重新导入</small> : <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', minWidth: 260 }}>
                         <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'retain_source')}>保留来源</button>
                         <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'ignore')}>忽略</button>
                         <button className="btn btn-secondary" disabled={busy || !selectedField} onClick={() => void decide(item, 'map_existing', adoptedValue)}>映射</button>
                         <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'propose_field')}>提交候选</button>
                         <button className="btn btn-secondary" disabled={busy} onClick={() => void showHistory(item)}>查看历史</button>
-                      </div>
+                      </div>}
                       <small style={{ display: 'block', marginTop: 4 }}>最近决策：{item.final_decision || '-'} / {formatDate(item.decided_at)}</small>
                     </td>
                   </tr>

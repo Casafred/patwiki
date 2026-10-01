@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-28.5"
+CURRENT_MIGRATION_VERSION = "2026-09-30.2"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -134,6 +134,7 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("import_batches", "source_table_title", "ALTER TABLE import_batches ADD COLUMN source_table_title VARCHAR(500)"),
     _column("import_batches", "worksheet_name", "ALTER TABLE import_batches ADD COLUMN worksheet_name VARCHAR(200)"),
     _column("import_batches", "source_system", "ALTER TABLE import_batches ADD COLUMN source_system VARCHAR(200)"),
+    _column("import_batches", "import_note", "ALTER TABLE import_batches ADD COLUMN import_note TEXT"),
     _column("import_batches", "mapping_version", "ALTER TABLE import_batches ADD COLUMN mapping_version VARCHAR(100)"),
     _column("import_batches", "file_hash", "ALTER TABLE import_batches ADD COLUMN file_hash VARCHAR(128)"),
     _column("import_batches", "artifact_path", "ALTER TABLE import_batches ADD COLUMN artifact_path VARCHAR(1000)"),
@@ -141,6 +142,7 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("import_batches", "created_patent_ids", "ALTER TABLE import_batches ADD COLUMN created_patent_ids JSON"),
     _column("patent_histories", "import_batch_id", "ALTER TABLE patent_histories ADD COLUMN import_batch_id INTEGER REFERENCES import_batches(id)"),
     _column("patent_histories", "source_table_title", "ALTER TABLE patent_histories ADD COLUMN source_table_title VARCHAR(500)"),
+    _column("patent_histories", "source_import_note", "ALTER TABLE patent_histories ADD COLUMN source_import_note TEXT"),
     _column("patent_histories", "source_row", "ALTER TABLE patent_histories ADD COLUMN source_row INTEGER"),
     _column("patent_histories", "source_field_name", "ALTER TABLE patent_histories ADD COLUMN source_field_name VARCHAR(500)"),
     _column("import_source_rows", "candidate_patent_ids", "ALTER TABLE import_source_rows ADD COLUMN candidate_patent_ids JSON"),
@@ -169,6 +171,8 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("attachments", "sha256", "ALTER TABLE attachments ADD COLUMN sha256 VARCHAR(64)"),
     _column("attachments", "width", "ALTER TABLE attachments ADD COLUMN width INTEGER"),
     _column("attachments", "height", "ALTER TABLE attachments ADD COLUMN height INTEGER"),
+    _column("attachments", "deleted_at", "ALTER TABLE attachments ADD COLUMN deleted_at DATETIME"),
+    _column("project_attachments", "deleted_at", "ALTER TABLE project_attachments ADD COLUMN deleted_at DATETIME"),
     _column("collaboration_sync_conflicts", "package_id", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN package_id INTEGER REFERENCES collaboration_sync_packages(id) ON DELETE CASCADE"),
     _column("collaboration_sync_conflicts", "origin_node_uid", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN origin_node_uid VARCHAR(80)"),
     _column("sync_records", "identity_candidate_patent_ids", "ALTER TABLE sync_records ADD COLUMN identity_candidate_patent_ids JSON"),

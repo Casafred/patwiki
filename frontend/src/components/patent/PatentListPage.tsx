@@ -3284,6 +3284,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             </div>
             <span className="selection-divider" aria-hidden="true" />
             <div className="selection-group" aria-label="批量编辑与更新">
+              <button className="btn btn-xs btn-primary" onClick={() => navigate(`${activeDatabaseId ? `/db/${activeDatabaseId}` : ''}/external-sync?mode=publication&patent_ids=${selectedIds.join(',')}`)} title="把选中的专利公开号带入 MCP 跟踪确认"><Icon name="refresh" size={13} /> 加入 MCP 跟踪</button>
               <button className="btn btn-xs btn-secondary" onClick={() => { setAddToViewId(null); setShowAddToView(true) }} title="把选中的专利加入一个或多个业务视图">
                 <Icon name="table" size={13} /> 加入业务视图
               </button>

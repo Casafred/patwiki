@@ -1342,6 +1342,7 @@ class ViewService:
                 "last_source_view_name": h.source_view_name,
                 "import_batch_id": h.import_batch_id,
                 "source_table_title": h.source_table_title,
+                "source_import_note": h.source_import_note,
                 "source_row": h.source_row,
                 "source_field_name": h.source_field_name,
             })

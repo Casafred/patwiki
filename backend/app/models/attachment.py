@@ -31,3 +31,4 @@ class Attachment(Base):
     sha256 = Column(String(64), index=True)
     width = Column(Integer)
     height = Column(Integer)
+    deleted_at = Column(DateTime, nullable=True, index=True)

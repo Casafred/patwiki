@@ -275,6 +275,9 @@ export default function ManagementPage() {
   const [showProductForm, setShowProductForm] = useState(false)
   const [bulkCategoryText, setBulkCategoryText] = useState('')
   const [bulkCategorySaving, setBulkCategorySaving] = useState(false)
+  const [productSearch, setProductSearch] = useState('')
+  const [productLineFilter, setProductLineFilter] = useState('')
+  const [productStatusFilter, setProductStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [showProjectForm, setShowProjectForm] = useState(false)
   const [showTagForm, setShowTagForm] = useState(false)
   const [showTagGroupForm, setShowTagGroupForm] = useState(false)
@@ -319,6 +322,13 @@ export default function ManagementPage() {
     () => Array.from(new Set(products.flatMap(product => [product.name, product.category]).filter((value): value is string => !!value))).sort(),
     [products],
   )
+  const filteredProducts = useMemo(() => products.filter(product => {
+    const needle = productSearch.trim().toLowerCase()
+    const matchesText = !needle || [product.name, product.code, product.category, product.description].some(value => String(value || '').toLowerCase().includes(needle))
+    const matchesLine = !productLineFilter || String(product.product_line_id || '') === productLineFilter
+    const matchesStatus = productStatusFilter === 'all' || (productStatusFilter === 'active' ? product.is_active !== false : product.is_active === false)
+    return matchesText && matchesLine && matchesStatus
+  }), [products, productSearch, productLineFilter, productStatusFilter])
 
   const beginCreate = () => {
     setError('')
@@ -456,7 +466,16 @@ export default function ManagementPage() {
 
   const renderProducts = () => (
     <>
-      <ManagementHeader title="产品管理" description="维护产品、产品线和负责人，供专利库与项目关联使用。" onCreate={() => { beginCreate(); setShowProductForm(true) }} createLabel="新增产品" />
+      <div className="management-hero">
+        <div><span className="management-kicker">业务资产 · 产品目录</span><h2>产品管理</h2><p>统一维护产品、产品线和负责人，产品会同步成为专利库与项目的业务入口。</p></div>
+        <button className="btn btn-primary" onClick={() => { beginCreate(); setShowProductForm(true) }}>新增产品</button>
+      </div>
+      <div className="management-overview-grid">
+        <div className="management-overview-card accent"><span>产品总数</span><strong>{products.length}</strong><small>已建立的业务产品</small></div>
+        <div className="management-overview-card"><span>启用中</span><strong>{products.filter(item => item.is_active !== false).length}</strong><small>可用于库内关联</small></div>
+        <div className="management-overview-card"><span>产品线</span><strong>{productLines.length}</strong><small>上层业务分类</small></div>
+        <div className="management-overview-card"><span>专利覆盖</span><strong>{products.reduce((sum, item) => sum + (item.patent_count || 0), 0)}</strong><small>已关联专利记录</small></div>
+      </div>
       {(showProductForm || editingProductId !== null) && (
         <div className="management-form">
           <div className="management-form-grid">
@@ -471,12 +490,22 @@ export default function ManagementPage() {
           <div className="management-form-actions"><button className="btn btn-primary" disabled={saving} onClick={() => void saveProduct()}>{saving ? '保存中...' : editingProductId ? '保存修改' : '创建产品'}</button><button className="btn btn-secondary" onClick={() => { setEditingProductId(null); setProductForm(emptyProduct); setShowProductForm(false) }}>取消</button></div>
         </div>
       )}
-      <div className="management-form compact">
-        <FormField label="批量录入产品品类"><textarea className="form-input" style={{ ...inputStyle, minHeight: 90 }} value={bulkCategoryText} onChange={event => setBulkCategoryText(event.target.value)} placeholder="每行一个品类名称，可直接粘贴整列文本" /></FormField>
-        <div className="management-form-actions"><button className="btn btn-secondary" disabled={bulkCategorySaving || !bulkCategoryText.trim()} onClick={() => void saveBulkCategories()}>{bulkCategorySaving ? '创建中…' : '逐行创建品类'}</button></div>
+      <div className="management-product-tools">
+        <div className="management-search"><span>⌕</span><input value={productSearch} onChange={event => setProductSearch(event.target.value)} placeholder="搜索产品名称、编码或分类" /></div>
+        <select className="form-input" value={productLineFilter} onChange={event => setProductLineFilter(event.target.value)}><option value="">全部产品线</option>{productLines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}</select>
+        <div className="management-segmented">{([['all', '全部'], ['active', '启用'], ['inactive', '停用']] as const).map(([value, label]) => <button key={value} className={productStatusFilter === value ? 'active' : ''} onClick={() => setProductStatusFilter(value)}>{label}</button>)}</div>
+        <details className="management-bulk-popover"><summary>批量导入品类</summary><div><textarea className="form-input" value={bulkCategoryText} onChange={event => setBulkCategoryText(event.target.value)} placeholder="每行一个品类名称" /><button className="btn btn-secondary" disabled={bulkCategorySaving || !bulkCategoryText.trim()} onClick={() => void saveBulkCategories()}>{bulkCategorySaving ? '创建中…' : '逐行创建'}</button></div></details>
       </div>
-      <TableShell><TableHead><Th>产品</Th><Th>编码</Th><Th>产品线</Th><Th>负责人账号</Th><Th>专利数</Th><Th>状态</Th><Th>操作</Th></TableHead><tbody>{products.map(product => <tr key={product.id}><Td><strong>{product.name}</strong>{product.category && <div style={{ color: '#94a3b8', marginTop: 3 }}>{product.category}</div>}</Td><Td muted>{product.code || '-'}</Td><Td>{productLineNameById.get(product.product_line_id ?? 0) || '-'}</Td><Td>{accounts.find(account => account.id === product.owner_user_id)?.display_name || accounts.find(account => account.id === product.owner_user_id)?.username || personNameById.get(product.owner_id ?? 0) || '-'}</Td><Td>{product.patent_count ?? 0}</Td><Td>{product.is_active === false ? '已停用' : '启用'}</Td><Td><RowActions onEdit={() => { setEditingProductId(product.id); setProductForm({ name: product.name, code: product.code || '', product_line_id: product.product_line_id ? String(product.product_line_id) : '', owner_id: product.owner_id ? String(product.owner_id) : '', owner_user_id: product.owner_user_id ? String(product.owner_user_id) : '', category: product.category || '', description: product.description || '', is_active: product.is_active !== false }) }} onDelete={() => void remove(`产品“${product.name}”`, () => productApi.delete(product.id), () => setProducts(current => current.filter(item => item.id !== product.id)))} /></Td></tr>)}</tbody></TableShell>
-      {products.length === 0 && <EmptyState text="暂无产品" />}
+      {filteredProducts.length > 0 ? <div className="management-product-grid">{filteredProducts.map(product => {
+        const owner = accounts.find(account => account.id === product.owner_user_id)?.display_name || accounts.find(account => account.id === product.owner_user_id)?.username || personNameById.get(product.owner_id ?? 0)
+        return <article className="management-product-card" key={product.id}>
+          <div className="management-product-card-top"><div className="management-product-mark">{product.name.slice(0, 1).toUpperCase()}</div><div className="management-product-title"><strong>{product.name}</strong><span>{product.code || '未设置编码'}</span></div><span className={`management-status-dot ${product.is_active === false ? 'inactive' : ''}`}>{product.is_active === false ? '停用' : '启用'}</span></div>
+          <div className="management-product-tags"><span>{productLineNameById.get(product.product_line_id ?? 0) || '未关联产品线'}</span>{product.category && <span>{product.category}</span>}</div>
+          <p>{product.description || '暂无产品描述，编辑后可补充业务定位。'}</p>
+          <div className="management-product-stats"><div><strong>{product.patent_count ?? 0}</strong><span>关联专利</span></div><div><strong>{owner || '—'}</strong><span>负责人</span></div></div>
+          <div className="management-product-actions"><button className="btn btn-secondary" onClick={() => navigate(`/patents?product=${product.id}`)}>查看关联专利</button><RowActions onEdit={() => { setEditingProductId(product.id); setProductForm({ name: product.name, code: product.code || '', product_line_id: product.product_line_id ? String(product.product_line_id) : '', owner_id: product.owner_id ? String(product.owner_id) : '', owner_user_id: product.owner_user_id ? String(product.owner_user_id) : '', category: product.category || '', description: product.description || '', is_active: product.is_active !== false }); setShowProductForm(true) }} onDelete={() => void remove(`产品“${product.name}”`, () => productApi.delete(product.id), () => setProducts(current => current.filter(item => item.id !== product.id)))} /></div>
+        </article>
+      })}</div> : <EmptyState text={products.length ? '没有符合筛选条件的产品' : '暂无产品'} />}
     </>
   )
 
@@ -545,7 +574,7 @@ export default function ManagementPage() {
   return (
     <div className="management-page">
       <div className="management-tabs" role="tablist" aria-label="管理资源">
-        {tabs.map(item => <button key={item.key} className={`management-tab ${tab === item.key ? 'active' : ''}`} onClick={() => { setTab(item.key); setError('') }}>{item.label}</button>)}
+        {tabs.map(item => <button key={item.key} className={`management-tab ${tab === item.key ? 'active' : ''}`} onClick={() => { setTab(item.key); setError('') }}><span>{item.label}</span><small>{item.key === 'products' ? products.length : item.key === 'projects' ? projects.length : item.key === 'tags' ? tags.length : item.key === 'organization' ? people.length : productLines.length}</small></button>)}
       </div>
       {error && <div className="management-error">{error}</div>}
       {tab === 'products' && renderProducts()}

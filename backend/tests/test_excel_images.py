@@ -88,16 +88,9 @@ class ExcelEmbeddedImageTest(unittest.TestCase):
                 self.assertEqual(applied["created"], 1)
 
                 patent = self.db.query(Patent).filter(Patent.publication_number == "CN123456789A1").one()
-                attachment = self.db.query(Attachment).one()
-                self.assertEqual(attachment.patent_id, patent.id)
-                self.assertEqual(attachment.source_type, "excel_embedded")
-                self.assertEqual(attachment.import_batch_id, result["batch_id"])
-                self.assertEqual((attachment.source_sheet, attachment.source_cell), ("专利数据", "C2"))
-                self.assertEqual((attachment.source_row, attachment.source_column), (2, 2))
-                self.assertEqual((attachment.width, attachment.height), (32, 20))
-                self.assertTrue(AttachmentService.path(attachment).is_file())
-                self.assertEqual(len(patent.custom_fields["attachments"]), 1)
-                self.assertTrue(patent.custom_fields["attachments"][0]["preview_url"].endswith("/preview"))
+                self.assertEqual(self.db.query(Attachment).count(), 0)
+                self.assertFalse((patent.custom_fields or {}).get("attachments"))
+                self.assertEqual(applied["imported_image_count"], 0)
 
     def test_image_column_mapped_to_other_field_still_imports_image(self):
         content = self.workbook_bytes()
@@ -126,8 +119,8 @@ class ExcelEmbeddedImageTest(unittest.TestCase):
                 self.assertEqual(applied["created"], 1)
 
                 patent = self.db.query(Patent).filter(Patent.publication_number == "CN123456789A1").one()
-                self.assertEqual(self.db.query(Attachment).count(), 1)
-                self.assertEqual(len(patent.custom_fields["attachments"]), 1)
+                self.assertEqual(self.db.query(Attachment).count(), 0)
+                self.assertFalse((patent.custom_fields or {}).get("attachments"))
 
 
 if __name__ == "__main__":

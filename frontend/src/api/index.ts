@@ -231,6 +231,9 @@ export const attachmentApi = {
   list: (patentId: number, fieldKey?: string): Promise<AttachmentMeta[]> =>
     api.get(`/attachments/patent/${patentId}`, { params: { field_key: fieldKey } }),
   library: (): Promise<AttachmentMeta[]> => api.get('/attachments/library'),
+  trash: (): Promise<AttachmentMeta[]> => api.get('/attachments/trash'),
+  bulkDelete: (items: { attachment_type?: string; attachment_id: number }[]): Promise<{ deleted: number }> => api.post('/attachments/bulk-delete', items),
+  restore: (items: { attachment_type?: string; attachment_id: number }[]): Promise<{ restored: number }> => api.post('/attachments/trash/restore', items),
   listForProject: (projectId: number): Promise<AttachmentMeta[]> => api.get(`/attachments/projects/${projectId}`),
   uploadForProject: (projectId: number, data: FormData): Promise<AttachmentMeta> =>
     api.post(`/attachments/projects/${projectId}`, data, { headers: { 'Content-Type': 'multipart/form-data' } }),
@@ -313,6 +316,8 @@ export const semanticSearchApi = {
 }
 
 export const syncApi = {
+  resolvePublications: (data: { database_id: number; publications?: string[]; patent_ids?: number[] }): Promise<{ matched: { patent_id: number; publication_number?: string; application_number?: string; title: string; country?: string; ungranted: boolean }[]; unmatched: string[] }> => api.post('/sync/resolve-publications', data),
+  classifyPublications: (databaseId: number): Promise<{ updated: number }> => api.post(`/sync/databases/${databaseId}/classify-publications`),
   connectors: (): Promise<{ items: SyncConnector[]; archived_items?: SyncConnector[] }> => api.get('/sync/connectors'),
   createConnector: (data: {
     code: string
@@ -547,6 +552,7 @@ export const importApi = {
     databaseId?: number,
     viewId?: number,
     sheetName?: string,
+    importNote?: string,
   ): Promise<ImportResult> => {
     return api.post('/import/confirm', {
       import_id: importId,
@@ -558,6 +564,7 @@ export const importApi = {
       database_id: databaseId,
       view_id: viewId,
       sheet_name: sheetName,
+      import_note: importNote,
     }, {
       timeout: 600000,
     })

@@ -722,6 +722,7 @@ class ImportBatchResponse(BaseSchema):
     source_table_title: Optional[str] = None
     worksheet_name: Optional[str] = None
     source_system: Optional[str] = None
+    import_note: Optional[str] = None
     mapping_version: Optional[str] = None
     file_hash: Optional[str] = None
     artifact_path: Optional[str] = None

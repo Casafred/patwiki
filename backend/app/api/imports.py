@@ -113,6 +113,7 @@ class ConfirmImportRequest(BaseModel):
     database_id: Optional[int] = None
     source_table_title: Optional[str] = None
     source_system: Optional[str] = None
+    import_note: Optional[str] = None
     sheet_name: Optional[str] = None
     view_id: Optional[int] = None  # P0-14：导入到指定视图（为空则导入到库的主视图）
 
@@ -170,9 +171,7 @@ async def preview_import(
     embedded_image_columns = {
         image.source_field_name for image in embedded_images if image.source_field_name
     }
-    for column in embedded_image_columns:
-        if not suggested_mapping.get(column):
-            suggested_mapping[column] = "attachments"
+    # Excel drawings remain in the original workbook, not the attachment library.
 
     preview_rows_list = []
     for _, row in df.head(3).iterrows():
@@ -509,6 +508,7 @@ def _record_field_observations(
                 changed_by="import",
                 import_batch_id=batch.id,
                 source_table_title=batch.source_table_title,
+                source_import_note=batch.import_note,
                 source_row=source_row.source_row,
                 source_field_name="Excel 单元格超链接",
             ))
@@ -585,6 +585,7 @@ def _legacy_confirm_import(
             source_table_title=(req.source_table_title or Path(filename).stem),
             worksheet_name=req.sheet_name,
             source_system=req.source_system,
+            import_note=(req.import_note or "").strip() or None,
             mapping_version="v1",
             file_hash=file_hash,
             artifact_path=str(artifact_path),
@@ -888,6 +889,8 @@ def _legacy_confirm_import(
                                 patent.custom_fields = custom_fields
                                 db.add(patent)
                                 db.flush()
+                                from app.services.publication_governance_service import classify_patent
+                                classify_patent(db, patent)
                                 patent_data["custom_fields"] = custom_fields
                                 inserted += 1
                                 current_patent = patent
@@ -1127,6 +1130,7 @@ def confirm_import(
             view_id=req.view_id,
             source_table_title=req.source_table_title,
             source_system=req.source_system,
+            import_note=(req.import_note or "").strip() or None,
             artifact_path=artifact_path,
         )
         result["database_id"] = database_id
@@ -1220,7 +1224,8 @@ def _unmapped_observation_query(
     source_field: Optional[str] = None,
     patent_id: Optional[int] = None,
     source_row_id: Optional[int] = None,
-    status: Optional[str] = "unmapped_retained",
+    status: Optional[str] = "actionable",
+    database_id: Optional[int] = None,
 ):
     query = (
         db.query(FieldObservation, ImportSourceRow, ImportBatch)
@@ -1235,8 +1240,16 @@ def _unmapped_observation_query(
         query = query.filter(FieldObservation.patent_id == patent_id)
     if source_row_id is not None:
         query = query.filter(FieldObservation.source_row_id == source_row_id)
+    if database_id is not None:
+        query = query.filter(func.json_extract(ImportBatch.review_config, "$.database_id") == database_id)
     if status and status != "all":
-        query = query.filter(FieldObservation.field_resolution == status)
+        if status == "actionable":
+            query = query.filter(or_(
+                FieldObservation.field_resolution.in_(("unmapped_retained", "quarantined")),
+                ImportSourceRow.resolution_status.in_(("retained_source_row", "quarantined")),
+            ))
+        else:
+            query = query.filter(FieldObservation.field_resolution == status)
     return query
 
 
@@ -1249,6 +1262,8 @@ def _observation_to_dict(observation: FieldObservation, source_row: ImportSource
         "worksheet_name": batch.worksheet_name,
         "source_row_id": source_row.id,
         "source_row": source_row.source_row,
+        "source_row_status": source_row.resolution_status,
+        "source_row_reason": source_row.resolution_reason,
         "patent_id": observation.patent_id,
         "candidate_patent_ids": source_row.candidate_patent_ids or [],
         "source_field_name": observation.source_field_name,
@@ -1667,12 +1682,13 @@ def list_unmapped_observations(
     source_field: Optional[str] = None,
     patent_id: Optional[int] = None,
     source_row_id: Optional[int] = None,
-    status: Optional[str] = Query("unmapped_retained"),
+    status: Optional[str] = Query("actionable"),
+    database_id: Optional[int] = None,
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
-    query = _unmapped_observation_query(db, batch_id, source_field, patent_id, source_row_id, status)
+    query = _unmapped_observation_query(db, batch_id, source_field, patent_id, source_row_id, status, database_id)
     total = query.count()
     rows = query.order_by(FieldObservation.id.desc()).offset(offset).limit(limit).all()
     return {
@@ -1690,9 +1706,10 @@ def export_unmapped_observations(
     patent_id: Optional[int] = None,
     source_row_id: Optional[int] = None,
     status: Optional[str] = Query("all"),
+    database_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
-    rows = _unmapped_observation_query(db, batch_id, source_field, patent_id, source_row_id, status).order_by(FieldObservation.id.asc()).all()
+    rows = _unmapped_observation_query(db, batch_id, source_field, patent_id, source_row_id, status, database_id).order_by(FieldObservation.id.asc()).all()
     output = StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow([

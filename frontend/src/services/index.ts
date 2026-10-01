@@ -179,6 +179,7 @@ export const syncService = {
   connectors: () => syncApi.connectors(),
   testConnector: (id: number) => syncApi.testConnector(id),
   createSubscription: (...args: Parameters<typeof syncApi.createSubscription>) => syncApi.createSubscription(...args),
+  resolvePublications: (...args: Parameters<typeof syncApi.resolvePublications>) => syncApi.resolvePublications(...args),
   subscriptions: (databaseId?: number | null) => syncApi.subscriptions(databaseId),
   runSubscription: (...args: Parameters<typeof syncApi.runSubscription>) => syncApi.runSubscription(...args),
   runs: (subscriptionId?: number | null) => syncApi.runs(subscriptionId),

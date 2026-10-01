@@ -98,6 +98,7 @@ export interface PatentFieldSource {
   last_source_view_name?: string | null
   import_batch_id?: number | null
   source_table_title?: string | null
+  source_import_note?: string | null
   source_row?: number | null
   source_field_name?: string | null
 }
@@ -799,6 +800,7 @@ export interface ImportBatch {
   source_table_title?: string
   worksheet_name?: string
   source_system?: string
+  import_note?: string | null
   mapping_version?: string
   file_hash?: string
   artifact_path?: string
@@ -1060,6 +1062,8 @@ export interface GovernanceObservation {
   worksheet_name?: string | null
   source_row_id: number
   source_row: number
+  source_row_status?: string
+  source_row_reason?: string | null
   patent_id?: number | null
   source_field_name: string
   source_column_index?: number | null
@@ -1234,6 +1238,7 @@ export interface AttachmentMeta {
   width?: number | null
   height?: number | null
   is_image?: boolean
+  deleted_at?: string | null
 }
 
 export interface ProjectHistoryEntry {
@@ -1473,6 +1478,7 @@ export interface PatentHistory {
   changed_by?: string | null
   import_batch_id?: number | null
   source_table_title?: string | null
+  source_import_note?: string | null
   source_row?: number | null
   source_field_name?: string | null
   created_at?: string
