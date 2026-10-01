@@ -20,7 +20,7 @@ from app.models.collaboration_sync import (
 )
 from app.schemas.collaboration_sync import (
     AccountRequest, AccountRoleRequest, BootstrapRequest, ExportRequest, LibraryGrantRequest, PeerRequest,
-    ActiveRequest, AggregationBatchCreateRequest, AggregationBatchPublishRequest, AggregationBatchSubmitRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ResponsibilityRequest, UnitRequest,
+    ActiveRequest, AggregationBatchCreateRequest, AggregationBatchPublishRequest, AggregationBatchSubmitRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ProvisioningRequest, ResponsibilityRequest, UnitRequest,
 )
 from app.services.collaboration_identity_service import (
     PASSWORDS, audit, bootstrap, create_account, identity, login, logout, require_admin, roles,
@@ -168,6 +168,23 @@ def add_account(request: AccountRequest, user: User = Depends(current_user), db:
     created = create_account(db, request, user.id, request.role)
     db.commit()
     return identity(db, created)
+
+
+@router.post("/accounts/provision")
+def provision_accounts(request: ProvisioningRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    created = []
+    for item in request.accounts:
+        if db.query(User).filter(User.username == item.username).first():
+            raise HTTPException(409, f"用户名已存在：{item.username}")
+        account = create_account(db, item, user.id, item.role)
+        account.employee_no = item.employee_no
+        created.append({"username": account.username, "display_name": account.display_name,
+                        "employee_no": account.employee_no, "role": item.role})
+    audit(db, user.id, "accounts_provisioned", detail={"department_code": request.department_code,
+          "count": len(created)})
+    db.commit()
+    return {"department_code": request.department_code, "accounts": created}
 
 
 @router.get("/accounts")

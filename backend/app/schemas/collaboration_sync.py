@@ -28,6 +28,19 @@ class AccountRequest(LoginRequest):
     unit_id: int | None = None
 
 
+class ProvisioningAccount(RequestModel):
+    username: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_.@-]+$")
+    password: str = Field(min_length=10, max_length=200)
+    display_name: str = Field(min_length=1, max_length=100)
+    employee_no: str | None = Field(default=None, max_length=50)
+    role: Role = "member"
+
+
+class ProvisioningRequest(RequestModel):
+    department_code: str = Field(min_length=1, max_length=80)
+    accounts: list[ProvisioningAccount] = Field(min_length=1, max_length=500)
+
+
 class UnitRequest(RequestModel):
     name: str = Field(min_length=1, max_length=100)
     team_type: Team

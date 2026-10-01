@@ -19,7 +19,7 @@ from app.models import LegalStatus, Patent, PatentDatabase, PatentDatabaseMember
 from app.services.patent_identity_service import ensure_patent_identifiers
 from app.models.collaboration_sync import (
     CollaborationCredential, PermissionGrant, SyncConflict, SyncEntityFieldState,
-    SyncAggregationBatch, SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice,
+    SyncAggregationBatch, SyncChange, SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice,
 )
 from app.services.collaboration_identity_service import PASSWORDS, audit, roles, uid, workspace_dir
 from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, encode, file_hash
@@ -241,6 +241,15 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
             memberships_by_patent.setdefault(patent.id, set()).update(default_scope_ids)
     product_ids = {patent.product_id for patent in patents if patent.product_id}
     products = {item.id: item for item in db.query(Product).filter(Product.id.in_(product_ids)).all()} if product_ids else {}
+    history_by_patent: dict[int, list[dict]] = {}
+    if patent_ids:
+        for change in db.query(PatentHistory).filter(PatentHistory.patent_id.in_(patent_ids)).order_by(PatentHistory.id).all():
+            history_by_patent.setdefault(change.patent_id, []).append({
+                "change_uid": change.change_uid, "field_key": change.field_key,
+                "old_value": change.old_value, "new_value": change.new_value,
+                "changed_by": change.changed_by, "actor_uid": change.actor_uid,
+                "source": change.source, "created_at": _value(change.created_at),
+            })
     records = []
     for patent in patents:
         _assert_record_scope(patent, request, fields, privileged, memberships_by_patent.get(patent.id, set()),
@@ -267,7 +276,7 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
                         "updated_at": _value(patent.updated_at),
                         "scope": {"database_uids": sorted(scopes),
                                   "product": {"code": product.code, "name": product.name} if product else None},
-                        "payload": payload, "field_provenance": {}})
+                        "payload": payload, "field_provenance": {"changes": history_by_patent.get(patent.id, [])}})
     return records
 
 
@@ -735,6 +744,17 @@ def _save_uid_mapping(db: Session, package: SyncPackage, row: SyncPackageRecord,
                          package_id=package.id, match_basis="uid" if patent.entity_uid == row.entity_uid else "official_number"))
 
 
+def _save_remote_changes(db: Session, package: SyncPackage, row: SyncPackageRecord) -> None:
+    for change in (row.field_provenance or {}).get("changes", []):
+        change_uid = change.get("change_uid")
+        if not change_uid or db.query(SyncChange).filter_by(change_uid=change_uid).first():
+            continue
+        db.add(SyncChange(change_uid=change_uid, package_id=package.id, entity_uid=row.entity_uid,
+                          entity_type=row.entity_type, field_key=change.get("field_key"),
+                          base_value=change.get("old_value"), remote_value=change.get("new_value"),
+                          operation="upsert"))
+
+
 def _save_baseline(db: Session, origin_node_uid: str, row: SyncPackageRecord, field_key: str,
                    remote_value, record_version: int, package: SyncPackage | None = None) -> None:
     state = db.query(SyncEntityFieldState).filter_by(
@@ -907,6 +927,7 @@ def apply_package(db: Session, user_id: int, package_uid: str, request) -> dict:
                     unchanged += 1
                 _ensure_database_memberships(db, patent, database)
             _save_uid_mapping(db, package, row, patent)
+            _save_remote_changes(db, package, row)
             for field_key, remote_value in payload.items():
                 key = (row.entity_uid, field_key)
                 if key in by_conflict_key and key not in decisions:

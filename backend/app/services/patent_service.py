@@ -15,6 +15,7 @@ from app.models import (
     FieldObservation,
     ProjectRole, RiskLevel, RelationType, DocumentRole,
 )
+from app.models.collaboration_sync import SyncTombstone
 from app.schemas.schemas import PatentCreate, PatentUpdate
 from app.services.field_registry import (
     RELATION_FIELD_KEYS,
@@ -1204,6 +1205,9 @@ class PatentService:
         patent = db.query(Patent).filter(Patent.id == patent_id).first()
         if not patent:
             return False
+        if patent.entity_uid:
+            db.add(SyncTombstone(entity_uid=patent.entity_uid, entity_type="patent",
+                                 base_version=patent.record_version or 1))
         from app.services.semantic_index_service import SemanticIndexService
         from app.models.semantic_search import SemanticIndexOutbox
         # The outbox still has a non-null FK to patents.id in deployed SQLite
