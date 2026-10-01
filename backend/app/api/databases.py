@@ -12,6 +12,7 @@ from sqlalchemy import or_
 from app.database import get_db
 from app.services.database_service import DatabaseService
 from app.services.view_service import ViewService
+from app.services.patent_database_scope import membership_consistency, repair_membership_consistency
 from app.models import User, PatentDatabaseMembership
 from app.core.exceptions import BadRequestException, NotFoundException
 
@@ -192,6 +193,20 @@ def refresh_patent_count(
 ):
     count = DatabaseService.refresh_patent_count(db, database_id)
     return {"success": True, "patent_count": count}
+
+
+@router.get("/{database_id}/membership-consistency")
+def get_membership_consistency(database_id: int, db: Session = Depends(get_db)):
+    if not DatabaseService.get_database(db, database_id):
+        raise NotFoundException("数据库不存在")
+    return membership_consistency(db, database_id)
+
+
+@router.post("/{database_id}/repair-membership-consistency")
+def repair_database_memberships(database_id: int, db: Session = Depends(get_db)):
+    if not DatabaseService.get_database(db, database_id):
+        raise NotFoundException("数据库不存在")
+    return {"repaired": repair_membership_consistency(db, database_id)}
 
 
 @router.get("/{database_id}/master-view")

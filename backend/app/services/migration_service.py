@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-09-30.2"
+CURRENT_MIGRATION_VERSION = "2026-10-01.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -76,6 +76,12 @@ def _unique_index(table: str, name: str, column: str) -> SchemaOperation:
 # tables and model-defined indexes are handled by Base.metadata.create_all;
 # these entries cover columns/indexes that create_all cannot add to an old DB.
 SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
+    _column("collaboration_sync_entity_field_states", "accepted_package_uid", "ALTER TABLE collaboration_sync_entity_field_states ADD COLUMN accepted_package_uid VARCHAR(80)"),
+    _column("collaboration_sync_entity_field_states", "source_exported_at", "ALTER TABLE collaboration_sync_entity_field_states ADD COLUMN source_exported_at DATETIME"),
+    _column("patent_histories", "change_uid", "ALTER TABLE patent_histories ADD COLUMN change_uid VARCHAR(80)"),
+    _column("patent_histories", "actor_uid", "ALTER TABLE patent_histories ADD COLUMN actor_uid VARCHAR(100)"),
+    _unique_index("patent_histories", "ix_patent_histories_change_uid", "change_uid"),
+    _index("patent_histories", "ix_patent_histories_actor_uid", "actor_uid"),
     _column("collaboration_user_responsibilities", "unit_id", "ALTER TABLE collaboration_user_responsibilities ADD COLUMN unit_id INTEGER REFERENCES collaboration_organization_units(id) ON DELETE SET NULL"),
     _column("users", "user_uid", "ALTER TABLE users ADD COLUMN user_uid VARCHAR(80)"),
     _column("patents", "entity_uid", "ALTER TABLE patents ADD COLUMN entity_uid VARCHAR(100)"),
@@ -240,6 +246,10 @@ def _backfill_collaboration_uids(bind: Engine) -> None:
         connection.execute(text(
             "UPDATE patents SET origin_node_uid = :node_uid WHERE origin_node_uid IS NULL"
         ), {"node_uid": node_uid})
+        connection.execute(text(
+            "UPDATE patent_histories SET change_uid = 'chg_' || lower(hex(randomblob(16))) "
+            "WHERE change_uid IS NULL"
+        ))
 
 
 class MigrationError(RuntimeError):

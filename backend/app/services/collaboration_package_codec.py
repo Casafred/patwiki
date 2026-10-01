@@ -8,6 +8,7 @@ import json
 import secrets
 import zipfile
 import zlib
+import os
 from datetime import datetime
 from typing import Literal
 
@@ -18,8 +19,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-MAX_BYTES = 100 * 1024 * 1024
-MAX_RECORDS = 20000
+MAX_BYTES = int(os.getenv("PATWIKI_SYNC_MAX_BYTES", str(100 * 1024 * 1024)))
+MAX_RECORDS = int(os.getenv("PATWIKI_SYNC_MAX_RECORDS", "20000"))
 MAX_LINE_BYTES = 2 * 1024 * 1024
 PROFILE = "patent-snapshot-v1"
 UID_PATTERN = r"^[a-z]+_[a-f0-9]{32}$"

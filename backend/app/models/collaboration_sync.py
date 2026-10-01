@@ -239,6 +239,23 @@ class SyncEntityState(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class SyncUidMapping(Base):
+    """A remote UID alias established only after a confirmed merge."""
+
+    __tablename__ = "collaboration_sync_uid_mappings"
+    __table_args__ = (
+        UniqueConstraint("origin_node_uid", "remote_uid", name="uq_collab_remote_uid_origin"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    origin_node_uid = Column(String(80), nullable=False)
+    remote_uid = Column(String(100), nullable=False, index=True)
+    patent_id = Column(Integer, ForeignKey("patents.id", ondelete="CASCADE"), nullable=False, index=True)
+    package_id = Column(Integer, ForeignKey("collaboration_sync_packages.id", ondelete="SET NULL"), nullable=True)
+    match_basis = Column(String(30), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class SyncEntityFieldState(Base):
     """Last accepted remote value used as the three-way merge base."""
 
@@ -254,6 +271,8 @@ class SyncEntityFieldState(Base):
     field_key = Column(String(200), nullable=False)
     last_value = Column(JSON, nullable=True)
     last_version = Column(Integer, nullable=False, default=0)
+    accepted_package_uid = Column(String(80), nullable=True)
+    source_exported_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 

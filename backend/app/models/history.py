@@ -10,6 +10,7 @@ P0-13：新增 source_view_id / source_view_name，记录修改来源的小表�
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from uuid import uuid4
 
 from app.database import Base
 
@@ -18,6 +19,7 @@ class PatentHistory(Base):
     __tablename__ = "patent_histories"
 
     id = Column(Integer, primary_key=True, index=True)
+    change_uid = Column(String(80), unique=True, nullable=True, index=True, default=lambda: f"chg_{uuid4().hex}")
     patent_id = Column(Integer, ForeignKey("patents.id", ondelete="CASCADE"), nullable=False, index=True)
     # 修改的字段名（系统字段名或 custom_fields.xxx / ai_fields.xxx）
     field_key = Column(String(200), nullable=False, index=True)
@@ -29,6 +31,7 @@ class PatentHistory(Base):
     source = Column(String(50), default="manual")
     # 修改人（用户名，可空）
     changed_by = Column(String(100))
+    actor_uid = Column(String(100), nullable=True, index=True)
     # P0-13：来源小表视图（在哪个视图中改的，可空表示直接在大表上修改）
     source_view_id = Column(Integer, ForeignKey("patent_views.id", ondelete="SET NULL"), nullable=True, index=True)
     # Import provenance shown in the patent Wiki timeline.

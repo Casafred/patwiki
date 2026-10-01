@@ -18,6 +18,7 @@ from app.models import (
 )
 from app.services.database_service import DatabaseService
 from app.services.patent_service import PatentService
+from app.services.patent_database_scope import membership_consistency, repair_membership_consistency
 from app.models.semantic_search import SemanticIndexOutbox
 
 
@@ -197,6 +198,16 @@ class DatabaseServiceTest(unittest.TestCase):
         self.assertEqual(self.db.execute(text("SELECT COUNT(*) FROM legacy_database_child")).scalar(), 0)
         self.assertIsNone(self.db.query(PatentDatabase).filter_by(id=database_id).first())
 
+    def test_membership_consistency_repair_backfills_legacy_rows(self):
+        database = PatentDatabase(name="一致性测试库", code="MEMBERSHIP_CHECK")
+        patent = Patent(database=database, title="待修复")
+        self.db.add(patent)
+        self.db.commit()
+
+        report = membership_consistency(self.db, database.id)
+        self.assertEqual(report["missing_memberships"], 1)
+        self.assertEqual(repair_membership_consistency(self.db, database.id), 1)
+        self.assertEqual(membership_consistency(self.db, database.id)["missing_memberships"], 0)
 
 if __name__ == "__main__":
     unittest.main()

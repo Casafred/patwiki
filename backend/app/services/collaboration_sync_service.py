@@ -4,13 +4,13 @@ from __future__ import annotations
 import sqlite3
 import base64
 import hashlib
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -19,7 +19,7 @@ from app.models import LegalStatus, Patent, PatentDatabase, PatentDatabaseMember
 from app.services.patent_identity_service import ensure_patent_identifiers
 from app.models.collaboration_sync import (
     CollaborationCredential, PermissionGrant, SyncConflict, SyncEntityFieldState,
-    SyncPackage, SyncPackageMember, SyncPackageRecord, SyncWorkspace, TrustedSyncDevice,
+    SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice,
 )
 from app.services.collaboration_identity_service import PASSWORDS, audit, roles, uid, workspace_dir
 from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, encode, file_hash
@@ -209,8 +209,10 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
     query = _query(db, request)
     count = query.count()
     if count > MAX_RECORDS:
-        raise HTTPException(413, "单个同步包最多 20000 条记录，请缩小范围")
-    patents = query.all()
+        raise HTTPException(413, f"单个同步包最多 {MAX_RECORDS} 条记录，请缩小范围")
+    projection = {"id", "product_id", "database_id", "entity_uid", "origin_node_uid", "record_version", "updated_at"}
+    projection.update(fields)
+    patents = query.options(load_only(*(getattr(Patent, field) for field in projection))).all()
     database_uids = {item.id: item.database_uid for item in databases}
     privileged = bool(roles(db, user_id) & PRIVILEGED)
     grants_by_database: dict[str, list[PermissionGrant]] = {}
@@ -269,11 +271,60 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
     return records
 
 
+def _validate_export_scope(db: Session, user_id: int, request, fields: list[str], databases: list[PatentDatabase]) -> None:
+    """Check row-level grants using scalar columns, keeping preview cheap."""
+    if roles(db, user_id) & PRIVILEGED:
+        return
+    database_uids = {item.id: item.database_uid for item in databases}
+    now = utc_now_naive()
+    grants = db.query(PermissionGrant).filter(
+        PermissionGrant.subject_user_id == user_id, PermissionGrant.scope_type == "database",
+        PermissionGrant.revoked_at.is_(None),
+        or_(PermissionGrant.expires_at.is_(None), PermissionGrant.expires_at > now),
+    ).all()
+    grants_by_database: dict[str, list[PermissionGrant]] = {}
+    for grant in grants:
+        grants_by_database.setdefault(grant.scope_uid, []).append(grant)
+    rows = _query(db, request).with_entities(Patent.id, Patent.product_id, Patent.database_id).all()
+    patent_ids = [row[0] for row in rows]
+    memberships: dict[int, set[int]] = {}
+    if patent_ids:
+        for patent_id, database_id in db.query(PatentDatabaseMembership.patent_id, PatentDatabaseMembership.database_id).filter(
+            PatentDatabaseMembership.patent_id.in_(patent_ids),
+            PatentDatabaseMembership.database_id.in_(request.database_ids),
+        ).all():
+            memberships.setdefault(patent_id, set()).add(database_id)
+    default_scope_ids = {database.id for database in databases if database.is_default}
+    for patent_id, product_id, database_id in rows:
+        if product_id is None:
+            raise HTTPException(403, "未分类记录需要领导或管理员导出")
+        scope_ids = memberships.get(patent_id, set()) | default_scope_ids
+        if database_id in request.database_ids:
+            scope_ids.add(database_id)
+        allowed = False
+        for scope_id in scope_ids:
+            for grant in grants_by_database.get(database_uids.get(scope_id, ""), []):
+                product_scope = (grant.scope_json or {}).get("product_ids") or []
+                if "export" in (grant.actions or []) and set(fields).issubset(set(grant.field_scope or [])) and (
+                    not product_scope or product_id in product_scope
+                ):
+                    allowed = True
+                    break
+            if allowed:
+                break
+        if not allowed:
+            raise HTTPException(403, "所选范围包含未授权品类")
+
+
 def preview_export(db: Session, user_id: int, request) -> dict:
     try:
         fields, recipients, databases = _validate_request(db, user_id, request)
-        records = _records(db, user_id, request, fields, databases, "node_" + "0" * 32)
-        return {"count": len(records), "fields": fields, "recipients": recipients}
+        query = _query(db, request)
+        count = query.count()
+        if count > MAX_RECORDS:
+            raise HTTPException(413, f"单个同步包最多 {MAX_RECORDS} 条记录，请缩小范围")
+        _validate_export_scope(db, user_id, request, fields, databases)
+        return {"count": count, "fields": fields, "recipients": recipients, "estimated_bytes": None}
     except HTTPException as exc:
         _audit_denial(db, user_id, "package_export_denied", {"database_ids": request.database_ids,
                        "status_code": exc.status_code, "reason": str(exc.detail)})
@@ -361,12 +412,15 @@ def inspect_package(db: Session, user_id: int, raw: bytes, password: str) -> dic
 def import_package(db: Session, user_id: int, raw: bytes, password: str) -> dict:
     manifest, permissions, records = _validated_import(db, user_id, raw, password)
     package_uid = manifest["package_id"]
-    if db.query(SyncPackage).filter(SyncPackage.package_uid == package_uid).first():
-        _audit_denial(db, user_id, "package_import_denied", {"package_uid": package_uid, "reason": "duplicate package UID"})
-        raise HTTPException(409, "同步包已经导入或由本机导出")
-    if db.query(SyncPackage).filter(SyncPackage.file_hash == file_hash(raw), SyncPackage.direction == "inbox").first():
-        _audit_denial(db, user_id, "package_import_denied", {"file_hash": file_hash(raw), "reason": "duplicate package hash"})
-        raise HTTPException(409, "该同步文件已经导入")
+    existing = db.query(SyncPackage).filter(
+        or_(SyncPackage.package_uid == package_uid,
+            (SyncPackage.file_hash == file_hash(raw)) & (SyncPackage.direction == "inbox"))
+    ).first()
+    if existing:
+        audit(db, user_id, "package_import_skipped", package_id=existing.id,
+              detail={"package_uid": package_uid, "reason": "already_processed"})
+        db.commit()
+        return {"package_uid": package_uid, "count": len(records), "status": "already_processed"}
     path = workspace_dir() / "inbox" / f"{package_uid}.pwshare"
     with path.open("xb") as stream:
         stream.write(raw)
@@ -398,7 +452,7 @@ _DATE_FIELDS = {"filing_date", "publication_date", "grant_date", "priority_date"
 _ENUM_FIELDS = {"patent_type": PatentType, "legal_status": LegalStatus, "risk_level": RiskLevel}
 
 
-def _batch_local_patents(db: Session, records: list[SyncPackageRecord]) -> dict[int, Patent | None]:
+def _batch_local_patents(db: Session, records: list[SyncPackageRecord], origin_node_uid: str | None = None) -> dict[int, Patent | None]:
     """Resolve rows by stable UID, then batch-match existing official numbers."""
     entity_uids = list(dict.fromkeys(row.entity_uid for row in records))
     by_entity: dict[str, Patent] = {}
@@ -407,6 +461,16 @@ def _batch_local_patents(db: Session, records: list[SyncPackageRecord]) -> dict[
             Patent.entity_uid.in_(entity_uids[offset:offset + 500]),
         ).all()
         by_entity.update({row.entity_uid: row for row in rows})
+        if origin_node_uid:
+            aliases = db.query(SyncUidMapping, Patent).join(Patent, Patent.id == SyncUidMapping.patent_id).filter(
+                SyncUidMapping.origin_node_uid == origin_node_uid,
+                SyncUidMapping.remote_uid.in_(entity_uids[offset:offset + 500]),
+            ).all()
+            for alias, patent in aliases:
+                direct = by_entity.get(alias.remote_uid)
+                if direct is not None and direct.id != patent.id:
+                    raise HTTPException(409, "同步 UID 映射与本机实体冲突，请先人工处理身份冲突")
+                by_entity[alias.remote_uid] = patent
 
     result: dict[int, Patent | None] = {}
     for row in records:
@@ -563,7 +627,7 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
     products = db.query(Product).filter(Product.is_active.is_(True)).all()
     products_by_code = {product.code: product for product in products if product.code}
     products_by_name = {product.name: product for product in products}
-    local_patents = _batch_local_patents(db, records)
+    local_patents = _batch_local_patents(db, records, origin_node_uid)
     entity_uids = list(dict.fromkeys(row.entity_uid for row in records))
     baselines: dict[tuple[str, str], SyncEntityFieldState] = {}
     for offset in range(0, len(entity_uids), 500):
@@ -592,8 +656,9 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
             continue
         for field_key, remote_value in payload.items():
             baseline = baselines.get((row.entity_uid, field_key))
-            if baseline and row.record_version < baseline.last_version:
-                raise HTTPException(409, "收到旧版本快照，请导入来源设备更新的同步包")
+            exported_at = _source_exported_at(package)
+            if baseline and baseline.source_exported_at and exported_at and exported_at < baseline.source_exported_at:
+                raise HTTPException(409, "收到早于已接受基线的同步包，请使用来源设备新导出的文件")
             base_value = baseline.last_value if baseline else _NO_BASELINE
             local_value = _local_value(patent, field_key)
             if local_value == remote_value:
@@ -646,8 +711,32 @@ def _coerce_remote_value(field_key: str, value):
     return value
 
 
+def _source_exported_at(package: SyncPackage) -> datetime | None:
+    value = (package.manifest_json or {}).get("created_at")
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(400, "同步包导出时间格式无效")
+
+
+def _save_uid_mapping(db: Session, package: SyncPackage, row: SyncPackageRecord, patent: Patent) -> None:
+    origin = package.manifest_json["origin_node_uid"]
+    mapping = db.query(SyncUidMapping).filter_by(origin_node_uid=origin, remote_uid=row.entity_uid).first()
+    if mapping is not None:
+        if mapping.patent_id != patent.id:
+            raise HTTPException(409, "同步 UID 已关联其他专利，请先人工处理身份冲突")
+        return
+    db.add(SyncUidMapping(origin_node_uid=origin, remote_uid=row.entity_uid, patent_id=patent.id,
+                         package_id=package.id, match_basis="uid" if patent.entity_uid == row.entity_uid else "official_number"))
+
+
 def _save_baseline(db: Session, origin_node_uid: str, row: SyncPackageRecord, field_key: str,
-                   remote_value, record_version: int) -> None:
+                   remote_value, record_version: int, package: SyncPackage | None = None) -> None:
     state = db.query(SyncEntityFieldState).filter_by(
         origin_node_uid=origin_node_uid, entity_uid=row.entity_uid, field_key=field_key,
     ).first()
@@ -657,6 +746,9 @@ def _save_baseline(db: Session, origin_node_uid: str, row: SyncPackageRecord, fi
         db.add(state)
     state.last_value = remote_value
     state.last_version = record_version
+    if package is not None:
+        state.accepted_package_uid = package.package_uid
+        state.source_exported_at = _source_exported_at(package)
 
 
 def _create_apply_backup(db: Session, package_uid: str) -> Path | None:
@@ -814,11 +906,12 @@ def apply_package(db: Session, user_id: int, package_uid: str, request) -> dict:
                 elif not plan["conflicts"]:
                     unchanged += 1
                 _ensure_database_memberships(db, patent, database)
+            _save_uid_mapping(db, package, row, patent)
             for field_key, remote_value in payload.items():
                 key = (row.entity_uid, field_key)
                 if key in by_conflict_key and key not in decisions:
                     continue
-                _save_baseline(db, origin_node_uid, row, field_key, remote_value, row.record_version)
+                _save_baseline(db, origin_node_uid, row, field_key, remote_value, row.record_version, package)
         package.status = "partially_applied" if pending else "applied"
         package.applied_at = utc_now_naive()
         manifest = dict(package.manifest_json or {})

@@ -332,7 +332,7 @@ export default function CollaborationSyncPanel() {
     setBusy(true)
     try {
       const result = await collaborationSyncApi.importPackage(importFile, importPassword)
-      setMessage(`已导入 ${result.count} 条只读共享记录`); setPreview(null); setImportFile(null); setImportPassword('')
+      setMessage(result.status === 'already_processed' ? `该同步包已处理过，跳过重复导入（${result.count} 条记录）` : `已导入 ${result.count} 条只读共享记录`); setPreview(null); setImportFile(null); setImportPassword('')
       await loadPackages()
     } catch (error: unknown) { setMessage(getErrorMessage(error, '导入失败')) }
     finally { setBusy(false) }
