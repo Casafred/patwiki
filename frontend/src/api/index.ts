@@ -900,6 +900,12 @@ export const collaborationSyncApi = {
   previewExport: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number }): Promise<{ count: number; fields: string[]; estimated_bytes?: number | null }> => api.post('/collaboration-sync/packages/preview-export', data),
   exportPackage: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number }): Promise<{ package_uid: string; path: string; count: number; file_hash: string }> => api.post('/collaboration-sync/packages/export', data),
   createAggregationBatch: (data: { name: string; target_database_id: number; package_uids?: string[] }): Promise<Record<string, unknown>> => api.post('/collaboration-sync/aggregation-batches', data),
+  provisionTemplate: (): Promise<Blob> => api.get('/collaboration-sync/accounts/provision/template', { responseType: 'blob' }),
+  provisionFile: (file: File): Promise<Record<string, unknown>> => {
+    const data = new FormData()
+    data.append('file', file)
+    return api.post('/collaboration-sync/accounts/provision/file', data)
+  },
   previewAggregationBatch: (batchUid: string): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/preview`, {}),
   submitAggregationBatch: (batchUid: string, data: { edit_password?: string; decisions?: Array<{ entity_uid: string; field_key: string; choice: 'local' | 'remote' }> }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/submit`, data),
   publishAggregationBatch: (batchUid: string, data: { recipient_names: string[]; password: string; fields?: string[]; expires_days?: number }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/publish`, data),

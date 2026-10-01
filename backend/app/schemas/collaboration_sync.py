@@ -34,6 +34,7 @@ class ProvisioningAccount(RequestModel):
     display_name: str = Field(min_length=1, max_length=100)
     employee_no: str | None = Field(default=None, max_length=50)
     role: Role = "member"
+    unit_id: int | None = None
 
 
 class ProvisioningRequest(RequestModel):

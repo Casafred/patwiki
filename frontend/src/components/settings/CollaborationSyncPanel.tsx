@@ -399,6 +399,10 @@ export default function CollaborationSyncPanel() {
       {isAdmin && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 18 }}>
         <div style={{ borderTop: '2px solid #0f766e', paddingTop: 10 }}>
           <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>协同账号</h4>
+          <div style={{ display: 'grid', gap: 7, marginBottom: 10 }}>
+            <button style={buttonStyle} onClick={() => void collaborationSyncApi.provisionTemplate().then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'patwiki-account-provision-template.json'; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载批量账号模板</button>
+            <input aria-label="导入批量账号配置" type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (!file) return; setBusy(true); void collaborationSyncApi.provisionFile(file).then(() => { setMessage('批量账号已创建'); return loadAdminData() }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)); event.target.value = '' }} />
+          </div>
           <div style={{ display: 'grid', gap: 7 }}>
             <input style={inputStyle} value={loginName} onChange={event => setLoginName(event.target.value)} placeholder="登录账号" />
             <input style={inputStyle} value={displayName} onChange={event => setDisplayName(event.target.value)} placeholder="显示名称" />

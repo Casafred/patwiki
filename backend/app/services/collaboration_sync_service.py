@@ -22,7 +22,7 @@ from app.models.collaboration_sync import (
     SyncAggregationBatch, SyncChange, SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice, SyncTombstone, SyncFieldOverlay,
 )
 from app.services.collaboration_identity_service import PASSWORDS, audit, roles, uid, workspace_dir
-from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, encode, file_hash
+from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, encode_to, file_hash
 from app.services.patent_identity_service import (
     find_patents_by_identifier_specs_bulk,
     identifier_specs_from_values,
@@ -373,12 +373,21 @@ def export_package(db: Session, user_id: int, request) -> dict:
                 "signature_status": "signed", "signer_fingerprint": signing_identity["fingerprint"]}
     permissions = {"access": "viewer", "recipients": recipients, "fields": fields,
                    "can_edit": False, "can_redistribute": False}
-    raw = encode(manifest, permissions, records, request.password, signing_identity["private_key"])
     path = workspace_dir() / "outbox" / f"{package_uid}.pwshare"
-    with path.open("xb") as stream:
-        stream.write(raw)
+    try:
+        with path.open("xb") as stream:
+            encode_to(stream, manifest, permissions, iter(records), request.password, signing_identity["private_key"])
+        if path.stat().st_size > MAX_BYTES:
+            raise HTTPException(413, "同步包过大，请缩小范围")
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(256 * 1024), b""):
+                digest.update(chunk)
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
     package = SyncPackage(package_uid=package_uid, package_type=manifest["package_type"], direction="outbox",
-                          path=str(path), file_hash=file_hash(raw), created_by=user_id,
+                          path=str(path), file_hash=digest.hexdigest(), created_by=user_id,
                           status="created", access="viewer", manifest_json=manifest,
                           signature_status="signed",
                           expires_at=now + timedelta(days=request.expires_days))

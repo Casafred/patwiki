@@ -1,4 +1,5 @@
 import unittest
+import io
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -11,9 +12,43 @@ from app.database import Base
 import app.models
 from app.models import Patent, PatentDatabase, PatentHistory, SyncAggregationBatch, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
 from app.services import collaboration_sync_service as sync
+from app.services.collaboration_package_codec import encrypt_v3_stream, decrypt_v3_stream, encode, decode, V3_CHUNK_BYTES
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
+import hashlib
 
 
 class CollaborationSyncTest(unittest.TestCase):
+    def test_v3_chunk_roundtrip_and_tampering(self):
+        from cryptography.exceptions import InvalidTag
+        content = b'x' * (V3_CHUNK_BYTES + 123)
+        encrypted = io.BytesIO()
+        encrypt_v3_stream(io.BytesIO(content), encrypted, 'test-password-123')
+        restored = io.BytesIO()
+        decrypt_v3_stream(io.BytesIO(encrypted.getvalue()), restored, 'test-password-123')
+        self.assertEqual(restored.getvalue(), content)
+        damaged = bytearray(encrypted.getvalue())
+        damaged[-1] ^= 1
+        with self.assertRaises(InvalidTag):
+            decrypt_v3_stream(io.BytesIO(damaged), io.BytesIO(), 'test-password-123')
+
+    def test_signed_v3_package_roundtrip(self):
+        private = Ed25519PrivateKey.generate()
+        private_bytes = private.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+        public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        fingerprint = hashlib.sha256(public).hexdigest()
+        manifest = {"package_id": "pkg_" + "a" * 32, "profile": "patent-snapshot-v1", "package_type": "snapshot",
+                    "created_at": "2026-10-01T00:00:00", "expires_at": "2026-11-01T00:00:00", "created_by": {},
+                    "origin_node_uid": "node_" + "b" * 32, "fields": ["title"], "count": 1, "databases": [],
+                    "signature_status": "signed", "signer_fingerprint": fingerprint}
+        permissions = {"access": "viewer", "recipients": ["alice"], "fields": ["title"], "can_edit": False, "can_redistribute": False}
+        record = {"entity_type": "patent", "entity_uid": "pat_" + "c" * 32, "record_version": 1,
+                  "origin_node_uid": manifest["origin_node_uid"], "scope": {}, "payload": {"title": "Device"}}
+        raw = encode(manifest, permissions, [record], "test-password-123", private_bytes)
+        decoded_manifest, _, decoded_records = decode(raw, "test-password-123", {fingerprint: public})
+        self.assertEqual(decoded_manifest["signature_status"], "trusted")
+        self.assertEqual(decoded_records[0]["payload"], {"title": "Device"})
+
     def setUp(self):
         self.engine = create_engine("sqlite://")
         Base.metadata.create_all(self.engine)

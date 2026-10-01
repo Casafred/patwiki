@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import base64
+import json
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from argon2.exceptions import VerificationError
 from app.core.time import utc_now_naive
 from sqlalchemy.orm import Session
@@ -20,7 +21,7 @@ from app.models.collaboration_sync import (
 )
 from app.schemas.collaboration_sync import (
     AccountRequest, AccountRoleRequest, BootstrapRequest, ExportRequest, LibraryGrantRequest, PeerRequest,
-    ActiveRequest, AggregationBatchCreateRequest, AggregationBatchPublishRequest, AggregationBatchSubmitRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ProvisioningRequest, ResponsibilityRequest, UnitRequest,
+    ActiveRequest, AggregationBatchCreateRequest, AggregationPublishRequest, AggregationBatchSubmitRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ProvisioningRequest, ResponsibilityRequest, UnitRequest,
 )
 from app.services.collaboration_identity_service import (
     PASSWORDS, audit, bootstrap, create_account, identity, login, logout, require_admin, roles,
@@ -173,18 +174,50 @@ def add_account(request: AccountRequest, user: User = Depends(current_user), db:
 @router.post("/accounts/provision")
 def provision_accounts(request: ProvisioningRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_admin(db, user.id)
+    usernames = [item.username.lower() for item in request.accounts]
+    if len(set(usernames)) != len(usernames):
+        raise HTTPException(400, "配置文件中的账号重复")
     created = []
-    for item in request.accounts:
-        if db.query(User).filter(User.username == item.username).first():
-            raise HTTPException(409, f"用户名已存在：{item.username}")
-        account = create_account(db, item, user.id, item.role)
-        account.employee_no = item.employee_no
-        created.append({"username": account.username, "display_name": account.display_name,
-                        "employee_no": account.employee_no, "role": item.role})
-    audit(db, user.id, "accounts_provisioned", detail={"department_code": request.department_code,
-          "count": len(created)})
-    db.commit()
+    try:
+        for item in request.accounts:
+            account = create_account(db, item, user.id, item.role)
+            account.employee_no = item.employee_no
+            created.append({"username": account.username, "display_name": account.display_name,
+                            "employee_no": account.employee_no, "role": item.role})
+        audit(db, user.id, "accounts_provisioned", detail={"department_code": request.department_code,
+              "count": len(created)})
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {"department_code": request.department_code, "accounts": created}
+
+
+@router.get("/accounts/provision/template")
+def provision_template(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    payload = {"department_code": "DEPARTMENT_CODE", "accounts": [{
+        "username": "employee.login", "display_name": "员工姓名", "employee_no": "EMP001",
+        "role": "member", "password": "",
+    }]}
+    return JSONResponse(content=payload, headers={"Content-Disposition": "attachment; filename=patwiki-account-provision-template.json"})
+
+
+@router.post("/accounts/provision/file")
+async def provision_file(file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    if not (file.filename or "").lower().endswith(".json"):
+        raise HTTPException(400, "账号配置文件必须是 JSON")
+    raw = await file.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise HTTPException(413, "账号配置文件过大")
+    try:
+        request = ProvisioningRequest.model_validate(json.loads(raw.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(400, "账号配置文件格式无效，且必须为 UTF-8 JSON") from exc
+    # Passwords are accepted only for this transaction and are never returned
+    # in the response or persisted outside the credential hash.
+    return provision_accounts(request, user, db)
 
 
 @router.get("/accounts")
