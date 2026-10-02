@@ -43,6 +43,13 @@ EXPORT_FIELDS = frozenset({
 PRIVILEGED = {"system_admin", "department_leader"}
 
 
+def _owned_export_databases(db: Session, user_id: int) -> set[int]:
+    owned = {row[0] for row in db.query(PatentDatabase.id).filter(PatentDatabase.owner_id == user_id).all()}
+    owned.update(row[0] for row in db.query(DatabaseMembership.database_id).filter(
+        DatabaseMembership.user_id == user_id, DatabaseMembership.role.in_(["owner", "editor"])).all())
+    return owned
+
+
 def _value(value):
     if hasattr(value, "value"):
         return value.value
@@ -158,6 +165,7 @@ def _validate_request(db: Session, user_id: int, request):
         raise HTTPException(404, "所选数据库不存在或已归档")
     privileged = bool(roles(db, user_id) & PRIVILEGED)
     if not privileged:
+        owned_database_ids = _owned_export_databases(db, user_id)
         now = utc_now_naive()
         grants = db.query(PermissionGrant).filter(
             PermissionGrant.subject_user_id == user_id,
@@ -166,6 +174,8 @@ def _validate_request(db: Session, user_id: int, request):
             or_(PermissionGrant.expires_at.is_(None), PermissionGrant.expires_at > now),
         ).all()
         for database in databases:
+            if database.id in owned_database_ids:
+                continue
             matching = [grant for grant in grants if grant.scope_uid == database.database_uid and
                         "export" in (grant.actions or []) and set(fields).issubset(set(grant.field_scope or [])) and
                         (not request.product_ids or not (grant.scope_json or {}).get("product_ids") or
@@ -216,6 +226,7 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
     patents = query.options(load_only(*(getattr(Patent, field) for field in projection))).all()
     database_uids = {item.id: item.database_uid for item in databases}
     privileged = bool(roles(db, user_id) & PRIVILEGED)
+    owned_database_ids = _owned_export_databases(db, user_id) & set(request.database_ids)
     grants_by_database: dict[str, list[PermissionGrant]] = {}
     if not privileged:
         now = utc_now_naive()
@@ -253,7 +264,8 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
             })
     records = []
     for patent in patents:
-        _assert_record_scope(patent, request, fields, privileged, memberships_by_patent.get(patent.id, set()),
+        row_memberships = memberships_by_patent.get(patent.id, set()) | {patent.database_id}
+        _assert_record_scope(patent, request, fields, privileged or bool(owned_database_ids & row_memberships), memberships_by_patent.get(patent.id, set()),
                              grants_by_database, database_uids)
         if not patent.entity_uid:
             patent.entity_uid = uid("pat")
@@ -297,6 +309,7 @@ def _validate_export_scope(db: Session, user_id: int, request, fields: list[str]
     """Check row-level grants using scalar columns, keeping preview cheap."""
     if roles(db, user_id) & PRIVILEGED:
         return
+    owned_database_ids = _owned_export_databases(db, user_id) & set(request.database_ids)
     database_uids = {item.id: item.database_uid for item in databases}
     now = utc_now_naive()
     grants = db.query(PermissionGrant).filter(
@@ -318,6 +331,8 @@ def _validate_export_scope(db: Session, user_id: int, request, fields: list[str]
             memberships.setdefault(patent_id, set()).add(database_id)
     default_scope_ids = {database.id for database in databases if database.is_default}
     for patent_id, product_id, database_id in rows:
+        if owned_database_ids & (memberships.get(patent_id, set()) | default_scope_ids | {database_id}):
+            continue
         if product_id is None:
             raise HTTPException(403, "未分类记录需要领导或管理员导出")
         scope_ids = memberships.get(patent_id, set()) | default_scope_ids

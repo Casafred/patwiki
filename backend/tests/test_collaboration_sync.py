@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Base
 import app.models
-from app.models import User, Patent, PatentDatabase, PatentHistory, SyncAggregationBatch, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
+from app.models import DatabaseMembership, User, Patent, PatentDatabase, PatentHistory, SyncAggregationBatch, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
 from app.services import collaboration_sync_service as sync
 from app.services.collaboration_package_codec import encrypt_v3_stream, decrypt_v3_stream, encode, decode, decode_stream, V3_CHUNK_BYTES
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -108,6 +108,25 @@ class CollaborationSyncTest(unittest.TestCase):
         self.assertEqual(conflicts, [])
         with patch.object(sync, "roles", return_value={"member"}), self.assertRaises(HTTPException):
             sync._merge_plan(self.db, 1, self.package, self.database, [self.row], None)
+
+    def test_member_database_permission_controls_export_without_legacy_grant(self):
+        user = User(username="exporter", role="member")
+        self.db.add(user)
+        self.db.flush()
+        membership = DatabaseMembership(user_id=user.id, database_id=self.database.id, role="editor")
+        self.db.add(membership)
+        self.db.commit()
+        request = SimpleNamespace(database_ids=[self.database.id], patent_ids=None, product_ids=None,
+            fields=["title"], include_attachments=False, recipient_names=["alice"])
+        self.assertIn(self.database.id, sync._owned_export_databases(self.db, user.id))
+        with patch.object(sync, "roles", return_value={"member"}):
+            sync._validate_export_scope(self.db, user.id, request, ["title"], [self.database])
+            records = sync._records(self.db, user.id, request, ["title"], [self.database], "node_local")
+        self.assertEqual(len(records), 1)
+        membership.role = "viewer"
+        self.db.commit()
+        with patch.object(sync, "roles", return_value={"member"}), self.assertRaises(HTTPException):
+            sync._validate_export_scope(self.db, user.id, request, ["title"], [self.database])
 
     def test_confirmed_uid_alias_resolves_later_package_without_numbers(self):
         resolved = sync._batch_local_patents(self.db, [self.row], "node_remote")
