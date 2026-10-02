@@ -3,7 +3,7 @@
 库是专利数据的顶层品类归属，例如"电钻专利数据库"、"传感器专利数据库"。
 导入时强制选择库，去重范围限定在库内。
 """
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from uuid import uuid4
@@ -23,6 +23,7 @@ class PatentDatabase(Base):
     icon = Column(String(50))
     is_default = Column(Boolean, default=False)
     kind = Column(String(30), nullable=False, default="personal", index=True)
+    sync_provenance = Column(JSON, nullable=False, default=dict)
     is_archived = Column(Boolean, default=False)
     patent_count = Column(Integer, default=0)
     sort_order = Column(Integer, default=0)

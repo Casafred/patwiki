@@ -86,6 +86,7 @@ export default function CollaborationSyncPanel() {
   const [preview, setPreview] = useState<{ count: number; sample: unknown[]; manifest: Record<string, unknown> } | null>(null)
   const [selectedPackage, setSelectedPackage] = useState('')
   const [selectedRecords, setSelectedRecords] = useState<unknown[]>([])
+  const [sharedSources, setSharedSources] = useState<Array<{ database_uid: string; name: string }>>([])
   const [applyPackageUid, setApplyPackageUid] = useState('')
   const [applyDatabaseId, setApplyDatabaseId] = useState('')
   const [applyEditPassword, setApplyEditPassword] = useState('')
@@ -478,6 +479,11 @@ export default function CollaborationSyncPanel() {
 
       {isAdmin && <SyncAggregationPanel databases={databases} packages={packages} />}
       <div style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 12 }}>
+        <h4 style={{ fontSize: 13 }}>导入来源共享库</h4>
+        <select aria-label="选择共享同步包" style={inputStyle} value={selectedPackage} onChange={event => { const value = event.target.value; setSelectedPackage(value); setSharedSources([]); if (value) void collaborationSyncApi.packageSources(value).then(result => setSharedSources(result.items)).catch(error => setMessage(getErrorMessage(error))) }}>
+          <option value="">选择已导入的成员文件</option>{packages.filter(item => item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status)).map(item => <option key={item.package_uid} value={item.package_uid}>{item.package_uid}</option>)}
+        </select>
+        {sharedSources.map(source => <div key={source.database_uid} style={{ display: 'flex', gap: 8, padding: '8px 0', flexWrap: 'wrap' }}><span>{source.name}</span><button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.applySharedLibrary(selectedPackage, source.database_uid).then(async result => { setMessage(`共享库导入完成：${String(result.status)}`); await Promise.all([loadPackages(), loadReferenceData()]) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>建立或更新共享库</button></div>)}
         <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>同步包收发记录</h4>
         {packages.length === 0 ? <div style={{ fontSize: 12, color: '#64748b' }}>暂无同步包</div> : packages.map((item: CollaborationPackage) => <div key={item.package_uid} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', alignItems: 'center', gap: 8, borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><span style={{ overflowWrap: 'anywhere' }}>{item.direction === 'inbox' ? '收到' : '发出'} · {item.package_uid} · {item.count} 条 · {item.status} · {item.signature_status === 'trusted' || item.signature_status === 'signed' ? '签名' : item.signature_status === 'signed_untrusted' ? '待信任' : '未签名'}</span>{item.direction === 'outbox' && <button style={buttonStyle} onClick={() => void collaborationSyncApi.download(item.package_uid).then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${item.package_uid}.pwshare`; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载</button>}{item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status) && <button style={buttonStyle} disabled={busy || !databases.length} onClick={() => void handlePreviewApply(item.package_uid)}>预览主表应用</button>}<button style={buttonStyle} onClick={() => void handleShowRecords(item.package_uid)}>查看只读记录</button></div>)}
         {applyPackageUid && <div style={{ display: 'grid', gap: 8, marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>

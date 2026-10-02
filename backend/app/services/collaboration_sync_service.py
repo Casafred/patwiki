@@ -692,7 +692,7 @@ def _has_matching_apply_grant(grants: list[PermissionGrant], product: Product | 
     return False
 
 
-def _apply_context(db: Session, user_id: int, package_uid: str, database_id: int):
+def _apply_context(db: Session, user_id: int, package_uid: str, database_id: int, source_database_uid=None):
     package = _visible_package(db, user_id, package_uid)
     if package.direction != "inbox" or package.status not in {"imported", "partially_applied"}:
         raise HTTPException(409, "只有已导入且未完成应用的收件包可以写入主表")
@@ -702,11 +702,16 @@ def _apply_context(db: Session, user_id: int, package_uid: str, database_id: int
     if not database or database.is_archived:
         raise HTTPException(404, "目标数据库不存在或已归档")
     selected_target_uid = (package.manifest_json or {}).get("applied_target_database_uid")
-    if selected_target_uid and selected_target_uid != database.database_uid:
+    if selected_target_uid and selected_target_uid != database.database_uid and not source_database_uid:
         raise HTTPException(409, "部分应用的同步包必须继续应用到首次选择的本机数据库")
     records = db.query(SyncPackageRecord).filter(SyncPackageRecord.package_id == package.id).order_by(
         SyncPackageRecord.id
     ).all()
+    if source_database_uid:
+        source_uids = {item.get("database_uid") for item in (package.manifest_json or {}).get("databases", [])}
+        if source_database_uid not in source_uids:
+            raise HTTPException(400, "同步包不包含所选来源库")
+        records = [row for row in records if source_database_uid in (row.scope_json or {}).get("database_uids", [])]
     return package, database, records
 
 
@@ -789,7 +794,7 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
 
 def preview_apply(db: Session, user_id: int, package_uid: str, request) -> dict:
     try:
-        package, database, records = _apply_context(db, user_id, package_uid, request.database_id)
+        package, database, records = _apply_context(db, user_id, package_uid, request.database_id, getattr(request, "source_database_uid", None))
         plans, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
         return {"package_uid": package_uid, "database_id": database.id,
                 "create_count": sum(1 for plan in plans if plan["patent"] is None),
@@ -934,7 +939,8 @@ def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: Us
 
 def apply_package(db: Session, user_id: int, package_uid: str, request, *, commit: bool = True) -> dict:
     try:
-        package, database, records = _apply_context(db, user_id, package_uid, request.database_id)
+        source_database_uid = getattr(request, "source_database_uid", None)
+        package, database, records = _apply_context(db, user_id, package_uid, request.database_id, source_database_uid)
         plans, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
         decisions = {(item.entity_uid, item.field_key): item.choice for item in request.decisions}
         if len(decisions) != len(request.decisions):
@@ -1069,7 +1075,15 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
         package.status = "partially_applied" if pending else "applied"
         package.applied_at = utc_now_naive()
         manifest = dict(package.manifest_json or {})
-        manifest["applied_target_database_uid"] = database.database_uid
+        if source_database_uid:
+            source_results = dict(manifest.get("shared_source_results") or {})
+            source_results[source_database_uid] = {"target_database_uid": database.database_uid, "pending_conflicts": pending}
+            manifest["shared_source_results"] = source_results
+            source_uids = {item["database_uid"] for item in manifest.get("databases", [])}
+            if any(source_uid not in source_results or source_results[source_uid]["pending_conflicts"] for source_uid in source_uids):
+                package.status = "partially_applied"
+        else:
+            manifest["applied_target_database_uid"] = database.database_uid
         manifest["last_apply_backup_path"] = str(backup_path) if backup_path else None
         package.manifest_json = manifest
         audit(db, user_id, "package_applied", package_id=package.id,
@@ -1098,6 +1112,47 @@ def _visible_package(db: Session, user_id: int, package_uid: str) -> SyncPackage
     if not package or (package.created_by != user_id and not (roles(db, user_id) & PRIVILEGED)):
         raise HTTPException(404, "同步包不存在")
     return package
+
+
+def shared_package_sources(db: Session, user_id: int, package_uid: str) -> list[dict]:
+    package = _visible_package(db, user_id, package_uid)
+    return (package.manifest_json or {}).get("databases", [])
+
+
+def apply_shared_library(db: Session, user_id: int, package_uid: str, request) -> dict:
+    package = _visible_package(db, user_id, package_uid)
+    if "viewer" in roles(db, user_id):
+        raise HTTPException(403, "只读账号不能导入共享库")
+    source = next((item for item in (package.manifest_json or {}).get("databases", [])
+                   if item.get("database_uid") == request.source_database_uid), None)
+    if not source:
+        raise HTTPException(400, "来源库不存在")
+    database = next((item for item in db.query(PatentDatabase).filter_by(kind="shared", owner_id=user_id).all()
+                     if (item.sync_provenance or {}).get("source_database_uid") == request.source_database_uid
+                     and (item.sync_provenance or {}).get("origin_node_uid") == package.manifest_json.get("origin_node_uid")), None)
+    try:
+        if database is None:
+            database = PatentDatabase(name=f"共享 · {source.get('name', '来源库')}", kind="shared", owner_id=user_id,
+                sync_provenance={"source_database_uid": request.source_database_uid,
+                    "origin_node_uid": package.manifest_json.get("origin_node_uid"),
+                    "created_by": package.manifest_json.get("created_by"), "imported_at": utc_now_naive().isoformat()})
+            db.add(database)
+            db.flush()
+            db.add(DatabaseMembership(user_id=user_id, database_id=database.id, role="owner"))
+            db.flush()
+        prior = (package.manifest_json or {}).get("shared_source_results", {}).get(request.source_database_uid)
+        if prior and not prior.get("pending_conflicts"):
+            return {"database_id": database.id, "status": "already_processed", "package_uid": package_uid}
+        apply_request = type("SharedApply", (), {"database_id": database.id, "source_database_uid": request.source_database_uid,
+            "edit_password": None, "decisions": request.decisions})()
+        result = apply_package(db, user_id, package_uid, apply_request, commit=False)
+        database.sync_provenance = {**(database.sync_provenance or {}), "last_package_uid": package_uid,
+            "last_imported_at": utc_now_naive().isoformat()}
+        db.commit()
+        return {**result, "database_id": database.id}
+    except Exception:
+        db.rollback()
+        raise
 
 
 def list_packages(db: Session, user_id: int) -> list[dict]:

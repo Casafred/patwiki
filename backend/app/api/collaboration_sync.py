@@ -21,6 +21,7 @@ from app.models.collaboration_sync import (
 )
 from app.schemas.collaboration_sync import (
     AccountRequest, AccountRoleRequest, BootstrapRequest, ExportRequest, LibraryGrantRequest, PeerRequest,
+    SharedLibraryApplyRequest,
     ActiveRequest, AggregationBatchCreateRequest, AggregationPublishRequest, AggregationBatchSubmitRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ProvisioningRequest, ResponsibilityRequest, UnitRequest,
 )
 from app.services.collaboration_identity_service import (
@@ -34,9 +35,11 @@ from app.services.collaboration_sync_service import (
     create_aggregation_batch, preview_aggregation_batch, submit_aggregation_batch,
     publish_aggregation_batch,
     process_package_stream,
+    shared_package_sources, apply_shared_library,
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
+
 
 
 def current_user(
@@ -505,6 +508,17 @@ async def import_package_file(
 def preview_apply_package(package_uid: str, request: ApplyPackageRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
     from app.services.collaboration_sync_service import preview_apply
     return preview_apply(db, user.id, package_uid, request)
+
+
+@router.get("/packages/{package_uid}/sources")
+def shared_sources(package_uid: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return {"items": shared_package_sources(db, user.id, package_uid)}
+
+
+@router.post("/packages/{package_uid}/shared-library")
+def import_shared_library(package_uid: str, request: SharedLibraryApplyRequest,
+                          user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return apply_shared_library(db, user.id, package_uid, request)
 
 
 @router.post("/packages/{package_uid}/apply")

@@ -106,6 +106,12 @@ class ApplyPackageRequest(RequestModel):
     database_id: int
     edit_password: str | None = Field(default=None, min_length=10, max_length=200)
     decisions: list[SyncConflictDecision] = Field(default_factory=list, max_length=20000)
+    source_database_uid: str | None = Field(default=None, pattern=r"^db_[a-f0-9]{32}$")
+
+
+class SharedLibraryApplyRequest(RequestModel):
+    source_database_uid: str = Field(pattern=r"^db_[a-f0-9]{32}$")
+    decisions: list[SyncConflictDecision] = Field(default_factory=list, max_length=20000)
 
 
 class AggregationBatchCreateRequest(RequestModel):

@@ -148,6 +148,32 @@ class CollaborationSyncTest(unittest.TestCase):
             sync.submit_aggregation_batch(self.db, 1, batch.batch_uid, SimpleNamespace(edit_password=None, decisions=[]))
         self.assertEqual(self.db.get(Patent, patent_id).title, "Local")
         self.assertEqual(self.db.query(SyncAggregationBatch).filter_by(batch_uid="agg_atomic").one().status, "open")
+
+    def test_shared_library_reuses_source_and_filters_records(self):
+        user = User(username="shared_receiver", role="member")
+        self.db.add(user)
+        self.db.flush()
+        self.package.created_by = user.id
+        source_uid = "db_" + "a" * 32
+        self.package.status = "imported"
+        self.package.manifest_json = {"origin_node_uid": "node_remote", "databases": [
+            {"database_uid": source_uid, "name": "Source"}, {"database_uid": "db_" + "b" * 32, "name": "Other"}]}
+        self.row.scope_json = {"database_uids": [source_uid]}
+        other = SyncPackageRecord(package_id=self.package.id, entity_type="patent", entity_uid="pat_other",
+            scope_json={"database_uids": ["db_" + "b" * 32]}, payload_json={"title": "Other"})
+        self.db.add(other)
+        self.db.commit()
+        def apply(db, user_id, package_uid, request, *, commit=True):
+            _, database, records = sync._apply_context(db, user_id, package_uid, request.database_id, request.source_database_uid)
+            self.assertEqual([row.id for row in records], [self.row.id])
+            return {"status": "partially_applied"}
+        with patch.object(sync, "roles", return_value={"member"}), patch.object(sync, "apply_package", side_effect=apply):
+            first = sync.apply_shared_library(self.db, user.id, self.package.package_uid,
+                SimpleNamespace(source_database_uid=source_uid, decisions=[]))
+            second = sync.apply_shared_library(self.db, user.id, self.package.package_uid,
+                SimpleNamespace(source_database_uid=source_uid, decisions=[]))
+        self.assertEqual(first["database_id"], second["database_id"])
+        self.assertEqual(self.db.query(PatentDatabase).filter_by(kind="shared").count(), 1)
     def test_confirmed_uid_alias_resolves_later_package_without_numbers(self):
         resolved = sync._batch_local_patents(self.db, [self.row], "node_remote")
         self.assertEqual(resolved[self.row.id].id, self.patent.id)
