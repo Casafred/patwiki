@@ -932,7 +932,7 @@ def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: Us
         ))
 
 
-def apply_package(db: Session, user_id: int, package_uid: str, request) -> dict:
+def apply_package(db: Session, user_id: int, package_uid: str, request, *, commit: bool = True) -> dict:
     try:
         package, database, records = _apply_context(db, user_id, package_uid, request.database_id)
         plans, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
@@ -1076,13 +1076,17 @@ def apply_package(db: Session, user_id: int, package_uid: str, request) -> dict:
               detail={"created": created, "updated": updated, "unchanged": unchanged,
                       "pending_conflicts": pending, "database_uid": database.database_uid,
                       "backup_path": str(backup_path) if backup_path else None})
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         return {"package_uid": package_uid, "status": package.status, "created": created,
                 "updated": updated, "unchanged": unchanged, "pending_conflicts": pending,
                 "conflicts": conflicts, "backup_path": str(backup_path) if backup_path else None}
     except HTTPException as exc:
-        _audit_denial(db, user_id, "package_apply_denied", {"package_uid": package_uid,
-                       "status_code": exc.status_code, "reason": str(exc.detail)})
+        if commit:
+            _audit_denial(db, user_id, "package_apply_denied", {"package_uid": package_uid,
+                           "status_code": exc.status_code, "reason": str(exc.detail)})
         raise
     except Exception:
         db.rollback()
@@ -1188,21 +1192,30 @@ def submit_aggregation_batch(db: Session, user_id: int, batch_uid: str, request)
     batch = db.query(SyncAggregationBatch).filter_by(batch_uid=batch_uid).first()
     if not batch:
         raise HTTPException(404, "汇总批次不存在")
-    if batch.status == "submitted":
+    if batch.status in {"submitted", "published"}:
         return _batch_dict(batch)
     database = db.get(PatentDatabase, batch.target_database_id)
     results = []
-    for package_uid in batch.package_uids or []:
-        package = db.query(SyncPackage).filter_by(package_uid=package_uid).first()
-        if not package or package.status == "applied":
-            continue
-        apply_request = type("BatchApplyRequest", (), {"database_id": database.id, "edit_password": request.edit_password,
-            "decisions": request.decisions})()
-        results.append(apply_package(db, user_id, package_uid, apply_request))
-    batch.status = "submitted"
-    batch.submitted_at = utc_now_naive()
-    batch.preview_json = {**(batch.preview_json or {}), "submit_results": results}
-    db.commit()
+    try:
+        for package_uid in batch.package_uids or []:
+            package = db.query(SyncPackage).filter_by(package_uid=package_uid).first()
+            if not package:
+                raise HTTPException(404, "汇总批次中的同步包不存在")
+            if package.status == "applied":
+                continue
+            records = db.query(SyncPackageRecord).filter_by(package_id=package.id).all()
+            _, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
+            conflict_keys = {(item["entity_uid"], item["field_key"]) for item in conflicts}
+            apply_request = type("BatchApplyRequest", (), {"database_id": database.id, "edit_password": request.edit_password,
+                "decisions": [item for item in request.decisions if (item.entity_uid, item.field_key) in conflict_keys]})()
+            results.append(apply_package(db, user_id, package_uid, apply_request, commit=False))
+        batch.status = "submitted"
+        batch.submitted_at = utc_now_naive()
+        batch.preview_json = {**(batch.preview_json or {}), "submit_results": results}
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return _batch_dict(batch)
 
 

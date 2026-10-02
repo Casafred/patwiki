@@ -128,6 +128,26 @@ class CollaborationSyncTest(unittest.TestCase):
         with patch.object(sync, "roles", return_value={"member"}), self.assertRaises(HTTPException):
             sync._validate_export_scope(self.db, user.id, request, ["title"], [self.database])
 
+    def test_aggregation_failure_rolls_back_prior_package(self):
+        second = SyncPackage(package_uid="pkg_second", path="unused", file_hash="second", direction="inbox")
+        batch = SyncAggregationBatch(batch_uid="agg_atomic", name="Atomic", target_database_id=self.database.id,
+            package_uids=[self.package.package_uid, second.package_uid], status="open")
+        self.db.add_all([second, batch])
+        self.db.commit()
+        patent_id = self.patent.id
+        def apply(db, user_id, package_uid, request, *, commit=True):
+            self.assertFalse(commit)
+            if package_uid == "pkg_second":
+                raise HTTPException(409, "second package failed")
+            self.patent.title = "Should roll back"
+            db.flush()
+            return {"pending_conflicts": 0}
+        with patch.object(sync, "roles", return_value={"system_admin"}), \
+             patch.object(sync, "_merge_plan", return_value=([], [])), \
+             patch.object(sync, "apply_package", side_effect=apply), self.assertRaises(HTTPException):
+            sync.submit_aggregation_batch(self.db, 1, batch.batch_uid, SimpleNamespace(edit_password=None, decisions=[]))
+        self.assertEqual(self.db.get(Patent, patent_id).title, "Local")
+        self.assertEqual(self.db.query(SyncAggregationBatch).filter_by(batch_uid="agg_atomic").one().status, "open")
     def test_confirmed_uid_alias_resolves_later_package_without_numbers(self):
         resolved = sync._batch_local_patents(self.db, [self.row], "node_remote")
         self.assertEqual(resolved[self.row.id].id, self.patent.id)
