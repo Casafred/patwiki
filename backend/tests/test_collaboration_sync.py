@@ -1,5 +1,7 @@
 import unittest
 import io
+import tempfile
+from pathlib import Path
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,9 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.database import Base
 import app.models
-from app.models import Patent, PatentDatabase, PatentHistory, SyncAggregationBatch, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
+from app.models import User, Patent, PatentDatabase, PatentHistory, SyncAggregationBatch, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
 from app.services import collaboration_sync_service as sync
-from app.services.collaboration_package_codec import encrypt_v3_stream, decrypt_v3_stream, encode, decode, V3_CHUNK_BYTES
+from app.services.collaboration_package_codec import encrypt_v3_stream, decrypt_v3_stream, encode, decode, decode_stream, V3_CHUNK_BYTES
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 import hashlib
@@ -48,6 +50,33 @@ class CollaborationSyncTest(unittest.TestCase):
         decoded_manifest, _, decoded_records = decode(raw, "test-password-123", {fingerprint: public})
         self.assertEqual(decoded_manifest["signature_status"], "trusted")
         self.assertEqual(decoded_records[0]["payload"], {"title": "Device"})
+        streamed = []
+        stream_manifest, _, collected = decode_stream(io.BytesIO(raw), "test-password-123",
+            {fingerprint: public}, streamed.append)
+        self.assertEqual(stream_manifest["signature_status"], "trusted")
+        self.assertEqual(collected, [])
+        self.assertEqual(streamed, decoded_records)
+        legacy_manifest = dict(manifest, signature_status="not_signed", signer_fingerprint=None)
+        legacy_raw = encode(legacy_manifest, permissions, [record], "test-password-123")
+        streamed.clear()
+        decode_stream(io.BytesIO(legacy_raw), "test-password-123", record_handler=streamed.append)
+        self.assertEqual(streamed[0]["payload"], {"title": "Device"})
+        user = User(username="alice", display_name="Alice", role="member")
+        self.db.add(user)
+        self.db.commit()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "inbox").mkdir()
+            with patch.object(sync, "workspace_dir", return_value=root):
+                preview = sync.process_package_stream(self.db, user.id, io.BytesIO(raw), "test-password-123", inspect=True)
+                self.assertEqual(len(preview["sample"]), 1)
+                self.assertEqual(self.db.query(SyncPackageRecord).count(), 1)
+                result = sync.process_package_stream(self.db, user.id, io.BytesIO(raw), "test-password-123")
+                self.assertEqual(result["status"], "imported")
+                self.assertEqual(self.db.query(SyncPackageRecord).count(), 2)
+                result = sync.process_package_stream(self.db, user.id, io.BytesIO(raw), "test-password-123")
+                self.assertEqual(result["status"], "already_processed")
+                self.assertEqual(self.db.query(SyncPackageRecord).count(), 2)
 
     def setUp(self):
         self.engine = create_engine("sqlite://")

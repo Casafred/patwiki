@@ -33,6 +33,7 @@ from app.services.collaboration_sync_service import (
     device_signing_identity,
     create_aggregation_batch, preview_aggregation_batch, submit_aggregation_batch,
     publish_aggregation_batch,
+    process_package_stream,
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
@@ -490,14 +491,14 @@ def create_package(request: ExportRequest, user: User = Depends(current_user), d
 async def inspect_package_file(
     file: UploadFile = File(...), password: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
-    return inspect_package(db, user.id, await read_upload(file), password)
+    return process_package_stream(db, user.id, file.file, password, inspect=True)
 
 
 @router.post("/packages/import")
 async def import_package_file(
     file: UploadFile = File(...), password: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
-    return import_package(db, user.id, await read_upload(file), password)
+    return process_package_stream(db, user.id, file.file, password)
 
 
 @router.post("/packages/{package_uid}/preview-apply")

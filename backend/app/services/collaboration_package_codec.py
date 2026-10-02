@@ -277,7 +277,7 @@ def decode(
         outer = _read_zip(raw, {"manifest.json", "payload.bin"})
         envelope = Envelope.model_validate_json(outer["manifest.json"]).model_dump(exclude_none=True)
         encrypted = outer["payload.bin"]
-        if len(encrypted) < 44:
+        if len(encrypted) < (20 if envelope.get("format_version") == 3 else 44):
             raise ValueError("truncated payload")
         signature_status = "not_signed"
         if envelope["format_version"] in {2, 3}:
@@ -338,6 +338,125 @@ def decode(
             InvalidSignature, InvalidTag, zipfile.BadZipFile, RuntimeError,
             NotImplementedError, EOFError, zlib.error) as exc:
         raise HTTPException(400, "同步包密码错误、格式不兼容或内容已损坏") from exc
+
+
+def decode_stream(source: BinaryIO, password: str, trusted_public_keys: dict[str, bytes] | None = None,
+                  record_handler=None, collect_records: bool = False):
+    """Validate and process records one line at a time for v3 packages."""
+    payload_copy = plain = None
+    try:
+        with zipfile.ZipFile(source) as outer_zip:
+            entries = outer_zip.infolist()
+            names = [entry.filename for entry in entries]
+            if len(names) != 2 or set(names) != {"manifest.json", "payload.bin"} or len(set(names)) != 2:
+                raise ValueError("unexpected archive entries")
+            for entry in entries:
+                if entry.flag_bits & 1 or (entry.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise ValueError("invalid outer entry")
+            if outer_zip.getinfo("manifest.json").file_size > 256 * 1024:
+                raise ValueError("envelope too large")
+            outer_manifest = outer_zip.read("manifest.json")
+            envelope = Envelope.model_validate_json(outer_manifest).model_dump(exclude_none=True)
+            payload_info = outer_zip.getinfo("payload.bin")
+            if payload_info.file_size > MAX_BYTES or payload_info.compress_type != zipfile.ZIP_STORED:
+                raise ValueError("invalid payload entry")
+            if envelope["format_version"] != 3:
+                source.seek(0)
+                manifest, permissions, records = decode(source.read(MAX_BYTES + 1), password, trusted_public_keys)
+                if record_handler:
+                    for record in records:
+                        record_handler(record)
+                return manifest, permissions, records if collect_records else []
+            with outer_zip.open("payload.bin") as encrypted:
+                digest = hashlib.sha256()
+                class HashReader:
+                    def read(self, size=-1):
+                        data = encrypted.read(size)
+                        digest.update(data)
+                        return data
+                payload_copy = tempfile.SpooledTemporaryFile(max_size=4 * 1024 * 1024)
+                shutil.copyfileobj(HashReader(), payload_copy, 256 * 1024)
+            if payload_copy.tell() > MAX_BYTES:
+                raise ValueError("payload too large")
+            if digest.hexdigest() != envelope.get("payload_sha256"):
+                raise ValueError("signed payload hash mismatch")
+            required = ("signer_fingerprint", "signer_public_key", "signature_algorithm", "signature")
+            if any(not envelope.get(key) for key in required):
+                raise ValueError("missing signature fields")
+            public_key = base64.b64decode(envelope["signer_public_key"], validate=True)
+            signature = base64.b64decode(envelope["signature"], validate=True)
+            if len(public_key) != 32 or hashlib.sha256(public_key).hexdigest() != envelope["signer_fingerprint"]:
+                raise ValueError("invalid signer key")
+            Ed25519PublicKey.from_public_bytes(public_key).verify(signature, _signature_payload(envelope))
+            trusted = (trusted_public_keys or {}).get(envelope["signer_fingerprint"])
+            if trusted is not None and trusted != public_key:
+                raise ValueError("trusted key mismatch")
+            payload_copy.seek(0)
+            plain = tempfile.SpooledTemporaryFile(max_size=4 * 1024 * 1024)
+            decrypt_v3_stream(payload_copy, plain, password)
+            if plain.tell() > MAX_BYTES:
+                raise ValueError("plaintext too large")
+            plain.seek(0)
+            with zipfile.ZipFile(plain) as inner_zip:
+                expected = {"manifest.json", "schema.json", "permissions.json", "data/patents.ndjson"}
+                infos = inner_zip.infolist()
+                if len(infos) != len(expected) or {item.filename for item in infos} != expected:
+                    raise ValueError("invalid inner archive")
+                if sum(item.file_size for item in infos) > MAX_BYTES:
+                    raise ValueError("expanded archive too large")
+                for item in infos:
+                    if item.filename != "data/patents.ndjson" and item.file_size > 256 * 1024:
+                        raise ValueError("metadata too large")
+                    if item.flag_bits & 1 or item.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}:
+                        raise ValueError("unsupported inner compression")
+                    if (item.external_attr >> 16) & 0o170000 == 0o120000:
+                        raise ValueError("inner symlink")
+                manifest = SnapshotManifest.model_validate_json(inner_zip.read("manifest.json")).model_dump()
+                permissions = SnapshotPermissions.model_validate_json(inner_zip.read("permissions.json")).model_dump()
+                if manifest["package_id"] != envelope["package_id"] or manifest["signature_status"] != "signed":
+                    raise ValueError("package identity or signature mismatch")
+                if json.loads(inner_zip.read("schema.json")) != {"profile": PROFILE, "fields": manifest["fields"]}:
+                    raise ValueError("schema mismatch")
+                if permissions["fields"] != manifest["fields"]:
+                    raise ValueError("permission mismatch")
+                created, expires = datetime.fromisoformat(manifest["created_at"]), datetime.fromisoformat(manifest["expires_at"])
+                if created.tzinfo is not None or expires.tzinfo is not None or expires <= created:
+                    raise ValueError("invalid timestamps")
+                count, seen, records = 0, set(), []
+                with inner_zip.open("data/patents.ndjson") as lines:
+                    while True:
+                        line = lines.readline(MAX_LINE_BYTES + 2)
+                        if not line:
+                            break
+                        count += 1
+                        if count > MAX_RECORDS or len(line) > MAX_LINE_BYTES + 1:
+                            raise ValueError("record limits exceeded")
+                        record = SnapshotRecord.model_validate_json(line).model_dump()
+                        if record["entity_uid"] in seen:
+                            raise ValueError("duplicate record identity")
+                        if record["operation"] == "upsert" and set(record["payload"]) != set(manifest["fields"]):
+                            raise ValueError("unexpected record fields")
+                        if record["operation"] == "delete" and record["entity_type"] != "patent_tombstone":
+                            raise ValueError("invalid tombstone")
+                        seen.add(record["entity_uid"])
+                        if record_handler:
+                            record_handler(record)
+                        if collect_records:
+                            records.append(record)
+                if count != manifest["count"]:
+                    raise ValueError("record count mismatch")
+            manifest["signature_status"] = "trusted" if trusted is not None else "signed_untrusted"
+            manifest["signer_fingerprint"] = envelope["signer_fingerprint"]
+            manifest["signer_public_key"] = envelope["signer_public_key"]
+            return manifest, permissions, records
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError, ValidationError,
+            InvalidSignature, InvalidTag, zipfile.BadZipFile, RuntimeError, EOFError, zlib.error) as exc:
+        raise HTTPException(400, "同步包密码错误、格式不兼容或内容已损坏") from exc
+    finally:
+        if payload_copy is not None:
+            payload_copy.close()
+        if plain is not None:
+            plain.close()
 
 
 def file_hash(raw: bytes) -> str:

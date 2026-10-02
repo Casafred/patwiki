@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 import base64
 import hashlib
+import shutil
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -22,7 +23,7 @@ from app.models.collaboration_sync import (
     SyncAggregationBatch, SyncChange, SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice, SyncTombstone, SyncFieldOverlay,
 )
 from app.services.collaboration_identity_service import PASSWORDS, audit, roles, uid, workspace_dir
-from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, encode_to, file_hash
+from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, decode_stream, encode_to, file_hash
 from app.services.patent_identity_service import (
     find_patents_by_identifier_specs_bulk,
     identifier_specs_from_values,
@@ -416,6 +417,60 @@ async def read_upload(upload: UploadFile) -> bytes:
     if len(raw) > MAX_BYTES:
         raise HTTPException(413, "同步包超过 100MB")
     return raw
+
+
+def process_package_stream(db: Session, user_id: int, source, password: str, *, inspect: bool = False) -> dict:
+    """Validate before writing, then stream records into one atomic transaction."""
+    source.seek(0, 2)
+    if source.tell() > MAX_BYTES:
+        raise HTTPException(413, "同步包过大")
+    source.seek(0)
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: source.read(256 * 1024), b""):
+        digest.update(chunk)
+    source.seek(0)
+    sample = []
+    def sample_record(record):
+        if len(sample) < 3:
+            sample.append(record)
+    manifest, permissions, _ = decode_stream(source, password, trusted_device_keys(db), sample_record)
+    if datetime.fromisoformat(manifest["expires_at"]) <= utc_now_naive():
+        raise HTTPException(410, "同步包已过期")
+    package_uid, checksum = manifest["package_id"], digest.hexdigest()
+    if inspect:
+        return {"manifest": manifest, "permissions": permissions, "count": manifest["count"],
+                "sample": sample, "file_hash": checksum}
+    existing = db.query(SyncPackage).filter(or_(SyncPackage.package_uid == package_uid,
+        (SyncPackage.file_hash == checksum) & (SyncPackage.direction == "inbox"))).first()
+    if existing:
+        return {"package_uid": package_uid, "count": manifest["count"], "status": "already_processed"}
+    path = workspace_dir() / "inbox" / f"{package_uid}.pwshare"
+    try:
+        source.seek(0)
+        with path.open("xb") as target:
+            shutil.copyfileobj(source, target, 256 * 1024)
+        package = SyncPackage(package_uid=package_uid, package_type=manifest["package_type"], direction="inbox",
+            path=str(path), file_hash=checksum, created_by=user_id, status="imported", access="viewer",
+            manifest_json=manifest, signature_status=manifest["signature_status"],
+            expires_at=datetime.fromisoformat(manifest["expires_at"]))
+        db.add(package)
+        db.flush()
+        db.add(SyncPackageMember(package_id=package.id, user_id=user_id,
+            subject_label=db.get(User, user_id).username, access="viewer", field_scope=permissions["fields"]))
+        def save_record(record):
+            db.execute(SyncPackageRecord.__table__.insert().values(package_id=package.id,
+                entity_type=record["entity_type"], entity_uid=record["entity_uid"],
+                record_version=record["record_version"], scope_json=record["scope"],
+                payload_json=record["payload"], field_provenance=record["field_provenance"]))
+        source.seek(0)
+        decode_stream(source, password, trusted_device_keys(db), save_record)
+        audit(db, user_id, "package_imported", package_id=package.id, detail={"count": manifest["count"]})
+        db.commit()
+    except Exception:
+        db.rollback()
+        path.unlink(missing_ok=True)
+        raise
+    return {"package_uid": package_uid, "count": manifest["count"], "status": "imported"}
 
 
 def _validated_import(db: Session, user_id: int, raw: bytes, password: str):
