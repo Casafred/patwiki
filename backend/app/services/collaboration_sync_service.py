@@ -939,6 +939,7 @@ def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: Us
 
 def apply_package(db: Session, user_id: int, package_uid: str, request, *, commit: bool = True) -> dict:
     try:
+        privileged = bool(roles(db, user_id) & PRIVILEGED)
         source_database_uid = getattr(request, "source_database_uid", None)
         package, database, records = _apply_context(db, user_id, package_uid, request.database_id, source_database_uid)
         plans, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)

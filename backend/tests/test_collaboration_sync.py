@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Base
 import app.models
-from app.models import DatabaseMembership, User, Patent, PatentDatabase, PatentHistory, SyncAggregationBatch, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
+from app.models import DatabaseMembership, User, Patent, PatentDatabase, PatentHistory, SyncAggregationBatch, SyncConflict, SyncEntityFieldState, SyncPackage, SyncPackageRecord, SyncUidMapping
 from app.services import collaboration_sync_service as sync
 from app.services.collaboration_package_codec import encrypt_v3_stream, decrypt_v3_stream, encode, decode, decode_stream, V3_CHUNK_BYTES
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -108,6 +108,42 @@ class CollaborationSyncTest(unittest.TestCase):
         self.assertEqual(conflicts, [])
         with patch.object(sync, "roles", return_value={"member"}), self.assertRaises(HTTPException):
             sync._merge_plan(self.db, 1, self.package, self.database, [self.row], None)
+
+    def test_apply_tombstone_to_department_record(self):
+        user = User(username="delete_admin", role="admin")
+        self.db.add(user)
+        self.db.flush()
+        self.package.created_by = user.id
+        self.package.status = "imported"
+        self.row.entity_type = "patent_tombstone"
+        self.row.entity_uid = self.patent.entity_uid
+        self.row.payload_json = {}
+        self.db.commit()
+        with patch.object(sync, "roles", return_value={"system_admin"}):
+            result = sync.apply_package(self.db, user.id, self.package.package_uid,
+                SimpleNamespace(database_id=self.database.id, edit_password=None, decisions=[]))
+        self.assertEqual(result["status"], "applied")
+        self.assertIsNotNone(self.patent.deleted_at)
+
+    def test_manual_conflict_preserves_final_value_and_reason(self):
+        user = User(username="review_admin", role="admin")
+        self.db.add(user)
+        self.db.flush()
+        self.package.created_by = user.id
+        self.package.status = "imported"
+        self.row.payload_json = {"title": "Remote"}
+        sync._save_uid_mapping(self.db, self.package, self.row, self.patent)
+        self.db.commit()
+        decision = SimpleNamespace(entity_uid=self.row.entity_uid, field_key="title", choice="manual",
+            value="Reviewed", reason="Reviewed by administrator")
+        with patch.object(sync, "roles", return_value={"system_admin"}):
+            result = sync.apply_package(self.db, user.id, self.package.package_uid,
+                SimpleNamespace(database_id=self.database.id, edit_password=None, decisions=[decision]))
+        self.assertEqual(result["pending_conflicts"], 0)
+        self.assertEqual(self.patent.title, "Reviewed")
+        conflict = self.db.query(SyncConflict).one()
+        self.assertEqual(conflict.final_value, "Reviewed")
+        self.assertEqual(conflict.decision_reason, decision.reason)
 
     def test_member_database_permission_controls_export_without_legacy_grant(self):
         user = User(username="exporter", role="member")
