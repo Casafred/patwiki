@@ -341,6 +341,8 @@ class SyncConflict(Base):
     remote_value = Column(JSON, nullable=True)
     status = Column(String(30), nullable=False, default="pending")
     decision = Column(String(30), nullable=True)
+    final_value = Column(JSON, nullable=True)
+    decision_reason = Column(Text, nullable=True)
     decided_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     decided_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

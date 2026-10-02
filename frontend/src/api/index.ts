@@ -909,7 +909,7 @@ export const collaborationSyncApi = {
     return api.post('/collaboration-sync/accounts/provision/file', data)
   },
   previewAggregationBatch: (batchUid: string): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/preview`, {}),
-  submitAggregationBatch: (batchUid: string, data: { edit_password?: string; decisions?: Array<{ entity_uid: string; field_key: string; choice: 'local' | 'remote' }> }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/submit`, data),
+  submitAggregationBatch: (batchUid: string, data: { edit_password?: string; decisions?: Array<{ entity_uid: string; field_key: string; package_uid?: string; choice: 'local' | 'remote' | 'manual'; value?: unknown; reason?: string }> }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/submit`, data),
   publishAggregationBatch: (batchUid: string, data: { recipient_names: string[]; password: string; fields?: string[]; expires_days?: number }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/publish`, data),
   inspect: (file: File, password: string): Promise<{ count: number; sample: unknown[]; manifest: Record<string, unknown> }> => {
     const body = new FormData(); body.append('file', file); body.append('password', password)

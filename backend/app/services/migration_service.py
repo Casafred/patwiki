@@ -76,6 +76,8 @@ def _unique_index(table: str, name: str, column: str) -> SchemaOperation:
 # tables and model-defined indexes are handled by Base.metadata.create_all;
 # these entries cover columns/indexes that create_all cannot add to an old DB.
 SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
+    _column("collaboration_sync_conflicts", "final_value", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN final_value JSON"),
+    _column("collaboration_sync_conflicts", "decision_reason", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN decision_reason TEXT"),
     _column("patent_databases", "sync_provenance", "ALTER TABLE patent_databases ADD COLUMN sync_provenance JSON"),
     _column("patent_databases", "kind", "ALTER TABLE patent_databases ADD COLUMN kind VARCHAR(30) NOT NULL DEFAULT 'personal'"),
     _column("collaboration_sync_aggregation_batches", "publication_package_uid", "ALTER TABLE collaboration_sync_aggregation_batches ADD COLUMN publication_package_uid VARCHAR(80)"),

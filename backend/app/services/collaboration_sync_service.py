@@ -943,6 +943,7 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
         package, database, records = _apply_context(db, user_id, package_uid, request.database_id, source_database_uid)
         plans, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
         decisions = {(item.entity_uid, item.field_key): item.choice for item in request.decisions}
+        decision_details = {(item.entity_uid, item.field_key): item for item in request.decisions}
         if len(decisions) != len(request.decisions):
             raise HTTPException(400, "冲突决策重复")
         conflict_keys = {(item["entity_uid"], item["field_key"]) for item in conflicts}
@@ -1009,6 +1010,8 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                     ).first()
                     if choice == "remote":
                         updates[key[1]] = conflict["remote_value"]
+                    elif choice == "manual":
+                        updates[key[1]] = decision_details[key].value
                     if choice:
                         if prior is None:
                             prior = SyncConflict(conflict_uid=uid("conflict"), package_id=package.id,
@@ -1020,6 +1023,8 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                         prior.remote_value = conflict["remote_value"]
                         prior.status = "resolved"
                         prior.decision = choice
+                        prior.final_value = updates.get(key[1], conflict["local_value"])
+                        prior.decision_reason = getattr(decision_details[key], "reason", None)
                         prior.decided_by = user_id
                         prior.decided_at = utc_now_naive()
                     elif prior is None:
@@ -1218,7 +1223,7 @@ def preview_aggregation_batch(db: Session, user_id: int, batch_uid: str) -> dict
     if not batch:
         raise HTTPException(404, "汇总批次不存在")
     database = db.get(PatentDatabase, batch.target_database_id)
-    summary = {"auto_merge": 0, "new": 0, "deleted": 0, "conflict": 0, "unmatched": 0, "unchanged": 0, "packages": []}
+    summary = {"auto_merge": 0, "new": 0, "deleted": 0, "conflict": 0, "unmatched": 0, "unchanged": 0, "packages": [], "conflicts": []}
     for package_uid in batch.package_uids or []:
         package = db.query(SyncPackage).filter_by(package_uid=package_uid).first()
         if not package:
@@ -1226,10 +1231,11 @@ def preview_aggregation_batch(db: Session, user_id: int, batch_uid: str) -> dict
         records = db.query(SyncPackageRecord).filter_by(package_id=package.id).order_by(SyncPackageRecord.id).all()
         try:
             plans, conflicts = _merge_plan(db, user_id, package, database, records, None)
+            summary["conflicts"].extend({**item, "package_uid": package_uid} for item in conflicts)
             counts = {"auto_merge": sum(1 for item in plans if item["patent"] is not None and item["updates"] and not item["conflicts"]),
-                      "new": sum(1 for item in plans if item["patent"] is None), "conflict": len(conflicts),
+                      "new": sum(1 for item in plans if item["patent"] is None and item.get("operation") != "delete"), "conflict": len(conflicts),
                       "unchanged": sum(1 for item in plans if item["patent"] is not None and not item["updates"] and not item["conflicts"]),
-                      "deleted": 0, "unmatched": 0}
+                      "deleted": sum(1 for item in plans if item.get("operation") == "delete"), "unmatched": 0}
         except HTTPException as exc:
             counts = {"auto_merge": 0, "new": 0, "deleted": 0, "conflict": 0, "unchanged": 0,
                       "unmatched": len(records), "error": str(exc.detail)}
@@ -1262,7 +1268,8 @@ def submit_aggregation_batch(db: Session, user_id: int, batch_uid: str, request)
             _, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
             conflict_keys = {(item["entity_uid"], item["field_key"]) for item in conflicts}
             apply_request = type("BatchApplyRequest", (), {"database_id": database.id, "edit_password": request.edit_password,
-                "decisions": [item for item in request.decisions if (item.entity_uid, item.field_key) in conflict_keys]})()
+                "decisions": [item for item in request.decisions if (item.entity_uid, item.field_key) in conflict_keys
+                    and getattr(item, "package_uid", None) in {None, package_uid}]})()
             results.append(apply_package(db, user_id, package_uid, apply_request, commit=False))
         batch.status = "submitted"
         batch.submitted_at = utc_now_naive()
