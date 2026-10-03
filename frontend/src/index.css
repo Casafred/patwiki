@@ -7373,6 +7373,85 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Project Wiki workspace layout */
+.project-wiki-page {
+  width: min(1440px, 100%);
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 28px 40px 56px;
+  gap: 20px;
+  color: #1e293b;
+}
+.project-wiki-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+  min-height: 164px;
+  padding: 28px 32px;
+  border: 1px solid #cfe3df;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f3fbf8 0%, #ffffff 64%);
+  box-shadow: 0 12px 30px rgba(25, 76, 70, .08);
+}
+.project-wiki-hero-copy { min-width: 0; }
+.project-wiki-eyebrow { display: flex; align-items: center; gap: 7px; color: #0f766e; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.project-wiki-eyebrow span { padding-left: 10px; border-left: 1px solid #b8d7d1; color: #7a9692; font-weight: 500; letter-spacing: 0; }
+.project-wiki-hero h2 { margin: 12px 0 8px; color: #173d3b; font-size: clamp(24px, 3vw, 34px); line-height: 1.12; letter-spacing: 0; overflow-wrap: anywhere; }
+.project-wiki-hero p { max-width: 720px; margin: 0; color: #647d7a; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.project-wiki-hero-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 18px; color: #52716c; font-size: 12px; }
+.project-wiki-hero-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.project-wiki-back { flex: none; margin-top: 2px; }
+.project-wiki-alert { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border: 1px solid #fecaca; border-radius: 9px; background: #fff7f7; color: #991b1b; font-size: 12px; }
+.project-wiki-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.project-wiki-summary > div { min-width: 0; padding: 16px 18px; border: 1px solid #e0ebe9; border-radius: 11px; background: #fff; box-shadow: 0 4px 14px rgba(21, 64, 61, .045); }
+.project-wiki-summary span, .project-wiki-summary small { display: block; color: #78908d; font-size: 11px; }
+.project-wiki-summary strong { display: inline-block; margin-top: 7px; color: #174f49; font-size: 24px; line-height: 1; }
+.project-wiki-summary small { display: inline-block; margin-left: 5px; }
+.project-wiki-summary-text { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px !important; }
+.project-wiki-main-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .85fr); gap: 20px; align-items: start; }
+.project-wiki-lower-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(330px, .8fr); gap: 20px; align-items: start; }
+.project-wiki-section { min-width: 0; margin: 0; padding: 22px; border: 1px solid #dce9e6; border-radius: 13px; background: #fff; box-shadow: 0 5px 18px rgba(22, 55, 54, .05); }
+.project-wiki-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-height: 34px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #edf3f1; color: #548079; }
+.project-wiki-section-heading > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.project-wiki-section-heading strong { color: #214844; font-size: 15px; }
+.project-wiki-section-heading span { color: #8a9e9a; font-size: 11px; font-weight: 400; }
+.project-wiki-count-badge { padding: 4px 8px; border-radius: 999px; background: #edf8f5; color: #0f766e !important; font-weight: 700 !important; white-space: nowrap; }
+.project-wiki-grid { border-color: #e5efed; border-radius: 8px; overflow: hidden; }
+.project-wiki-field { min-height: 64px; padding: 12px 14px; }
+.project-wiki-field strong { color: #284743; }
+.project-wiki-description { margin-top: 16px; border-left-color: #2c9b8d; border-radius: 0 7px 7px 0; background: #f4faf8; }
+.project-wiki-patents { gap: 7px; }
+.project-wiki-patents button { padding: 11px 12px; border: 1px solid #e5efed; border-radius: 8px; background: #fbfefd; transition: border-color .15s, background .15s; }
+.project-wiki-patents button:hover { border-color: #9ed8cd; background: #f1fbf8; }
+.project-wiki-patents button span { color: #17645e; font-weight: 600; }
+.project-attachment-upload { grid-template-columns: auto minmax(150px, 1fr) minmax(150px, 1.3fr) auto; padding: 0 0 16px; border-bottom-color: #edf3f1; }
+.project-attachment-row { padding: 14px 0; border-bottom-color: #edf3f1; }
+.project-attachment-row:last-child { border-bottom: 0; }
+.project-history-list { gap: 12px; }
+.project-history-entry { position: relative; padding: 14px 16px 15px 18px; border: 1px solid #e5efed; border-radius: 9px; background: #fbfefd; }
+.project-history-entry::before { content: ''; position: absolute; left: 0; top: 15px; bottom: 15px; width: 3px; border-radius: 3px; background: #47a999; }
+.project-history-meta { align-items: flex-start; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.project-history-meta strong { color: #27524c; font-size: 12px; }
+.project-history-meta span { font-size: 11px; }
+.project-history-changes { gap: 8px; }
+.project-history-changes > div { padding: 7px 9px; border-radius: 6px; background: #f3f8f7; font-size: 11px; }
+@media (max-width: 980px) {
+  .project-wiki-page { padding: 22px 24px 42px; }
+  .project-wiki-main-grid, .project-wiki-lower-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .project-wiki-page { padding: 16px 14px 32px; gap: 14px; }
+  .project-wiki-hero { flex-direction: column; padding: 21px 19px; border-radius: 12px; }
+  .project-wiki-back { align-self: flex-start; }
+  .project-wiki-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .project-wiki-summary > div { padding: 13px 14px; }
+  .project-wiki-section { padding: 17px 14px; border-radius: 10px; }
+  .project-attachment-upload { grid-template-columns: 1fr; }
+  .project-attachment-row { flex-direction: column; }
+  .project-attachment-row > div:last-child { width: 100%; flex-wrap: wrap; }
+}
+
 @media (max-width: 780px) {
   .project-attachment-upload {
     grid-template-columns: minmax(0, 1fr);

@@ -168,24 +168,42 @@ export default function ProjectWikiPage() {
   ]
 
   return <div className="project-wiki-page">
-    <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-      <div><div style={{ color: '#64748b', fontSize: 12, marginBottom: 4 }}>项目 Wiki</div><h2 className="page-title" style={{ margin: 0 }}>{project.name}</h2></div>
-      <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)}><Icon name="chevron-left" size={15} /> 返回</button>
+    <header className="project-wiki-hero">
+      <div className="project-wiki-hero-copy">
+        <div className="project-wiki-eyebrow"><Icon name="file" size={14} /> 项目 Wiki <span>项目空间</span></div>
+        <h2>{project.name}</h2>
+        <p>{project.description || '集中查看项目资料、关联专利、附件和信息变更。'}</p>
+        <div className="project-wiki-hero-meta">
+          <span><Icon name="tag" size={13} /> {project.project_no || project.code || '未设置项目号'}</span>
+          <span><Icon name="activity" size={13} /> {display(project.status)}</span>
+          <span><Icon name="history" size={13} /> {display(project.current_stage)}</span>
+        </div>
+      </div>
+      <button type="button" className="btn btn-secondary project-wiki-back" onClick={() => navigate(-1)}><Icon name="chevron-left" size={15} /> 返回项目管理</button>
+    </header>
+    {error && <div className="project-wiki-alert" role="alert"><Icon name="x" size={16} /> {error}</div>}
+    <div className="project-wiki-summary">
+      <div><span>关联专利</span><strong>{patents.length}</strong><small>件</small></div>
+      <div><span>项目附件</span><strong>{attachments.length}</strong><small>份</small></div>
+      <div><span>变更记录</span><strong>{history.length}</strong><small>条</small></div>
+      <div><span>项目负责人</span><strong className="project-wiki-summary-text">{project.project_manager || '未设置'}</strong></div>
     </div>
-    {error && <div role="alert" style={{ padding: 10, margin: '12px 0', color: '#991b1b', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6 }}>{error}</div>}
-    <section className="project-wiki-section">
-      <div className="management-section-title"><strong>项目信息</strong><span style={{ color: '#64748b', fontSize: 12 }}>记录由业务管理台维护</span></div>
+    <div className="project-wiki-main-grid">
+    <section className="project-wiki-section project-wiki-info-card">
+      <div className="project-wiki-section-heading"><div><strong>项目信息</strong><span>项目基本属性与业务归属</span></div><Icon name="settings" size={18} /></div>
       <div className="project-wiki-grid">{fields.map(([label, value]) => <div key={label} className="project-wiki-field"><span>{label}</span><strong>{value || '未填写'}</strong></div>)}</div>
       {project.description && <div className="project-wiki-description"><span>项目描述</span><p>{project.description}</p></div>}
     </section>
 
-    <section className="project-wiki-section">
-      <div className="management-section-title"><strong>关联专利</strong><span style={{ color: '#64748b', fontSize: 12 }}>{patents.length} 件</span></div>
+    <section className="project-wiki-section project-wiki-patent-card">
+      <div className="project-wiki-section-heading"><div><strong>关联专利</strong><span>项目范围内的专利记录</span></div><span className="project-wiki-count-badge">{patents.length} 件</span></div>
       {patents.length ? <div className="project-wiki-patents">{patents.map(patent => <button key={patent.id} type="button" onClick={() => navigate(`/patents/${patent.id}`)}><span>{patent.title}</span><small>{patent.application_number || patent.publication_number || `#${patent.id}`}</small></button>)}</div> : <div style={{ color: '#94a3b8', padding: '12px 0' }}>暂无关联专利</div>}
     </section>
+    </div>
 
-    <section className="project-wiki-section">
-      <div className="management-section-title"><strong>项目附件</strong><span style={{ color: '#64748b', fontSize: 12 }}>文件统一存放于附件目录</span></div>
+    <div className="project-wiki-lower-grid">
+    <section className="project-wiki-section project-wiki-attachments-card">
+      <div className="project-wiki-section-heading"><div><strong>项目附件</strong><span>文件统一存放于附件目录</span></div><Icon name="file" size={18} /></div>
       <div className="project-attachment-upload">
         <div className="project-attachment-scope" role="group" aria-label="附件归属">
           <button type="button" className={scope === 'project' ? 'active' : ''} onClick={() => setScope('project')}>项目资料</button>
@@ -202,9 +220,10 @@ export default function ProjectWikiPage() {
       </article>)}{attachments.length === 0 && <div style={{ color: '#94a3b8', padding: '14px 0' }}>暂无项目附件</div>}</div>
     </section>
 
-    <section className="project-wiki-section">
-      <div className="management-section-title"><strong>信息变更记录</strong><span style={{ color: '#64748b', fontSize: 12 }}>{history.length} 条</span></div>
+    <section className="project-wiki-section project-wiki-history-card">
+      <div className="project-wiki-section-heading"><div><strong>信息变更记录</strong><span>项目资料的更新轨迹</span></div><span className="project-wiki-count-badge">{history.length} 条</span></div>
       <div className="project-history-list">{history.map(entry => <article key={entry.id} className="project-history-entry"><div className="project-history-meta"><strong>{entry.action === 'created' ? '创建项目' : '更新项目资料'}</strong><span>{entry.created_at ? new Date(entry.created_at).toLocaleString() : ''} · {entry.changed_by}</span></div><div className="project-history-changes">{Object.entries(entry.changes).map(([key, change]) => <div key={key}><span>{fieldLabels[key] || key}</span><s>{historyValue(key, change.before, productLines, products)}</s><b>{historyValue(key, change.after, productLines, products)}</b></div>)}</div></article>)}{history.length === 0 && <div style={{ color: '#94a3b8', padding: '14px 0' }}>暂无变更记录</div>}</div>
     </section>
+    </div>
   </div>
 }
