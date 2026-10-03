@@ -119,6 +119,7 @@ class CustomFieldHandler(FieldHandler):
             "is_ai": field.ai_config is not None,
             "is_formula": is_formula,
             "ai_config": field.ai_config,
+            "mapped_system_key": (field.ai_config or {}).get("mapped_system_key"),
             "formula_config": field.formula_config,
             "link_config": field.link_config,
             "lookup_config": field.lookup_config,

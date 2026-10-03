@@ -5,6 +5,12 @@ import { useAppStore } from '../../store'
 import { getErrorMessage } from '../../lib/errors'
 import FormulaEditor from './FormulaEditor'
 
+const SYSTEM_MAPPING_OPTIONS = [
+  ['title', '标题'], ['abstract', '摘要'], ['claims', '权利要求'], ['applicant', '申请人'],
+  ['inventor', '发明人'], ['technical_problem', '技术问题'], ['technical_solution', '技术方案'],
+  ['technical_effect', '技术效果'], ['category', '分类'], ['subcategory', '子分类'],
+] as const
+
 interface RelationConfigFieldsProps {
   fieldType?: string
   field: Partial<CustomField>
@@ -154,12 +160,12 @@ export default function FieldSettingsPage() {
       options: field.options,
       is_active: field.is_active,
       is_required: field.is_required,
-      ai_config: field.ai_config ? { ...field.ai_config } : {},
       link_config: field.link_config ? { ...field.link_config } : undefined,
       lookup_config: field.lookup_config ? { ...field.lookup_config } : undefined,
       rollup_config: field.rollup_config ? { ...field.rollup_config } : undefined,
       formula_config: field.formula_config ? { ...field.formula_config } : undefined,
       group_name: field.group_name,
+      ai_config: { ...(field.ai_config || {}), mapped_system_key: field.ai_config?.mapped_system_key || '' },
     })
   }
 
@@ -379,6 +385,13 @@ export default function FieldSettingsPage() {
                       value={editForm.name || ''}
                       onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                     />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>映射系统字段（可选）</label>
+                    <select className="form-input" value={String(editForm.ai_config?.mapped_system_key || '')} onChange={e => setEditForm({ ...editForm, ai_config: { ...(editForm.ai_config || {}), mapped_system_key: e.target.value || undefined } })}>
+                      <option value="">不映射，保留为自定义字段</option>
+                      {SYSTEM_MAPPING_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label} ({key})</option>)}
+                    </select>
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>字段类型</label>
