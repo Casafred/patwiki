@@ -7,7 +7,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy import func, or_, and_, desc, text, String, inspect, exists
 
 from app.models import (
-    Patent, Product, Project, Tag, CustomField,
+    Patent, Product, Project, Tag, CustomField, User,
     patent_tag, patent_project, LegalStatus, PatentType,
     PatentHistory, PatentProjectLink,
     PatentDatabaseMembership, PatentDatabase,
@@ -649,6 +649,9 @@ class PatentService:
                         db.add(overlay)
                     overlay.baseline_value = baseline.last_value
                     overlay.local_value = _stringify_value(new_value)
+                    if changed_by:
+                        editor = db.query(User).filter_by(username=changed_by).first()
+                        overlay.editor_user_id = editor.id if editor else None
                     overlay.reason = source
                     overlay.status = "pending"
             return PatentHistory(
@@ -680,13 +683,8 @@ class PatentService:
         # 自定义字段修改
         if custom_fields_data is not None:
             relation_fields = RELATION_FIELD_KEYS.intersection(custom_fields_data)
-            if relation_fields:
-                # Detail-page saves send the full JSON object. Preserve these
-                # read-only import projections while accepting other edits.
-                custom_fields_data = {
-                    key: value for key, value in custom_fields_data.items()
-                    if key not in relation_fields
-                }
+            if relation_fields and any(custom_fields_data[key] != (patent.custom_fields or {}).get(key) for key in relation_fields):
+                raise BadRequestException("专利关系来源字段为只读投影，不能直接编辑")
             # JSON 列没有 MutableDict 追踪，先复制再赋值才能稳定触发 SQLAlchemy 更新。
             current = dict(patent.custom_fields or {})
             for k, v in custom_fields_data.items():
@@ -1221,7 +1219,8 @@ class PatentService:
         if patent.entity_uid:
             db.add(SyncTombstone(entity_uid=patent.entity_uid, entity_type="patent",
                                  base_version=patent.record_version or 1,
-                                 scope_json={"database_id": patent.database_id}))
+                                 scope_json={"database_id": patent.database_id,
+                                    "deletion_scope": "department_delete" if patent.database and patent.database.kind == "department_master" else "library_exit"}))
         from app.services.semantic_index_service import SemanticIndexService
         from app.models.semantic_search import SemanticIndexOutbox
         # The outbox still has a non-null FK to patents.id in deployed SQLite

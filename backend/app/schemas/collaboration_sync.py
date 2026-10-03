@@ -26,6 +26,7 @@ class AccountRequest(LoginRequest):
     display_name: str = Field(min_length=1, max_length=100)
     role: Role = "member"
     unit_id: int | None = None
+    employee_no: str | None = Field(default=None, min_length=1, max_length=50)
 
 
 class ProvisioningAccount(RequestModel):
@@ -58,10 +59,11 @@ class ExportRequest(RequestModel):
     patent_ids: list[int] | None = Field(default=None, max_length=20000)
     product_ids: list[int] | None = Field(default=None, max_length=500)
     fields: list[str] = Field(min_length=1, max_length=200)
-    recipient_names: list[str] = Field(min_length=1, max_length=100)
+    recipient_names: list[str] = Field(default_factory=list, max_length=100)
     include_attachments: bool = False
     password: str = Field(min_length=10, max_length=200)
     expires_days: int = Field(default=30, ge=1, le=365)
+    mode: Literal["full", "delta"] = "full"
 
 
 class ActiveRequest(RequestModel):
@@ -117,6 +119,15 @@ class SharedLibraryApplyRequest(RequestModel):
     decisions: list[SyncConflictDecision] = Field(default_factory=list, max_length=20000)
 
 
+class DepartmentPublicationApplyRequest(RequestModel):
+    decisions: list[SyncConflictDecision] = Field(default_factory=list, max_length=20000)
+
+
+class LibraryFieldEditRequest(RequestModel):
+    value: Any
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 class AggregationBatchCreateRequest(RequestModel):
     name: str = Field(min_length=1, max_length=200)
     target_database_id: int
@@ -129,7 +140,26 @@ class AggregationBatchSubmitRequest(RequestModel):
 
 
 class AggregationPublishRequest(RequestModel):
-    recipient_names: list[str] = Field(min_length=1, max_length=100)
+    recipient_names: list[str] = Field(default_factory=list, max_length=100)
     password: str = Field(min_length=10, max_length=200)
     fields: list[str] = Field(default_factory=lambda: ["title", "publication_number", "application_number", "legal_status"])
     expires_days: int = Field(default=30, ge=1, le=365)
+
+
+class SharingPreferenceRequest(RequestModel):
+    shared_database_ids: list[int] = Field(default_factory=list, max_length=500)
+    update_database_ids: list[int] = Field(default_factory=list, max_length=500)
+    update_fields: list[str] = Field(default_factory=lambda: ["legal_status"], max_length=100)
+
+
+class AggregationUpdateRequest(RequestModel):
+    connector_id: int
+
+
+class AggregationUpdateChoice(RequestModel):
+    item_id: int
+    fields: list[str] = Field(default_factory=list, max_length=100)
+
+
+class AggregationUpdateConfirmRequest(RequestModel):
+    selected_items: list[AggregationUpdateChoice] = Field(default_factory=list, max_length=20000)

@@ -22,6 +22,9 @@ from app.models.collaboration_sync import (
 from app.schemas.collaboration_sync import (
     AccountRequest, AccountRoleRequest, BootstrapRequest, ExportRequest, LibraryGrantRequest, PeerRequest,
     SharedLibraryApplyRequest,
+    SharingPreferenceRequest, AggregationUpdateRequest, AggregationUpdateConfirmRequest,
+    DepartmentPublicationApplyRequest,
+    LibraryFieldEditRequest,
     ActiveRequest, AggregationBatchCreateRequest, AggregationPublishRequest, AggregationBatchSubmitRequest, ApplyPackageRequest, LoginRequest, PasswordRequest, ProvisioningRequest, ResponsibilityRequest, UnitRequest,
 )
 from app.services.collaboration_identity_service import (
@@ -39,6 +42,12 @@ from app.services.collaboration_sync_service import (
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
+
+
+@router.post("/employee-config/import")
+async def import_employee_config(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    from app.services.collaboration_enrollment_service import import_enrollment
+    return import_enrollment(db, await file.read(64 * 1024 + 1))
 
 
 
@@ -171,8 +180,22 @@ def revoke_trusted_device(fingerprint: str, user: User = Depends(current_user), 
 def add_account(request: AccountRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_admin(db, user.id)
     created = create_account(db, request, user.id, request.role)
+    created.employee_no = request.employee_no
     db.commit()
     return identity(db, created)
+
+
+@router.get("/accounts/{target_user_id}/employee-config")
+def export_employee_config(target_user_id: int, department_code: str,
+                           user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    if not department_code.strip() or len(department_code) > 80:
+        raise HTTPException(400, "部门标识无效")
+    from app.services.collaboration_enrollment_service import export_enrollment
+    key = device_signing_identity(db, user.id)["private_key"]
+    document = export_enrollment(db, user.id, target_user_id, department_code.strip(), key)
+    db.commit()
+    return JSONResponse(document, headers={"Content-Disposition": "attachment; filename=patwiki-employee-config.json"})
 
 
 @router.post("/accounts/provision")
@@ -527,6 +550,13 @@ def apply_package_file(package_uid: str, request: ApplyPackageRequest, user: Use
     return apply_package(db, user.id, package_uid, request)
 
 
+@router.post("/packages/{package_uid}/department-publication")
+def import_department_publication(package_uid: str, request: DepartmentPublicationApplyRequest,
+    user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_sync_service import apply_department_publication
+    return apply_department_publication(db, user.id, package_uid, request.decisions)
+
+
 @router.get("/packages")
 def get_packages(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return {"items": list_packages(db, user.id)}
@@ -563,3 +593,55 @@ def submit_sync_aggregation_batch(batch_uid: str, request: AggregationBatchSubmi
 def publish_sync_aggregation_batch(batch_uid: str, request: AggregationPublishRequest,
                                    user: User = Depends(current_user), db: Session = Depends(get_db)):
     return publish_aggregation_batch(db, user.id, batch_uid, request)
+
+
+@router.get("/sharing-preference")
+def get_sharing_preference(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_update_service import sharing_preference
+    return sharing_preference(db, user.id)
+
+
+@router.put("/library-fields/{field_id}")
+def edit_library_field(field_id: int, request: LibraryFieldEditRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.models import DatabaseMembership
+    from app.models.collaboration_sync import SyncLibraryField
+    row = db.get(SyncLibraryField, field_id)
+    if not row:
+        raise HTTPException(404, "来源库字段不存在")
+    membership = db.query(DatabaseMembership).filter_by(user_id=user.id, database_id=row.database_id).first()
+    if not roles(db, user.id) & {"system_admin", "department_leader"} and not (membership and membership.role in {"owner", "editor"}):
+        raise HTTPException(403, "没有此来源库的编辑权限")
+    database = db.get(PatentDatabase, row.database_id)
+    if database.kind == "department_master" and not roles(db, user.id) & {"system_admin", "department_leader"}:
+        raise HTTPException(403, "普通成员不能编辑部门已确认字段")
+    before = row.local_value if row.has_overlay else row.baseline_value
+    if before is not None and type(before) is not type(request.value) and request.value is not None:
+        raise HTTPException(400, "字段类型不一致")
+    row.local_value = request.value
+    row.has_overlay = request.value != row.baseline_value
+    row.editor_user_id = user.id
+    row.reason = request.reason
+    audit(db, user.id, "library_field_edited", detail={"field_id": field_id, "source_database_uid": row.source_database_uid,
+        "field_key": row.field_key, "before": before, "after": request.value, "reason": request.reason})
+    db.commit()
+    return {"status": "saved"}
+
+
+@router.put("/sharing-preference")
+def put_sharing_preference(request: SharingPreferenceRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_update_service import save_sharing_preference
+    return save_sharing_preference(db, user.id, request)
+
+
+@router.post("/aggregation-batches/{batch_uid}/external-updates/preview")
+def preview_aggregation_updates(batch_uid: str, request: AggregationUpdateRequest,
+    user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_update_service import preview_updates
+    return preview_updates(db, user.id, batch_uid, request.connector_id)
+
+
+@router.post("/aggregation-batches/{batch_uid}/external-updates/confirm")
+def confirm_aggregation_updates(batch_uid: str, request: AggregationUpdateConfirmRequest,
+    user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_update_service import confirm_updates
+    return confirm_updates(db, user.id, batch_uid, [item.model_dump() for item in request.selected_items])

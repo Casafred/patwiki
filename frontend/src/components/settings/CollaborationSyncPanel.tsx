@@ -58,11 +58,14 @@ export default function CollaborationSyncPanel() {
   const [busy, setBusy] = useState(false)
   const [loginName, setLoginName] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [employeeNo, setEmployeeNo] = useState('')
   const [password, setPassword] = useState('')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmNewPassword, setConfirmNewPassword] = useState('')
   const [setupToken, setSetupToken] = useState('')
+  const [departmentCode, setDepartmentCode] = useState('')
+  const [configAccount, setConfigAccount] = useState('')
   const [newRole, setNewRole] = useState('member')
   const [newUnit, setNewUnit] = useState('')
   const [targetUser, setTargetUser] = useState('')
@@ -76,6 +79,9 @@ export default function CollaborationSyncPanel() {
   const [grantActions, setGrantActions] = useState<string[]>(['export'])
   const [grantEditPassword, setGrantEditPassword] = useState('')
   const [exportDatabaseIds, setExportDatabaseIds] = useState<number[]>([])
+  const [updateDatabaseIds, setUpdateDatabaseIds] = useState<number[]>([])
+  const [updateFields, setUpdateFields] = useState<string[]>(['legal_status'])
+  const [exportMode, setExportMode] = useState<'full' | 'delta'>('full')
   const [exportProducts, setExportProducts] = useState<number[]>([])
   const [exportFields, setExportFields] = useState<string[]>(fields)
   const [exportPreview, setExportPreview] = useState<{ count: number; key: string } | null>(null)
@@ -89,16 +95,16 @@ export default function CollaborationSyncPanel() {
   const [sharedSources, setSharedSources] = useState<Array<{ database_uid: string; name: string }>>([])
   const [applyPackageUid, setApplyPackageUid] = useState('')
   const [applyDatabaseId, setApplyDatabaseId] = useState('')
-  const [applyEditPassword, setApplyEditPassword] = useState('')
+  const [applyEditPassword] = useState('')
   const [applyPreview, setApplyPreview] = useState<ApplyPreview | null>(null)
   const [applyDecisions, setApplyDecisions] = useState<Record<string, 'local' | 'remote'>>({})
 
   const isAdmin = useMemo(() => Boolean(identity?.roles.some(role => role === 'system_admin' || role === 'department_leader')), [identity])
   const grantTargetIsViewer = accounts.find(account => String(account.id) === grantUser)?.roles.includes('viewer') || false
-  const exportRequest = useMemo(() => ({ database_ids: exportDatabaseIds,
+  const exportRequest = useMemo(() => ({ database_ids: exportDatabaseIds, mode: exportMode,
     product_ids: exportProducts.length ? exportProducts : undefined, fields: exportFields,
     recipient_names: recipients.split(',').map(value => value.trim()).filter(Boolean), password: packagePassword }),
-  [exportDatabaseIds, exportProducts, exportFields, recipients, packagePassword])
+  [exportDatabaseIds, exportProducts, exportFields, recipients, packagePassword, exportMode])
   const exportRequestKey = JSON.stringify(exportRequest)
 
   const loadReferenceData = useCallback(async () => {
@@ -163,7 +169,10 @@ export default function CollaborationSyncPanel() {
     if (!identity) return
     // These async requests populate the authenticated collaboration view.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void Promise.all([loadAdminData(), loadPackages()]).catch(error => setMessage(getErrorMessage(error)))
+    void Promise.all([loadAdminData(), loadPackages(), collaborationSyncApi.sharingPreference().then(preference => {
+      if (preference.shared_database_ids.length) setExportDatabaseIds(preference.shared_database_ids)
+      setUpdateDatabaseIds(preference.update_database_ids); setUpdateFields(preference.update_fields)
+    })]).catch(error => setMessage(getErrorMessage(error)))
   }, [identity, loadAdminData, loadPackages])
 
   const storeSession = (result: { token: string; user: CollaborationIdentity }) => {
@@ -211,8 +220,8 @@ export default function CollaborationSyncPanel() {
     setBusy(true)
     try {
       await collaborationSyncApi.createAccount({ username: loginName, display_name: displayName || loginName,
-        password, role: newRole, unit_id: newUnit ? Number(newUnit) : undefined })
-      setMessage(`协同账号 ${loginName} 已创建`); setLoginName(''); setDisplayName(''); setPassword('')
+        password, role: newRole, unit_id: newUnit ? Number(newUnit) : undefined, employee_no: employeeNo.trim() || undefined })
+      setMessage(`协同账号 ${loginName} 已创建`); setLoginName(''); setDisplayName(''); setPassword(''); setEmployeeNo('')
       await loadAdminData()
     } catch (error: unknown) { setMessage(getErrorMessage(error, '创建账号失败')) }
     finally { setBusy(false) }
@@ -295,7 +304,7 @@ export default function CollaborationSyncPanel() {
   }
 
   const handlePreviewExport = async () => {
-    if (!exportDatabaseIds.length || !recipients.trim() || !packagePassword) return
+    if (!exportDatabaseIds.length || !packagePassword) return
     setBusy(true); setMessage('')
     try {
       const result = await collaborationSyncApi.previewExport(exportRequest)
@@ -355,6 +364,7 @@ export default function CollaborationSyncPanel() {
     </div>
 
     {!identity && <div style={{ display: 'grid', gap: 10, maxWidth: 680 }}>
+      <label style={{ fontSize: 13 }}>成员初始化 / 权限更新文件<input type="file" accept=".json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (!file) return; setBusy(true); void collaborationSyncApi.importEmployeeConfig(file).then(result => { setLoginName(result.username); setConfigured(true); setMessage(`成员配置已导入：${result.username}`) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)); event.target.value = '' }} /></label>
       {configured ? <><strong style={{ fontSize: 13 }}>协同账号登录</strong>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
           <input style={inputStyle} value={loginName} onChange={event => setLoginName(event.target.value)} placeholder="协同账号" autoComplete="username" />
@@ -401,12 +411,18 @@ export default function CollaborationSyncPanel() {
         <div style={{ borderTop: '2px solid #0f766e', paddingTop: 10 }}>
           <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>协同账号</h4>
           <div style={{ display: 'grid', gap: 7, marginBottom: 10 }}>
+            <input style={inputStyle} value={departmentCode} placeholder="部门标识" onChange={event => setDepartmentCode(event.target.value)} />
+            <select style={inputStyle} aria-label="成员配置账号" value={configAccount} onChange={event => setConfigAccount(event.target.value)}><option value="">选择成员配置账号</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.display_name || account.username}</option>)}</select>
+            <button style={buttonStyle} disabled={!departmentCode.trim() || !configAccount} onClick={() => void collaborationSyncApi.employeeConfig(Number(configAccount), departmentCode.trim()).then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'patwiki-employee-config.json'; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载成员初始化 / 权限配置</button>
+          </div>
+          <div style={{ display: 'grid', gap: 7, marginBottom: 10 }}>
             <button style={buttonStyle} onClick={() => void collaborationSyncApi.provisionTemplate().then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'patwiki-account-provision-template.json'; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载批量账号模板</button>
             <input aria-label="导入批量账号配置" type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (!file) return; setBusy(true); void collaborationSyncApi.provisionFile(file).then(() => { setMessage('批量账号已创建'); return loadAdminData() }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)); event.target.value = '' }} />
           </div>
           <div style={{ display: 'grid', gap: 7 }}>
             <input style={inputStyle} value={loginName} onChange={event => setLoginName(event.target.value)} placeholder="登录账号" />
             <input style={inputStyle} value={displayName} onChange={event => setDisplayName(event.target.value)} placeholder="显示名称" />
+            <input style={inputStyle} value={employeeNo} onChange={event => setEmployeeNo(event.target.value)} placeholder="员工工号" />
             <input style={inputStyle} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="初始密码（至少 10 位）" />
             <select style={inputStyle} value={newRole} onChange={event => setNewRole(event.target.value)}>
               <option value="member">组员</option><option value="group_leader">组长</option><option value="department_leader">部门领导</option><option value="system_admin">维护管理员</option><option value="viewer">只读协作者</option>
@@ -455,13 +471,17 @@ export default function CollaborationSyncPanel() {
           <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>生成加密共享文件</h4>
           <div style={{ display: 'grid', gap: 8 }}>
             <select multiple style={{ ...inputStyle, height: 82 }} value={exportDatabaseIds.map(String)} onChange={event => setExportDatabaseIds(Array.from(event.target.selectedOptions, option => Number(option.value)))}>{databases.map(database => <option key={database.id} value={database.id}>{database.name}</option>)}</select>
+            <select aria-label="导出模式" style={inputStyle} value={exportMode} onChange={event => setExportMode(event.target.value as 'full' | 'delta')}><option value="full">完整文件</option><option value="delta">仅导出变更</option></select>
+            <label>统一更新范围<select multiple aria-label="统一更新范围" style={{ ...inputStyle, width: '100%', height: 82 }} value={updateDatabaseIds.map(String)} onChange={event => setUpdateDatabaseIds(Array.from(event.target.selectedOptions, option => Number(option.value)))}>{databases.map(database => <option key={database.id} value={database.id}>{database.name}</option>)}</select></label>
+            <div>{['legal_status', 'title', 'abstract', 'applicant', 'assignee', 'publication_number', 'application_number', 'grant_date'].map(field => <label key={field} style={{ display: 'inline-block', marginRight: 8 }}><input type="checkbox" checked={updateFields.includes(field)} onChange={event => setUpdateFields(current => event.target.checked ? [...current, field] : current.filter(value => value !== field))} />{fieldLabel(field)}</label>)}</div>
+            <button style={buttonStyle} disabled={busy} onClick={() => void collaborationSyncApi.saveSharingPreference({ shared_database_ids: exportDatabaseIds, update_database_ids: updateDatabaseIds, update_fields: updateFields }).then(() => setMessage('共享与统一更新范围已保存')).catch(error => setMessage(getErrorMessage(error)))}>保存共享与更新范围</button>
             <div style={{ fontSize: 11, color: '#64748b' }}>可选择多个数据库；留出至少一个库后再核对范围。</div>
             <select multiple style={{ ...inputStyle, height: 82 }} value={exportProducts.map(String)} onChange={event => setExportProducts(Array.from(event.target.selectedOptions, option => Number(option.value)))}>{products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}</select>
             <div style={{ fontSize: 11, color: '#64748b' }}>不选品类时按该库全部记录导出；被授权范围会由服务器再次过滤。</div>
             <details><summary style={{ cursor: 'pointer', fontSize: 12 }}>同步字段（已选 {exportFields.length} 项）</summary><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '4px 12px', maxHeight: 180, overflow: 'auto', padding: '8px 0' }}>{fields.map(field => <label key={field} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}><input type="checkbox" checked={exportFields.includes(field)} disabled={field === 'title'} onChange={event => setExportFields(current => event.target.checked ? [...current, field] : current.filter(item => item !== field))} />{fieldLabel(field)}</label>)}</div></details>
             <input style={inputStyle} value={recipients} onChange={event => setRecipients(event.target.value)} placeholder="接收账号，多个账号用逗号分隔" />
             <input style={inputStyle} type="password" value={packagePassword} onChange={event => setPackagePassword(event.target.value)} placeholder="共享密码（至少 10 位，需另行告知接收方）" />
-            <button style={{ ...buttonStyle, background: '#edf5f4', borderColor: '#78b9aa' }} disabled={busy || !exportDatabaseIds.length || packagePassword.length < 10 || !recipients.trim()} onClick={() => void handlePreviewExport()}>核对导出范围</button>
+            <button style={{ ...buttonStyle, background: '#edf5f4', borderColor: '#78b9aa' }} disabled={busy || !exportDatabaseIds.length || packagePassword.length < 10} onClick={() => void handlePreviewExport()}>核对导出范围</button>
             {exportPreview && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, color: '#334155' }}><span>{exportPreview.key === exportRequestKey ? `${exportPreview.count} 条记录待确认` : '导出范围已变更，请重新核对'}</span><button style={buttonStyle} disabled={busy || exportPreview.key !== exportRequestKey} onClick={() => void handleCreateExport()}>确认并生成文件</button></div>}
           </div>
         </div>
@@ -483,13 +503,14 @@ export default function CollaborationSyncPanel() {
         <select aria-label="选择共享同步包" style={inputStyle} value={selectedPackage} onChange={event => { const value = event.target.value; setSelectedPackage(value); setSharedSources([]); if (value) void collaborationSyncApi.packageSources(value).then(result => setSharedSources(result.items)).catch(error => setMessage(getErrorMessage(error))) }}>
           <option value="">选择已导入的成员文件</option>{packages.filter(item => item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status)).map(item => <option key={item.package_uid} value={item.package_uid}>{item.package_uid}</option>)}
         </select>
-        {sharedSources.map(source => <div key={source.database_uid} style={{ display: 'flex', gap: 8, padding: '8px 0', flexWrap: 'wrap' }}><span>{source.name}</span><button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.applySharedLibrary(selectedPackage, source.database_uid).then(async result => { setMessage(`共享库导入完成：${String(result.status)}`); await Promise.all([loadPackages(), loadReferenceData()]) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>建立或更新共享库</button></div>)}
+        {packages.find(item => item.package_uid === selectedPackage)?.package_type === 'department_publication'
+          ? <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.applyDepartmentPublication(selectedPackage).then(async result => { setApplyDatabaseId(String(result.database_id)); setMessage(`部门总库已更新，待审冲突 ${result.pending_conflicts} 项`); await Promise.all([loadPackages(), loadReferenceData()]); if (result.pending_conflicts) { setApplyPackageUid(selectedPackage); const next = await collaborationSyncApi.previewApply(selectedPackage, { database_id: result.database_id }); setApplyPreview(next as ApplyPreview) } }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>建立或更新部门总库</button>
+          : sharedSources.map(source => <div key={source.database_uid} style={{ display: 'flex', gap: 8, padding: '8px 0', flexWrap: 'wrap' }}><span>{source.name}</span><button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.applySharedLibrary(selectedPackage, source.database_uid).then(async result => { setMessage(`共享库导入完成：${String(result.status)}`); await Promise.all([loadPackages(), loadReferenceData()]) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>建立或更新共享库</button></div>)}
         <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>同步包收发记录</h4>
         {packages.length === 0 ? <div style={{ fontSize: 12, color: '#64748b' }}>暂无同步包</div> : packages.map((item: CollaborationPackage) => <div key={item.package_uid} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', alignItems: 'center', gap: 8, borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><span style={{ overflowWrap: 'anywhere' }}>{item.direction === 'inbox' ? '收到' : '发出'} · {item.package_uid} · {item.count} 条 · {item.status} · {item.signature_status === 'trusted' || item.signature_status === 'signed' ? '签名' : item.signature_status === 'signed_untrusted' ? '待信任' : '未签名'}</span>{item.direction === 'outbox' && <button style={buttonStyle} onClick={() => void collaborationSyncApi.download(item.package_uid).then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${item.package_uid}.pwshare`; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载</button>}{item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status) && <button style={buttonStyle} disabled={busy || !databases.length} onClick={() => void handlePreviewApply(item.package_uid)}>预览主表应用</button>}<button style={buttonStyle} onClick={() => void handleShowRecords(item.package_uid)}>查看只读记录</button></div>)}
         {applyPackageUid && <div style={{ display: 'grid', gap: 8, marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
           <strong style={{ fontSize: 12 }}>应用到本地主表 · {applyPackageUid}</strong>
           <select style={inputStyle} value={applyDatabaseId} onChange={event => { setApplyDatabaseId(event.target.value); setApplyPreview(null) }}><option value="">选择本机目标数据库</option>{databases.map(database => <option key={database.id} value={database.id}>{database.name}</option>)}</select>
-          {!isAdmin && <input style={inputStyle} type="password" value={applyEditPassword} onChange={event => setApplyEditPassword(event.target.value)} placeholder="编辑授权密码" />}
           <button style={buttonStyle} disabled={busy || !applyDatabaseId} onClick={() => void handlePreviewApply(applyPackageUid)}>重新核对差异</button>
           {applyPreview && <>
             <div style={{ fontSize: 12, color: '#334155' }}>新增 {applyPreview.create_count} 条 · 更新 {applyPreview.update_count} 条 · 无变化 {applyPreview.unchanged_count} 条 · 冲突 {applyPreview.conflicts.length} 项</div>

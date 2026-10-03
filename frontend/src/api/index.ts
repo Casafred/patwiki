@@ -380,6 +380,7 @@ export const commentApi = {
 }
 
 export const patentApi = {
+  collaborationStates: (id: number): Promise<{ items: Array<{ field_key: string; baseline_value: unknown; local_value: unknown; source?: unknown; editor?: { name: string } | null; state: string; reason?: string | null }>; library_fields?: Array<{ database_name: string; field_key: string; baseline_value: unknown; local_value: unknown; state: string; editor?: string | null }> }> => api.get(`/patents/${id}/collaboration-states`),
   list: (params: JsonObject = {}): Promise<PatentListResponse> =>
     api.get('/patents', { params }),
 
@@ -877,6 +878,11 @@ export const sharingApi = {
 }
 
 export const collaborationSyncApi = {
+  applyDepartmentPublication: (packageUid: string): Promise<{ database_id: number; pending_conflicts: number }> => api.post(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/department-publication`, {}),
+  sharingPreference: (): Promise<{ shared_database_ids: number[]; update_database_ids: number[]; update_fields: string[] }> => api.get('/collaboration-sync/sharing-preference'),
+  saveSharingPreference: (data: { shared_database_ids: number[]; update_database_ids: number[]; update_fields: string[] }): Promise<unknown> => api.put('/collaboration-sync/sharing-preference', data),
+  previewAggregationUpdates: (batchUid: string, connectorId: number): Promise<SyncUpdateBatch> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/external-updates/preview`, { connector_id: connectorId }),
+  confirmAggregationUpdates: (batchUid: string, selectedItems: { item_id: number; fields: string[] }[]): Promise<SyncUpdateBatch> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/external-updates/confirm`, { selected_items: selectedItems }),
   setupStatus: (): Promise<{ configured: boolean; setup_token_path?: string | null }> => api.get('/collaboration-sync/setup-status'),
   bootstrap: (data: { username: string; password: string; display_name: string; setup_token: string }): Promise<{ token: string; expires_at: string; user: CollaborationIdentity }> => api.post('/collaboration-sync/bootstrap', data),
   login: (data: { username: string; password: string }): Promise<{ token: string; expires_at: string; user: CollaborationIdentity }> => api.post('/collaboration-sync/login', data),
@@ -888,7 +894,7 @@ export const collaborationSyncApi = {
   trustedDevices: (): Promise<{ items: Array<{ fingerprint: string; name: string; public_key: string; revoked: boolean; created_at?: string | null }> }> => api.get('/collaboration-sync/devices/trusted'),
   trustDevice: (data: { name: string; public_key: string }): Promise<{ fingerprint: string; name: string }> => api.post('/collaboration-sync/devices/trusted', data),
   revokeTrustedDevice: (fingerprint: string): Promise<{ fingerprint: string; revoked: boolean }> => api.delete(`/collaboration-sync/devices/trusted/${encodeURIComponent(fingerprint)}`),
-  createAccount: (data: { username: string; password: string; display_name: string; role: string; unit_id?: number }): Promise<CollaborationIdentity> => api.post('/collaboration-sync/accounts', data),
+  createAccount: (data: { username: string; password: string; display_name: string; role: string; unit_id?: number; employee_no?: string }): Promise<CollaborationIdentity> => api.post('/collaboration-sync/accounts', data),
   setAccountActive: (userId: number, active: boolean): Promise<{ user_id: number; active: boolean }> => api.patch(`/collaboration-sync/accounts/${userId}/active`, { active }),
   setAccountRole: (userId: number, role: string, unitId?: number): Promise<CollaborationIdentity> => api.patch(`/collaboration-sync/accounts/${userId}/role`, { role, unit_id: unitId }),
   units: (): Promise<Array<{ id: number; name: string; unit_type: string; team_type?: string | null; parent_id?: number | null }>> => api.get('/collaboration-sync/organization/units'),
@@ -897,12 +903,18 @@ export const collaborationSyncApi = {
   grants: (): Promise<{ items: Array<{ grant_uid: string; username: string; database_id: number; database_name: string; fields: string[]; product_ids: number[]; actions: string[]; expires_at?: string | null; revoked: boolean }> }> => api.get('/collaboration-sync/permissions/library-grants'),
   createGrant: (data: { user_id: number; database_id: number; product_ids: number[]; fields: string[]; actions: string[]; edit_password?: string; expires_days: number }): Promise<Record<string, unknown>> => api.post('/collaboration-sync/permissions/library-grants', data),
   revokeGrant: (grantUid: string): Promise<{ success: boolean }> => api.delete(`/collaboration-sync/permissions/library-grants/${encodeURIComponent(grantUid)}`),
-  previewExport: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number }): Promise<{ count: number; fields: string[]; estimated_bytes?: number | null }> => api.post('/collaboration-sync/packages/preview-export', data),
-  exportPackage: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number }): Promise<{ package_uid: string; path: string; count: number; file_hash: string }> => api.post('/collaboration-sync/packages/export', data),
+  previewExport: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number; mode?: 'full' | 'delta' }): Promise<{ count: number; fields: string[]; estimated_bytes?: number | null }> => api.post('/collaboration-sync/packages/preview-export', data),
+  exportPackage: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number; mode?: 'full' | 'delta' }): Promise<{ package_uid: string; path: string; count: number; file_hash: string }> => api.post('/collaboration-sync/packages/export', data),
   createAggregationBatch: (data: { name: string; target_database_id: number; package_uids?: string[] }): Promise<Record<string, unknown>> => api.post('/collaboration-sync/aggregation-batches', data),
   packageSources: (packageUid: string): Promise<{ items: Array<{ database_uid: string; name: string }> }> => api.get(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/sources`),
   applySharedLibrary: (packageUid: string, sourceDatabaseUid: string): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/shared-library`, { source_database_uid: sourceDatabaseUid }),
   provisionTemplate: (): Promise<Blob> => api.get('/collaboration-sync/accounts/provision/template', { responseType: 'blob' }),
+  employeeConfig: (userId: number, departmentCode: string): Promise<Blob> => api.get(`/collaboration-sync/accounts/${userId}/employee-config`, { params: { department_code: departmentCode }, responseType: 'blob' }),
+  importEmployeeConfig: (file: File): Promise<{ username: string; status: string }> => {
+    const data = new FormData()
+    data.append('file', file)
+    return api.post('/collaboration-sync/employee-config/import', data)
+  },
   provisionFile: (file: File): Promise<Record<string, unknown>> => {
     const data = new FormData()
     data.append('file', file)

@@ -73,11 +73,18 @@ class SnapshotManifest(WireModel):
     databases: list[dict] = Field(max_length=500)
     signature_status: Literal["not_signed", "signed"] = "not_signed"
     signer_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    signer_public_key: str | None = None
+    update_requests: list[dict] = Field(default_factory=list, max_length=MAX_RECORDS)
+    external_update_results: dict = Field(default_factory=dict)
+    export_mode: Literal["full", "delta"] = "full"
+    base_package_uid: str | None = Field(default=None, pattern=UID_PATTERN)
+    recipient_names: list[str] = Field(default_factory=list, max_length=100)
+    selection: dict = Field(default_factory=dict)
 
 
 class SnapshotPermissions(WireModel):
     access: Literal["viewer"] = "viewer"
-    recipients: list[str] = Field(min_length=1, max_length=100)
+    recipients: list[str] = Field(default_factory=list, max_length=100)
     fields: list[str] = Field(min_length=1, max_length=100)
     can_edit: Literal[False] = False
     can_redistribute: Literal[False] = False

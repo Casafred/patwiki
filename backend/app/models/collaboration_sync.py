@@ -30,6 +30,15 @@ class CollaborationSession(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class CollaborationEnrollment(Base):
+    __tablename__ = "collaboration_enrollments"
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    department_code = Column(String(80), nullable=False)
+    employee_no = Column(String(50), nullable=False)
+    issuer_public_key = Column(String(100), nullable=False)
+    accepted_at = Column(DateTime, nullable=False)
+
+
 class TrustedSyncDevice(Base):
     __tablename__ = "collaboration_trusted_devices"
 
@@ -125,6 +134,40 @@ class PermissionGrant(Base):
     revoked_at = Column(DateTime, nullable=True)
     password_digest = Column(String(255), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class SyncSharingPreference(Base):
+    __tablename__ = "collaboration_sync_sharing_preferences"
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    shared_database_ids = Column(JSON, nullable=False, default=list)
+    update_database_ids = Column(JSON, nullable=False, default=list)
+    update_fields = Column(JSON, nullable=False, default=list)
+
+
+class SyncExportRecordState(Base):
+    __tablename__ = "collaboration_sync_export_record_states"
+    __table_args__ = (UniqueConstraint("package_uid", "entity_uid", name="uq_sync_export_record_state"),)
+    id = Column(Integer, primary_key=True)
+    package_uid = Column(String(80), nullable=False, index=True)
+    entity_uid = Column(String(100), nullable=False)
+    content_hash = Column(String(64), nullable=False)
+
+
+class SyncLibraryField(Base):
+    __tablename__ = "collaboration_sync_library_fields"
+    __table_args__ = (UniqueConstraint("database_id", "patent_id", "source_database_uid", "field_key", name="uq_sync_library_field"),)
+    id = Column(Integer, primary_key=True)
+    database_id = Column(Integer, ForeignKey("patent_databases.id", ondelete="CASCADE"), nullable=False, index=True)
+    patent_id = Column(Integer, ForeignKey("patents.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_database_uid = Column(String(100), nullable=False)
+    field_key = Column(String(200), nullable=False)
+    baseline_value = Column(JSON)
+    local_value = Column(JSON)
+    has_overlay = Column(Boolean, nullable=False, default=False)
+    editor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    reason = Column(Text)
+    package_uid = Column(String(80), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class SyncWorkspace(Base):

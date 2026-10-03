@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Header
 from sqlalchemy import or_
 from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session
@@ -264,6 +264,15 @@ def get_patent(patent_id: int, db: Session = Depends(get_db)):
     if not patent:
         raise NotFoundException("Patent not found")
     return patent
+
+
+@router.get("/{patent_id}/collaboration-states")
+def get_collaboration_states(patent_id: int, authorization: str | None = Header(None), db: Session = Depends(get_db)):
+    from app.services.collaboration_sync_service import patent_edit_states
+    from app.services.collaboration_identity_service import session_user
+    user = session_user(db, authorization) if authorization else None
+    from app.services.collaboration_library_field_service import library_fields
+    return {"items": patent_edit_states(db, patent_id, user.id if user else None), "library_fields": library_fields(db, patent_id)}
 
 
 @router.get("/{patent_id}/family")
@@ -742,11 +751,30 @@ def create_patent(patent_in: PatentCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{patent_id}", response_model=Patent)
-def update_patent(patent_id: int, patent_in: PatentUpdate, db: Session = Depends(get_db)):
+def update_patent(patent_id: int, patent_in: PatentUpdate, authorization: str | None = Header(None), db: Session = Depends(get_db)):
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
         raise NotFoundException("Patent not found")
-    return PatentService.update_patent(db, patent, patent_in)
+    from app.models import PatentDatabase, DatabaseMembership
+    from app.models.collaboration_sync import CollaborationCredential
+    from app.services.collaboration_identity_service import session_user, roles, ADMIN_ROLES
+    user = session_user(db, authorization) if authorization else None
+    scoped = db.query(PatentDatabase).join(PatentDatabaseMembership,
+        PatentDatabaseMembership.database_id == PatentDatabase.id).filter(PatentDatabaseMembership.patent_id == patent.id,
+            PatentDatabase.kind.in_(["shared", "department_master"])).all()
+    if scoped and db.query(CollaborationCredential).first():
+        if not user:
+            from fastapi import HTTPException
+            raise HTTPException(401, "编辑协同数据前请登录")
+        if not roles(db, user.id) & ADMIN_ROLES:
+            editable = db.query(DatabaseMembership).join(PatentDatabase, PatentDatabase.id == DatabaseMembership.database_id).join(
+                PatentDatabaseMembership, PatentDatabaseMembership.database_id == PatentDatabase.id).filter(
+                    DatabaseMembership.user_id == user.id, DatabaseMembership.role.in_(["owner", "editor"]),
+                    PatentDatabaseMembership.patent_id == patent.id, PatentDatabase.kind != "department_master").first()
+            if not editable:
+                from fastapi import HTTPException
+                raise HTTPException(403, "没有个人库或共享库的编辑权限")
+    return PatentService.update_patent(db, patent, patent_in, changed_by=user.username if user else None)
 
 
 @router.delete("/{patent_id}")

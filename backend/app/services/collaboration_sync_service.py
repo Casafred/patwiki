@@ -24,12 +24,14 @@ from app.models.collaboration_sync import (
 )
 from app.services.collaboration_identity_service import PASSWORDS, audit, roles, uid, workspace_dir
 from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, decode_stream, encode_to, file_hash
+from app.services.collaboration_package_codec import json_bytes
 from app.services.patent_identity_service import (
     find_patents_by_identifier_specs_bulk,
     identifier_specs_from_values,
 )
 from app.services.patent_service import PatentService, _stringify_value
 from app.services.patent_database_scope import in_database
+from app.services.collaboration_library_field_service import PRIVATE_FIELDS, plan_library_fields, apply_library_fields
 
 EXPORT_FIELDS = frozenset({
     "application_number", "publication_number", "grant_number", "title", "abstract", "claims",
@@ -153,13 +155,8 @@ def _validate_request(db: Session, user_id: int, request):
     if request.include_attachments:
         raise HTTPException(400, "首期同步包暂不支持附件")
     recipients = list(dict.fromkeys(name.lower() for name in request.recipient_names))
-    if not recipients or any(not name or len(name) > 100 for name in recipients):
+    if any(not name or len(name) > 100 for name in recipients):
         raise HTTPException(400, "必须指定有效接收账号")
-    known_recipients = {row[0].lower() for row in db.query(CollaborationCredential.login_name).join(
-        User, User.id == CollaborationCredential.user_id
-    ).filter(CollaborationCredential.active.is_(True), User.is_active.is_(True)).all()}
-    if not set(recipients).issubset(known_recipients):
-        raise HTTPException(400, "接收人必须先开通有效的协同账号")
     databases = db.query(PatentDatabase).filter(PatentDatabase.id.in_(request.database_ids), PatentDatabase.is_archived.is_(False)).all()
     if len(databases) != len(set(request.database_ids)):
         raise HTTPException(404, "所选数据库不存在或已归档")
@@ -216,8 +213,11 @@ def _assert_record_scope(patent: Patent, request, fields: list[str], privileged:
     raise HTTPException(403, "所选范围包含未授权品类")
 
 
-def _records(db: Session, user_id: int, request, fields: list[str], databases: list[PatentDatabase], node_uid: str):
+def _record_batch(db: Session, user_id: int, request, fields: list[str], databases: list[PatentDatabase], node_uid: str,
+                  *, patent_ids=None, include_tombstones=True):
     query = _query(db, request)
+    if patent_ids is not None:
+        query = query.filter(Patent.id.in_(patent_ids))
     count = query.count()
     if count > MAX_RECORDS:
         raise HTTPException(413, f"单个同步包最多 {MAX_RECORDS} 条记录，请缩小范围")
@@ -255,7 +255,8 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
     products = {item.id: item for item in db.query(Product).filter(Product.id.in_(product_ids)).all()} if product_ids else {}
     history_by_patent: dict[int, list[dict]] = {}
     if patent_ids:
-        for change in db.query(PatentHistory).filter(PatentHistory.patent_id.in_(patent_ids)).order_by(PatentHistory.id).all():
+        for change in db.query(PatentHistory).filter(PatentHistory.patent_id.in_(patent_ids),
+                PatentHistory.source.notin_(["collaboration_sync", "department_publication"])).order_by(PatentHistory.id).all():
             history_by_patent.setdefault(change.patent_id, []).append({
                 "change_uid": change.change_uid, "field_key": change.field_key,
                 "old_value": change.old_value, "new_value": change.new_value,
@@ -277,6 +278,16 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
         scopes = [database_uids[database_id] for database_id in memberships if database_id in database_uids]
         product = products.get(patent.product_id)
         payload = {field: _value(getattr(patent, field)) for field in fields}
+        from app.models.collaboration_sync import SyncLibraryField
+        annotations = db.query(SyncLibraryField).filter(SyncLibraryField.patent_id == patent.id,
+            SyncLibraryField.database_id.in_(request.database_ids)).all()
+        library_values = []
+        for annotation in annotations:
+            library_values.append({"database_uid": database_uids[annotation.database_id], "source_database_uid": annotation.source_database_uid,
+                "field_key": annotation.field_key, "baseline_value": annotation.baseline_value,
+                "value": annotation.local_value if annotation.has_overlay else annotation.baseline_value,
+                "editor_user_uid": db.get(User, annotation.editor_user_id).user_uid if annotation.editor_user_id else None,
+                "reason": annotation.reason})
         if "custom_fields" in payload and isinstance(payload["custom_fields"], dict):
             # Attachment IDs, local paths and download URLs are machine-local.
             payload["custom_fields"] = {
@@ -289,9 +300,9 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
                         "updated_at": _value(patent.updated_at),
                         "scope": {"database_uids": sorted(scopes),
                                   "product": {"code": product.code, "name": product.name} if product else None},
-                        "payload": payload, "field_provenance": {"changes": history_by_patent.get(patent.id, [])}})
+                        "payload": payload, "field_provenance": {"changes": history_by_patent.get(patent.id, []), "library_values": library_values}})
     selected_database_ids = {database.id for database in databases}
-    tombstones = db.query(SyncTombstone).filter(SyncTombstone.entity_type == "patent").all()
+    tombstones = db.query(SyncTombstone).filter(SyncTombstone.entity_type == "patent").yield_per(250) if include_tombstones else []
     for tombstone in tombstones:
         scope = tombstone.scope_json or {}
         if scope.get("database_id") not in selected_database_ids:
@@ -301,8 +312,25 @@ def _records(db: Session, user_id: int, request, fields: list[str], databases: l
                         "origin_node_uid": node_uid, "updated_at": _value(tombstone.deleted_at),
                         "scope": {"database_uids": [database_uids[scope["database_id"]]]},
                         "payload": {}, "base_version": tombstone.base_version,
-                        "field_provenance": {"deleted_at": _value(tombstone.deleted_at)}})
+                        "field_provenance": {"deleted_at": _value(tombstone.deleted_at), "base_version": tombstone.base_version,
+                            "deletion_scope": scope.get("deletion_scope", "library_exit")}})
     return records
+
+
+def _iter_records(db: Session, user_id: int, request, fields: list[str], databases: list[PatentDatabase], node_uid: str):
+    """Keyset pagination bounds patents, histories and memberships per export batch."""
+    last_id = 0
+    while True:
+        ids = [row[0] for row in _query(db, request).filter(Patent.id > last_id).with_entities(Patent.id).limit(250).all()]
+        if not ids:
+            break
+        yield from _record_batch(db, user_id, request, fields, databases, node_uid, patent_ids=ids, include_tombstones=False)
+        last_id = ids[-1]
+    yield from _record_batch(db, user_id, request, fields, databases, node_uid, patent_ids=[])
+
+
+def _records(db: Session, user_id: int, request, fields: list[str], databases: list[PatentDatabase], node_uid: str):
+    return list(_iter_records(db, user_id, request, fields, databases, node_uid))
 
 
 def _validate_export_scope(db: Session, user_id: int, request, fields: list[str], databases: list[PatentDatabase]) -> None:
@@ -372,7 +400,14 @@ def export_package(db: Session, user_id: int, request) -> dict:
     try:
         fields, recipients, databases = _validate_request(db, user_id, request)
         workspace = _workspace(db, user_id)
-        records = _records(db, user_id, request, fields, databases, workspace.node_uid)
+        _validate_export_scope(db, user_id, request, fields, databases)
+        record_count = _query(db, request).count()
+        selected_ids = {item.id for item in databases}
+        record_count += sum(1 for row in db.query(SyncTombstone.scope_json).filter(SyncTombstone.entity_type == "patent").yield_per(250)
+            if (row[0] or {}).get("database_id") in selected_ids)
+        if record_count > MAX_RECORDS:
+            raise HTTPException(413, "同步包记录过多，请缩小范围")
+        records = _iter_records(db, user_id, request, fields, databases, workspace.node_uid)
         signing_identity = device_signing_identity(db, user_id)
     except HTTPException as exc:
         _audit_denial(db, user_id, "package_export_denied", {"database_ids": request.database_ids,
@@ -380,13 +415,56 @@ def export_package(db: Session, user_id: int, request) -> dict:
         raise
     now = utc_now_naive()
     package_uid = uid("pkg")
+    from app.models.collaboration_sync import SyncExportRecordState
+    mode = getattr(request, "mode", "full")
+    base = None
+    scope_uids = sorted(item.database_uid for item in databases)
+    if mode == "delta":
+        for previous in db.query(SyncPackage).filter_by(direction="outbox", created_by=user_id).order_by(SyncPackage.id.desc()).all():
+            data = previous.manifest_json or {}
+            if (sorted(item["database_uid"] for item in data.get("databases", [])) == scope_uids and
+                data.get("fields") == fields and data.get("recipient_names", []) == recipients and
+                data.get("selection") == {"patent_ids": request.patent_ids, "product_ids": request.product_ids}):
+                base = previous
+                break
+        if base is None:
+            mode = "full"
+    def content_hash(record):
+        return hashlib.sha256(json_bytes({key: record.get(key) for key in ("entity_type", "scope", "payload", "field_provenance")})).hexdigest()
+    def previous_hash(entity_uid):
+        if base is None:
+            return None
+        row = db.query(SyncExportRecordState.content_hash).filter_by(package_uid=base.package_uid, entity_uid=entity_uid).first()
+        return row[0] if row else None
+    if mode == "delta":
+        record_count = sum(1 for record in _iter_records(db, user_id, request, fields, databases, workspace.node_uid)
+            if content_hash(record) != previous_hash(record["entity_uid"]))
+    original_records = records
+    def checkpointed_records():
+        for record in original_records:
+            digest = content_hash(record)
+            prior = previous_hash(record["entity_uid"])
+            db.execute(SyncExportRecordState.__table__.insert().values(package_uid=package_uid,
+                entity_uid=record["entity_uid"], content_hash=digest))
+            if mode == "full" or prior != digest:
+                yield record
+    records = checkpointed_records()
     user = db.get(User, user_id)
     manifest = {"package_id": package_uid, "profile": "patent-snapshot-v1", "package_type": getattr(request, "package_type", "snapshot"),
                 "created_at": now.isoformat(), "expires_at": (now + timedelta(days=request.expires_days)).isoformat(),
                 "created_by": {"user_uid": user.user_uid, "username": user.username},
-                "origin_node_uid": workspace.node_uid, "fields": fields, "count": len(records),
+                "origin_node_uid": workspace.node_uid, "fields": fields, "count": record_count,
                 "databases": [{"database_uid": item.database_uid, "name": item.name} for item in databases],
-                "signature_status": "signed", "signer_fingerprint": signing_identity["fingerprint"]}
+                "signature_status": "signed", "signer_fingerprint": signing_identity["fingerprint"],
+                "signer_public_key": signing_identity["public_key"]}
+    from app.services.collaboration_update_service import sharing_preference
+    preference = sharing_preference(db, user_id)
+    update_ids = [item.id for item in databases if item.id in preference["update_database_ids"]]
+    manifest["update_requests"] = [{"entity_uid": row[0], "fields": preference["update_fields"]}
+        for row in _query(db, request).filter(or_(*(in_database(item) for item in update_ids))).with_entities(Patent.entity_uid).yield_per(250)] if update_ids else []
+    manifest["external_update_results"] = getattr(request, "external_update_results", {})
+    manifest.update({"export_mode": mode, "base_package_uid": base.package_uid if base else None,
+        "recipient_names": recipients, "selection": {"patent_ids": request.patent_ids, "product_ids": request.product_ids}})
     permissions = {"access": "viewer", "recipients": recipients, "fields": fields,
                    "can_edit": False, "can_redistribute": False}
     path = workspace_dir() / "outbox" / f"{package_uid}.pwshare"
@@ -414,9 +492,9 @@ def export_package(db: Session, user_id: int, request) -> dict:
     ).all()
     recipient_ids = {name.lower(): user_id for name, user_id in recipient_rows}
     for recipient in recipients:
-        db.add(SyncPackageMember(package_id=package.id, user_id=recipient_ids[recipient],
+        db.add(SyncPackageMember(package_id=package.id, user_id=recipient_ids.get(recipient),
                                  subject_label=recipient, access="viewer", field_scope=fields))
-    audit(db, user_id, "package_exported", package_id=package.id, detail={"count": len(records)})
+    audit(db, user_id, "package_exported", package_id=package.id, detail={"count": record_count})
     try:
         db.commit()
     except Exception:
@@ -424,7 +502,7 @@ def export_package(db: Session, user_id: int, request) -> dict:
         path.unlink(missing_ok=True)
         raise
     return {"package_uid": package_uid, "path": str(path), "file_hash": package.file_hash,
-            "count": len(records), "expires_at": manifest["expires_at"]}
+            "count": record_count, "expires_at": manifest["expires_at"]}
 
 
 async def read_upload(upload: UploadFile) -> bytes:
@@ -476,7 +554,7 @@ def process_package_stream(db: Session, user_id: int, source, password: str, *, 
             db.execute(SyncPackageRecord.__table__.insert().values(package_id=package.id,
                 entity_type=record["entity_type"], entity_uid=record["entity_uid"],
                 record_version=record["record_version"], scope_json=record["scope"],
-                payload_json=record["payload"], field_provenance=record["field_provenance"]))
+                payload_json=record["payload"], field_provenance={**record["field_provenance"], "base_version": record.get("base_version", 0)}))
         source.seek(0)
         decode_stream(source, password, trusted_device_keys(db), save_record)
         audit(db, user_id, "package_imported", package_id=package.id, detail={"count": manifest["count"]})
@@ -537,7 +615,7 @@ def import_package(db: Session, user_id: int, raw: bytes, password: str) -> dict
     for record in records:
         db.add(SyncPackageRecord(package_id=package.id, entity_type=record.get("entity_type", "patent"), entity_uid=record["entity_uid"],
                                  record_version=record["record_version"], scope_json=record["scope"],
-                                 payload_json=record["payload"], field_provenance=record["field_provenance"]))
+                                 payload_json=record["payload"], field_provenance={**record["field_provenance"], "base_version": record.get("base_version", 0)}))
     audit(db, user_id, "package_imported", package_id=package.id, detail={"count": len(records)})
     try:
         db.commit()
@@ -701,6 +779,15 @@ def _apply_context(db: Session, user_id: int, package_uid: str, database_id: int
     database = db.get(PatentDatabase, database_id)
     if not database or database.is_archived:
         raise HTTPException(404, "目标数据库不存在或已归档")
+    if (package.manifest_json or {}).get("export_mode") == "delta":
+        base_uid = package.manifest_json.get("base_package_uid")
+        baseline = db.query(SyncPackage).filter_by(package_uid=base_uid, direction="inbox", status="applied").first()
+        if not baseline:
+            raise HTTPException(409, "缺少增量文件的已应用基线，请补齐前序文件或导入完整文件")
+        applied_target = (baseline.manifest_json or {}).get("applied_target_database_uid")
+        shared_target = (baseline.manifest_json or {}).get("shared_source_results", {}).get(source_database_uid, {}).get("target_database_uid")
+        if database.database_uid not in {applied_target, shared_target}:
+            raise HTTPException(409, "增量基线未应用到该目标库，请导入完整文件")
     selected_target_uid = (package.manifest_json or {}).get("applied_target_database_uid")
     if selected_target_uid and selected_target_uid != database.database_uid and not source_database_uid:
         raise HTTPException(409, "部分应用的同步包必须继续应用到首次选择的本机数据库")
@@ -722,6 +809,12 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
     if not origin_node_uid:
         raise HTTPException(400, "同步包缺少來源設備標識")
     privileged = bool(roles(db, user_id) & PRIVILEGED)
+    if package.package_type == "department_publication" and not privileged:
+        from app.models.collaboration_sync import CollaborationEnrollment
+        enrollment = db.get(CollaborationEnrollment, user_id)
+        signer = manifest.get("signer_public_key")
+        if not ((enrollment and enrollment.issuer_public_key == signer) or package_signer_is_trusted(db, manifest)):
+            raise HTTPException(403, "部门发布文件的签发者与管理员配置不匹配")
     if not privileged and "viewer" in roles(db, user_id):
         raise HTTPException(403, "只读协作者不能应用同步包到主表")
     # A normal authenticated editor uses target database permissions. Legacy
@@ -743,14 +836,25 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
     plans, conflicts = [], []
     for row in records:
         payload = row.payload_json or {}
+        if package.package_type == "department_publication":
+            payload = {key: value for key, value in payload.items() if key in _PUBLICATION_FIELDS}
         if row.entity_type == "patent_tombstone":
             patent = local_patents[row.id]
             membership = db.query(DatabaseMembership).filter_by(user_id=user_id, database_id=database.id).first()
             if not privileged and not (membership and membership.role in {"owner", "editor"}):
                 raise HTTPException(403, "没有目标库的删除权限")
+            deletion_scope = (row.field_provenance or {}).get("deletion_scope", "library_exit")
+            if database.kind == "department_master" and deletion_scope == "library_exit":
+                plans.append({"record": row, "patent": patent, "product": None, "updates": {}, "conflicts": [], "operation": "ignore_delete"})
+                continue
+            if patent is not None and (database.kind == "department_master" or (patent.record_version or 1) > int((row.field_provenance or {}).get("base_version", row.record_version))):
+                conflict = {"entity_uid": row.entity_uid, "field_key": "__delete__", "base_value": (row.field_provenance or {}).get("base_version"), "local_value": patent.record_version, "remote_value": "delete"}
+                conflicts.append(conflict)
+                plans.append({"record": row, "patent": patent, "product": None, "updates": {}, "conflicts": [conflict], "operation": "delete", "confirmed": privileged and database.kind == "department_master"})
+                continue
             if patent is not None and (database.kind or "personal") == "department_master" and not privileged:
                 raise HTTPException(403, "部门总库中的删除必须由管理员确认")
-            plans.append({"record": row, "patent": patent, "product": None, "updates": {}, "conflicts": [], "operation": "delete"})
+            plans.append({"record": row, "patent": patent, "product": None, "updates": {}, "conflicts": [], "operation": "delete", "confirmed": privileged and database.kind == "department_master"})
             continue
         if not payload or set(payload) - EXPORT_FIELDS or "title" not in payload:
             raise HTTPException(400, "共享记录包含不支持的字段")
@@ -761,10 +865,16 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
             raise HTTPException(409, "本机找不到同步包中的品类，请先建立相同品类代码或名称")
         target_membership = db.query(DatabaseMembership).filter_by(user_id=user_id, database_id=database.id).first()
         has_target_edit = bool(target_membership and target_membership.role in {"owner", "editor"})
-        if not privileged and not has_target_edit and not _has_matching_apply_grant(apply_grants, product, set(payload)):
+        if package.package_type != "department_publication" and not privileged and not has_target_edit and not _has_matching_apply_grant(apply_grants, product, set(payload)):
             raise HTTPException(403, "没有匹配此数据库、品类和字段范围的主表应用授权，或编辑密码错误")
         patent = local_patents[row.id]
-        record_plan = {"record": row, "patent": patent, "product": product, "updates": {}, "conflicts": []}
+        if not privileged and database.kind == "department_master" and package.package_type != "department_publication":
+            raise HTTPException(403, "普通成员不能直接修改部门已发布基线")
+        annotations, annotation_conflicts = plan_library_fields(db, package, database, row, patent)
+        payload = {key: value for key, value in payload.items() if key not in PRIVATE_FIELDS}
+        record_plan = {"record": row, "patent": patent, "product": product, "updates": {}, "conflicts": annotation_conflicts,
+            "annotation_plans": annotations}
+        conflicts.extend(annotation_conflicts)
         if patent is None:
             record_plan["updates"] = dict(payload)
             plans.append(record_plan)
@@ -776,6 +886,12 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
                 raise HTTPException(409, "收到早于已接受基线的同步包，请使用来源设备新导出的文件")
             base_value = baseline.last_value if baseline else _NO_BASELINE
             local_value = _local_value(patent, field_key)
+            forced = getattr(package, "_aggregation_conflicts", {}).get((row.entity_uid, field_key))
+            if forced:
+                conflict = {**forced, "local_value": local_value}
+                record_plan["conflicts"].append(conflict)
+                conflicts.append(conflict)
+                continue
             if local_value == remote_value:
                 continue
             if base_value is not _NO_BASELINE and local_value == base_value:
@@ -861,6 +977,31 @@ def _save_remote_changes(db: Session, package: SyncPackage, row: SyncPackageReco
                           operation="upsert"))
 
 
+def patent_edit_states(db: Session, patent_id: int, user_id: int | None = None) -> list[dict]:
+    patent = db.get(Patent, patent_id)
+    if not patent:
+        raise HTTPException(404, "专利不存在")
+    result = []
+    states = db.query(SyncEntityFieldState).filter_by(entity_uid=patent.entity_uid).all()
+    aliases = [row.remote_uid for row in db.query(SyncUidMapping).filter_by(patent_id=patent_id).all()]
+    if aliases:
+        states.extend(db.query(SyncEntityFieldState).filter(SyncEntityFieldState.entity_uid.in_(aliases)).all())
+    for state in states:
+        package = db.query(SyncPackage).filter_by(package_uid=state.accepted_package_uid).first()
+        overlay = db.query(SyncFieldOverlay).filter_by(entity_uid=patent.entity_uid, field_key=state.field_key).first()
+        editor = db.get(User, overlay.editor_user_id) if overlay and overlay.editor_user_id else None
+        result.append({"field_key": state.field_key, "baseline_value": state.last_value,
+            "local_value": _local_value(patent, state.field_key), "origin_node_uid": state.origin_node_uid,
+            "source": (package.manifest_json or {}).get("created_by") if package else None,
+            "source_databases": (package.manifest_json or {}).get("databases") if package else [],
+            "editor": {"user_uid": editor.user_uid, "name": editor.display_name or editor.username} if editor else None,
+            "reason": overlay.reason if overlay else None,
+            "state": "department_confirmed" if package and package.package_type == "department_publication" and (not overlay or overlay.status == "confirmed")
+                else "self_edit" if overlay and overlay.editor_user_id == user_id else "other_edit",
+            "overlay_status": overlay.status if overlay else None})
+    return result
+
+
 def _save_baseline(db: Session, origin_node_uid: str, row: SyncPackageRecord, field_key: str,
                    remote_value, record_version: int, package: SyncPackage | None = None) -> None:
     state = db.query(SyncEntityFieldState).filter_by(
@@ -878,7 +1019,8 @@ def _save_baseline(db: Session, origin_node_uid: str, row: SyncPackageRecord, fi
         overlay = db.query(SyncFieldOverlay).filter_by(entity_uid=row.entity_uid, field_key=field_key).first()
         if overlay is not None:
             overlay.baseline_value = remote_value
-            overlay.status = "confirmed" if package.package_type == "department_publication" else "returned"
+            if overlay.local_value == remote_value:
+                overlay.status = "confirmed" if package.package_type == "department_publication" else "returned"
 
 
 def _create_apply_backup(db: Session, package_uid: str) -> Path | None:
@@ -915,7 +1057,8 @@ def _create_apply_backup(db: Session, package_uid: str) -> Path | None:
 
 
 _RISK_PROJECTION_FIELDS = {"has_risk", "risk_level", "risk_description"}
-_PUBLICATION_FIELDS = EXPORT_FIELDS - {"custom_fields", "notes", "scope_description", "category", "subcategory", "module"}
+_PUBLICATION_FIELDS = EXPORT_FIELDS - {"custom_fields", "notes", "scope_description", "category", "subcategory", "module",
+    "technical_problem", "technical_effect", "technical_solution", "has_risk", "risk_level", "risk_description", "application_status"}
 
 
 def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: User | None) -> None:
@@ -960,16 +1103,50 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
             patent: Patent | None = plan["patent"]
             product: Product | None = plan["product"]
             payload = row.payload_json or {}
+            if package.package_type == "department_publication":
+                payload = {key: value for key, value in payload.items() if key in _PUBLICATION_FIELDS}
+            payload = {key: value for key, value in payload.items() if key not in PRIVATE_FIELDS}
+            if plan.get("operation") == "ignore_delete":
+                unchanged += 1
+                continue
             if plan.get("operation") == "delete":
+                if plan.get("conflicts"):
+                    conflict = plan["conflicts"][0]
+                    key = (conflict["entity_uid"], conflict["field_key"])
+                    if decisions.get(key) not in {"local", "remote"}:
+                        prior = db.query(SyncConflict).filter_by(package_id=package.id, entity_uid=row.entity_uid, field_key="__delete__").first()
+                        if prior is None:
+                            db.add(SyncConflict(conflict_uid=uid("conflict"), package_id=package.id,
+                                origin_node_uid=origin_node_uid, entity_uid=row.entity_uid, entity_type="patent",
+                                field_key="__delete__", base_value=conflict["base_value"], local_value=conflict["local_value"], remote_value="delete"))
+                        pending += 1
+                        continue
+                    audit(db, user_id, "deletion_decided", package_id=package.id,
+                        detail={**conflict, "choice": decisions[key], "reason": getattr(decision_details[key], "reason", None)})
+                    prior = db.query(SyncConflict).filter_by(package_id=package.id, entity_uid=row.entity_uid, field_key="__delete__").first()
+                    if prior:
+                        prior.status = "resolved"
+                        prior.decision = decisions[key]
+                        prior.decided_by = user_id
+                        prior.decided_at = utc_now_naive()
+                    if decisions[key] == "local":
+                        unchanged += 1
+                        continue
                 if patent is not None:
                     membership = db.query(PatentDatabaseMembership).filter_by(
                         patent_id=patent.id, database_id=database.id).first()
                     if membership is not None:
                         db.delete(membership)
-                    if (database.kind or "personal") == "department_master" and privileged:
+                    elif patent.database_id == database.id:
+                        patent.database_id = None
+                    if plan.get("confirmed"):
                         remaining = db.query(PatentDatabaseMembership).filter_by(patent_id=patent.id).count()
-                        if remaining == 0 and patent.database_id == database.id:
+                        if remaining == 0 and patent.database_id in {database.id, None}:
                             patent.deleted_at = utc_now_naive()
+                        db.add(SyncTombstone(entity_uid=patent.entity_uid, entity_type="patent", deleted_by=user_id,
+                            base_version=patent.record_version or 1, scope_json={"database_id": database.id, "deletion_scope": "department_delete"}))
+                    from app.services.semantic_index_service import SemanticIndexService
+                    SemanticIndexService.enqueue_patent(db, patent.id, "collaboration_sync_deleted")
                 unchanged += 1
                 continue
             if patent is None:
@@ -1009,9 +1186,9 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                     prior = db.query(SyncConflict).filter_by(
                         package_id=package.id, entity_uid=key[0], field_key=key[1],
                     ).first()
-                    if choice == "remote":
+                    if choice == "remote" and not key[1].startswith("library:"):
                         updates[key[1]] = conflict["remote_value"]
-                    elif choice == "manual":
+                    elif choice == "manual" and not key[1].startswith("library:"):
                         updates[key[1]] = decision_details[key].value
                     if choice:
                         if prior is None:
@@ -1028,6 +1205,10 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                         prior.decision_reason = getattr(decision_details[key], "reason", None)
                         prior.decided_by = user_id
                         prior.decided_at = utc_now_naive()
+                        audit(db, user_id, "conflict_decided", package_id=package.id, detail={
+                            "entity_uid": key[0], "field_key": key[1], "base_value": prior.base_value,
+                            "local_value": prior.local_value, "remote_value": prior.remote_value,
+                            "final_value": prior.final_value, "choice": choice, "reason": prior.decision_reason})
                     elif prior is None:
                         db.add(SyncConflict(conflict_uid=uid("conflict"), package_id=package.id,
                                             origin_node_uid=origin_node_uid, entity_uid=key[0],
@@ -1057,6 +1238,7 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                     unchanged += 1
                 _ensure_database_memberships(db, patent, database)
             _save_uid_mapping(db, package, row, patent)
+            apply_library_fields(db, package, database, row, patent, plan.get("annotation_plans", []), decisions, decision_details, user_id)
             _save_remote_changes(db, package, row)
             if package.package_type == "department_publication" and patent is not None and plan.get("operation") != "delete":
                 # A department publication updates matching personal copies only;
@@ -1096,6 +1278,8 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
               detail={"created": created, "updated": updated, "unchanged": unchanged,
                       "pending_conflicts": pending, "database_uid": database.database_uid,
                       "backup_path": str(backup_path) if backup_path else None})
+        db.flush()
+        database.patent_count = db.query(Patent.id).filter(in_database(database.id), Patent.deleted_at.is_(None)).count()
         if commit:
             db.commit()
         else:
@@ -1161,6 +1345,32 @@ def apply_shared_library(db: Session, user_id: int, package_uid: str, request) -
         raise
 
 
+def apply_department_publication(db: Session, user_id: int, package_uid: str, decisions) -> dict:
+    package = _visible_package(db, user_id, package_uid)
+    if package.package_type != "department_publication":
+        raise HTTPException(400, "请选择部门总库发布文件")
+    source = (package.manifest_json or {}).get("databases", [])
+    if len(source) != 1:
+        raise HTTPException(400, "部门发布文件必须包含一个总库")
+    database = next((item for item in db.query(PatentDatabase).filter_by(kind="department_master").all()
+        if (item.sync_provenance or {}).get("source_database_uid") == source[0]["database_uid"]), None)
+    try:
+        if database is None:
+            database = PatentDatabase(name="部门总库 · " + source[0].get("name", "总表"), kind="department_master",
+                sync_provenance={"source_database_uid": source[0]["database_uid"],
+                    "origin_node_uid": package.manifest_json.get("origin_node_uid")})
+            db.add(database)
+            db.flush()
+            db.add(DatabaseMembership(user_id=user_id, database_id=database.id, role="viewer"))
+        request = type("PublicationApply", (), {"database_id": database.id, "edit_password": None, "decisions": decisions})()
+        result = apply_package(db, user_id, package_uid, request, commit=False)
+        db.commit()
+        return {**result, "database_id": database.id}
+    except Exception:
+        db.rollback()
+        raise
+
+
 def list_packages(db: Session, user_id: int) -> list[dict]:
     query = db.query(SyncPackage)
     if not (roles(db, user_id) & PRIVILEGED):
@@ -1173,6 +1383,7 @@ def list_packages(db: Session, user_id: int) -> list[dict]:
         if signature_status in {"signed", "trusted"} and not package_signer_is_trusted(db, manifest, trusted_keys):
             signature_status = "signed_untrusted"
         result.append({"package_uid": row.package_uid, "direction": row.direction, "status": row.status,
+                       "package_type": row.package_type,
                        "file_hash": row.file_hash, "count": manifest.get("count", 0),
                        "path": row.path, "created_at": row.created_at.isoformat() if row.created_at else None,
                        "signature_status": signature_status,
@@ -1225,6 +1436,7 @@ def preview_aggregation_batch(db: Session, user_id: int, batch_uid: str) -> dict
         raise HTTPException(404, "汇总批次不存在")
     database = db.get(PatentDatabase, batch.target_database_id)
     summary = {"auto_merge": 0, "new": 0, "deleted": 0, "conflict": 0, "unmatched": 0, "unchanged": 0, "packages": [], "conflicts": []}
+    concurrent = _concurrent_batch_conflicts(db, batch)
     for package_uid in batch.package_uids or []:
         package = db.query(SyncPackage).filter_by(package_uid=package_uid).first()
         if not package:
@@ -1232,6 +1444,9 @@ def preview_aggregation_batch(db: Session, user_id: int, batch_uid: str) -> dict
         records = db.query(SyncPackageRecord).filter_by(package_id=package.id).order_by(SyncPackageRecord.id).all()
         try:
             plans, conflicts = _merge_plan(db, user_id, package, database, records, None)
+            known = {(item["entity_uid"], item["field_key"]) for item in conflicts}
+            conflicts.extend(item for item in concurrent.get(package_uid, {}).values()
+                if (item["entity_uid"], item["field_key"]) not in known)
             summary["conflicts"].extend({**item, "package_uid": package_uid} for item in conflicts)
             counts = {"auto_merge": sum(1 for item in plans if item["patent"] is not None and item["updates"] and not item["conflicts"]),
                       "new": sum(1 for item in plans if item["patent"] is None and item.get("operation") != "delete"), "conflict": len(conflicts),
@@ -1248,16 +1463,43 @@ def preview_aggregation_batch(db: Session, user_id: int, batch_uid: str) -> dict
     return _batch_dict(batch)
 
 
+def _concurrent_batch_conflicts(db: Session, batch: SyncAggregationBatch) -> dict:
+    candidates = {}
+    for package in db.query(SyncPackage).filter(SyncPackage.package_uid.in_(batch.package_uids or []), SyncPackage.status != "applied").all():
+        rows = db.query(SyncPackageRecord).filter_by(package_id=package.id, entity_type="patent").all()
+        resolved = _batch_local_patents(db, rows, package.manifest_json.get("origin_node_uid"))
+        for row in rows:
+            patent = resolved[row.id]
+            for field, value in (row.payload_json or {}).items():
+                baseline = db.query(SyncEntityFieldState).filter_by(origin_node_uid=package.manifest_json.get("origin_node_uid"),
+                    entity_uid=row.entity_uid, field_key=field).first()
+                local = _local_value(patent, field) if patent else None
+                if (baseline and baseline.last_value == value) or (not baseline and value == local):
+                    continue
+                key = (patent.id if patent else row.entity_uid, field)
+                candidates.setdefault(key, []).append((package.package_uid, {"entity_uid": row.entity_uid,
+                    "field_key": field, "base_value": baseline.last_value if baseline else None,
+                    "local_value": local, "remote_value": value}))
+    result = {}
+    for items in candidates.values():
+        values = [item[1]["remote_value"] for item in items]
+        if len({item[0] for item in items}) > 1 and any(value != values[0] for value in values[1:]):
+            for package_uid, conflict in items:
+                result.setdefault(package_uid, {})[(conflict["entity_uid"], conflict["field_key"])] = conflict
+    return result
+
+
 def submit_aggregation_batch(db: Session, user_id: int, batch_uid: str, request) -> dict:
     if not roles(db, user_id) & PRIVILEGED:
         raise HTTPException(403, "只有部门管理员可以提交汇总批次")
     batch = db.query(SyncAggregationBatch).filter_by(batch_uid=batch_uid).first()
     if not batch:
         raise HTTPException(404, "汇总批次不存在")
-    if batch.status in {"submitted", "published"}:
+    if batch.status == "published" or (batch.status == "submitted" and not request.decisions):
         return _batch_dict(batch)
     database = db.get(PatentDatabase, batch.target_database_id)
     results = []
+    concurrent = _concurrent_batch_conflicts(db, batch)
     try:
         for package_uid in batch.package_uids or []:
             package = db.query(SyncPackage).filter_by(package_uid=package_uid).first()
@@ -1266,12 +1508,14 @@ def submit_aggregation_batch(db: Session, user_id: int, batch_uid: str, request)
             if package.status == "applied":
                 continue
             records = db.query(SyncPackageRecord).filter_by(package_id=package.id).all()
+            package._aggregation_conflicts = concurrent.get(package_uid, {})
             _, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
             conflict_keys = {(item["entity_uid"], item["field_key"]) for item in conflicts}
             apply_request = type("BatchApplyRequest", (), {"database_id": database.id, "edit_password": request.edit_password,
                 "decisions": [item for item in request.decisions if (item.entity_uid, item.field_key) in conflict_keys
                     and getattr(item, "package_uid", None) in {None, package_uid}]})()
             results.append(apply_package(db, user_id, package_uid, apply_request, commit=False))
+            del package._aggregation_conflicts
         batch.status = "submitted"
         batch.submitted_at = utc_now_naive()
         batch.preview_json = {**(batch.preview_json or {}), "submit_results": results}
@@ -1292,9 +1536,10 @@ def publish_aggregation_batch(db: Session, user_id: int, batch_uid: str, request
         return _batch_dict(batch)
     export_request = type("PublicationRequest", (), {
         "database_ids": [batch.target_database_id], "patent_ids": None, "product_ids": None,
-        "fields": request.fields, "recipient_names": request.recipient_names,
+        "fields": [field for field in request.fields if field in _PUBLICATION_FIELDS], "recipient_names": request.recipient_names,
         "include_attachments": False, "password": request.password, "expires_days": request.expires_days,
         "package_type": "department_publication",
+        "external_update_results": (batch.preview_json or {}).get("external_update_results", {}),
     })()
     result = export_package(db, user_id, export_request)
     batch.publication_package_uid = result["package_uid"]

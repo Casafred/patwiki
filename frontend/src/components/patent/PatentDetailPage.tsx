@@ -65,6 +65,8 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
   const [aiProcessing, setAiProcessing] = useState<string | null>(null)
   const [aiTaskInfo, setAiTaskInfo] = useState<AITask | null>(null)
   const [history, setHistory] = useState<PatentHistory[]>([])
+  const [collaborationStates, setCollaborationStates] = useState<Array<{ field_key: string; baseline_value: unknown; local_value: unknown; source?: unknown; editor?: { name: string } | null; state: string; reason?: string | null }>>([])
+  const [libraryFields, setLibraryFields] = useState<Array<{ database_name: string; field_key: string; baseline_value: unknown; local_value: unknown; state: string; editor?: string | null }>>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [identifiers, setIdentifiers] = useState<PatentIdentifier[]>([])
   const [fieldSources, setFieldSources] = useState<PatentFieldSource[]>([])
@@ -97,6 +99,10 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
     } finally {
       setHistoryLoading(false)
     }
+  }, [patentId])
+
+  const loadCollaborationStates = useCallback(async () => {
+    try { const result = await patentApi.collaborationStates(patentId); setCollaborationStates(result.items); setLibraryFields(result.library_fields || []) } catch { setCollaborationStates([]); setLibraryFields([]) }
   }, [patentId])
 
   const loadIdentity = useCallback(async () => {
@@ -152,10 +158,10 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPatent()
     void loadMeta()
-    void loadHistory()
+    void loadHistory(); void loadCollaborationStates()
     void loadIdentity()
     void loadAIValues()
-  }, [loadAIValues, loadHistory, loadIdentity, loadMeta, loadPatent])
+  }, [loadAIValues, loadHistory, loadIdentity, loadMeta, loadPatent, loadCollaborationStates])
 
   const handleSave = async () => {
     if (!patent) return
@@ -395,6 +401,8 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
             <section className="patent-detail-section">
               <div className="patent-detail-section-heading"><div><h3>修改审计</h3><p>人工、导入、AI、批量及 MCP 更新的完整变更链。</p></div></div>
               <HistoryTab patent={patent} history={history} loading={historyLoading} onReload={loadHistory} />
+              {collaborationStates.length > 0 && <div style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}><h4>协同编辑状态</h4>{collaborationStates.map(item => <div key={item.field_key} style={{ fontSize: 12, padding: '4px 0' }}>{item.field_key} · {item.state} · 基线 {JSON.stringify(item.baseline_value)} · 当前 {JSON.stringify(item.local_value)}{item.editor ? ` · ${item.editor.name}` : ''}</div>)}</div>}
+              {libraryFields.length > 0 && <div style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}><h4>来源库字段</h4>{libraryFields.map(item => <div key={`${item.database_name}:${item.field_key}`} style={{ fontSize: 12, padding: '4px 0' }}>{item.database_name} · {item.field_key} · {item.state} · {JSON.stringify(item.local_value)}</div>)}</div>}
             </section>
           </div>
         )}

@@ -101,11 +101,12 @@ class CollaborationSyncTest(unittest.TestCase):
         self.row.entity_type = "patent_tombstone"
         self.row.entity_uid = self.patent.entity_uid
         self.row.payload_json = {}
+        self.row.field_provenance = {"deletion_scope": "department_delete", "base_version": 1}
         self.db.commit()
         with patch.object(sync, "roles", return_value={"system_admin"}):
             plans, conflicts = sync._merge_plan(self.db, 1, self.package, self.database, [self.row], None)
         self.assertEqual(plans[0]["operation"], "delete")
-        self.assertEqual(conflicts, [])
+        self.assertEqual(conflicts[0]["field_key"], "__delete__")
         with patch.object(sync, "roles", return_value={"member"}), self.assertRaises(HTTPException):
             sync._merge_plan(self.db, 1, self.package, self.database, [self.row], None)
 
@@ -118,10 +119,12 @@ class CollaborationSyncTest(unittest.TestCase):
         self.row.entity_type = "patent_tombstone"
         self.row.entity_uid = self.patent.entity_uid
         self.row.payload_json = {}
+        self.row.field_provenance = {"deletion_scope": "department_delete", "base_version": 1}
         self.db.commit()
         with patch.object(sync, "roles", return_value={"system_admin"}):
             result = sync.apply_package(self.db, user.id, self.package.package_uid,
-                SimpleNamespace(database_id=self.database.id, edit_password=None, decisions=[]))
+                SimpleNamespace(database_id=self.database.id, edit_password=None, decisions=[SimpleNamespace(
+                    entity_uid=self.row.entity_uid, field_key="__delete__", choice="remote", reason="Approved deletion")]))
         self.assertEqual(result["status"], "applied")
         self.assertIsNotNone(self.patent.deleted_at)
 

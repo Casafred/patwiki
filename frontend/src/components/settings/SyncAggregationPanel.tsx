@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { collaborationSyncApi } from '../../api'
-import type { CollaborationPackage, PatentDatabase } from '../../types'
+import { useEffect, useState } from 'react'
+import { collaborationSyncApi, syncApi } from '../../api'
+import type { CollaborationPackage, PatentDatabase, SyncConnector, SyncUpdateBatch } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 type Conflict = { package_uid: string; entity_uid: string; field_key: string; base_value: unknown; local_value: unknown; remote_value: unknown }
@@ -17,6 +17,20 @@ export default function SyncAggregationPanel({ databases, packages }: { database
   const [decisions, setDecisions] = useState<Record<string, 'local' | 'remote' | 'manual'>>({})
   const [manualValues, setManualValues] = useState<Record<string, string>>({})
   const [reasons, setReasons] = useState<Record<string, string>>({})
+  const [connectors, setConnectors] = useState<SyncConnector[]>([])
+  const [connectorId, setConnectorId] = useState('')
+  const [updateBatch, setUpdateBatch] = useState<SyncUpdateBatch | null>(null)
+  const [updateChoices, setUpdateChoices] = useState<Record<number, string[]>>({})
+  useEffect(() => { void syncApi.connectors().then(result => setConnectors(result.items.filter(item => item.enabled))).catch(error => setMessage(getErrorMessage(error))) }, [])
+  const runUpdate = async (confirm: boolean) => {
+    setBusy(true)
+    try {
+      const result = confirm
+        ? await collaborationSyncApi.confirmAggregationUpdates(batchUid, Object.entries(updateChoices).map(([id, selectedFields]) => ({ item_id: Number(id), fields: selectedFields })))
+        : await collaborationSyncApi.previewAggregationUpdates(batchUid, Number(connectorId))
+      setUpdateBatch(result); if (!confirm) setUpdateChoices({}); setMessage(confirm ? '统一更新已审核' : '统一更新查询完成')
+    } catch (error) { setMessage(getErrorMessage(error)) } finally { setBusy(false) }
+  }
   const run = async (action: () => Promise<Record<string, unknown>>) => {
     setBusy(true)
     try { setBatch(await action()); setMessage('已保存') }
@@ -51,7 +65,7 @@ export default function SyncAggregationPanel({ databases, packages }: { database
       <button disabled={busy || !name.trim() || !databaseId || !selected.length} onClick={() => void run(() => collaborationSyncApi.createAggregationBatch({ name, target_database_id: Number(databaseId), package_uids: selected }))}>创建汇总批次</button>
       {batch && <>
         <strong>{String(batch.name)} · {String(batch.status)}</strong>
-        <button disabled={busy || batch.status !== 'open'} onClick={() => void run(() => collaborationSyncApi.previewAggregationBatch(batchUid))}>预审</button>
+        <button disabled={busy || batch.status === 'published'} onClick={() => void run(() => collaborationSyncApi.previewAggregationBatch(batchUid))}>预审 / 刷新待审冲突</button>
         {preview && <div>自动合并 {preview.auto_merge || 0} · 新增 {preview.new || 0} · 删除 {preview.deleted || 0} · 冲突 {preview.conflict || 0} · 未匹配 {preview.unmatched || 0} · 无变化 {preview.unchanged || 0}</div>}
         {(preview?.conflicts || []).map(item => <div key={conflictKey(item)} style={{ borderTop: '1px solid #d9e0e8', paddingTop: 8, display: 'grid', gap: 6 }}>
           <strong style={{ fontSize: 12 }}>{item.field_key} · {item.entity_uid}</strong>
@@ -61,10 +75,20 @@ export default function SyncAggregationPanel({ databases, packages }: { database
           {decisions[conflictKey(item)] === 'manual' && <textarea aria-label="手工最终值" value={manualValues[conflictKey(item)] || ''} placeholder="最终值" onChange={event => setManualValues(current => ({ ...current, [conflictKey(item)]: event.target.value }))} />}
           <input aria-label="处理理由" placeholder="处理理由" value={reasons[conflictKey(item)] || ''} onChange={event => setReasons(current => ({ ...current, [conflictKey(item)]: event.target.value }))} />
         </div>)}
-        <button disabled={busy || batch.status !== 'open' || !batch.preview} onClick={() => void run(submit)}>提交汇总</button>
+        <button disabled={busy || batch.status === 'published' || !batch.preview} onClick={() => void run(submit)}>提交汇总 / 保存冲突处理</button>
+        {batch.status === 'submitted' && <section style={{ borderTop: '1px solid #d9e0e8', paddingTop: 12 }}>
+          <h5>统一更新专利</h5>
+          <select aria-label="统一更新连接器" value={connectorId} onChange={event => setConnectorId(event.target.value)}><option value="">选择数据连接器</option>{connectors.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+          <button disabled={busy || !connectorId} onClick={() => void runUpdate(false)}>查询成员更新请求</button>
+          {updateBatch?.items.map(item => <div key={item.id} style={{ borderTop: '1px solid #e5e7eb', padding: '8px 0', overflowWrap: 'anywhere' }}>
+            <strong>专利 #{item.patent_id} · {item.status}</strong>{item.error_message && <p role="alert">{item.error_message}</p>}
+            {item.changed_fields.map(field => <label key={field} style={{ display: 'block', fontSize: 12, padding: 4 }}><input type="checkbox" disabled={updateBatch.status !== 'preview'} checked={(updateChoices[item.id] || []).includes(field)} onChange={event => setUpdateChoices(current => ({ ...current, [item.id]: event.target.checked ? [...(current[item.id] || []), field] : (current[item.id] || []).filter(value => value !== field) }))} /> {field}: {JSON.stringify(item.current_fields[field])} → {JSON.stringify(item.candidate_fields[field])}</label>)}
+          </div>)}
+          {updateBatch?.status === 'preview' && <button disabled={busy} onClick={() => void runUpdate(true)}>确认选中的公共字段更新</button>}
+        </section>}
         <input aria-label="发布接收账号" value={recipients} placeholder="发布接收账号，逗号分隔" onChange={event => setRecipients(event.target.value)} />
         <input aria-label="发布密码" type="password" value={password} placeholder="发布密码" onChange={event => setPassword(event.target.value)} />
-        <button disabled={busy || batch.status !== 'submitted' || password.length < 10 || !recipients.trim()} onClick={() => void run(() => collaborationSyncApi.publishAggregationBatch(batchUid, { recipient_names: recipients.split(',').map(value => value.trim()).filter(Boolean), password }))}>发布部门总库</button>
+        <button disabled={busy || batch.status !== 'submitted' || password.length < 10} onClick={() => void run(() => collaborationSyncApi.publishAggregationBatch(batchUid, { recipient_names: recipients.split(',').map(value => value.trim()).filter(Boolean), password }))}>发布部门总库</button>
         {typeof batch.publication_package_uid === 'string' && <div>发布包：{batch.publication_package_uid}</div>}
       </>}
       {message && <div role="status">{message}</div>}

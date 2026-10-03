@@ -1516,6 +1516,7 @@ export interface CollaborationIdentity {
 
 export interface CollaborationPackage {
   package_uid: string
+  package_type?: string
   direction: string
   status: string
   file_hash: string

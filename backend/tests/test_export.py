@@ -124,12 +124,16 @@ class ExportApiTest(unittest.TestCase):
                 "ip_application_control_excel",
                 "patent_analysis_work_file",
                 "daily_patent_accumulation_csv",
+                "company_filing_category_excel",
+                "ip_risk_control_excel",
+                "product_category_master_excel",
+                "daily_patent_accumulation_excel",
             },
         )
 
         listed = self.client.get("/export/templates", params={"database_id": self.database_id})
         self.assertEqual(listed.status_code, 200)
-        self.assertEqual(len(listed.json()), 4)
+        self.assertEqual(len(listed.json()), 8)
 
         csv_template = next(item for item in listed.json() if item["output_format"] == "csv")
         response = self.client.post("/export/csv", json={

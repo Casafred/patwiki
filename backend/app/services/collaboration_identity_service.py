@@ -167,7 +167,8 @@ def identity(db: Session, user: User) -> dict:
     if credential is None:
         raise HTTPException(401, "该用户没有协同账号")
     return {"id": user.id, "user_uid": user.user_uid, "username": credential.login_name,
-            "display_name": user.display_name, "roles": sorted(roles(db, user.id)), "active": credential.active}
+            "display_name": user.display_name, "employee_no": user.employee_no,
+            "roles": sorted(roles(db, user.id)), "active": credential.active}
 
 
 def logout(db: Session, user_id: int, authorization: str | None) -> None:
