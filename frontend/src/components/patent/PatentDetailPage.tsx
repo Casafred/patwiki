@@ -1115,7 +1115,7 @@ function AITab({ patent, aiFields, aiValues, onProcess, onOverride, onClearOverr
          <div className="detail-grid">
            {aiFields.map(field => {
              const stored = aiValues.find(item => item.field_key === field.key)
-             const value = stored?.value ?? aiData[field.key]
+             const value = stored?.value ?? aiData[field.key] ?? patent.custom_fields?.[field.key]
              const generatedValue = stored?.generated_value
              const hasValue = value !== null && value !== undefined && value !== ''
              const isOverridden = stored?.is_overridden === true

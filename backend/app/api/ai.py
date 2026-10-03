@@ -196,13 +196,16 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
 @router.get("/fields")
 def list_ai_fields(db: Session = Depends(get_db)):
     fields = db.query(CustomField).filter(
-        CustomField.field_type == "ai_field",
         CustomField.is_active == True,
     ).all()
+    fields = [f for f in fields if f.field_type == CustomFieldType.AI_FIELD or (f.ai_config or {}).get("ai_enabled") or (f.ai_config or {}).get("prompt_template")]
     return [
         {
+            "id": f.id,
             "key": f.key,
             "name": f.name,
+            "field_type": f.field_type,
+            "is_active": f.is_active,
             "description": f.description,
             "ai_config": f.ai_config,
         }
@@ -300,9 +303,18 @@ async def quick_analyze(
                 )
                 db.add(new_field)
                 db.flush()
+                field = new_field
             else:
                 raise ValueError("每个抽取目标必须选择已有字段或填写新字段名称")
 
+            if field:
+                field.ai_config = {
+                    **(field.ai_config or {}),
+                    "ai_enabled": True,
+                    "input_fields": req.input_fields,
+                    "prompt_template": req.prompt,
+                    "quick_extraction_name": ext.name.strip(),
+                }
             extraction_targets.append({
                 "name": ext.name.strip(),
                 "target_field_key": field_key,

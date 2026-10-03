@@ -631,7 +631,7 @@ def _is_ai_field(field: CustomField | None) -> bool:
     if not field:
         return False
     actual_type = field.field_type.value if hasattr(field.field_type, "value") else str(field.field_type)
-    return actual_type == CustomFieldType.AI_FIELD.value
+    return actual_type == CustomFieldType.AI_FIELD.value or bool((field.ai_config or {}).get("ai_enabled") or (field.ai_config or {}).get("prompt_template"))
 
 
 def _ai_value_response(patent: Patent, db: Session) -> list[dict[str, Any]]:
