@@ -593,8 +593,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [semanticNotice, setSemanticNotice] = useState('')
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([])
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
-  const [sortField, setSortField] = useState<string>(() => searchParams.get('sort') || 'filing_date')
+  const [sortField, setSortField] = useState<string>(() => searchParams.get('sort') || '')
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => searchParams.get('order') === 'asc' ? 'asc' : 'desc')
+  const [familyCountry, setFamilyCountry] = useState(() => searchParams.get('family_country') || '')
+  const [familySortBy, setFamilySortBy] = useState<'count' | 'priority_date' | 'applicant' | 'publication_date' | ''>(() => {
+    const value = searchParams.get('family_sort')
+    return value === 'count' || value === 'priority_date' || value === 'applicant' || value === 'publication_date' ? value : ''
+  })
+  const [familySortOrder, setFamilySortOrder] = useState<SortOrder>(() => searchParams.get('family_order') === 'desc' ? 'desc' : 'asc')
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [undoStack, setUndoStack] = useState<Array<{ patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
@@ -737,6 +743,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     filters: filterValues,
     sortField,
     sortOrder,
+    familyCountry,
+    familySortBy,
+    familySortOrder,
     groupByFamily,
     mode: tableViewMode,
     page: tableViewMode === 'continuous' ? null : page,
@@ -1093,9 +1102,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               page: effectivePage,
               page_size: requestedPageSize,
               search: searchText || undefined,
-              sort_by: sortField,
+              sort_by: sortField || undefined,
               sort_order: sortOrder,
               group_by_family: groupByFamily,
+              family_country: groupByFamily ? familyCountry || undefined : undefined,
+              family_sort_by: groupByFamily ? familySortBy || undefined : undefined,
+              family_sort_order: familySortOrder,
               extra_filters: viewFilters,
             })
             if (myRequestId !== loadPatentsRequestId.current) return false
@@ -1112,9 +1124,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             page: effectivePage,
             page_size: requestedPageSize,
             search: searchText || undefined,
-            sort_by: sortField,
+            sort_by: sortField || undefined,
             sort_order: sortOrder,
             group_by_family: groupByFamily,
+            family_country: groupByFamily ? familyCountry || undefined : undefined,
+            family_sort_by: groupByFamily ? familySortBy || undefined : undefined,
+            family_sort_order: familySortOrder,
             // 连续滚动走的是普通列表接口（跳过分组接口），这里要求后端按
             // 视图分组字段排序，使行顺序与分页/详情/全图（分组接口）一致。
             order_by_view_grouping: true,
@@ -1130,7 +1145,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       const params: JsonObject = {
         page: effectivePage,
         page_size: requestedPageSize,
-        sort_by: sortField,
+        sort_by: sortField || undefined,
         sort_order: sortOrder,
       }
       if (searchText) params.search = searchText
@@ -1141,6 +1156,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       // P2-8：大表直查（无产品筛选）时透传同族聚拢开关
       if (groupByFamily) {
         params.group_by_family = true
+        if (familyCountry.trim()) params.family_country = familyCountry.trim().toUpperCase()
+        if (familySortBy) params.family_sort_by = familySortBy
+        params.family_sort_order = familySortOrder
       }
 
       const allFilters: JsonObject = {}
@@ -1162,7 +1180,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, searchMode, currentProductId, activeDatabaseId, isGlobalMasterTable, sortField, sortOrder, filterValues, groupByFamily, tableViewMode, viewId, tableScopeKey, setPatents, setLoading])
+  }, [page, pageSize, searchText, searchMode, currentProductId, activeDatabaseId, isGlobalMasterTable, sortField, sortOrder, filterValues, groupByFamily, familyCountry, familySortBy, familySortOrder, tableViewMode, viewId, tableScopeKey, setPatents, setLoading])
 
   const loadNextContinuousPage = useCallback(() => {
     if (tableViewMode !== 'continuous' || continuousLoadingRef.current || !continuousHasMoreRef.current) return
@@ -1253,10 +1271,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setSearchInputText(params.get('q') || '')
     const mode = params.get('search_mode')
     setSearchMode(mode === 'keyword' || mode === 'semantic' || mode === 'hybrid' ? mode : 'hybrid')
-    setSortField(params.get('sort') || 'filing_date')
+    setSortField(params.get('sort') || '')
     setSortOrder(params.get('order') === 'asc' ? 'asc' : 'desc')
+    setFamilyCountry(params.get('family_country') || '')
+    const familySort = params.get('family_sort')
+    setFamilySortBy(familySort === 'count' || familySort === 'priority_date' || familySort === 'applicant' || familySort === 'publication_date' ? familySort : '')
+    setFamilySortOrder(params.get('family_order') === 'desc' ? 'desc' : 'asc')
     setFilterValues(readFilterParam(params))
-  }, [currentProductId, groupByFamily, searchParamsString, setCurrentProductId, setGroupByFamily])
+  }, [currentProductId, searchParamsString, setCurrentProductId, setGroupByFamily])
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams)
@@ -1270,12 +1292,15 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setOrDelete('q', searchText.trim() || null)
     setOrDelete('search_mode', searchMode === 'hybrid' ? null : searchMode)
     setOrDelete('page', page > 1 ? String(page) : null)
-    setOrDelete('sort', sortField !== 'filing_date' ? sortField : null)
+    setOrDelete('sort', sortField || null)
     setOrDelete('order', sortOrder !== 'desc' ? sortOrder : null)
+    setOrDelete('family_country', groupByFamily && familyCountry.trim() ? familyCountry.trim().toUpperCase() : null)
+    setOrDelete('family_sort', groupByFamily && familySortBy ? familySortBy : null)
+    setOrDelete('family_order', groupByFamily && familySortBy && familySortOrder === 'desc' ? 'desc' : null)
     setOrDelete('family', groupByFamily ? '1' : null)
     setOrDelete('filters', Object.keys(filterValues).length > 0 ? JSON.stringify(filterValues) : null)
     if (next.toString() !== searchParamsString) setSearchParams(next, { replace: true })
-  }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, isGlobalMasterTable, page, searchParams, searchParamsString, searchText, searchMode, setSearchParams, sortField, sortOrder, viewId])
+  }, [activeDatabaseId, currentProductId, familyCountry, familySortBy, familySortOrder, filterValues, groupByFamily, isGlobalMasterTable, page, searchParams, searchParamsString, searchText, searchMode, setSearchParams, sortField, sortOrder, viewId])
 
   const saveViewColumnConfig = useCallback(async (columnConfig: ViewColumnConfig[]) => {
     if (!activeView) return
@@ -1583,19 +1608,10 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
   const handleFamilyGrouping = async () => {
     const nextValue = !groupByFamily
-    if (nextValue && activeDatabaseId) {
-      try {
-        const result = await patentApi.rebuildFamilies(activeDatabaseId)
-        setViewConfigNotice(`已重建 ${result.family_count} 个同族组，覆盖 ${result.grouped_patent_count} 件专利`)
-        setCollapsedFamilyKeys(new Set())
-        setGroupedGroups([])
-        await loadPatents(1, false, pageSize, true)
-      } catch (error: unknown) {
-        setViewConfigNotice(getErrorMessage(error, '同族关系重建失败'))
-      }
-    }
     setGroupByFamily(nextValue)
     setPage(1)
+    setCollapsedFamilyKeys(new Set())
+    setGroupedGroups([])
   }
 
   // 主表默认开启同族聚拢时，切入一个尚未建立族关系的数据库也要先完成
@@ -1603,7 +1619,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   useEffect(() => {
     if (!groupByFamily || !activeDatabaseId || familyRebuildDatabaseRef.current === activeDatabaseId) return
     familyRebuildDatabaseRef.current = activeDatabaseId
-    void patentApi.rebuildFamilies(activeDatabaseId).then(() => {
+    void patentApi.rebuildFamilies(activeDatabaseId).then(result => {
+      setViewConfigNotice(`已重建 ${result.family_count} 个同族组，覆盖 ${result.grouped_patent_count} 件专利`)
       setCollapsedFamilyKeys(new Set())
       setGroupedGroups([])
       // 切库后重建同族时不能用 preserveVisible：该模式下 applyItems 会把响应
@@ -2414,9 +2431,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         page: requestedPage,
         page_size: requestedPageSize,
         search: searchText || undefined,
-        sort_by: sortField,
+        sort_by: sortField || undefined,
         sort_order: sortOrder,
         group_by_family: groupByFamily,
+        family_country: groupByFamily ? familyCountry || undefined : undefined,
+        family_sort_by: groupByFamily ? familySortBy || undefined : undefined,
+        family_sort_order: familySortOrder,
         extra_filters: extraFilters,
       }
       if (getViewGroupFields(activeViewForQuery).length > 0 && !groupByFamily) {
@@ -2435,11 +2455,16 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     if (searchText) params.search = searchText
     if (!isGlobalMasterTable && activeDatabaseId != null) params.database_id = activeDatabaseId
     if (currentProductId) params.product_id = currentProductId
-    if (groupByFamily) params.group_by_family = true
+    if (groupByFamily) {
+      params.group_by_family = true
+      if (familyCountry.trim()) params.family_country = familyCountry.trim().toUpperCase()
+      if (familySortBy) params.family_sort_by = familySortBy
+      params.family_sort_order = familySortOrder
+    }
     if (Object.keys(extraFilters).length) params.filters = JSON.stringify(extraFilters)
     const result = await patentApi.list(params)
     return { items: result.items, total: result.total }
-  }, [activeDatabaseId, currentProductId, filterValues, groupByFamily, isGlobalMasterTable, patents, searchMode, searchText, sortField, sortOrder, viewId])
+  }, [activeDatabaseId, currentProductId, filterValues, familyCountry, familySortBy, familySortOrder, groupByFamily, isGlobalMasterTable, patents, searchMode, searchText, sortField, sortOrder, viewId])
 
   // 读取“当前库（含当前筛选/视图）”的全部专利 ID，用于“勾选当前库全部”和列选中的整列操作。
   const fetchAllScopeIds = useCallback(async () => {
@@ -3194,6 +3219,32 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </ToolbarMenu>
             )}
             <div className="datagrid-view-actions" aria-label="常用表格工具">
+              <button type="button" className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'}`} onClick={() => void handleFamilyGrouping()} title="按同族聚拢或恢复原始导入顺序">
+                <Icon name="table" size={14} /> 同族聚拢{groupByFamily ? '已开启' : '已关闭'}
+              </button>
+              {groupByFamily && (
+                <>
+                  <input
+                    className="input input-sm"
+                    value={familyCountry}
+                    onChange={event => { setFamilyCountry(event.target.value.toUpperCase()); setPage(1) }}
+                    placeholder="族内国家，如 CN"
+                    aria-label="按族内国家筛选"
+                    style={{ width: 132 }}
+                  />
+                  <select className="input input-sm" value={familySortBy} onChange={event => { setFamilySortBy(event.target.value as typeof familySortBy); setPage(1) }} aria-label="同族排序指标">
+                    <option value="">默认族顺序</option>
+                    <option value="count">族内专利数量</option>
+                    <option value="priority_date">最早优先权</option>
+                    <option value="applicant">申请人</option>
+                    <option value="publication_date">最早公开日</option>
+                  </select>
+                  <select className="input input-sm" value={familySortOrder} disabled={!familySortBy} onChange={event => { setFamilySortOrder(event.target.value as SortOrder); setPage(1) }} aria-label="同族排序方向">
+                    <option value="asc">升序</option>
+                    <option value="desc">降序</option>
+                  </select>
+                </>
+              )}
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
               {(tableViewMode === 'detail' || tableViewMode === 'full_image') && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowDetailFieldConfig(true)} title="选择详情浏览显示的字段"><Icon name="file" size={14} /> 详情字段{configuredDetailKeys ? ` (${configuredDetailKeys.length})` : ''}</button>}
               {activeView && activeView.layout_type === 'table' && (
@@ -3228,7 +3279,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             <ToolbarMenu label="更多" icon="more-horizontal" title="同族聚拢、导出数据、工作文件等">
               {(close) => (
                 <>
-                  <button type="button" className={`menu-item ${groupByFamily ? 'is-active' : ''}`} onClick={() => { close(); void handleFamilyGrouping() }} title="把同族专利聚拢显示"><Icon name="table" /> 同族聚拢 {groupByFamily ? '已开启' : '已关闭'}</button>
                   <button type="button" className="menu-item" onClick={() => { close(); handleExport() }}><Icon name="download" /> 导出数据</button>
                   {!isGlobalMasterTable && <button type="button" className="menu-item menu-item-primary" onClick={() => { close(); setShowWorkFileDialog(true) }} title="按业务模板生成 Excel、Word 或 CSV 工作文件"><Icon name="file" /> 工作文件</button>}
                   {!isGlobalMasterTable && <>

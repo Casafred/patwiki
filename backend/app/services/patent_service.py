@@ -14,6 +14,7 @@ from app.models import (
     PatentViewMembership,
     FieldObservation,
     ProjectRole, RiskLevel, RelationType, DocumentRole,
+    ImportBatch,
 )
 from app.models.collaboration_sync import SyncTombstone
 from app.schemas.schemas import PatentCreate, PatentUpdate
@@ -270,6 +271,9 @@ class PatentService:
         filters: Optional[dict[str, Any]] = None,
         group_by_family: bool = False,
         group_order_fields: Optional[list[tuple[str, str]]] = None,
+        family_country: Optional[str] = None,
+        family_sort_by: Optional[str] = None,
+        family_sort_order: str = "asc",
     ) -> tuple[list[Patent], int]:
         query = db.query(Patent).options(
             joinedload(Patent.tags),
@@ -306,7 +310,7 @@ class PatentService:
 
         # Placeholder identities are relation-resolution evidence, not user
         # facing rows.  They remain queryable from family/citation detail APIs.
-        query = query.filter(Patent.title != "待补全")
+        query = query.filter(Patent.title != "待补全", Patent.deleted_at.is_(None))
 
         # 库筛选：P0-11 新增，限定查询范围到某个库
         if database_id is not None:
@@ -346,6 +350,16 @@ class PatentService:
 
         if country:
             query = query.filter(Patent.country == country)
+
+        if group_by_family and family_country:
+            normalized_country = family_country.strip().upper()
+            family_query = db.query(Patent.family_id).filter(
+                Patent.family_id.isnot(None), Patent.country == normalized_country,
+                Patent.deleted_at.is_(None), Patent.title != "待补全",
+            )
+            if database_id is not None:
+                family_query = family_query.filter(in_database(database_id))
+            query = query.filter(or_(Patent.family_id.in_(family_query), and_(Patent.family_id.is_(None), Patent.country == normalized_country)))
 
         if filing_date_from:
             query = query.filter(Patent.filing_date >= filing_date_from)
@@ -417,6 +431,9 @@ class PatentService:
         # 视图配置了分组字段时，先按分组字段排序。这样普通列表接口（连续滚动）
         # 与分组接口（分页/详情/全图）返回的行顺序完全一致；否则连续滚动按
         # sort_by 排、而分组接口按分组字段排，前几行会对不上。
+        # Every request owns its complete ordering. SQLAlchemy otherwise keeps
+        # earlier ORDER BY clauses when a view/grouping path appends another.
+        query = query.order_by(None)
         if group_order_fields and not group_by_family:
             for field_key, direction in group_order_fields:
                 expression = _group_order_expression(field_key)
@@ -430,12 +447,24 @@ class PatentService:
 
         # P2-8：同族聚拢模式 —— 把同族专利排在一起（family_id 非空的在前，按 family_id 分组，组内按申请日倒序）
         if group_by_family:
-            query = query.order_by(
-                Patent.family_id.is_(None),
-                Patent.family_id.asc(),
-                desc(Patent.filing_date),
-                Patent.id.asc(),
-            )
+            metric_query = db.query(Patent.family_id.label("family_id"), func.count(Patent.id).label("count"), func.min(Patent.priority_date).label("priority_date"), func.min(Patent.applicant).label("applicant"), func.min(Patent.publication_date).label("publication_date")).filter(Patent.family_id.isnot(None), Patent.deleted_at.is_(None), Patent.title != "待补全")
+            if database_id is not None: metric_query = metric_query.filter(in_database(database_id))
+            metrics = metric_query.group_by(Patent.family_id).subquery()
+            query = query.outerjoin(metrics, metrics.c.family_id == Patent.family_id)
+            family_sort = {
+                "count": metrics.c.count, "priority_date": metrics.c.priority_date,
+                "applicant": metrics.c.applicant, "publication_date": metrics.c.publication_date,
+            }.get(family_sort_by)
+            family_sort = family_sort.desc().nullslast() if family_sort is not None and family_sort_order == "desc" else family_sort.asc().nullslast() if family_sort is not None else None
+            order_columns = [Patent.family_id.is_(None)]
+            if family_sort is not None:
+                order_columns.append(family_sort)
+            order_columns.append(Patent.family_id.asc())
+            if sort_by:
+                column = _group_order_expression(sort_by)
+                if column is not None: order_columns.append(column.desc().nullslast() if sort_order == "desc" else column.asc().nullslast())
+            order_columns.extend([Patent.source_batch_id.asc().nullslast(), Patent.source_row.asc().nullslast(), Patent.id.asc()])
+            query = query.order_by(*order_columns)
         elif sort_by:
             if sort_by in SYSTEM_FIELDS:
                 column = getattr(Patent, sort_by, None)
@@ -451,7 +480,15 @@ class PatentService:
                 else:
                     query = query.order_by(func.json_extract(Patent.custom_fields, json_path), Patent.id.asc())
         else:
-            query = query.order_by(desc(Patent.created_at), Patent.id.asc())
+            # Import chronology is the canonical unsorted table order. The
+            # Excel row is retained on Patent.source_row, so records from the
+            # same batch remain exactly in their source order.
+            query = query.outerjoin(ImportBatch, ImportBatch.id == Patent.source_batch_id).order_by(
+                ImportBatch.created_at.asc().nullslast(),
+                ImportBatch.id.asc().nullslast(),
+                Patent.source_row.asc().nullslast(),
+                Patent.id.asc(),
+            )
 
         query = query.offset((page - 1) * page_size).limit(page_size)
         patents = query.all()

@@ -79,9 +79,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   groupByFamily: (() => {
     try {
       const saved = localStorage.getItem(GROUP_BY_FAMILY_STORAGE_KEY)
-      // 主表默认开启同族聚拢；用户明确关闭后才保持关闭。
-      return saved === null ? true : saved === 'true'
-    } catch { return true }
+      return saved === 'true'
+    } catch { return false }
   })(),
   setGroupByFamily: (v) => {
     try { localStorage.setItem(GROUP_BY_FAMILY_STORAGE_KEY, String(v)) } catch { /* storage is optional */ }

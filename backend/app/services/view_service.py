@@ -414,6 +414,9 @@ class ViewService:
         sort_order: Optional[str] = None,
         group_by_family: bool = False,
         order_by_view_grouping: bool = False,
+        family_country: Optional[str] = None,
+        family_sort_by: Optional[str] = None,
+        family_sort_order: str = "asc",
     ) -> tuple[list[Patent], int]:
         """获取视图中的专利列表。
 
@@ -451,6 +454,7 @@ class ViewService:
             sort_by=sort_by,
             sort_order=sort_order,
             group_by_family=group_by_family,
+            family_country=family_country, family_sort_by=family_sort_by, family_sort_order=family_sort_order,
             group_order_fields=group_order_fields,
         )
         return patents, total
@@ -872,6 +876,9 @@ class ViewService:
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
         group_by_family: bool = False,
+        family_country: Optional[str] = None,
+        family_sort_by: Optional[str] = None,
+        family_sort_order: str = "asc",
     ) -> dict:
         """Return the current view page as nested groups."""
         group_fields = ViewService.validate_group_by_config(view.group_by_config).get("fields", [])
@@ -881,6 +888,7 @@ class ViewService:
             extra_filters=extra_filters, search=search,
             sort_by=sort_by, sort_order=sort_order,
             group_by_family=group_by_family,
+            family_country=family_country, family_sort_by=family_sort_by, family_sort_order=family_sort_order,
             order_by_view_grouping=True,
         )
         local_values = {}

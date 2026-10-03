@@ -132,6 +132,9 @@ export const viewApi = {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_by_family?: boolean
+    family_country?: string
+    family_sort_by?: 'count' | 'priority_date' | 'applicant' | 'publication_date'
+    family_sort_order?: 'asc' | 'desc'
     order_by_view_grouping?: boolean
     extra_filters?: JsonObject
   } = {}): Promise<ViewPatentListResponse> => {
@@ -153,6 +156,9 @@ export const viewApi = {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_by_family?: boolean
+    family_country?: string
+    family_sort_by?: 'count' | 'priority_date' | 'applicant' | 'publication_date'
+    family_sort_order?: 'asc' | 'desc'
     extra_filters?: JsonObject
   } = {}): Promise<GroupedViewResponse> => {
     const { extra_filters, ...query } = params
