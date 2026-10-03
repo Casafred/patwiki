@@ -877,21 +877,6 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
 
 // ============ 技术信息 Tab ============
 
-// 权利要求按编号解析：仅当超过一半的行以“1. / 2、”等形式开头时才视为编号列表，
-// 否则按原始段落展示，避免把普通文本误拆。
-function parseClaims(raw: string): Array<{ no: string | null; text: string }> | null {
-  if (!raw || !raw.trim()) return null
-  const lines = raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-  if (lines.length === 0) return null
-  let numbered = 0
-  const parsed = lines.map(line => {
-    const match = line.match(/^(\d{1,3})[.、)．]\s*(.*)$/)
-    if (match) numbered += 1
-    return match ? { no: match[1], text: match[2] } : { no: null, text: line }
-  })
-  return numbered >= Math.ceil(parsed.length / 2) ? parsed : null
-}
-
 function TechnicalTab({ patent, formData, editing, updateField }: {
   patent: Patent
   formData: PatentEditData
@@ -905,11 +890,9 @@ function TechnicalTab({ patent, formData, editing, updateField }: {
   ]
   const storylineEmpty = storyline.every(item => !item.value || !String(item.value).trim())
   const claims = patent.claims || ''
-  const parsedClaims = editing ? null : parseClaims(claims)
-  const claimCount = parsedClaims ? parsedClaims.filter(item => item.no !== null).length : 0
   const summaryParts: string[] = []
   if (!storylineEmpty) summaryParts.push('技术主线')
-  if (claims.trim()) summaryParts.push(claimCount > 0 ? `${claimCount} 项权利要求` : '权利要求')
+  if (claims.trim()) summaryParts.push('权利要求文本')
   const headerSummary = summaryParts.length > 0 ? summaryParts.join(' · ') : '技术主线尚未记录'
 
   if (editing) {
@@ -1001,20 +984,9 @@ function TechnicalTab({ patent, formData, editing, updateField }: {
         <section className="tech-claims">
           <div className="tech-claims-heading">
             <h3>权利要求</h3>
-            {claimCount > 0 && <span className="tech-claims-count">{claimCount} 项</span>}
+            {claims.trim() && <span className="tech-claims-count">完整文本</span>}
           </div>
-          {parsedClaims ? (
-            <ol className="tech-claim-list">
-              {parsedClaims.map((claim, index) => (
-                <li className="tech-claim" key={`${claim.no ?? 'x'}-${index}`}>
-                  <span className="tech-claim-no">{claim.no ?? ''}</span>
-                  <span className="tech-claim-text">{claim.text}</span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <div className="tech-claims-raw">{claims}</div>
-          )}
+          <div className="tech-claims-raw">{claims}</div>
         </section>
       ) : (
         <section className="tech-claims tech-claims-empty">

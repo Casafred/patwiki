@@ -4099,6 +4099,10 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           onToggleFreeze={handleToggleFreeze}
           onRemove={requestDeleteColumnByKey}
           onReorder={handleReorderFields}
+          onManageFields={() => {
+            setShowFieldConfig(false)
+            navigate(activeDatabaseId ? `/db/${activeDatabaseId}/fields` : '/fields')
+          }}
         />
       )}
 

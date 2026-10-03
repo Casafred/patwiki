@@ -184,8 +184,8 @@ export default function FieldSettingsPage() {
   }
 
   const handleAddField = async () => {
-    if (!newField.key?.trim() || !newField.name?.trim() || !newField.ai_config?.prompt_template?.trim()) {
-      alert('请填写字段 key、名称和提取提示词')
+    if (!newField.key?.trim() || !newField.name?.trim()) {
+      alert('请填写字段 key 和名称')
       return
     }
     setSaving(true)
@@ -243,7 +243,8 @@ export default function FieldSettingsPage() {
     attachment: '附件',
   }
 
-  const aiFields = fields.filter(isAiField)
+  // 字段管理页同时管理普通自定义字段和 AI 字段；AI 配置只是其中一部分能力。
+  const aiFields = fields
 
   if (loading) {
     return (
@@ -259,14 +260,14 @@ export default function FieldSettingsPage() {
       <div className="workspace-page-shell ai-field-settings-shell">
       <div className="page-header workspace-page-header">
         <div>
-          <h2 className="page-title">AI 预置字段管理</h2>
-          <p className="page-subtitle">统一管理可复用的 AI 抽取字段、输入范围和提示词模板</p>
+          <h2 className="page-title">字段管理</h2>
+          <p className="page-subtitle">统一管理系统字段、自定义字段和 AI 抽取字段；列管理中的“管理字段”会进入这里</p>
         </div>
         <button
           className="btn btn-primary"
           onClick={() => setShowAddForm(true)}
         >
-          + 新增 AI 预置字段
+          + 新增自定义字段
         </button>
       </div>
 

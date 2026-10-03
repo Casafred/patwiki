@@ -11,6 +11,7 @@ from app.models.enums import CustomFieldType
 from app.config import settings
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.core.time import utc_now_naive
+from app.services.field_registry import SYSTEM_FIELD_KEYS
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -262,13 +263,14 @@ async def quick_analyze(
             if ext.target_field_key:
                 # 快速抽取只允许写入已注册的自定义字段；系统字段的正式值
                 # 需要人工确认，避免 AI 绕过字段类型和来源治理。
+                standard_ai_target = ext.target_field_key in {"technical_problem", "technical_solution", "technical_effect"}
                 field = db.query(CustomField).filter(
                     CustomField.key == ext.target_field_key,
                     CustomField.is_active == True,
                 ).first()
-                if not field:
+                if not field and not standard_ai_target:
                     raise ValueError(f"目标字段不存在或已停用：{ext.target_field_key}")
-                if field.field_type in (
+                if field and field.field_type in (
                     CustomFieldType.FORMULA,
                     CustomFieldType.ATTACHMENT,
                     CustomFieldType.LINK,

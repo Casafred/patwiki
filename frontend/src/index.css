@@ -6663,7 +6663,7 @@ body {
 }
 
 /* ============ WIKI 详情页 · 技术信息 Tab 重构 ============ */
-.tech-tab { display: flex; flex-direction: column; gap: 16px; }
+.tech-tab { display: flex; flex-direction: column; gap: 16px; padding: 2px 0 12px; }
 .tech-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .tech-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tech-chip {
@@ -6681,8 +6681,8 @@ body {
 .tech-header-summary { color: #94a3b8; font-size: 12px; }
 
 .tech-story {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 0;
   padding: 0;
@@ -6700,15 +6700,7 @@ body {
   background: #fff;
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
-.tech-story-item:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  left: 16px;
-  bottom: -10px;
-  width: 2px;
-  height: 10px;
-  background: #cbd5e1;
-}
+.tech-story-item:not(:last-child)::after { display: none; }
 .tech-accent-problem { border-left-color: #f59e0b; }
 .tech-accent-solution { border-left-color: #2563eb; }
 .tech-accent-effect { border-left-color: #10b981; }
@@ -6770,7 +6762,8 @@ body {
   padding: 16px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  background: #fff;
+  background: #fbfefd;
+  border-color: #dce9e6;
 }
 .tech-claims-empty p { margin: 4px 0 0; color: #94a3b8; font-size: 12px; }
 .tech-claims-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
@@ -6816,6 +6809,7 @@ body {
 .tech-edit-card h3 { margin: 0 0 12px; color: #334155; font-size: 13px; }
 .tech-edit-stack { display: flex; flex-direction: column; gap: 12px; }
 @media (max-width: 720px) {
+  .tech-story { grid-template-columns: 1fr; }
   .tech-story-item { grid-template-columns: 28px minmax(0, 1fr); }
   .tech-story-marker { width: 28px; height: 28px; }
 }

@@ -6,7 +6,7 @@ from typing import Optional, Any
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Patent, AITask, AIFieldValue, CustomField,
+    Patent, AITask, AIFieldValue, CustomField, PatentHistory,
 )
 from app.config import settings
 from app.core.time import utc_now_naive
@@ -106,6 +106,52 @@ class AIFieldEngine:
             return val.isoformat()
         return str(val)
 
+    @staticmethod
+    def _clean_markdown(value: Any) -> str:
+        """将模型返回的 Markdown 简化为可直接存入字段的纯文本。"""
+        if value is None:
+            return ""
+        text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+        if text.startswith("```") and text.endswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1]).strip()
+        import re
+        text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", text)
+        text = re.sub(r"__([^_\n]+)__", r"\1", text)
+        text = re.sub(r"`([^`\n]+)`", r"\1", text)
+        text = re.sub(r"^\s*[-*+]\s+", "• ", text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*>\s?", "", text, flags=re.MULTILINE)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    @staticmethod
+    def _standard_target(field_key: str) -> str | None:
+        return {
+            "ai_technical_problem": "technical_problem",
+            "ai_technical_solution": "technical_solution",
+            "ai_technical_effect": "technical_effect",
+            "technical_problem": "technical_problem",
+            "technical_solution": "technical_solution",
+            "technical_effect": "technical_effect",
+        }.get(field_key)
+
+    def _write_ai_result(self, patent: Patent, field_key: str, value: Any) -> str:
+        cleaned = self._clean_markdown(value)
+        current = dict(patent.ai_fields or {})
+        current[field_key] = cleaned
+        patent.ai_fields = current
+        standard_key = self._standard_target(field_key)
+        if standard_key and cleaned:
+            old_value = getattr(patent, standard_key, None)
+            if old_value != cleaned:
+                setattr(patent, standard_key, cleaned)
+                self.db.add(PatentHistory(
+                    patent_id=patent.id, field_key=standard_key,
+                    field_display_name={"technical_problem": "技术问题", "technical_solution": "技术方案", "technical_effect": "技术效果"}[standard_key],
+                    old_value=str(old_value or ""), new_value=cleaned, source="ai",
+                ))
+        return cleaned
+
     def _build_prompt(self, patent: Patent, field_def: CustomField) -> str:
         ai_config = field_def.ai_config or {}
         template = ai_config.get("prompt_template", "")
@@ -197,7 +243,7 @@ class AIFieldEngine:
 
         try:
             response = llm.invoke(prompt)
-            result = response.content.strip()
+            result = self._clean_markdown(response.content)
             # 优先取 API 返回的 response_model（可能解析别名→具体快照）
             response_model = getattr(response, "response_model", None) or actual_model
 
@@ -227,9 +273,7 @@ class AIFieldEngine:
             ai_value.overridden_value = None
             ai_value.overridden_at = None
 
-            current = dict(patent.ai_fields or {})
-            current[field_def.key] = result
-            patent.ai_fields = current
+            self._write_ai_result(patent, field_def.key, result)
 
             self.db.commit()
             call_info = {
@@ -247,7 +291,7 @@ class AIFieldEngine:
     def _persist_standard_result(self, patent: Patent, field_def: CustomField,
                                  input_hash: str, response: dict) -> dict:
         """Persist one completed network result on the owning DB session."""
-        result = str(response["content"]).strip()
+        result = self._clean_markdown(response["content"])
         response_model = response.get("model") or field_def.key
         ai_value = self.db.query(AIFieldValue).filter(
             AIFieldValue.patent_id == patent.id,
@@ -270,9 +314,7 @@ class AIFieldEngine:
         ai_value.is_overridden = False
         ai_value.overridden_value = None
         ai_value.overridden_at = None
-        current = dict(patent.ai_fields or {})
-        current[field_def.key] = result
-        patent.ai_fields = current
+        self._write_ai_result(patent, field_def.key, result)
         return {
             "patent_id": patent.id,
             "response": result,
@@ -460,10 +502,16 @@ class AIFieldEngine:
             value = parsed.get(name, "")
             if isinstance(value, (list, dict)):
                 value = json.dumps(value, ensure_ascii=False)
+            value = self._clean_markdown(value)
             field_key = target.get("target_field_key")
             if not field_key:
                 continue
 
+            standard_key = self._standard_target(field_key)
+            if standard_key:
+                self._write_ai_result(patent, field_key, value)
+                results[field_key] = value
+                continue
             # 写入：AI 字段 → ai_fields JSON；普通自定义字段 → custom_fields JSON
             field_def = self.db.query(CustomField).filter(CustomField.key == field_key).first()
             if field_def and field_def.field_type == "ai_field":
@@ -535,8 +583,12 @@ class AIFieldEngine:
                     value = parsed.get(name, "")
                     if isinstance(value, (list, dict)):
                         value = json.dumps(value, ensure_ascii=False)
+                    value = self._clean_markdown(value)
                     field_key = target.get("target_field_key")
                     if not field_key:
+                        continue
+                    if self._standard_target(field_key):
+                        self._write_ai_result(patent, field_key, value)
                         continue
                     field_def = self.db.query(CustomField).filter(CustomField.key == field_key).first()
                     if field_def and field_def.field_type == "ai_field":
