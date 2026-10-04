@@ -55,6 +55,8 @@ export default function ExternalSyncPage() {
   const [selectedConnectorId, setSelectedConnectorId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<McpTab>('connectors')
 
+  const defaultMonitorName = (mode: typeof monitorMode) => mode === 'applicant' ? '申请人监控' : mode === 'expression' ? '检索式监控' : '公开号跟踪'
+
   const load = useCallback(async () => {
     if (!currentDatabaseId) return
     try {
@@ -89,6 +91,7 @@ export default function ExternalSyncPage() {
     if (ids.length) {
       setActiveTab('monitor')
       setMonitorMode('publication')
+      setName('公开号跟踪')
       setSelectedTrackedPatentIds(ids)
       if (currentDatabaseId) void syncApi.resolvePublications({ database_id: currentDatabaseId, patent_ids: ids }).then(result => setPublicationMatches(result.matched)).catch(() => undefined)
     }
@@ -216,7 +219,8 @@ export default function ExternalSyncPage() {
     setBusy(true); setError(''); setMessage('')
     try {
       const run = await syncApi.runSubscription(subscription.id)
-      setMessage(`同步完成：读取 ${countValue(run, 'records')} 条，变更 ${countValue(run, 'auto_applied')} 项`)
+      if (run.error_message) setError(`${run.status}：${run.error_message}`)
+      else setMessage(`同步完成：读取 ${countValue(run, 'records')} 条，变更 ${countValue(run, 'auto_applied')} 项`)
       await load()
     } catch (runError: unknown) {
       setError(getErrorMessage(runError, '同步执行失败'))
@@ -372,7 +376,7 @@ export default function ExternalSyncPage() {
                 {scheduleMode === 'minutes' && <label>同步间隔（分钟）<input className="form-input" type="number" min="1" value={intervalMinutes} onChange={event => setIntervalMinutes(event.target.value)} /></label>}
                 {scheduleMode === 'days' && <label>每隔天数<input className="form-input" type="number" min="1" value={intervalDays} onChange={event => setIntervalDays(event.target.value)} /></label>}
                 {scheduleMode === 'date' && <><label>首次触发时间<input className="form-input" type="datetime-local" value={runAt} onChange={event => setRunAt(event.target.value)} /></label><label>重复间隔天数（可选）<input className="form-input" type="number" min="0" value={intervalDays} onChange={event => setIntervalDays(event.target.value)} /></label></>}
-                <label className="mcp-form-full">跟踪方式<select className="form-input" value={monitorMode} onChange={event => { setMonitorMode(event.target.value as typeof monitorMode); setSelectedTrackedPatentIds([]); setPublicationMatches([]) }}><option value="applicant">申请人跟踪</option><option value="expression">检索式跟踪</option><option value="publication">专利公开号跟踪</option></select></label>
+                <label className="mcp-form-full">跟踪方式<select className="form-input" value={monitorMode} onChange={event => { const mode = event.target.value as typeof monitorMode; setMonitorMode(mode); setName(defaultMonitorName(mode)); setSelectedTrackedPatentIds([]); setPublicationMatches([]) }}><option value="applicant">申请人跟踪</option><option value="expression">检索式跟踪</option><option value="publication">专利公开号跟踪</option></select></label>
                 {monitorMode === 'applicant' && <label className="mcp-form-full">申请人<input className="form-input" value={applicant} onChange={event => setApplicant(event.target.value)} placeholder="输入申请人名称" /></label>}
                 {monitorMode === 'expression' && <label className="mcp-form-full">检索式<input className="form-input" value={expression} onChange={event => setExpression(event.target.value)} placeholder="例如：(芯片 OR 半导体) AND 封装" /></label>}
                 {monitorMode === 'publication' && <>
@@ -415,6 +419,8 @@ export default function ExternalSyncPage() {
                           <span className={`mcp-chip ${subscription.last_status === 'succeeded' ? 'mcp-chip-ok' : subscription.last_status ? 'mcp-chip-warn' : 'mcp-chip-muted'}`}>{subscription.last_status || '尚未运行'}</span>
                           <div className="mcp-rule-card-actions">
                             <button className="btn btn-secondary" disabled={busy || !active} onClick={() => void runSubscription(subscription)}>立即同步</button>
+                            <button className="btn btn-secondary" disabled={busy} onClick={() => { setBusy(true); void syncApi.updateSubscription(subscription.id, { enabled: !subscription.enabled }).then(load).catch(error => setError(getErrorMessage(error))).finally(() => setBusy(false)) }}>{subscription.enabled ? '停用' : '启用'}</button>
+                            <button className="btn btn-danger" disabled={busy} onClick={() => { if (!window.confirm(`删除监控规则“${subscription.name}”？历史运行和来源记录会保留。`)) return; setBusy(true); void syncApi.deleteSubscription(subscription.id).then(load).catch(error => setError(getErrorMessage(error))).finally(() => setBusy(false)) }}>删除</button>
                           </div>
                         </div>
                       </div>

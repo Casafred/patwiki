@@ -192,7 +192,10 @@ class AIFieldEngine:
         # 收集 prompt 中引用的所有字段值参与 hash，保证引用值变化时重新计算
         import re
         keys = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_.]*)\}", template))
-        parts = [field_def.key, template]
+        keys.update(ai_config.get("input_fields") or [])
+        if not template:
+            keys.update(["title", "abstract", "applicant", "inventor"])
+        parts = [field_def.key, template, json.dumps(ai_config, sort_keys=True, ensure_ascii=False)]
         for k in sorted(keys):
             parts.append(f"{k}={self._resolve_field_value(patent, k)}")
         content = "|".join(parts)

@@ -211,7 +211,7 @@ class HimmPatMcpAdapter(PatentConnector):
         if not isinstance(item, Mapping):
             raise ConnectorError("HimmPat 著录项响应无效", error_code="invalid_response_shape")
         record = self._dossier_record(patent_id, item, dossier_envelope)
-        if self.config.get("enrich_legal_on_fetch", False):
+        if self.config.get("enrich_legal_on_fetch", False) or self.config.get("enrich_legal_status", False):
             record = self._enrich_legal([record])[0]
         return record
 

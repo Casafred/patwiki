@@ -63,6 +63,13 @@ class AIOverrideApiTest(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
+    def test_selected_input_fields_invalidate_cache_without_prompt_variables(self):
+        self.field.ai_config = {"prompt_template": "Summarize", "input_fields": ["claims"]}
+        engine = AIFieldEngine(self.db)
+        before = engine._calculate_input_hash(self.patent, self.field)
+        self.patent.claims = "New claim evidence"
+        self.assertNotEqual(before, engine._calculate_input_hash(self.patent, self.field))
+
     def test_override_lifecycle_and_history(self):
         initial = self.client.get(f"/patents/{self.patent.id}/ai-values")
         self.assertEqual(initial.status_code, 200)

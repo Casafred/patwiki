@@ -20,6 +20,7 @@ from app.models import (
     SavedPatentQuery,
     SyncRun,
     SyncSubscription,
+    SyncLease,
     Patent,
     SyncUpdateBatch,
     WatchEvent,
@@ -358,7 +359,22 @@ def list_subscriptions(database_id: int | None = None, db: Session = Depends(get
     query = db.query(SyncSubscription)
     if database_id is not None:
         query = query.filter(SyncSubscription.database_id == database_id)
-    return {"items": [SyncService.subscription_dict(item) for item in query.order_by(SyncSubscription.id.desc()).all()]}
+    return {"items": [SyncService.subscription_dict(item) for item in query.order_by(SyncSubscription.id.desc()).all() if not (item.schedule_json or {}).get("deleted_at")]}
+
+
+@router.delete("/subscriptions/{subscription_id}")
+def delete_subscription(subscription_id: int, db: Session = Depends(get_db)):
+    subscription = db.query(SyncSubscription).filter(SyncSubscription.id == subscription_id).first()
+    if not subscription:
+        raise NotFoundException("同步订阅不存在")
+    lease = db.query(SyncLease).filter(SyncLease.subscription_id == subscription_id).first()
+    if lease and lease.expires_at > utc_now_naive():
+        raise BadRequestException("规则正在运行，请等待运行结束后删除")
+    subscription.enabled = False
+    subscription.next_run_at = None
+    subscription.schedule_json = {**(subscription.schedule_json or {}), "deleted_at": utc_now_naive().isoformat()}
+    db.commit()
+    return {"success": True}
 
 
 @router.post("/subscriptions")

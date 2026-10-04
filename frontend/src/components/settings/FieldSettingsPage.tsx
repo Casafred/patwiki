@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { customFieldApi } from '../../api'
-import type { CustomField, LinkConfig, LookupConfig, RollupConfig } from '../../types'
+import { customFieldApi, fieldApi } from '../../api'
+import type { CustomField, FieldMeta, LinkConfig, LookupConfig, RollupConfig } from '../../types'
 import { useAppStore } from '../../store'
 import { getErrorMessage } from '../../lib/errors'
 import FormulaEditor from './FormulaEditor'
@@ -118,7 +118,9 @@ function RelationConfigFields({ fieldType, field, availableFields, onChange }: R
 }
 
 export default function FieldSettingsPage() {
+  const [fieldMode, setFieldMode] = useState<'ai' | 'all'>('ai')
   const [fields, setFields] = useState<CustomField[]>([])
+  const [availableFieldsForAI, setAvailableFieldsForAI] = useState<FieldMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<Partial<CustomField>>({})
@@ -129,7 +131,7 @@ export default function FieldSettingsPage() {
     name: '',
     field_type: 'textarea',
     is_active: true,
-    ai_config: { ai_enabled: true, prompt_template: '', input_fields: ['title', 'abstract', 'claims'] },
+    ai_config: { ai_enabled: true, prompt_template: '', input_fields: [] },
     formula_config: { expression: '', return_type: 'text' },
   })
   const { setCustomFields } = useAppStore()
@@ -138,6 +140,7 @@ export default function FieldSettingsPage() {
     try {
       const data = await customFieldApi.list()
       setFields(data)
+      setAvailableFieldsForAI(await fieldApi.list())
     } catch (e) {
       console.error('Failed to load fields:', e)
     } finally {
@@ -206,7 +209,7 @@ export default function FieldSettingsPage() {
         name: '',
         field_type: 'textarea',
         is_active: true,
-        ai_config: { ai_enabled: true, prompt_template: '', input_fields: ['title', 'abstract', 'claims'] },
+        ai_config: { ai_enabled: true, prompt_template: '', input_fields: [] },
         formula_config: { expression: '', return_type: 'text' },
       })
     } catch (error: unknown) {
@@ -250,7 +253,7 @@ export default function FieldSettingsPage() {
   }
 
   // 字段管理页同时管理普通自定义字段和 AI 字段；AI 配置只是其中一部分能力。
-  const aiFields = fields
+  const aiFields = fieldMode === 'ai' ? fields.filter(field => field.field_type === 'ai_field' || isAiField(field)) : fields
 
   if (loading) {
     return (
@@ -266,7 +269,7 @@ export default function FieldSettingsPage() {
       <div className="workspace-page-shell ai-field-settings-shell">
       <div className="page-header workspace-page-header">
         <div>
-          <h2 className="page-title">字段管理</h2>
+          <h2 className="page-title">字段与 AI 抽取</h2>
           <p className="page-subtitle">统一管理系统字段、自定义字段和 AI 抽取字段；列管理中的“管理字段”会进入这里</p>
         </div>
         <button
@@ -276,6 +279,11 @@ export default function FieldSettingsPage() {
           + 新增自定义字段
         </button>
       </div>
+
+      <nav className="ai-field-mode-tabs" aria-label="字段类型">
+        <button className={fieldMode === 'ai' ? 'active' : ''} onClick={() => setFieldMode('ai')}>AI 抽取配置</button>
+        <button className={fieldMode === 'all' ? 'active' : ''} onClick={() => setFieldMode('all')}>全部自定义字段</button>
+      </nav>
 
       {showAddForm && (
         <div style={{
@@ -326,12 +334,11 @@ export default function FieldSettingsPage() {
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 4, fontWeight: 500 }}>抽取范围</label>
-            <input className="form-input" value={(newField.ai_config?.input_fields || []).join(', ')} onChange={e => setNewField({ ...newField, ai_config: { ...(newField.ai_config || {}), ai_enabled: true, input_fields: e.target.value.split(',').map(item => item.trim()).filter(Boolean) } })} placeholder="例如：title, abstract, claims, description_full" />
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>输入系统字段 key，用逗号分隔；Prompt 中也可用 {`{field_key}`} 引用字段。</div>
+            <div className="ai-input-field-picker">{availableFieldsForAI.map(field => <label key={field.key}><input type="checkbox" checked={(newField.ai_config?.input_fields || []).includes(field.key)} onChange={e => setNewField({ ...newField, ai_config: { ...(newField.ai_config || {}), ai_enabled: true, input_fields: e.target.checked ? [...(newField.ai_config?.input_fields || []), field.key] : (newField.ai_config?.input_fields || []).filter(key => key !== field.key) } })} />{field.name}</label>)}</div>
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 4, fontWeight: 500 }}>AI 提取提示词</label>
-            <textarea className="form-input" style={{ minHeight: 150, fontFamily: 'monospace', fontSize: 12 }} value={newField.ai_config?.prompt_template || ''} onChange={e => setNewField({ ...newField, ai_config: { ...(newField.ai_config || {}), ai_enabled: true, prompt_template: e.target.value } })} placeholder="告诉 AI 如何提取字段，保留可复用的 {title}、{abstract} 等变量。" />
+            <textarea className="form-input" style={{ minHeight: 150, fontSize: 12 }} value={newField.ai_config?.prompt_template || ''} onChange={e => setNewField({ ...newField, ai_config: { ...(newField.ai_config || {}), ai_enabled: true, prompt_template: e.target.value } })} placeholder="输入抽取要求，例如：归纳核心技术手段及关键部件之间的关系" />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <RelationConfigFields
@@ -356,7 +363,7 @@ export default function FieldSettingsPage() {
             </button>
             <button className="btn btn-secondary" onClick={() => {
               setShowAddForm(false)
-              setNewField({ key: '', name: '', field_type: 'textarea', is_active: true, ai_config: { ai_enabled: true, prompt_template: '', input_fields: ['title', 'abstract', 'claims'] }, formula_config: { expression: '', return_type: 'text' } })
+              setNewField({ key: '', name: '', field_type: 'textarea', is_active: true, ai_config: { ai_enabled: true, prompt_template: '', input_fields: [] }, formula_config: { expression: '', return_type: 'text' } })
             }}>
               取消
             </button>
@@ -462,13 +469,10 @@ export default function FieldSettingsPage() {
                 {(editForm.ai_config?.ai_enabled || editForm.ai_config?.prompt_template) && (
                   <div style={{ marginBottom: 12 }}>
                     <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>抽取范围</label>
-                    <input className="form-input" style={{ marginBottom: 10 }} value={(editForm.ai_config?.input_fields || []).join(', ')} onChange={e => setEditForm({ ...editForm, ai_config: { ...(editForm.ai_config || {}), ai_enabled: true, input_fields: e.target.value.split(',').map(item => item.trim()).filter(Boolean) } })} placeholder="title, abstract, claims" />
+                    <div className="ai-input-field-picker">{availableFieldsForAI.filter(item => item.key !== field.key).map(item => <label key={item.key}><input type="checkbox" checked={(editForm.ai_config?.input_fields || []).includes(item.key)} onChange={e => setEditForm({ ...editForm, ai_config: { ...(editForm.ai_config || {}), ai_enabled: true, input_fields: e.target.checked ? [...(editForm.ai_config?.input_fields || []), item.key] : (editForm.ai_config?.input_fields || []).filter(key => key !== item.key) } })} />{item.name}</label>)}</div>
                     <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4 }}>
                       AI提取提示词 (Prompt Template)
                     </label>
-                    <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
-                      可用变量：{`{title}`}（标题）、{`{abstract}`}（摘要）、{`{claims}`}（权利要求）、{`{description}`}（说明书）
-                    </div>
                     <textarea
                       className="form-input"
                       style={{ minHeight: 150, fontFamily: 'monospace', fontSize: 12 }}
@@ -539,6 +543,7 @@ export default function FieldSettingsPage() {
                     {field.group_name && (
                       <div style={{ fontSize: 11, color: '#94a3b8' }}>分组: {field.group_name}</div>
                     )}
+                    {isAiField(field) && <div style={{ marginTop: 8, fontSize: 12, color: '#475569' }}>输入字段：{(field.ai_config?.input_fields || []).map(key => availableFieldsForAI.find(item => item.key === key)?.name || key).join('、') || '按提示词引用字段'}</div>}
                     {isAiField(field) && field.ai_config?.prompt_template && (
                       <div style={{
                         marginTop: 8,
@@ -569,7 +574,7 @@ export default function FieldSettingsPage() {
                       style={{ fontSize: 12, padding: '4px 10px' }}
                       onClick={() => startEdit(field)}
                     >
-                      编辑
+                      {isAiField(field) ? '配置 AI 抽取' : '编辑字段'}
                     </button>
                     <button
                       className="btn btn-secondary"

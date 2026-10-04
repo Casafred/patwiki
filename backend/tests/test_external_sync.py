@@ -69,6 +69,50 @@ class ExternalSyncTest(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
+    def test_delete_subscription_preserves_history_and_removes_from_listing(self):
+        from app.api.sync import delete_subscription, list_subscriptions
+        subscription = SyncService.create_subscription(self.db, {
+            "database_id": self.database.id, "connector_id": self.connector.id,
+            "name": "delete-test", "scope_json": {"applicant": "test"},
+            "schedule_json": {}, "review_policy": "safe_auto_apply", "enabled": True,
+        })
+        run = SyncService.run_subscription(self.db, subscription)
+        delete_subscription(subscription.id, self.db)
+        self.assertFalse(subscription.enabled)
+        self.assertIsNone(subscription.next_run_at)
+        self.assertEqual(list_subscriptions(self.database.id, self.db)["items"], [])
+        from app.models import SyncRun
+        self.assertIsNotNone(self.db.get(SyncRun, run.id))
+
+    def test_tracked_run_falls_back_to_application_when_publication_lookup_fails(self):
+        from unittest.mock import patch
+        from app.integrations.contracts import ProviderPatentRecord, ProviderIdentifier
+        from app.models import PatentDatabaseMembership
+        patent = Patent(title="tracked", publication_number="CN123456789A1", application_number="CN202010123456.7", database_id=self.database.id)
+        self.db.add(patent)
+        self.db.commit()
+        self.db.add(PatentDatabaseMembership(patent_id=patent.id, database_id=self.database.id))
+        self.db.commit()
+        subscription = SyncService.create_subscription(self.db, {
+            "database_id": self.database.id, "connector_id": self.connector.id,
+            "name": "fallback-test", "mode": "tracked_patents",
+            "scope_json": {"patent_ids": [patent.id]}, "schedule_json": {},
+            "review_policy": "safe_auto_apply", "enabled": True,
+        })
+        calls = []
+        class Connector:
+            def fetch_patent(self, identifier):
+                calls.append(identifier.identifier_type)
+                if identifier.identifier_type == "publication":
+                    raise LookupError("publication unavailable")
+                return ProviderPatentRecord(external_record_id="fallback", identifiers=(ProviderIdentifier("publication", "CN123456789A1", "CN"),), fields={"title": "updated"})
+            def close(self):
+                pass
+        with patch("app.services.sync_service.get_connector", return_value=Connector()):
+            run = SyncService.run_subscription(self.db, subscription)
+        self.assertEqual(run.status, "succeeded", run.error_message)
+        self.assertIn("application", calls)
+
     def test_subscription_sync_persists_evidence_applies_safe_facts_and_deduplicates_events(self):
         subscription = SyncService.create_subscription(self.db, {
             "database_id": self.database.id,

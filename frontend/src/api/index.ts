@@ -358,6 +358,8 @@ export const syncApi = {
   }): Promise<SyncSubscription> => api.post('/sync/subscriptions', data),
   subscriptions: (databaseId?: number | null): Promise<{ items: SyncSubscription[] }> => api.get('/sync/subscriptions', { params: { database_id: databaseId ?? undefined } }),
   runSubscription: (id: number, maxPages = 100): Promise<SyncRun> => api.post(`/sync/subscriptions/${id}/run`, { trigger: 'manual', max_pages: maxPages }),
+  deleteSubscription: (id: number): Promise<{ success: boolean }> => api.delete(`/sync/subscriptions/${id}`),
+  updateSubscription: (id: number, data: JsonObject): Promise<SyncSubscription> => api.patch(`/sync/subscriptions/${id}`, data),
   runs: (subscriptionId?: number | null): Promise<{ items: SyncRun[] }> => api.get('/sync/runs', { params: { subscription_id: subscriptionId ?? undefined, limit: 50 } }),
   observations: (decision = 'pending_review'): Promise<{ items: ExternalObservation[] }> => api.get('/sync/observations', { params: { decision, limit: 100 } }),
   decideObservation: (id: number, decision: 'accepted' | 'rejected', decidedBy = 'local-user'): Promise<ExternalObservation> => api.post(`/sync/observations/${id}/decision`, { decision, decided_by: decidedBy }),

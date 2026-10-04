@@ -54,7 +54,7 @@ const NAV_SECTIONS: Array<{ key: SidebarSectionKey; label: string; items: NavDes
     label: '系统管理',
     items: [
       { page: 'management', label: '业务管理台', icon: 'dashboard', hint: '字段、模板与业务规则配置' },
-      { page: 'fields', label: '自定义字段', icon: 'settings', hint: '新增、编辑、停用和删除已有自定义字段' },
+      { page: 'fields', label: '字段与 AI 抽取', icon: 'settings', hint: '配置 AI 输入字段、提示词及自定义字段' },
       { page: 'attachments', label: '附件库', icon: 'file', hint: '统一查找专利与项目附件' },
       { page: 'sharing', label: '协作与权限', icon: 'users', hint: '成员、角色与权限管理' },
     ],

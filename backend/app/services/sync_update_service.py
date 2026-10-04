@@ -63,7 +63,11 @@ class SyncUpdateService:
 
     @staticmethod
     def _identifiers(patent: Patent) -> list[ProviderIdentifier]:
-        result = [
+        result = []
+        if patent.publication_number:
+            from app.services.patent_identity_service import normalize_publication_number
+            result.append(ProviderIdentifier("publication", normalize_publication_number(patent.publication_number) or patent.publication_number, patent.country))
+        result.extend([
             ProviderIdentifier(
                 identifier_type=item.identifier_type,
                 raw_value=item.raw_value,
@@ -73,15 +77,13 @@ class SyncUpdateService:
             )
             for item in patent.identifiers
             if item.raw_value
-        ]
-        if result:
-            return result
+        ])
         for identifier_type, value in (
             ("publication", patent.publication_number),
             ("application", patent.application_number),
             ("grant", patent.grant_number),
         ):
-            if value:
+            if value and not any(item.identifier_type == identifier_type and item.raw_value == str(value) for item in result):
                 result.append(ProviderIdentifier(identifier_type, str(value), patent.country))
         return result
 
@@ -114,7 +116,6 @@ class SyncUpdateService:
                 candidates[field_key] = candidate
         return candidates
 
-    @staticmethod
     @staticmethod
     def _fetch_record(connector: Any, patent: Patent) -> ProviderPatentRecord:
         identifiers = SyncUpdateService._identifiers(patent)

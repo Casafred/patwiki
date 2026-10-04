@@ -266,6 +266,9 @@ class SyncService:
         patent = db.query(Patent).filter(Patent.id == patent_id).first()
         if not patent:
             return None
+        if patent.publication_number:
+            from app.services.patent_identity_service import normalize_publication_number
+            return ProviderIdentifier(identifier_type="publication", raw_value=normalize_publication_number(patent.publication_number) or patent.publication_number, jurisdiction_code=patent.country)
         identifier = db.query(PatentIdentifier).filter(
             PatentIdentifier.patent_id == patent_id,
             PatentIdentifier.is_primary == True,
@@ -361,7 +364,8 @@ class SyncService:
                             raise ValueError("跟踪的专利已不存在")
                         if not identifier:
                             raise ValueError("该专利没有可用于外部检索的申请号、公开号或授权号")
-                        record = connector.fetch_patent(identifier)
+                        from app.services.sync_update_service import SyncUpdateService
+                        record = SyncUpdateService._fetch_record(connector, patent)
                         process_record(db, run, subscription, record)
                         refreshed_patent = db.query(Patent).filter(Patent.id == tracked.patent_id).first()
                         current_status = str(getattr(refreshed_patent.legal_status, "value", refreshed_patent.legal_status) or "unknown") if refreshed_patent else "unknown"
