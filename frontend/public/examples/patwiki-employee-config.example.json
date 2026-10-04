@@ -1,0 +1,24 @@
+{
+  "payload": {
+    "format": "patwiki.employee-config",
+    "version": 1,
+    "department_code": "IP",
+    "employee_no": "E001",
+    "user_uid": "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "username": "alice",
+    "display_name": "Alice",
+    "role": "member",
+    "active": true,
+    "password_hash": "<administrator-generated Argon2 password hash>",
+    "issued_at": "2026-10-04T00:00:00",
+    "issuer_public_key": "<administrator-generated base64 Ed25519 public key>",
+    "database_permissions": [
+      {
+        "database_uid": "db_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "actions": ["export", "apply"],
+        "fields": ["title", "abstract", "notes"]
+      }
+    ]
+  },
+  "signature": "<administrator-generated base64 Ed25519 signature of payload>"
+}

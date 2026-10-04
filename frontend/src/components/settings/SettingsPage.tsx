@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { settingsApi } from '../../api'
 import { getErrorMessage } from '../../lib/errors'
+import Icon from '../common/Icon'
 
-export default function SettingsPage() {
+export default function SettingsPage({ onSemanticModels }: { onSemanticModels?: () => void } = {}) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -117,6 +118,7 @@ export default function SettingsPage() {
       </div>
 
       {/* LLM 配置卡片 */}
+      {onSemanticModels && <div className="semantic-model-actions" style={{ marginBottom: 16 }}><button className="btn btn-secondary" onClick={onSemanticModels}><Icon name="database" />Embedding / Rerank 模型配置</button></div>}
       <div className="settings-panel">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>LLM 配置</h3>

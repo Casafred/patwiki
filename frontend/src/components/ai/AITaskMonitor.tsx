@@ -119,7 +119,7 @@ export default function AITaskMonitor() {
   return (
     <div className="ai-task-monitor-page">
       <div className="page-header">
-        <h2 className="page-title">AI 任务监控</h2>
+        <h2 className="page-title">AI抽取任务记录</h2>
         <p className="page-subtitle">
           查看 AI 字段抽取任务进度
         </p>

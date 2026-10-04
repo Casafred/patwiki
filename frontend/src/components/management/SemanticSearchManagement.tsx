@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { semanticSearchService } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
+import Icon from '../common/Icon'
 import type { SemanticEvaluationCase, SemanticEvaluationDataset, SemanticEvaluationRun, SemanticIndex, SemanticJob, SemanticProfile, SemanticProvider, SemanticStatus } from '../../types'
 
 const inputStyle = { width: '100%', boxSizing: 'border-box' as const }
@@ -24,7 +25,8 @@ function thresholdValue(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : undefined
 }
 
-export default function SemanticSearchManagement() {
+export default function SemanticSearchManagement({ initialTab = 'overview' }: { initialTab?: 'overview' | 'models' } = {}) {
+  const [tab, setTab] = useState<'overview' | 'models' | 'indexes' | 'evaluation'>(initialTab)
   const { databases, currentDatabaseId } = useAppStore()
   const [profiles, setProfiles] = useState<SemanticProfile[]>([])
   const [providers, setProviders] = useState<SemanticProvider[]>([])
@@ -83,11 +85,11 @@ export default function SemanticSearchManagement() {
   const [evaluationMode, setEvaluationMode] = useState<'keyword' | 'semantic' | 'hybrid'>('hybrid')
 
   const quickProfile = useMemo(
-    () => profiles.find(profile => profile.is_default) || profiles[0],
-    [profiles],
+    () => profiles.find(profile => profile.id === selectedProfileId) || profiles.find(profile => profile.is_default) || profiles[0],
+    [profiles, selectedProfileId],
   )
   const selectedIndexDatabaseId = indexScope === 'current' ? currentDatabaseId : null
-  const quickProfileReady = Boolean(quickProfile?.embedding_provider_id && quickProfile.embedding_dimensions)
+  const quickProfileReady = Boolean(quickProfile?.enabled && quickProfile.embedding_dimensions && providers.some(provider => provider.id === quickProfile.embedding_provider_id && provider.enabled))
   const quickActiveIndex = useMemo(() => indexes.find(index => (
     index.profile_id === quickProfile?.id
       && index.is_active
@@ -107,7 +109,7 @@ export default function SemanticSearchManagement() {
       ])
       setProfiles(profileResult.items); setProviders(providerResult.items); setIndexes(indexResult.items)
       setJobs(jobResult.items); setStatus(statusResult); setDatasets(datasetResult.items); setRuns(runResult.items)
-      setSelectedProfileId(current => current && profileResult.items.some(item => item.id === current) ? current : profileResult.items[0]?.id ?? null)
+      setSelectedProfileId(current => current && profileResult.items.some(item => item.id === current) ? current : profileResult.items.find(item => item.is_default && item.enabled)?.id ?? profileResult.items[0]?.id ?? null)
       setSelectedDatasetId(current => current && datasetResult.items.some(item => item.id === current) ? current : datasetResult.items[0]?.id ?? null)
       setSelectedIndexId(current => current && indexResult.items.some(item => item.id === current) ? current : indexResult.items.find(item => item.status === 'validating')?.id ?? indexResult.items.find(item => item.is_active)?.id ?? null)
     } catch (loadError: unknown) {
@@ -161,7 +163,10 @@ export default function SemanticSearchManagement() {
     }, editingProviderId ? '供应商已更新' : '供应商已保存')
   }
 
-  const testProvider = (provider: SemanticProvider) => runAction(() => semanticSearchService.testProvider(provider.id, provider.provider_kind === 'embedding' && selectedProfileId ? { profile_id: selectedProfileId } : { model: typeof provider.config_json.model === 'string' ? provider.config_json.model : undefined }), '供应商测试完成')
+  const testProvider = (provider: SemanticProvider) => {
+    const profile = profiles.find(item => item.embedding_provider_id === provider.id)
+    return runAction(() => semanticSearchService.testProvider(provider.id, provider.provider_kind === 'embedding' && profile ? { profile_id: profile.id } : { model: typeof provider.config_json.model === 'string' ? provider.config_json.model : undefined }), '供应商测试完成')
+  }
   const toggleProvider = (provider: SemanticProvider) => runAction(() => semanticSearchService.updateProvider(provider.id, { enabled: !provider.enabled }), provider.enabled ? '供应商已停用' : '供应商已启用')
 
   const editProfile = (profile: SemanticProfile) => {
@@ -202,13 +207,14 @@ export default function SemanticSearchManagement() {
     const dimensions = profileEmbeddingDimensions.trim() ? Number(profileEmbeddingDimensions) : null
     if (dimensions !== null && (!Number.isInteger(dimensions) || dimensions < 1)) { setError('Embedding 维度必须是正整数'); return }
     await runAction(async () => {
-      await semanticSearchService.createProfile({
+      const created = await semanticSearchService.createProfile({
         name: profileName.trim(), embedding_provider_id: profileEmbeddingProviderId ? Number(profileEmbeddingProviderId) : null,
         embedding_model: profileEmbeddingModel.trim() || 'text-embedding-3-small', embedding_dimensions: dimensions,
         vector_backend: profileVectorBackend, retrieval_mode: profileRetrievalMode,
         is_default: !profiles.some(profile => profile.is_default && profile.enabled && profile.embedding_provider_id),
         indexed_field_allowlist: [],
       })
+      setSelectedProfileId(created.id)
       setProfileName(''); setProfileEmbeddingProviderId(''); setProfileEmbeddingModel('text-embedding-3-small'); setProfileEmbeddingDimensions(''); setShowProfileForm(false)
     }, 'Profile 已创建')
   }
@@ -270,18 +276,20 @@ export default function SemanticSearchManagement() {
   return (
     <div className="semantic-management">
       <div className="page-header">
-        <div><h2 className="page-title">语义检索</h2><p className="page-subtitle">管理 Embedding、Rerank、可重建索引、异步任务和离线质量评测。</p></div>
-        <button className="btn btn-secondary" onClick={() => void load()} disabled={busy}>刷新状态</button>
+        <div><h2 className="page-title">语义检索工作台</h2></div>
+        <button className="btn btn-secondary" onClick={() => void load()} disabled={busy}><Icon name="refresh" />刷新状态</button>
       </div>
+      <nav className="workspace-subtabs" aria-label="语义检索模块">{([{ key: 'overview', label: '工作台概览' }, { key: 'models', label: '模型配置' }, { key: 'indexes', label: '索引与任务' }, { key: 'evaluation', label: '检索质量评测' }] as const).map(item => <button key={item.key} className={tab === item.key ? 'active' : ''} onClick={() => setTab(item.key)}>{item.label}</button>)}</nav>
       {error && <div className="management-error">{error}</div>}
       {message && <div className="semantic-management-message">{message}</div>}
-      <section className="semantic-setup-guide">
+      <section className="semantic-setup-guide" hidden={tab !== 'overview'}>
         <div className="semantic-setup-header">
           <div>
             <strong>开始向量化</strong>
-            <span>完成供应商、Profile 和维度检测后，点击“开始向量化”；任务完成后在下方索引表点击“激活”。</span>
           </div>
           <label className="semantic-scope-control">
+            <span>检索配置</span>
+            <select className="form-input" value={quickProfile?.id ?? ''} onChange={event => setSelectedProfileId(Number(event.target.value) || null)}><option value="">选择检索配置</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select>
             <span>索引范围</span>
             <select className="form-input" value={indexScope} onChange={event => setIndexScope(event.target.value as 'current' | 'global')}>
               <option value="current">当前数据库{currentDatabaseId ? ` · ${databases.find(database => database.id === currentDatabaseId)?.name || currentDatabaseId}` : ' · 未选择'}</option>
@@ -293,12 +301,12 @@ export default function SemanticSearchManagement() {
           <div className={`semantic-setup-step ${providers.some(provider => provider.provider_kind === 'embedding' && provider.enabled) ? 'ready' : ''}`}>
             <span className="semantic-step-number">1</span>
             <div><strong>配置 Embedding 供应商</strong><span>{providers.filter(provider => provider.provider_kind === 'embedding' && provider.enabled).length ? '已配置' : '尚未配置'}</span></div>
-            <button type="button" className="btn btn-secondary" onClick={() => { setShowProviderForm(true); setProviderKind('embedding') }}>配置供应商</button>
+            <button type="button" className="btn btn-secondary" onClick={() => { setTab('models'); resetProviderForm(); setShowProviderForm(true) }}>配置供应商</button>
           </div>
           <div className={`semantic-setup-step ${quickProfile?.embedding_provider_id ? 'ready' : ''}`}>
             <span className="semantic-step-number">2</span>
             <div><strong>选择向量 Profile</strong><span>{quickProfile ? quickProfile.name : '尚未创建'}</span></div>
-            <button type="button" className="btn btn-secondary" onClick={() => setShowProfileForm(true)}>{quickProfile ? '新建 / 调整' : '新建 Profile'}</button>
+            <button type="button" className="btn btn-secondary" onClick={() => { setTab('models'); setShowProfileForm(true) }}>新建配置</button>
           </div>
           <div className={`semantic-setup-step ${quickProfile?.embedding_dimensions ? 'ready' : ''}`}>
             <span className="semantic-step-number">3</span>
@@ -311,8 +319,9 @@ export default function SemanticSearchManagement() {
             <button type="button" className="btn btn-primary" disabled={!quickProfile || !quickProfileReady || busy || Boolean(quickJob)} onClick={() => quickProfile && void rebuild(quickProfile)}>开始向量化</button>
           </div>
         </div>
+        <div className="management-form-actions"><button className="btn btn-secondary" onClick={() => setTab('indexes')}><Icon name="database" />查看索引 / 激活索引</button></div>
       </section>
-      <div className="semantic-status-grid">
+      <div className="semantic-status-grid" hidden={tab !== 'overview'}>
         <StatusTile label="启用 Profile" value={status?.configured_profiles ?? '-'} />
         <StatusTile label="Active 索引" value={status?.active_indexes ?? '-'} />
         <StatusTile label="待处理任务" value={status?.pending_jobs ?? '-'} />
@@ -321,19 +330,21 @@ export default function SemanticSearchManagement() {
         <StatusTile label="稀疏检索" value={status?.sparse_available ? 'FTS5 BM25' : 'ILIKE 回退'} detail={status?.sparse_available ? '中文 trigram' : '当前 SQLite 不支持 FTS5'} />
       </div>
 
-      <section className="semantic-management-section">
-        <div className="management-section-title"><strong>Profiles</strong><span>兼容身份字段锁定后需新建 Profile 和重建索引</span><button className="btn btn-primary" onClick={() => setShowProfileForm(current => !current)}>{showProfileForm ? '关闭表单' : '新建 Profile'}</button></div>
+      <section className="semantic-management-section" hidden={tab !== 'models'}>
+        <div className="management-section-title"><strong>检索模型配置</strong><button className="btn btn-primary" onClick={() => setShowProfileForm(current => !current)}><Icon name="plus" />{showProfileForm ? '关闭表单' : '新建配置'}</button></div>
         {showProfileForm && <div className="management-form compact"><div className="management-form-grid">
           <label>名称<input className="form-input" style={inputStyle} value={profileName} onChange={event => setProfileName(event.target.value)} placeholder="patent-semantic-v1" /></label>
-          <label>Embedding 供应商<select className="form-input" style={inputStyle} value={profileEmbeddingProviderId} onChange={event => setProfileEmbeddingProviderId(event.target.value)}><option value="">选择供应商</option>{providers.filter(provider => provider.provider_kind === 'embedding').map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
+          <label>Embedding 供应商<select className="form-input" style={inputStyle} value={profileEmbeddingProviderId} onChange={event => { setProfileEmbeddingProviderId(event.target.value); const provider = providers.find(item => item.id === Number(event.target.value)); if (typeof provider?.config_json.model === 'string') setProfileEmbeddingModel(provider.config_json.model); setProfileEmbeddingDimensions('') }}><option value="">选择供应商</option>{providers.filter(provider => provider.provider_kind === 'embedding' && provider.enabled).map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
           <label>Embedding 模型<input className="form-input" style={inputStyle} value={profileEmbeddingModel} onChange={event => setProfileEmbeddingModel(event.target.value)} /></label>
           <label>Embedding 维度<input className="form-input" style={inputStyle} type="number" min="1" value={profileEmbeddingDimensions} onChange={event => setProfileEmbeddingDimensions(event.target.value)} placeholder="由供应商返回时可留空" /></label>
           <label>向量后端<select className="form-input" style={inputStyle} value={profileVectorBackend} onChange={event => setProfileVectorBackend(event.target.value)}><option value="zvec">Zvec</option><option value="json_local">JSON Local</option></select></label>
           <label>检索模式<select className="form-input" style={inputStyle} value={profileRetrievalMode} onChange={event => setProfileRetrievalMode(event.target.value as 'keyword' | 'semantic' | 'hybrid')}><option value="hybrid">混合</option><option value="semantic">语义</option><option value="keyword">关键词</option></select></label>
         </div><div className="management-form-actions"><button className="btn btn-primary" disabled={busy} onClick={() => void createProfile()}>保存 Profile</button></div></div>}
-        <div className="management-table"><table><thead><tr><th>名称</th><th>Embedding</th><th>Rerank</th><th>分块</th><th>质量门禁</th><th>操作</th></tr></thead><tbody>
-          {profiles.map(profile => <tr key={profile.id}><td><strong>{profile.name}</strong>{profile.is_default && <span className="semantic-pill">默认</span>}{!profile.enabled && <span className="semantic-pill">停用</span>}</td><td>{profile.embedding_model || '-'}<div className="semantic-muted">{profile.embedding_dimensions || '-'} 维 · {profile.vector_backend}</div></td><td>{profile.rerank_enabled ? `${profile.rerank_model || '已启用'} · Top ${profile.rerank_top_n}` : '关闭'}</td><td>{profile.chunk_strategy_version}</td><td>{profile.quality_gate_enabled ? `启用 · ${Object.keys(profile.quality_thresholds).length} 项阈值` : '手动验收'}</td><td><button className="btn btn-secondary" disabled={busy} onClick={() => editProfile(profile)}>编辑</button> <button className="btn btn-secondary" disabled={busy} onClick={() => void health(profile)}>检测维度</button> <button className="btn btn-primary" disabled={busy} onClick={() => void rebuild(profile)}>开始向量化</button></td></tr>)}
-        </tbody></table>{profiles.length === 0 && <div className="semantic-empty">暂无 Profile，请先创建配置。</div>}</div>
+        <div className="semantic-model-grid">{profiles.map(profile => <article className="semantic-model-card" key={profile.id}>
+          <h3><Icon name="database" />{profile.name}{profile.is_default && <span className="semantic-pill">默认</span>}{!profile.enabled && <span className="semantic-pill">停用</span>}</h3>
+          <dl><dt>供应商</dt><dd>{providers.find(provider => provider.id === profile.embedding_provider_id)?.name || '未配置'}</dd><dt>向量模型</dt><dd>{profile.embedding_model || '-'}</dd><dt>维度 / 后端</dt><dd>{profile.embedding_dimensions || '未检测'} · {profile.vector_backend}</dd><dt>重排模型</dt><dd>{profile.rerank_enabled ? `${profile.rerank_model || '已启用'} · Top ${profile.rerank_top_n}` : '关闭'}</dd><dt>质量门禁</dt><dd>{profile.quality_gate_enabled ? '启用' : '手动验收'}</dd></dl>
+          <div className="semantic-model-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => editProfile(profile)}><Icon name="edit" />编辑</button><button className="btn btn-secondary" disabled={busy || !profile.embedding_provider_id} onClick={() => void health(profile)}>检测维度</button><button className="btn btn-primary" disabled={busy || !profile.enabled} onClick={() => { setSelectedProfileId(profile.id); setTab('overview') }}><Icon name="play" />选择此配置</button></div>
+        </article>)}</div>{profiles.length === 0 && <div className="semantic-empty">暂无检索配置</div>}
         {editingProfileId && <div className="management-form compact"><div className="management-section-title"><strong>编辑 Profile</strong><span>当前 Profile 的模型、模板和分块身份不能在 Active 后修改</span></div><div className="management-form-grid">
           <label>启用<select className="form-input" style={inputStyle} value={profileEnabled ? 'yes' : 'no'} onChange={event => setProfileEnabled(event.target.value === 'yes')}><option value="yes">启用</option><option value="no">停用</option></select></label>
           <label>Rerank<select className="form-input" style={inputStyle} value={profileRerankEnabled ? 'yes' : 'no'} onChange={event => setProfileRerankEnabled(event.target.value === 'yes')}><option value="no">关闭</option><option value="yes">启用</option></select></label>
@@ -348,7 +359,7 @@ export default function SemanticSearchManagement() {
         </div><div className="management-form-actions"><button className="btn btn-secondary" onClick={() => setEditingProfileId(null)}>取消</button><button className="btn btn-primary" disabled={busy} onClick={() => void saveProfile()}>保存 Profile</button></div></div>}
       </section>
 
-      <section className="semantic-management-section">
+      <section className="semantic-management-section" hidden={tab !== 'models'}>
         <div className="management-section-title"><strong>供应商</strong><button className="btn btn-primary" onClick={() => { resetProviderForm(); setShowProviderForm(current => !current) }}>{showProviderForm ? '关闭表单' : '新增供应商'}</button></div>
         {showProviderForm && <div className="management-form compact"><div className="management-form-grid">
           <label>名称<input className="form-input" style={inputStyle} value={providerName} onChange={event => setProviderName(event.target.value)} placeholder="OpenAI Embedding" /></label>
@@ -357,12 +368,14 @@ export default function SemanticSearchManagement() {
           <label>凭证引用<input className="form-input" style={inputStyle} value={providerCredential} onChange={event => setProviderCredential(event.target.value)} placeholder="env://OPENAI_API_KEY" /><span className="semantic-field-hint">只保存 env:// 或 keyring:// 引用，不保存明文 Key。</span></label>
           <label>模型提示<input className="form-input" style={inputStyle} value={providerModel} onChange={event => setProviderModel(event.target.value)} placeholder="由 Profile 指定时可留空" /></label>
         </div><div className="management-form-actions"><button className="btn btn-secondary" onClick={() => { resetProviderForm(); setShowProviderForm(false) }}>取消</button><button className="btn btn-primary" disabled={busy} onClick={() => void saveProvider()}>{editingProviderId ? '更新供应商' : '保存供应商'}</button></div></div>}
-        <div className="management-table"><table><thead><tr><th>名称</th><th>能力</th><th>Endpoint</th><th>凭证</th><th>状态</th><th>操作</th></tr></thead><tbody>
-          {providers.map(provider => <tr key={provider.id}><td><strong>{provider.name}</strong></td><td>{provider.provider_kind}</td><td className="semantic-mono">{provider.endpoint || '-'}</td><td className="semantic-mono">{provider.credential_ref || '-'}</td><td>{provider.enabled ? (provider.last_health_status || '未检查') : '已停用'}</td><td><button className="btn btn-secondary" disabled={busy} onClick={() => editProvider(provider)}>编辑</button> <button className="btn btn-secondary" disabled={busy} onClick={() => void testProvider(provider)}>测试</button> <button className="btn btn-secondary" disabled={busy} onClick={() => void toggleProvider(provider)}>{provider.enabled ? '停用' : '启用'}</button></td></tr>)}
-        </tbody></table></div>
+        <div className="semantic-model-grid">{providers.map(provider => <article className="semantic-model-card" key={provider.id}>
+          <h3><Icon name="settings" />{provider.name}<span className="semantic-pill">{provider.provider_kind === 'embedding' ? 'Embedding' : 'Rerank'}</span></h3>
+          <dl><dt>模型</dt><dd>{typeof provider.config_json.model === 'string' ? provider.config_json.model : '由检索配置指定'}</dd><dt>Endpoint</dt><dd>{provider.endpoint || '默认'}</dd><dt>凭证引用</dt><dd>{provider.credential_ref || '-'}</dd><dt>状态</dt><dd>{provider.enabled ? (provider.last_health_status || '未检查') : '已停用'}</dd></dl>
+          <div className="semantic-model-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => editProvider(provider)}><Icon name="edit" />编辑</button><button className="btn btn-secondary" disabled={busy || !provider.enabled} onClick={() => void testProvider(provider)}><Icon name="activity" />测试连接</button><button className="btn btn-secondary" disabled={busy} onClick={() => void toggleProvider(provider)}>{provider.enabled ? '停用' : '启用'}</button></div>
+        </article>)}</div>{providers.length === 0 && <div className="semantic-empty">暂无模型供应商</div>}
       </section>
 
-      <section className="semantic-management-section">
+      <section className="semantic-management-section" hidden={tab !== 'indexes'}>
         <div className="management-section-title"><strong>索引与任务</strong><span>后台重建完成后再手动激活，失败任务可重试，最终失败进入 dead-letter。</span></div>
         <div className="management-table"><table><thead><tr><th>版本</th><th>Profile</th><th>范围</th><th>状态</th><th>文档 / 专利</th><th>操作</th></tr></thead><tbody>
           {indexes.map(index => <tr key={index.id}><td className="semantic-mono">{index.index_version}</td><td>{profileById.get(index.profile_id)?.name || index.profile_id}</td><td>{index.database_id ? `数据库 ${index.database_id}` : '全局'}</td><td><span className={index.is_active ? 'semantic-pill active' : 'semantic-pill'}>{index.is_active ? 'active' : index.status}</span></td><td>{index.document_count} / {index.patent_count}</td><td>{!index.is_active && index.status === 'validating' && <button className="btn btn-primary" disabled={busy} onClick={() => void activate(index)}>激活</button>}</td></tr>)}
@@ -370,7 +383,7 @@ export default function SemanticSearchManagement() {
         <div className="semantic-job-list">{jobs.slice(0, 8).map(job => <div className="semantic-job-row" key={job.id}><span>#{job.id} {job.job_type}</span><span>{profileById.get(job.profile_id)?.name || job.profile_id}</span><span>{job.status}</span><span>{job.processed_items}/{job.total_items}</span><span>{job.error_code || `尝试 ${job.attempt_count}/${job.max_attempts}`}</span>{['failed', 'retry_wait', 'dead_letter'].includes(job.status) && <button className="btn btn-secondary" disabled={busy} onClick={() => void retryJob(job)}>重试</button>}</div>)}</div>
       </section>
 
-      <section className="semantic-management-section">
+      <section className="semantic-management-section" hidden={tab !== 'evaluation'}>
         <div className="management-section-title"><strong>离线评测</strong><button className="btn btn-primary" onClick={() => setShowDatasetForm(current => !current)}>新建评测集</button></div>
         {showDatasetForm && <div className="management-form compact"><div className="management-form-grid"><label>名称<input className="form-input" style={inputStyle} value={datasetName} onChange={event => setDatasetName(event.target.value)} /></label><label>版本<input className="form-input" style={inputStyle} value={datasetVersion} onChange={event => setDatasetVersion(event.target.value)} /></label></div><div className="management-form-actions"><button className="btn btn-primary" disabled={busy} onClick={() => void createDataset()}>创建</button></div></div>}
         <div className="semantic-evaluation-controls"><select className="form-input" value={selectedDatasetId ?? ''} onChange={event => setSelectedDatasetId(Number(event.target.value) || null)}><option value="">选择评测集</option>{datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.name} · {dataset.version} ({dataset.case_count ?? 0} 条)</option>)}</select><select className="form-input" value={selectedProfileId ?? ''} onChange={event => setSelectedProfileId(Number(event.target.value) || null)}><option value="">选择 Profile</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select><select className="form-input" value={selectedIndexId ?? ''} onChange={event => setSelectedIndexId(Number(event.target.value) || null)}><option value="">使用 Active 索引</option>{indexes.filter(index => !selectedProfileId || index.profile_id === selectedProfileId).map(index => <option key={index.id} value={index.id}>{index.index_version.slice(-17)} · {index.status}</option>)}</select><select className="form-input" value={evaluationMode} onChange={event => setEvaluationMode(event.target.value as 'keyword' | 'semantic' | 'hybrid')}><option value="keyword">关键词基线</option><option value="hybrid">混合</option><option value="semantic">语义</option></select><button className="btn btn-primary" disabled={busy || !selectedDatasetId || !selectedProfileId || casesDatasetId !== selectedDatasetId || !cases.some(item => item.enabled)} onClick={() => void runEvaluation()}>运行评测</button></div>

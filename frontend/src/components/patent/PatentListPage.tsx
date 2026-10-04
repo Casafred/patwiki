@@ -764,6 +764,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const restoredScopeRef = useRef<string | null>(null)
   const [activeCell, setActiveCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [scrollEdges, setScrollEdges] = useState({ atTop: true, atBottom: true })
+  const pendingLibraryEdge = useRef<'top' | 'bottom' | null>(null)
 
   const tableScopeKey = `${TABLE_POSITION_STORAGE_PREFIX}${JSON.stringify({
     databaseId: isGlobalMasterTable ? null : activeDatabaseId ?? null,
@@ -834,23 +835,46 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }, [page, tableScopeKey])
 
   const scrollLibraryTo = useCallback((edge: 'top' | 'bottom') => {
+    const targetPage = edge === 'top' ? 1 : Math.max(1, Math.ceil(totalPatents / pageSize))
+    if (tableViewMode === 'continuous' || page !== targetPage) {
+      pendingLibraryEdge.current = edge
+      if (tableViewMode === 'continuous') {
+        setTableViewMode('pagination')
+        try { localStorage.setItem(TABLE_VIEW_MODE_STORAGE_KEY, 'pagination') } catch { /* storage is optional */ }
+      }
+      setPage(targetPage)
+      return
+    }
     const element = tableWrapperRef.current
     if (!element) return
     element.scrollTo({
       top: edge === 'top' ? 0 : element.scrollHeight,
       behavior: 'smooth',
     })
-  }, [])
+  }, [page, pageSize, tableViewMode, totalPatents])
+
+  useEffect(() => {
+    if (loading || !pendingLibraryEdge.current) return
+    // Run after the page cache/position restoration has painted its rows.
+    const frame = window.requestAnimationFrame(() => {
+      const edge = pendingLibraryEdge.current
+      const element = tableWrapperRef.current
+      if (!element || !edge) return
+      element.scrollTo({ top: edge === 'top' ? 0 : element.scrollHeight })
+      pendingLibraryEdge.current = null
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [patents, loading])
 
   // 悬浮快捷按钮只在真正可滚动、且不在对应边缘时出现，避免遮挡内容。
   const updateScrollEdges = useCallback((node?: HTMLDivElement | null) => {
     const element = node ?? tableWrapperRef.current
     if (!element) return
     const maxScroll = element.scrollHeight - element.clientHeight
-    const atTop = element.scrollTop <= 1
-    const atBottom = maxScroll <= 1 || element.scrollTop >= maxScroll - 1
+    const atTop = (tableViewMode === 'continuous' || page === 1) && element.scrollTop <= 1
+    const atBottom = (tableViewMode === 'continuous' ? patents.length >= totalPatents : page >= Math.ceil(totalPatents / pageSize)) && (maxScroll <= 1 || element.scrollTop >= maxScroll - 1)
     setScrollEdges(prev => (prev.atTop === atTop && prev.atBottom === atBottom ? prev : { atTop, atBottom }))
-  }, [])
+  }, [page, pageSize, patents.length, tableViewMode, totalPatents])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => updateScrollEdges())
@@ -3323,27 +3347,31 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 <Icon name="table" size={14} /> 同族聚拢{groupByFamily ? '已开启' : '已关闭'}
               </button>
               {groupByFamily && (
-                <>
+                <ToolbarMenu label={`同族条件${familyCountry || familySortBy ? ' · 已设置' : ''}`} icon="filter" title="同族国家与排序条件">
+                  {() => <div className="family-filter-panel">
+                  <label>族内国家
                   <input
-                    className="input input-sm"
+                    className="form-input"
                     value={familyCountry}
                     onChange={event => { setFamilyCountry(event.target.value.toUpperCase()); setPage(1) }}
                     placeholder="族内国家，如 CN"
                     aria-label="按族内国家筛选"
-                    style={{ width: 132 }}
                   />
-                  <select className="input input-sm" value={familySortBy} onChange={event => { setFamilySortBy(event.target.value as typeof familySortBy); setPage(1) }} aria-label="同族排序指标">
+                  </label>
+                  <label>排序指标<select className="form-input" value={familySortBy} onChange={event => { setFamilySortBy(event.target.value as typeof familySortBy); setPage(1) }} aria-label="同族排序指标">
                     <option value="">默认族顺序</option>
                     <option value="count">族内专利数量</option>
                     <option value="priority_date">最早优先权</option>
                     <option value="applicant">申请人</option>
                     <option value="publication_date">最早公开日</option>
-                  </select>
-                  <select className="input input-sm" value={familySortOrder} disabled={!familySortBy} onChange={event => { setFamilySortOrder(event.target.value as SortOrder); setPage(1) }} aria-label="同族排序方向">
+                  </select></label>
+                  <label>排序方向<select className="form-input" value={familySortOrder} disabled={!familySortBy} onChange={event => { setFamilySortOrder(event.target.value as SortOrder); setPage(1) }} aria-label="同族排序方向">
                     <option value="asc">升序</option>
                     <option value="desc">降序</option>
-                  </select>
-                </>
+                  </select></label>
+                  <button className="btn btn-sm btn-secondary" onClick={() => { setFamilyCountry(''); setFamilySortBy(''); setFamilySortOrder('asc'); setPage(1) }}><Icon name="undo" size={14} />重置条件</button>
+                  </div>}
+                </ToolbarMenu>
               )}
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
               <button

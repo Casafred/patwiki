@@ -3,6 +3,7 @@ import { collaborationSyncApi, databaseApi, productApi } from '../../api'
 import type { CollaborationIdentity, CollaborationPackage, PatentDatabase, Product } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import SyncAggregationPanel from './SyncAggregationPanel'
+import Icon from '../common/Icon'
 
 const TOKEN_KEY = 'patwiki_collaboration_token'
 const fields = [
@@ -364,7 +365,13 @@ export default function CollaborationSyncPanel() {
     </div>
 
     {!identity && <div style={{ display: 'grid', gap: 10, maxWidth: 680 }}>
-      <label style={{ fontSize: 13 }}>成员初始化 / 权限更新文件<input type="file" accept=".json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (!file) return; setBusy(true); void collaborationSyncApi.importEmployeeConfig(file).then(result => { setLoginName(result.username); setConfigured(true); setMessage(`成员配置已导入：${result.username}`) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)); event.target.value = '' }} /></label>
+      <div className="member-config-import">
+        <Icon name="file" size={28} />
+        <div className="member-config-description"><strong>成员初始化 / 权限更新</strong><span>管理员签发的 JSON 配置文件</span></div>
+        <label className={`btn btn-primary member-config-picker ${busy ? 'is-disabled' : ''}`}><Icon name="download" />{busy ? '导入中...' : '选择配置文件'}<input type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (!file) return; setBusy(true); void collaborationSyncApi.importEmployeeConfig(file).then(result => { setLoginName(result.username); setConfigured(true); setMessage(`成员配置已导入：${result.username}`) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)); event.target.value = '' }} /></label>
+        <a className="btn btn-secondary" href={`${import.meta.env.BASE_URL}examples/patwiki-employee-config.example.json`} download><Icon name="download" />格式样例</a>
+      </div>
+      <div className="semantic-muted">样例用于查看格式。正式文件请由管理员在成员权限配置中导出，修改文件内容会使签名失效。</div>
       {configured ? <><strong style={{ fontSize: 13 }}>协同账号登录</strong>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
           <input style={inputStyle} value={loginName} onChange={event => setLoginName(event.target.value)} placeholder="协同账号" autoComplete="username" />

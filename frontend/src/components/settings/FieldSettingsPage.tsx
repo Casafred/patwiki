@@ -269,7 +269,7 @@ export default function FieldSettingsPage() {
       <div className="workspace-page-shell ai-field-settings-shell">
       <div className="page-header workspace-page-header">
         <div>
-          <h2 className="page-title">字段与 AI 抽取</h2>
+            <h2 className="page-title">自定义字段与AI抽取</h2>
           <p className="page-subtitle">统一管理系统字段、自定义字段和 AI 抽取字段；列管理中的“管理字段”会进入这里</p>
         </div>
         <button
