@@ -2,7 +2,7 @@ import json
 import unittest
 
 from app.integrations.contracts import CanonicalPatentQuery, ProviderIdentifier
-from app.integrations.himmpat import HimmPatMcpAdapter
+from app.integrations.himmpat import HimmPatMcpAdapter, READ_ONLY_TOOLS
 
 
 class FixtureTransport:
@@ -95,6 +95,51 @@ class HimmPatAdapterTest(unittest.TestCase):
             "https://www.himmpat.com/api/service/himmuc_api/mcp/product_legal_ownership_risk",
         )
         adapter.close()
+
+    def test_selected_fulltext_and_ai_fields_use_provider_schema_and_normalize_text(self):
+        class FullTransport(FixtureTransport):
+            def discover(self, services):
+                return {"services": [{"service": services[0], "tools": [
+                    {"name": "get_claims_by_patent_id", "inputSchema": {"properties": {"patentId": {"type": "string"}}}},
+                    {"name": "get_description_by_patent_id", "inputSchema": {"properties": {"id": {"type": "string"}}}},
+                ]}]}
+
+            def call_tool(self, service, tool, arguments):
+                payloads = {
+                    "get_claims_by_patent_id": {"h-1": {"claims": [{"text": "1. A device"}, {"text": "2. The device"}]}},
+                    "get_description_by_patent_id": {"h-1": {"description": "Detailed description"}},
+                    "get_patent_ai_tech_info": {"h-1": {"technicalProblem": "Problem", "technicalMeans": "Means", "technicalEffect": "Effect"}},
+                }
+                if tool in payloads:
+                    self.calls.append((service, tool, arguments))
+                    return {"structuredContent": {"code": 200, "data": payloads[tool]}}
+                return super().call_tool(service, tool, arguments)
+
+        transport = FullTransport()
+        adapter = HimmPatMcpAdapter({}, transport=transport)
+        basic = adapter.fetch_patent_fields(ProviderIdentifier("publication", "CN123A"), {"title"})
+        self.assertNotIn("claims", basic.fields)
+        self.assertEqual(len(transport.calls), 2)
+        record = adapter.fetch_patent_fields(ProviderIdentifier("publication", "CN123A"), {"claims", "description_full", "technical_solution"})
+        self.assertEqual(record.fields["claims"], "1. A device\n\n2. The device")
+        self.assertEqual(record.fields["description_full"], "Detailed description")
+        self.assertEqual(record.fields["technical_solution"], "Means")
+        self.assertIn("get_patent_ai_tech_info", record.raw_payload)
+        self.assertIn(("product_patent_dossier", "get_claims_by_patent_id", {"patentId": "h-1"}), transport.calls)
+
+    def test_workbench_supports_all_catalog_tools_and_array_scalar_results(self):
+        class ToolTransport(FixtureTransport):
+            def call_tool(self, service, tool, arguments):
+                return {"structuredContent": {"code": 200, "data": ["one", "two"]}}
+        adapter = HimmPatMcpAdapter({}, transport=ToolTransport())
+        self.assertEqual(sum(len(names) for names in READ_ONLY_TOOLS.values()), 40)
+        for service, names in READ_ONLY_TOOLS.items():
+            for name in names:
+                data, _ = adapter.call_discovered_tool(adapter.services[service], name, {})
+                self.assertEqual(data["items"], ["one", "two"])
+        with self.assertRaises(Exception) as raised:
+            adapter.call_discovered_tool(adapter.services["dossier"], "delete_patent", {})
+        self.assertEqual(raised.exception.error_code, "unsupported_tool")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,10 @@ SAFE_EXTERNAL_FIELDS = {
     "applicant", "inventor", "assignee", "agent", "filing_date", "publication_date",
     "grant_date", "priority_date", "priority_number", "priority_country", "country",
     "ipc_main", "ipc_all", "cpc_main", "cpc_all",
+    "claims", "description_full",
 }
+
+REVIEWABLE_EXTERNAL_FIELDS = SAFE_EXTERNAL_FIELDS | {"technical_problem", "technical_solution", "technical_effect"}
 
 LEGAL_STATUS_MAP = {
     "pending": "pending", "published": "published", "examining": "examining",

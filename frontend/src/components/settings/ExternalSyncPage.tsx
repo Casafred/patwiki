@@ -5,12 +5,16 @@ import { fieldService as fieldApi } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
 import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, SyncConnector, SyncRun, SyncSubscription } from '../../types'
+import McpToolWorkbench from './McpToolWorkbench'
 
 const EXTERNAL_UPDATE_FIELDS = [
   ['publication_date', '公开日'], ['grant_date', '授权日'], ['legal_status', '法律状态'],
   ['application_number', '申请号'], ['publication_number', '公开号'], ['title', '标题'],
   ['abstract', '摘要'], ['applicant', '申请人'], ['assignee', '受让人'], ['inventor', '发明人'],
   ['filing_date', '申请日'], ['country', '国家/地区'], ['ipc_all', 'IPC 分类'],
+  ['agent', '代理人'], ['priority_date', '优先权日'], ['priority_number', '优先权号'],
+  ['claims', '权利要求全文'], ['description_full', '说明书全文'],
+  ['technical_problem', '技术问题'], ['technical_solution', '技术方案'], ['technical_effect', '技术效果'],
 ] as const
 
 function countValue(run: SyncRun, key: string): string {
@@ -361,6 +365,7 @@ export default function ExternalSyncPage() {
               })}
             </section>
           )}
+          {tools && <McpToolWorkbench connectors={connectors} />}
         </div>
       )}
 

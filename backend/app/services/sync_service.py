@@ -365,7 +365,7 @@ class SyncService:
                         if not identifier:
                             raise ValueError("该专利没有可用于外部检索的申请号、公开号或授权号")
                         from app.services.sync_update_service import SyncUpdateService
-                        record = SyncUpdateService._fetch_record(connector, patent)
+                        record = SyncUpdateService._fetch_record(connector, patent, payload.get("update_fields"))
                         process_record(db, run, subscription, record)
                         refreshed_patent = db.query(Patent).filter(Patent.id == tracked.patent_id).first()
                         current_status = str(getattr(refreshed_patent.legal_status, "value", refreshed_patent.legal_status) or "unknown") if refreshed_patent else "unknown"
@@ -433,6 +433,9 @@ class SyncService:
                         next_cursor = page.next_cursor
                         break
                     for record in page.records:
+                        fetch_fields = getattr(connector, "fetch_patent_fields", None)
+                        if callable(fetch_fields) and payload.get("update_fields") and record.identifiers:
+                            record = fetch_fields(record.identifiers[0], set(payload["update_fields"]))
                         process_record(db, run, subscription, record)
                     next_cursor = page.next_cursor
                     cursor.cursor = next_cursor
@@ -536,14 +539,14 @@ class SyncService:
 
     @staticmethod
     def decide_observation(db: Session, observation: ExternalFactObservation, decision: str, decided_by: str, reason: str | None = None) -> ExternalFactObservation:
-        from app.services.sync_support import SAFE_EXTERNAL_FIELDS
+        from app.services.sync_support import REVIEWABLE_EXTERNAL_FIELDS
         if decision not in {"accepted", "rejected"}:
             raise ValueError("decision must be accepted or rejected")
         if decision == "accepted":
             if not observation.patent_id:
                 raise ValueError("没有关联专利的观察不能直接接受")
             patent = db.query(Patent).filter(Patent.id == observation.patent_id).one()
-            if observation.canonical_field_key not in SAFE_EXTERNAL_FIELDS:
+            if observation.canonical_field_key not in REVIEWABLE_EXTERNAL_FIELDS:
                 raise ValueError("该字段不允许外部同步直接写入")
             before = serialize_value(getattr(patent, observation.canonical_field_key, None))
             value = date_value(observation.candidate_value) if observation.canonical_field_key.endswith("_date") else observation.candidate_value

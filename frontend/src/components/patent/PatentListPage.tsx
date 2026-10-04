@@ -24,6 +24,7 @@ import type {
   AttachmentMeta,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { HIMMPAT_UPDATE_FIELDS, HIMMPAT_OPTIONAL_FIELDS } from '../../lib/externalSync'
 import { formatApiDate, parseApiDate } from '../../lib/date'
 import { useDailyHistory, type DailyHistoryRecord } from '../../lib/dailyHistory'
 import Icon, { type IconName } from '../common/Icon'
@@ -747,7 +748,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [syncUpdateLoading, setSyncUpdateLoading] = useState(false)
   const syncUpdateConnector = syncUpdateConnectors.find(item => item.id === syncUpdateConnectorId)
   const syncUpdateSupportedKeys = syncUpdateConnector?.provider_type === 'himmpat_mcp'
-    ? ['publication_number', 'application_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'filing_date', 'publication_date', 'country', 'ipc_all', ...(syncUpdateConnector.capabilities.legal_events === true ? ['legal_status', 'grant_date'] : [])]
+    ? HIMMPAT_UPDATE_FIELDS
     : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
   const syncUpdateSupportedFields = fields.filter(field => syncUpdateSupportedKeys.includes(field.key))
 
@@ -2157,9 +2158,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       setSyncUpdateConnectorId(connectorId)
       const connector = available.find(item => item.id === connectorId)
       const supported = connector?.provider_type === 'himmpat_mcp'
-        ? ['publication_number', 'application_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'filing_date', 'publication_date', 'country', 'ipc_all', ...(connector.capabilities.legal_events === true ? ['legal_status', 'grant_date'] : [])]
+        ? HIMMPAT_UPDATE_FIELDS
         : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
-      setSyncUpdateRequestedFields(supported.filter(key => fields.some(field => field.key === key)))
+      setSyncUpdateRequestedFields(supported.filter(key => fields.some(field => field.key === key) && !HIMMPAT_OPTIONAL_FIELDS.has(key)))
     } catch (error: unknown) {
       setShowSyncUpdate(false)
       alert('加载外部数据连接器失败: ' + getErrorMessage(error))
@@ -4601,9 +4602,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     setSyncUpdateConnectorId(connectorId)
                     const connector = syncUpdateConnectors.find(item => item.id === connectorId)
                     const supported = connector?.provider_type === 'himmpat_mcp'
-                      ? ['publication_number', 'application_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'filing_date', 'publication_date', 'country', 'ipc_all', ...(connector.capabilities.legal_events === true ? ['legal_status', 'grant_date'] : [])]
+                      ? HIMMPAT_UPDATE_FIELDS
                       : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
-                    setSyncUpdateRequestedFields(supported.filter(key => fields.some(field => field.key === key)))
+                    setSyncUpdateRequestedFields(supported.filter(key => fields.some(field => field.key === key) && !HIMMPAT_OPTIONAL_FIELDS.has(key)))
                   }}>
                     {syncUpdateConnectors.map(connector => <option key={connector.id} value={connector.id}>{connector.name} · {connector.provider_type}</option>)}
                   </select>

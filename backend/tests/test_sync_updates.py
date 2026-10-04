@@ -1,4 +1,6 @@
 import unittest
+from copy import deepcopy
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -121,12 +123,55 @@ class ExplicitSyncUpdateTest(unittest.TestCase):
         self.connector.config_json = {"enrich_legal_status": False}
         self.db.commit()
         with self.assertRaises(Exception) as raised:
-            SyncUpdateService._validate_fields(["title", "claims"], self.connector)
-        self.assertIn("claims", str(raised.exception))
+            SyncUpdateService._validate_fields(["title", "risk_level"], self.connector)
+        self.assertIn("risk_level", str(raised.exception))
         self.assertEqual(
             SyncUpdateService._validate_fields(["title", "ipc_all"], self.connector),
             ["title", "ipc_all"],
         )
+        self.assertEqual(SyncUpdateService._validate_fields(["claims", "description_full", "technical_solution"], self.connector), ["claims", "description_full", "technical_solution"])
+        self.assertNotIn("claims", SyncUpdateService._validate_fields(None, self.connector))
+
+    def test_fulltext_and_technical_fields_confirm_to_wiki_with_history(self):
+        records = deepcopy(self.connector.config_json["records"])
+        records[0]["fields"].update({"claims": "1. A device", "description_full": "Details", "technical_solution": "Technical means"})
+        self.connector.config_json = {"records": records}
+        self.db.commit()
+        batch = SyncUpdateService.preview(self.db, self.connector, self.database.id, [self.patent.id], ["claims", "description_full", "technical_solution"])
+        self.assertIsNone(self.patent.claims)
+        SyncUpdateService.confirm(self.db, batch, [{"item_id": batch.items[0].id, "fields": ["claims", "technical_solution"]}], "tester")
+        self.db.refresh(self.patent)
+        self.assertEqual(self.patent.claims, "1. A device")
+        self.assertEqual(self.patent.technical_solution, "Technical means")
+        self.assertIsNone(self.patent.description_full)
+        self.assertEqual(self.db.query(PatentHistory).filter(PatentHistory.source == "external_sync_update").count(), 2)
+
+    def test_tool_api_validates_schema_and_persists_query_source(self):
+        from app.api.sync import call_connector_tool, McpToolRequest
+        from app.integrations.himmpat import HimmPatMcpAdapter
+        self.connector.enabled = True
+        self.connector.mcp_catalog_json = {"services": [{"service": "product_patent_dossier", "tools": [{
+            "name": "get_pdf_by_patent_ids", "inputSchema": {"type": "object", "required": ["ids"],
+                "properties": {"ids": {"type": "array", "items": {"type": "string"}}}},
+        }]}]}
+        self.db.commit()
+
+        class Transport:
+            def call_tool(self, service, name, arguments):
+                return {"structuredContent": {"code": 200, "data": {"h-1": ["pdf-1"]}}}
+            def close(self):
+                pass
+
+        with patch("app.api.sync.get_connector", return_value=HimmPatMcpAdapter({}, transport=Transport())) as factory:
+            with self.assertRaises(Exception):
+                call_connector_tool(self.connector.id, McpToolRequest(service="product_patent_dossier", tool="get_pdf_by_patent_ids", arguments={"ids": [123]}), self.db)
+            factory.assert_not_called()
+            response = call_connector_tool(self.connector.id, McpToolRequest(service="product_patent_dossier", tool="get_pdf_by_patent_ids", arguments={"ids": ["h-1"]}), self.db)
+            snapshot = self.db.get(ExternalSnapshot, response["snapshot_id"])
+            self.assertEqual(snapshot.request_metadata["tool"], "get_pdf_by_patent_ids")
+            self.assertEqual(snapshot.run.trigger, "mcp_tool")
+            self.assertEqual(response["data"], {"h-1": ["pdf-1"]})
+            self.assertEqual(self.db.query(Patent).count(), 1)
 
 
 if __name__ == "__main__":

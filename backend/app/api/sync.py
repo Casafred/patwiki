@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from jsonschema import Draft202012Validator
 
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.core.time import utc_now_naive
@@ -54,6 +55,12 @@ class PublicationMatchRequest(BaseModel):
     database_id: int
     publications: list[str] = Field(default_factory=list, max_length=500)
     patent_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+class McpToolRequest(BaseModel):
+    service: str = Field(min_length=1, max_length=150)
+    tool: str = Field(min_length=1, max_length=150)
+    arguments: dict = Field(default_factory=dict)
 
 
 @router.post("/resolve-publications")
@@ -282,6 +289,57 @@ def discover_connector_tools(connector_id: int, db: Session = Depends(get_db)):
     finally:
         if runtime_connector is not None:
             close = getattr(runtime_connector, "close", None)
+            if callable(close):
+                close()
+
+
+@router.post("/connectors/{connector_id}/tools/call")
+def call_connector_tool(connector_id: int, body: McpToolRequest, db: Session = Depends(get_db)):
+    connector = _require_connector(db, connector_id)
+    if not connector.enabled:
+        raise BadRequestException("连接器已停用")
+    catalog = connector.mcp_catalog_json or {}
+    tool = next((tool for service in catalog.get("services", []) if service.get("service") == body.service
+                 for tool in service.get("tools", []) if tool.get("name") == body.tool), None)
+    if tool is None:
+        raise BadRequestException("工具不在当前连接器目录中，请先发现工具")
+    schema = tool.get("inputSchema") or {}
+    errors = list(Draft202012Validator(schema).iter_errors(body.arguments))
+    if errors:
+        # Schema errors may include the submitted value, so expose only the
+        # path and rule rather than echoing image data or user documents.
+        first = errors[0]
+        path = ".".join(str(part) for part in first.absolute_path) or "arguments"
+        raise BadRequestException(f"工具参数 {path} 不符合规则：{first.validator}")
+    runtime = None
+    try:
+        runtime = get_connector(connector)
+        call = getattr(runtime, "call_discovered_tool", None)
+        if not callable(call):
+            raise BadRequestException("该连接器不支持工具调用")
+        data, evidence = call(body.service, body.tool, body.arguments)
+        from app.models import ExternalSnapshot
+        from app.services.sync_support import hash_payload
+        run = SyncRun(connector_id=connector.id, trigger="mcp_tool", status="succeeded",
+                      started_at=utc_now_naive(), finished_at=utc_now_naive(),
+                      counts_json={"tools": 1})
+        db.add(run)
+        db.flush()
+        snapshot = ExternalSnapshot(connector_id=connector.id,
+                                    sync_run_id=run.id,
+                                    request_metadata={"mode": "mcp_tool", "service": body.service, "tool": body.tool},
+                                    payload_json=evidence, payload_hash=hash_payload(evidence), source_version="himmpat-mcp")
+        db.add(snapshot)
+        db.commit()
+        return {"data": data, "snapshot_id": snapshot.id, "service": body.service, "tool": body.tool}
+    except BadRequestException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise BadRequestException(f"MCP 工具调用失败：{exc}") from exc
+    finally:
+        if runtime is not None:
+            close = getattr(runtime, "close", None)
             if callable(close):
                 close()
 

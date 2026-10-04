@@ -6,7 +6,6 @@ generic MCP protocol implementation remains in ``mcp_transport``.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import date, datetime, timezone
 import hashlib
 import json
@@ -34,6 +33,47 @@ DEFAULT_SERVICES = {
     "legal": "product_legal_ownership_risk",
     "monitoring": "product_patent_monitoring",
 }
+
+READ_ONLY_TOOLS = {
+    "discovery": {
+        "query_patent_ids_by_query_expression_with_info", "search_similar_patents_by_public_number_with_info",
+        "new_search_similar_patents_by_text_with_info", "get_filter_results_by_query_expression",
+        "search_patent_by_patent_numbers", "search_patent_by_image", "retrieval_element_extraction",
+        "ai_word_extend", "get_ipc_default", "ai_ipc_words_match", "build_query",
+        "generate_query_expressions_from_technical_solution", "get_classification_info", "get_extended_info_from_keyword",
+    },
+    "dossier": {
+        "get_patent_publication_by_patent_ids", "get_patent_record_fields_by_patent_ids",
+        "get_patent_family_by_patent_id", "get_patent_citations_by_patent_id", "get_patent_citation_data_by_patent_id",
+        "get_abstract_and_figures_by_patent_ids", "get_claims_by_patent_id", "get_description_by_patent_id",
+        "get_figures_by_patent_ids", "get_pdf_by_patent_ids", "get_patent_ai_tech_info",
+    },
+    "legal": {"get_patent_legal_status_by_patent_ids", "get_legal_details_by_patent_id",
+              "get_reexamination_by_patent_id", "get_invalidation_by_patent_id", "invention_patent_stability"},
+    "monitoring": {"get_litigation_by_plaintiff_or_defendant", "monitor_latest_hit_patents", "monitor_latest_legal_state",
+                   "monitor_latest_reassignment", "monitor_latest_license", "monitor_latest_pledge",
+                   "monitor_latest_preservation", "monitor_latest_reexamination", "monitor_latest_invalid", "monitor_expiring_soon"},
+}
+DOSSIER_UPDATE_FIELDS = {
+    "publication_number", "application_number", "title", "abstract", "applicant", "assignee", "inventor",
+    "agent", "filing_date", "publication_date", "country", "ipc_all", "priority_number", "priority_date",
+    "claims", "description_full", "technical_problem", "technical_solution", "technical_effect",
+}
+
+
+def _text_field(value: Any, keys: tuple[str, ...]) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, Mapping):
+        for key in keys:
+            if key in value:
+                text = _text_field(value[key], keys)
+                if text:
+                    return text
+    if isinstance(value, list):
+        parts = [_text_field(item, keys) for item in value]
+        return "\n\n".join(part for part in parts if part) or None
+    return None
 
 
 def _path(value: Any, path: str | None, default: Any = None) -> Any:
@@ -195,6 +235,9 @@ class HimmPatMcpAdapter(PatentConnector):
         )
 
     def fetch_patent(self, identifier: ProviderIdentifier) -> ProviderPatentRecord:
+        return self.fetch_patent_fields(identifier, set(self.config.get("enrich_dossier_fields") or []))
+
+    def fetch_patent_fields(self, identifier: ProviderIdentifier, requested_fields: set[str]) -> ProviderPatentRecord:
         matching_method = "AP" if identifier.identifier_type.casefold() in {"application", "ap"} else "PN"
         data, _ = self._call("discovery", "search_patent_by_patent_numbers", {
             "matchingMethod": [matching_method],
@@ -211,36 +254,16 @@ class HimmPatMcpAdapter(PatentConnector):
         if not isinstance(item, Mapping):
             raise ConnectorError("HimmPat 著录项响应无效", error_code="invalid_response_shape")
         record = self._dossier_record(patent_id, item, dossier_envelope)
-        if self.config.get("enrich_legal_on_fetch", False) or self.config.get("enrich_legal_status", False):
+        # Only selected fields trigger the larger, potentially billable tools.
+        extra = set(requested_fields)
+        if extra:
+            record = self._enrich_dossier(record, patent_id, extra)
+        if self.config.get("enrich_legal_on_fetch", False) or self.config.get("enrich_legal_status", False) or extra.intersection({"legal_status", "grant_date"}):
             record = self._enrich_legal([record])[0]
         return record
 
     def _call(self, service_key: str, tool_name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-        raw = self.transport.call_tool(self.services[service_key], tool_name, arguments)
-        result = raw.get("structuredContent") if isinstance(raw, Mapping) else None
-        if not isinstance(result, Mapping):
-            result = raw
-        text_blocks = result.get("content", []) if isinstance(result, Mapping) else []
-        text_value = next((item.get("text") for item in text_blocks if isinstance(item, Mapping) and item.get("type") == "text"), None)
-        if text_value is None:
-            if isinstance(result, Mapping) and isinstance(result.get("data"), Mapping):
-                envelope = dict(result)
-            else:
-                raise ConnectorError("HimmPat MCP 结果缺少文本数据", error_code="invalid_mcp_payload")
-        else:
-            try:
-                envelope = json.loads(text_value) if isinstance(text_value, str) else text_value
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise ConnectorError("HimmPat MCP 业务结果不是有效 JSON", error_code="invalid_provider_json") from exc
-        if not isinstance(envelope, Mapping):
-            raise ConnectorError("HimmPat MCP 业务结果结构无效", error_code="invalid_provider_payload")
-        code = int(envelope.get("code", 200) or 200)
-        if code != 200:
-            raise ConnectorError("HimmPat 业务请求未成功", error_code="provider_business_error", retryable=False, status_code=code)
-        data = envelope.get("data")
-        if not isinstance(data, Mapping):
-            raise ConnectorError("HimmPat 业务结果缺少 data", error_code="invalid_provider_payload")
-        return dict(data), dict(redact_payload(envelope))
+        return self._call_by_service_name(self.services[service_key], tool_name, arguments)
 
     def _summary_record(self, item: Mapping[str, Any]) -> ProviderPatentRecord:
         patent_id = str(item["id"])
@@ -290,6 +313,9 @@ class HimmPatMcpAdapter(PatentConnector):
                 "publication_date": _date(pub_ref.get("pd") or pub_ref.get("pdf")),
                 "country": jurisdiction,
                 "ipc_all": item.get("classificationModel", {}).get("ic") if isinstance(item.get("classificationModel"), Mapping) else None,
+                "priority_number": _string(_path(item, "priorityReferenceModel.ap")) or _string(_path(item, "priorityModel.ap")),
+                "priority_date": _date(_path(item, "priorityReferenceModel.apd")) or _date(_path(item, "priorityModel.apd")),
+                "agent": _people(parties.get("agent") or parties.get("representative"), ("ag", "pa", "as")),
             }.items() if value is not None
         }
         return ProviderPatentRecord(
@@ -299,6 +325,107 @@ class HimmPatMcpAdapter(PatentConnector):
             source_version="himmpat-mcp",
             raw_payload=dict(redact_payload(envelope)),
         )
+
+    def _enrich_dossier(self, record: ProviderPatentRecord, patent_id: str, fields: set[str]) -> ProviderPatentRecord:
+        """Fetch optional dossier resources and keep their raw evidence."""
+        calls = {
+            "claims": ("get_claims_by_patent_id", {"id": patent_id}),
+            "description_full": ("get_description_by_patent_id", {"id": patent_id}),
+            "technical": ("get_patent_ai_tech_info", {"ids": [patent_id]}),
+            "family_members": ("get_patent_family_by_patent_id", {"id": patent_id}),
+            "cited_patents": ("get_patent_citations_by_patent_id", {"id": patent_id}),
+        }
+        values = dict(record.fields)
+        evidence = dict(record.raw_payload)
+        if fields.intersection({"agent", "priority_number", "priority_date"}):
+            data, envelope = self._call("dossier", "get_patent_record_fields_by_patent_ids", {"ids": [patent_id]})
+            detail = data.get(patent_id)
+            evidence["get_patent_record_fields_by_patent_ids"] = envelope
+            if isinstance(detail, Mapping):
+                values.update(self._dossier_record(patent_id, detail, envelope).fields)
+        if fields.intersection({"technical_problem", "technical_solution", "technical_effect"}):
+            fields = fields | {"technical"}
+        for field in sorted(fields):
+            spec = calls.get(field)
+            if not spec:
+                continue
+            tool, args = spec
+            if "id" in args:
+                args = self._single_patent_arguments(tool, patent_id)
+            data, envelope = self._call("dossier", tool, args)
+            evidence[tool] = envelope
+            value: Any = data.get(patent_id, data.get("items", data)) if isinstance(data, Mapping) else data
+            if field == "technical" and isinstance(value, Mapping):
+                aliases = {
+                    "technical_problem": ("technical_problem", "technicalProblem", "problem"),
+                    "technical_solution": ("technical_solution", "technicalSolution", "technicalMeans", "solution"),
+                    "technical_effect": ("technical_effect", "technicalEffect", "effect"),
+                }
+                for key, keys in aliases.items():
+                    text = _text_field(value, keys)
+                    if text:
+                        values[key] = text
+            elif field in {"claims", "description_full"}:
+                keys = ("claims", "claim", "claimsText", "clc", "clo", "cle", "text", "content", "value") if field == "claims" else ("description", "description_full", "descriptionText", "dec", "deo", "dee", "text", "content", "value")
+                text = _text_field(value, keys)
+                if text:
+                    values[field] = text
+                elif value not in (None, "", [], {}):
+                    raise ConnectorError(f"{tool} 返回的全文结构无法识别", error_code="unsupported_provider_shape")
+            # Family/citation structures remain in evidence until reviewed;
+            # opaque provider objects must not become local patent identities.
+        return ProviderPatentRecord(record.external_record_id, record.identifiers, values, record.legal_events, record.source_updated_at, record.source_version, evidence)
+
+    def _single_patent_arguments(self, tool_name: str, patent_id: str) -> dict[str, Any]:
+        catalog = getattr(self, "_dossier_catalog", None)
+        if catalog is None:
+            catalog = self.transport.discover([self.services["dossier"]])
+            self._dossier_catalog = catalog
+        for service in catalog.get("services", []):
+            for tool in service.get("tools", []):
+                if tool.get("name") != tool_name:
+                    continue
+                props = (tool.get("inputSchema") or {}).get("properties") or {}
+                for key in ("patentId", "patent_id", "id", "ids"):
+                    if key in props:
+                        return {key: [patent_id] if props[key].get("type") == "array" else patent_id}
+        raise ConnectorError("工具目录缺少专利 ID 参数定义，请重新发现工具", error_code="missing_tool_schema")
+
+    def call_discovered_tool(self, service_name: str, tool_name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Execute a discovered read-only tool through the same safe decoder."""
+        service_key = next((key for key, name in self.services.items() if name == service_name), None)
+        if not service_key:
+            raise ConnectorError("未知 MCP 服务", error_code="unknown_service")
+        if tool_name not in READ_ONLY_TOOLS[service_key]:
+            raise ConnectorError("工具未在只读调用白名单中", error_code="unsupported_tool")
+        return self._call_by_service_name(service_name, tool_name, arguments)
+
+    def _call_by_service_name(self, service_name: str, tool_name: str, arguments: dict[str, Any]):
+        raw = self.transport.call_tool(service_name, tool_name, arguments)
+        if isinstance(raw, Mapping) and raw.get("isError"):
+            raise ConnectorError("MCP 工具执行失败", error_code="mcp_tool_error")
+        result = raw.get("structuredContent") if isinstance(raw, Mapping) else raw
+        if not isinstance(result, Mapping):
+            result = raw
+        blocks = result.get("content", []) if isinstance(result, Mapping) else []
+        text_value = next((item.get("text") for item in blocks if isinstance(item, Mapping) and item.get("type") == "text"), None)
+        try:
+            envelope = json.loads(text_value) if isinstance(text_value, str) else result
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ConnectorError("HimmPat MCP 业务结果不是有效 JSON", error_code="invalid_provider_json") from exc
+        if not isinstance(envelope, Mapping):
+            raise ConnectorError("HimmPat MCP 业务结果结构无效", error_code="invalid_provider_payload")
+        if "data" not in envelope:
+            raise ConnectorError("HimmPat MCP 业务结果缺少 data", error_code="invalid_provider_payload")
+        code = int(envelope.get("code", 200) or 200)
+        if code != 200:
+            raise ConnectorError("HimmPat 业务请求未成功", error_code="provider_business_error", retryable=False, status_code=code)
+        data = envelope.get("data", {})
+        if isinstance(data, list):
+            data = {"items": data}
+        if not isinstance(data, Mapping):
+            data = {"value": data}
+        return dict(data), dict(redact_payload(envelope))
 
     def _identifiers(self, publication: str | None, application: str | None, jurisdiction: str | None) -> list[ProviderIdentifier]:
         identifiers = []

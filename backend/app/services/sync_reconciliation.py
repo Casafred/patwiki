@@ -29,6 +29,7 @@ from app.services.patent_identity_service import (
 from app.services.sync_support import (
     LEGAL_STATUS_MAP,
     SAFE_EXTERNAL_FIELDS,
+    REVIEWABLE_EXTERNAL_FIELDS,
     date_value,
     hash_payload,
     now,
@@ -278,7 +279,7 @@ def process_record(db: Session, run: SyncRun, subscription: SyncSubscription, re
         configured_fields = status_strategy["update_fields"]
     selected_fields = set(configured_fields) if isinstance(configured_fields, list) else SAFE_EXTERNAL_FIELDS | {"legal_status"}
     for field_key, value in record.fields.items():
-        if field_key not in SAFE_EXTERNAL_FIELDS or field_key not in selected_fields or value is None:
+        if field_key not in REVIEWABLE_EXTERNAL_FIELDS or field_key not in selected_fields or value is None:
             continue
         observation = record_observation(db, run, snapshot, sync_record, patent, field_key, value, subscription.review_policy)
         run.counts_json["observations"] += 1

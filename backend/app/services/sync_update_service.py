@@ -28,10 +28,10 @@ from app.models import (
 from app.services.patent_service import PatentService
 from app.services.patent_database_scope import in_database
 from app.services.sync_reconciliation import apply_legal_events, resolve_patent
-from app.services.sync_support import LEGAL_STATUS_MAP, SAFE_EXTERNAL_FIELDS, date_value, hash_payload, now, serialize_value
+from app.services.sync_support import LEGAL_STATUS_MAP, REVIEWABLE_EXTERNAL_FIELDS, date_value, hash_payload, now, serialize_value
 
 
-EXPLICIT_UPDATE_FIELDS = frozenset(SAFE_EXTERNAL_FIELDS) | {"legal_status"}
+EXPLICIT_UPDATE_FIELDS = frozenset(REVIEWABLE_EXTERNAL_FIELDS) | {"legal_status"}
 DEFAULT_UPDATE_FIELDS = tuple(sorted(EXPLICIT_UPDATE_FIELDS))
 UPDATE_BATCH_TTL_MINUTES = 30
 
@@ -41,10 +41,12 @@ class SyncUpdateService:
     def _validate_fields(fields: list[str] | None, connector: ConnectorDefinition | None = None) -> list[str]:
         allowed: set[str] | None = None
         if connector and connector.provider_type in {"himmpat_mcp", "mcp_himmpat"}:
-            allowed = {"publication_number", "application_number", "title", "abstract", "applicant", "assignee", "inventor", "filing_date", "publication_date", "country", "ipc_all"}
+            from app.integrations.himmpat import DOSSIER_UPDATE_FIELDS
+            allowed = set(DOSSIER_UPDATE_FIELDS) | {"legal_status", "grant_date"}
             if (connector.config_json or {}).get("enrich_legal_on_fetch") or (connector.config_json or {}).get("enrich_legal_status"):
                 allowed.update({"legal_status", "grant_date"})
-        requested = list(dict.fromkeys(fields if fields is not None else (sorted(allowed) if allowed is not None else DEFAULT_UPDATE_FIELDS)))
+        defaults = sorted(allowed - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect", "agent", "priority_number", "priority_date"}) if allowed is not None else DEFAULT_UPDATE_FIELDS
+        requested = list(dict.fromkeys(fields if fields is not None else defaults))
         invalid = sorted(set(requested) - EXPLICIT_UPDATE_FIELDS)
         if invalid:
             raise BadRequestException("外部更新不允许覆盖字段：" + ", ".join(invalid))
@@ -117,15 +119,20 @@ class SyncUpdateService:
         return candidates
 
     @staticmethod
-    def _fetch_record(connector: Any, patent: Patent) -> ProviderPatentRecord:
+    def _fetch_record(connector: Any, patent: Patent, fields: list[str] | None = None) -> ProviderPatentRecord:
         identifiers = SyncUpdateService._identifiers(patent)
         if not identifiers:
             raise ValueError("专利没有可用于外部检索的申请号、公开号或授权号")
         last_error: Exception | None = None
         for identifier in identifiers:
             try:
+                fetch_fields = getattr(connector, "fetch_patent_fields", None)
+                if fields is not None and callable(fetch_fields):
+                    return fetch_fields(identifier, set(fields))
                 return connector.fetch_patent(identifier)
             except Exception as exc:  # Providers differ in which identifier types they accept.
+                if getattr(exc, "error_code", None) and exc.error_code != "patent_not_found":
+                    raise
                 last_error = exc
         raise last_error or LookupError("外部数据未找到")
 
@@ -259,7 +266,7 @@ class SyncUpdateService:
                     run.counts_json["errors"] += 1
                     continue
                 try:
-                    record = cls._fetch_record(runtime_connector, patent)
+                    record = cls._fetch_record(runtime_connector, patent, selected_fields)
                 except Exception as exc:
                     item.status = "not_found"
                     item.error_code = getattr(exc, "error_code", "provider_not_found")

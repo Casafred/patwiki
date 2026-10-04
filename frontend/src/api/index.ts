@@ -341,6 +341,7 @@ export const syncApi = {
   updateConnector: (id: number, data: { enabled?: boolean }): Promise<SyncConnector> => api.patch(`/sync/connectors/${id}`, data),
   testConnector: (id: number): Promise<{ status: string; message: string; latency_ms?: number | null }> => api.post(`/sync/connectors/${id}/test`),
   discoverConnector: (id: number): Promise<JsonObject> => api.post(`/sync/connectors/${id}/discover`),
+  callConnectorTool: (id: number, data: { service: string; tool: string; arguments: JsonObject }): Promise<JsonObject> => api.post(`/sync/connectors/${id}/tools/call`, data),
   connectorCredentials: (id: number): Promise<{ items: JsonObject[] }> => api.get(`/sync/connectors/${id}/credentials`),
   addConnectorCredential: (id: number, data: { credential_ref: string; credential_type?: string; label?: string }): Promise<JsonObject> => api.post(`/sync/connectors/${id}/credentials`, data),
   queries: (databaseId?: number | null): Promise<{ items: JsonObject[] }> => api.get('/sync/queries', { params: { database_id: databaseId ?? undefined } }),
