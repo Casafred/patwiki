@@ -6,7 +6,7 @@
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, and_
 from typing import Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
@@ -124,10 +124,32 @@ def _apply_common_filters(query, req):
                 continue
             col, _, _ = _resolve_field_column(key)
             if isinstance(fv, dict):
-                if fv.get("contains"):
+                operator = fv.get("operator")
+                value = fv.get("value", fv.get(operator) if operator else None)
+                if operator == "in" or isinstance(value, list):
+                    from app.services.patent_service import FILTER_EMPTY_TOKEN
+                    values = value if isinstance(value, list) else [value]
+                    candidates = [
+                        str(item).strip().lower()
+                        for item in values
+                        if item is not None and str(item) != FILTER_EMPTY_TOKEN
+                    ]
+                    predicates = []
+                    if candidates:
+                        predicates.append(func.lower(col.cast(str)).in_(candidates))
+                    if any(item is None or str(item) == FILTER_EMPTY_TOKEN for item in values):
+                        predicates.append(or_(col.is_(None), col.cast(str) == ""))
+                    if predicates:
+                        query = query.filter(or_(*predicates))
+                elif operator == "is_empty":
+                    query = query.filter(or_(col.is_(None), col.cast(str) == ""))
+                elif operator == "is_not_empty":
+                    query = query.filter(and_(col.isnot(None), col.cast(str) != ""))
+                elif operator == "eq" or fv.get("eq") is not None:
+                    eq_value = fv.get("eq") if operator is None else value
+                    query = query.filter(col == eq_value)
+                elif fv.get("contains"):
                     query = query.filter(col.cast(str).ilike(f"%{fv['contains']}%"))
-                elif fv.get("eq") is not None:
-                    query = query.filter(col == fv["eq"])
             else:
                 query = query.filter(col.cast(str).ilike(f"%{fv}%"))
     return query

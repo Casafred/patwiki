@@ -25,6 +25,7 @@ import type {
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDate, parseApiDate } from '../../lib/date'
+import { useDailyHistory, type DailyHistoryRecord } from '../../lib/dailyHistory'
 import Icon, { type IconName } from '../common/Icon'
 import GroupConfigPanel from '../views/GroupConfigPanel'
 import ViewColumnConfigPanel from '../views/ViewColumnConfigPanel'
@@ -42,6 +43,7 @@ import AIQuickAnalyzeModal from '../ai/AIQuickAnalyzeModal'
 import JEVQuickAnalyzeModal from '../ai/JEVQuickAnalyzeModal'
 import StatsPage from './StatsPage'
 import ViewSwitcher from '../views/ViewSwitcher'
+import DailyHistoryDialog from './DailyHistoryDialog'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -52,11 +54,15 @@ interface PatentListPageProps {
 
 type SortOrder = 'asc' | 'desc'
 type FilterOperator = 'contains' | 'eq' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty'
+// 'in' 为“值清单”多选筛选（Excel 式），值为字符串数组，不出现在手动操作符下拉里。
+type FilterConditionOperator = FilterOperator | 'in'
 interface FilterCondition {
-  operator: FilterOperator
-  value?: string
+  operator: FilterConditionOperator
+  value?: string | string[]
 }
 type FilterState = Record<string, FilterCondition>
+// 值清单勾选“(空)”时使用的占位符，与后端 FILTER_EMPTY_TOKEN 对应。
+const FILTER_EMPTY_TOKEN = '__EMPTY__'
 type RelationCellData = { links?: LinkRecord[]; value?: JsonValue; aggregation?: string }
 type BulkTransferAction = 'move_database' | 'move_view' | 'duplicate'
 type TableViewMode = 'pagination' | 'continuous' | 'detail' | 'full_image'
@@ -112,6 +118,12 @@ interface TableDataSnapshot {
 const tableDataCache = new Map<string, TableDataSnapshot>()
 const TABLE_DATA_CACHE_LIMIT = 8
 
+// 同族关系已重建过的库集合（模块级，跨组件挂载保持）。
+// 若放在组件 ref 中，每次从专利详情返回列表都会重新触发一次 rebuildFamilies
+// 并整窗重载当前页，导致“返回后数据刷新、顺序变化”。族关系在一个会话内
+// 只需重建一次；删除等数据变更路径会显式再次重建。
+const rebuiltFamilyDatabases = new Set<number>()
+
 function saveTableDataSnapshot(key: string, snapshot: TableDataSnapshot) {
   tableDataCache.delete(key)
   tableDataCache.set(key, snapshot)
@@ -156,6 +168,7 @@ const FILTER_OPERATOR_LABELS: Record<FilterOperator, string> = {
   is_empty: '为空',
   is_not_empty: '不为空',
 }
+const KNOWN_FILTER_OPERATORS = new Set<string>([...Object.keys(FILTER_OPERATOR_LABELS), 'in'])
 
 function readFilterParam(params: URLSearchParams): FilterState {
   const raw = params.get('filters')
@@ -172,10 +185,17 @@ function readFilterParam(params: URLSearchParams): FilterState {
       }
       if (!value || typeof value !== 'object' || Array.isArray(value)) return
       const candidate = value as Record<string, unknown>
-      const operator = (candidate.operator || Object.keys(candidate).find(item => item in FILTER_OPERATOR_LABELS)) as FilterOperator | undefined
-      if (!operator || !(operator in FILTER_OPERATOR_LABELS)) return
+      const operator = (candidate.operator || Object.keys(candidate).find(item => KNOWN_FILTER_OPERATORS.has(item))) as FilterConditionOperator | undefined
+      if (!operator || !KNOWN_FILTER_OPERATORS.has(operator)) return
       const candidateValue = candidate.value ?? candidate[operator]
-      result[key] = { operator, ...(typeof candidateValue === 'string' ? { value: candidateValue } : {}) }
+      if (typeof candidateValue === 'string') {
+        result[key] = { operator, value: candidateValue }
+      } else if (Array.isArray(candidateValue)) {
+        const values = candidateValue.filter((item): item is string => typeof item === 'string')
+        if (values.length > 0) result[key] = { operator, value: values }
+      } else {
+        result[key] = { operator }
+      }
     })
     return result
   } catch {
@@ -185,7 +205,9 @@ function readFilterParam(params: URLSearchParams): FilterState {
 
 function filterConditionHasValue(condition?: FilterCondition): boolean {
   if (!condition) return false
-  return condition.operator === 'is_empty' || condition.operator === 'is_not_empty' || !!condition.value?.trim()
+  if (condition.operator === 'is_empty' || condition.operator === 'is_not_empty') return true
+  if (Array.isArray(condition.value)) return condition.value.length > 0
+  return !!condition.value?.trim()
 }
 
 function PatentReferenceText({
@@ -610,6 +632,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
   const [headerFilterText, setHeaderFilterText] = useState<string>('')
   const [headerFilterOperator, setHeaderFilterOperator] = useState<FilterOperator>('contains')
+  // Excel 式“值清单”：去重值 + 计数，勾选后按 in 过滤。
+  const [headerFilterListOpen, setHeaderFilterListOpen] = useState(false)
+  const [headerFilterListLoading, setHeaderFilterListLoading] = useState(false)
+  const [headerFilterListItems, setHeaderFilterListItems] = useState<{ value: string; raw_value: JsonValue; count: number }[]>([])
+  const [headerFilterListSearch, setHeaderFilterListSearch] = useState('')
+  const [headerFilterListSelected, setHeaderFilterListSelected] = useState<Set<string>>(new Set())
   const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
@@ -649,7 +677,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [showColumnStats, setShowColumnStats] = useState(false)
   const [showPatentAnalysis, setShowPatentAnalysis] = useState(false)
   const [analysisScope, setAnalysisScope] = useState<'all' | 'view' | 'selected'>('view')
-  const familyRebuildDatabaseRef = useRef<number | null>(null)
   const [statsFieldKey, setStatsFieldKey] = useState('')
   const [statsData, setStatsData] = useState<{ value: string; count: number; percentage: number }[]>([])
   const [statsLoading, setStatsLoading] = useState(false)
@@ -704,6 +731,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [showGroupConfig, setShowGroupConfig] = useState(false)
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
+  const [showDailyHistory, setShowDailyHistory] = useState(false)
+  // 订阅本机当日记录，用于入口按钮上的数量提示。
+  const dailyHistoryRecords = useDailyHistory()
   const [showWorkFileDialog, setShowWorkFileDialog] = useState(false)
   const [showAddToView, setShowAddToView] = useState(false)
   const [addToViewId, setAddToViewId] = useState<number | null>(null)
@@ -1606,6 +1636,16 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
   const handleExport = () => setShowExportDialog(true)
 
+  // 当日记录里保存的是浏览时的详情页地址，直接跳回可还原当时的库 / 视图上下文。
+  const openDailyHistoryRecord = (record: DailyHistoryRecord) => {
+    setShowDailyHistory(false)
+    if (record.sourcePath && record.sourcePath.includes('/patents/')) {
+      navigate(record.sourcePath)
+      return
+    }
+    navigate(record.databaseId ? `/db/${record.databaseId}/patents/${record.patentId}` : `/patents/${record.patentId}`)
+  }
+
   const handleFamilyGrouping = async () => {
     const nextValue = !groupByFamily
     setGroupByFamily(nextValue)
@@ -1617,8 +1657,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   // 主表默认开启同族聚拢时，切入一个尚未建立族关系的数据库也要先完成
   // 一次重建，否则接口虽收到 group_by_family=true 仍没有可聚拢的 family_id。
   useEffect(() => {
-    if (!groupByFamily || !activeDatabaseId || familyRebuildDatabaseRef.current === activeDatabaseId) return
-    familyRebuildDatabaseRef.current = activeDatabaseId
+    if (!groupByFamily || !activeDatabaseId || rebuiltFamilyDatabases.has(activeDatabaseId)) return
+    rebuiltFamilyDatabases.add(activeDatabaseId)
     void patentApi.rebuildFamilies(activeDatabaseId).then(result => {
       setViewConfigNotice(`已重建 ${result.family_count} 个同族组，覆盖 ${result.grouped_patent_count} 件专利`)
       setCollapsedFamilyKeys(new Set())
@@ -1629,7 +1669,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       // 其它切换按钮才刷新出来”。这里按切库处理，整窗替换为响应结果。
       return loadPatents(1, false, pageSize, false)
     }).catch(error => {
-      familyRebuildDatabaseRef.current = null
+      rebuiltFamilyDatabases.delete(activeDatabaseId)
       console.error('Failed to rebuild family relations:', error)
     })
   }, [activeDatabaseId, groupByFamily, loadPatents, pageSize])
@@ -1916,6 +1956,65 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     })
     setHeaderFilterText('')
     setHeaderFilterOperator('contains')
+    setHeaderFilterListOpen(false)
+    setHeaderFilterListItems([])
+    setHeaderFilterListSelected(new Set())
+    setPage(1)
+  }
+
+  // 值清单：去重值项 -> 筛选 token（空值用占位符表示，后端翻译为 NULL/空串）。
+  const headerFilterValueToken = (item: { raw_value: JsonValue }): string => {
+    if (item.raw_value === null || item.raw_value === undefined || item.raw_value === '') return FILTER_EMPTY_TOKEN
+    return String(item.raw_value)
+  }
+
+  const openHeaderValueList = async (fieldKey: string) => {
+    setHeaderFilterListOpen(true)
+    setHeaderFilterListLoading(true)
+    setHeaderFilterListSearch('')
+    const existing = filterValues[fieldKey]
+    setHeaderFilterListSelected(new Set(Array.isArray(existing?.value) ? existing.value : []))
+    try {
+      // 清单按当前其他筛选条件收敛，但不含本列自身的筛选，便于随时增删勾选。
+      const scopedFilters: JsonObject = {}
+      Object.entries(filterValues).forEach(([key, condition]) => {
+        if (key === fieldKey) return
+        if (filterConditionHasValue(condition)) scopedFilters[key] = condition as unknown as JsonValue
+      })
+      const result = await analyticsApi.columnStats({
+        field_key: fieldKey,
+        database_id: isGlobalMasterTable ? undefined : activeDatabaseId ?? undefined,
+        product_id: currentProductId || undefined,
+        filters: Object.keys(scopedFilters).length > 0 ? scopedFilters : undefined,
+        top_n: 500,
+      })
+      setHeaderFilterListItems(result.items)
+    } catch (error: unknown) {
+      alert('加载筛选清单失败: ' + getErrorMessage(error))
+      setHeaderFilterListItems([])
+    } finally {
+      setHeaderFilterListLoading(false)
+    }
+  }
+
+  const toggleHeaderFilterValue = (token: string) => {
+    setHeaderFilterListSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(token)) next.delete(token)
+      else next.add(token)
+      return next
+    })
+  }
+
+  const applyHeaderValueList = (fieldKey: string) => {
+    const selected = Array.from(headerFilterListSelected)
+    setHeaderFilterListOpen(false)
+    setActiveHeaderMenu(null)
+    if (selected.length === 0) {
+      handleHeaderFilterClear(fieldKey)
+      return
+    }
+    setFilterValues(prev => ({ ...prev, [fieldKey]: { operator: 'in', value: selected } }))
     setPage(1)
   }
 
@@ -3246,6 +3345,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 </>
               )}
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setShowDailyHistory(true)}
+                title="查看本机今天浏览和编辑过的专利，快速找回详情"
+              >
+                <Icon name="history" size={14} /> 当日记录{dailyHistoryRecords.length > 0 ? ` (${dailyHistoryRecords.length})` : ''}
+              </button>
               {(tableViewMode === 'detail' || tableViewMode === 'full_image') && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowDetailFieldConfig(true)} title="选择详情浏览显示的字段"><Icon name="file" size={14} /> 详情字段{configuredDetailKeys ? ` (${configuredDetailKeys.length})` : ''}</button>}
               {activeView && activeView.layout_type === 'table' && (
                 <>
@@ -3306,9 +3413,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           <span style={{ fontSize: 11, color: '#6b7280' }}>已筛选：</span>
            {Object.entries(filterValues).filter(([, condition]) => filterConditionHasValue(condition)).map(([key, condition]) => {
              const field = fields.find(f => f.key === key)
+             const valueText = Array.isArray(condition.value)
+               ? `已选 ${condition.value.length} 项`
+               : condition.value ? ` ${condition.value}` : ''
              return (
                <span key={key} className="filter-chip">
-                 {field?.name || key}: {FILTER_OPERATOR_LABELS[condition.operator]}{condition.value ? ` ${condition.value}` : ''}
+                 {field?.name || key}: {condition.operator === 'in' ? '值清单' : FILTER_OPERATOR_LABELS[condition.operator]}{valueText}
                  <span className="chip-remove" onClick={() => handleHeaderFilterClear(key)}>×</span>
                </span>
             )
@@ -3573,8 +3683,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                             } else {
                               setActiveHeaderMenu(field.key)
                               const existingFilter = filterValues[field.key]
-                              setHeaderFilterOperator(existingFilter?.operator || 'contains')
-                              setHeaderFilterText(existingFilter?.value || '')
+                              // “值清单”筛选（operator: 'in'）不进入手动操作符下拉，
+                              // 否则会把 'in' 塞进只接受 FilterOperator 的状态。
+                              const existingOperator = existingFilter?.operator
+                              setHeaderFilterOperator(existingOperator && existingOperator !== 'in' ? existingOperator : 'contains')
+                              setHeaderFilterText(typeof existingFilter?.value === 'string' ? existingFilter.value : '')
+                              setHeaderFilterListOpen(false)
+                              setHeaderFilterListItems([])
+                              setHeaderFilterListSelected(new Set())
                             }
                           }}
                           style={{
@@ -3662,6 +3778,73 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                                 >
                                   清除此列筛选
                                 </button>
+                              )}
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-secondary"
+                                style={{ marginTop: 6, fontSize: 11 }}
+                                onClick={() => void openHeaderValueList(field.key)}
+                                title="列出这一列的去重值及数量，勾选后按选中值筛选（类似 Excel）"
+                              >
+                                <Icon name="filter" size={12} /> 按值清单筛选
+                              </button>
+                              {headerFilterListOpen && (
+                                <div style={{ marginTop: 8, borderTop: '1px solid #f3f4f6', paddingTop: 8 }}>
+                                  <input
+                                    type="text"
+                                    placeholder="搜索值..."
+                                    value={headerFilterListSearch}
+                                    onChange={e => setHeaderFilterListSearch(e.target.value)}
+                                    style={{ width: '100%', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 12, outline: 'none' }}
+                                  />
+                                  {headerFilterListLoading ? (
+                                    <div style={{ fontSize: 12, color: '#9ca3af', padding: '8px 0' }}>加载中...</div>
+                                  ) : (() => {
+                                    const query = headerFilterListSearch.trim().toLowerCase()
+                                    const items = headerFilterListItems.filter(item => {
+                                      if (!query) return true
+                                      const token = headerFilterValueToken(item)
+                                      const label = token === FILTER_EMPTY_TOKEN ? '(空)' : token
+                                      return label.toLowerCase().includes(query)
+                                    })
+                                    if (items.length === 0) {
+                                      return <div style={{ fontSize: 12, color: '#9ca3af', padding: '8px 0' }}>没有可选值</div>
+                                    }
+                                    return (
+                                      <>
+                                        <div style={{ maxHeight: 220, overflow: 'auto', marginTop: 6, display: 'grid', gap: 2 }}>
+                                          {items.map(item => {
+                                            const token = headerFilterValueToken(item)
+                                            const label = token === FILTER_EMPTY_TOKEN ? '(空)' : token
+                                            return (
+                                              <label key={`${token}::${item.value}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 2px', cursor: 'pointer' }}>
+                                                <input
+                                                  type="checkbox"
+                                                  checked={headerFilterListSelected.has(token)}
+                                                  onChange={() => toggleHeaderFilterValue(token)}
+                                                />
+                                                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={label}>{label}</span>
+                                                <span style={{ color: '#9ca3af', fontSize: 11 }}>{item.count}</span>
+                                              </label>
+                                            )
+                                          })}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                                          <button
+                                            type="button"
+                                            className="btn btn-xs btn-primary"
+                                            onClick={() => applyHeaderValueList(field.key)}
+                                            disabled={headerFilterListSelected.size === 0}
+                                          >
+                                            应用{headerFilterListSelected.size > 0 ? `(${headerFilterListSelected.size})` : ''}
+                                          </button>
+                                          <button type="button" className="btn btn-xs btn-secondary" onClick={() => setHeaderFilterListSelected(new Set())}>清空勾选</button>
+                                          <button type="button" className="btn btn-xs btn-ghost" onClick={() => setHeaderFilterListOpen(false)}>收起</button>
+                                        </div>
+                                      </>
+                                    )
+                                  })()}
+                                </div>
                               )}
                             </div>
                           )}
@@ -5038,6 +5221,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           search={searchText}
           filters={filterValues as unknown as JsonObject}
           onClose={() => setShowExportDialog(false)}
+        />
+      )}
+      {showDailyHistory && (
+        <DailyHistoryDialog
+          onClose={() => setShowDailyHistory(false)}
+          onOpen={openDailyHistoryRecord}
         />
       )}
       {showWorkFileDialog && (

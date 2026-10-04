@@ -55,7 +55,10 @@ SEARCH_TEXT_FIELDS = (
     "risk_description", "risk_level", "module", "application_status",
     "scope_description", "notes", "search_vector",
 )
-FILTER_OPERATORS = {"contains", "eq", "starts_with", "ends_with", "is_empty", "is_not_empty"}
+FILTER_OPERATORS = {"contains", "eq", "starts_with", "ends_with", "is_empty", "is_not_empty", "in"}
+# 值清单筛选用到的“空值”占位符：前端勾选“(空)”时以该 token 表达，
+# 后端翻译为 NULL 或空字符串，避免把真正的空串与用户勾选混淆。
+FILTER_EMPTY_TOKEN = "__EMPTY__"
 
 # These fields remain readable for legacy views, but structured RiskCase and
 # RiskAssessmentVersion are now the only supported write path.
@@ -113,6 +116,33 @@ def _parse_filter_condition(filter_value: Any) -> tuple[str, Any] | None:
     return "contains", filter_value
 
 
+def _text_match_candidates(value: Any) -> set[str]:
+    """标准化单个文本匹配值，兼容布尔列在 SQLite 中的 "1"/"0" 存储。"""
+    lowered = str(value).strip().lower()
+    candidates = {lowered}
+    if lowered in ("true", "1"):
+        candidates.update(("true", "1"))
+    elif lowered in ("false", "0"):
+        candidates.update(("false", "0"))
+    return candidates
+
+
+def _split_in_values(value: Any) -> tuple[list[Any], bool]:
+    """拆分值清单为 (非空值列表, 是否包含空值)。
+
+    None 或 FILTER_EMPTY_TOKEN 视为“勾选了空值”，其余按原值返回。
+    """
+    values = value if isinstance(value, (list, tuple, set)) else [value]
+    non_empty: list[Any] = []
+    include_empty = False
+    for item in values:
+        if item is None or str(item) == FILTER_EMPTY_TOKEN:
+            include_empty = True
+        else:
+            non_empty.append(item)
+    return non_empty, include_empty
+
+
 def _apply_filter_expression(expression, operator: str, value: Any):
     """Build one Excel-style predicate for a SQL column or JSON expression."""
     text_expression = expression.cast(String)
@@ -122,6 +152,30 @@ def _apply_filter_expression(expression, operator: str, value: Any):
         return and_(expression.isnot(None), text_expression != "")
     if value is None:
         return None
+    if operator == "in":
+        # Excel 式“值清单”多选：value 为勾选值数组。空值用 FILTER_EMPTY_TOKEN
+        # 表达，翻译为 NULL/空串，与其他值取并集。
+        if not isinstance(value, (list, tuple, set)):
+            value = [value]
+        candidates: set[str] = set()
+        include_empty = False
+        for item in value:
+            if item is None:
+                include_empty = True
+                continue
+            item_text = str(item)
+            if item_text == FILTER_EMPTY_TOKEN:
+                include_empty = True
+                continue
+            candidates.update(_text_match_candidates(item))
+        predicates = []
+        if candidates:
+            predicates.append(func.lower(text_expression).in_(list(candidates)))
+        if include_empty:
+            predicates.append(or_(expression.is_(None), text_expression == ""))
+        if not predicates:
+            return None
+        return or_(*predicates)
     value_text = str(value)
     if operator == "contains":
         return text_expression.ilike(f"%{value_text}%")
@@ -133,13 +187,7 @@ def _apply_filter_expression(expression, operator: str, value: Any):
         # SQLite 把布尔列存成整数，cast 成文本后是 "1"/"0"；而前端可能传
         # true/false，str() 后是 "True"/"False"。统一按布尔语义匹配，避免
         # {"has_risk": {"eq": true}} 这类筛选永远匹配不到任何行。
-        lowered = value_text.strip().lower()
-        candidates = {lowered}
-        if lowered in ("true", "1"):
-            candidates.update(("true", "1"))
-        elif lowered in ("false", "0"):
-            candidates.update(("false", "0"))
-        return func.lower(text_expression).in_(list(candidates))
+        return func.lower(text_expression).in_(list(_text_match_candidates(value_text)))
     return None
 
 
@@ -395,14 +443,34 @@ class PatentService:
                 else:
                     custom_expression = func.json_extract(Patent.custom_fields, f'$.{key}')
                     ai_expression = func.json_extract(Patent.ai_fields, f'$.{key}')
-                    custom_predicate = _apply_filter_expression(custom_expression, operator, value)
-                    ai_predicate = _apply_filter_expression(ai_expression, operator, value)
-                    if custom_predicate is not None and ai_predicate is not None:
-                        query = query.filter(
-                            and_(custom_predicate, ai_predicate)
-                            if operator == "is_empty"
-                            else or_(custom_predicate, ai_predicate)
-                        )
+                    if operator == "in":
+                        # 值清单：具体值在双投影间取 OR（值出现在任一侧即算命中），
+                        # 但“空值”必须在两侧都为空时才成立。若整体做 OR，会在字段
+                        # 只存在于 custom_fields、ai_fields 无此键时，把 ai 侧的 NULL
+                        # 误判为空值，导致勾选“(空)”命中全表。
+                        non_empty, include_empty = _split_in_values(value)
+                        value_predicates = []
+                        if non_empty:
+                            custom_predicate = _apply_filter_expression(custom_expression, "in", non_empty)
+                            ai_predicate = _apply_filter_expression(ai_expression, "in", non_empty)
+                            if custom_predicate is not None and ai_predicate is not None:
+                                value_predicates.append(or_(custom_predicate, ai_predicate))
+                        if include_empty:
+                            value_predicates.append(and_(
+                                _apply_filter_expression(custom_expression, "is_empty", None),
+                                _apply_filter_expression(ai_expression, "is_empty", None),
+                            ))
+                        if value_predicates:
+                            query = query.filter(or_(*value_predicates))
+                    else:
+                        custom_predicate = _apply_filter_expression(custom_expression, operator, value)
+                        ai_predicate = _apply_filter_expression(ai_expression, operator, value)
+                        if custom_predicate is not None and ai_predicate is not None:
+                            query = query.filter(
+                                and_(custom_predicate, ai_predicate)
+                                if operator == "is_empty"
+                                else or_(custom_predicate, ai_predicate)
+                            )
 
         # 兼容旧 custom_filters
         if custom_filters:

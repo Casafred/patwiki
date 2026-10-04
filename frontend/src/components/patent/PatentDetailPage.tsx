@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   patentService as patentApi,
   productService as productApi,
@@ -24,6 +24,7 @@ import type {
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDate, formatApiDateTime, formatApiTime } from '../../lib/date'
+import { recordBrowse, recordEdit, type DailyHistoryInput } from '../../lib/dailyHistory'
 import PatentShareDialog from './PatentShareDialog'
 import PatentGraph from './PatentGraph'
 import CommentPanel from './CommentPanel'
@@ -50,6 +51,20 @@ const PATENT_TYPE_LABELS: Record<string, string> = {
   invention: '发明', utility_model: '实用新型', design: '外观设计', pct: 'PCT',
 }
 
+/** 组装当日记录的写入数据，地址含查询串以便一键回到该详情页。 */
+function toHistoryInput(data: Patent): DailyHistoryInput {
+  const path = typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : undefined
+  return {
+    patentId: data.id,
+    title: data.title,
+    publicationNumber: data.publication_number,
+    applicationNumber: data.application_number,
+    applicant: data.applicant || data.assignee,
+    databaseId: data.database_id ?? null,
+    sourcePath: path,
+  }
+}
+
 export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, onOpenSidebar }: PatentDetailPageProps) {
   const [patent, setPatent] = useState<Patent | null>(null)
   const [loading, setLoading] = useState(true)
@@ -74,6 +89,8 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
   const [identityLoading, setIdentityLoading] = useState(false)
   const [showShareDialog, setShowShareDialog] = useState(false)
   const [openCommentCount, setOpenCommentCount] = useState(0)
+  // 同一专利在一次停留中只记一次浏览（保存后重载不再重复累加）。
+  const recordedBrowseRef = useRef<number | null>(null)
 
   const loadPatent = useCallback(async () => {
     setLoading(true)
@@ -163,6 +180,12 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
     void loadAIValues()
   }, [loadAIValues, loadHistory, loadIdentity, loadMeta, loadPatent, loadCollaborationStates])
 
+  useEffect(() => {
+    if (!patent || recordedBrowseRef.current === patent.id) return
+    recordedBrowseRef.current = patent.id
+    recordBrowse(toHistoryInput(patent))
+  }, [patent])
+
   const handleSave = async () => {
     if (!patent) return
     setSaving(true)
@@ -181,6 +204,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
       delete updates.risk_level
       delete updates.risk_description
       await patentApi.update(patent.id, updates)
+      recordEdit(toHistoryInput({ ...patent, ...formData } as Patent))
       setEditing(false)
       await loadPatent()
       await loadHistory()
