@@ -203,7 +203,30 @@ export default function CollaborationSyncPanel() {
     try { await collaborationSyncApi.logout() } catch { /* Expired sessions can still be cleared locally. */ }
     localStorage.removeItem(TOKEN_KEY)
     setIdentity(null)
+    setAccounts([])
+    setPassword('')
     setMessage('已退出协同账号')
+  }
+
+  const handleDeleteAccount = async (account: CollaborationIdentity) => {
+    if (!window.confirm(`确认删除协同账号“${account.display_name || account.username}”？登录和协同权限将被移除，历史记录保留。`)) return
+    setBusy(true)
+    try { await collaborationSyncApi.deleteAccount(account.id); setMessage(`账号 ${account.username} 已删除`); await loadAdminData() }
+    catch (error: unknown) { setMessage(getErrorMessage(error, '删除账号失败')) }
+    finally { setBusy(false) }
+  }
+
+  const downloadSample = async () => {
+    try {
+      const response = await fetch(`${import.meta.env.BASE_URL}examples/patwiki-employee-config.example.json`)
+      if (!response.ok) throw new Error('样例文件读取失败')
+      const url = URL.createObjectURL(await response.blob())
+      const anchor = document.createElement('a')
+      anchor.href = url; anchor.download = 'patwiki-employee-config.example.json'
+      document.body.appendChild(anchor); anchor.click(); anchor.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setMessage('成员配置样例已下载')
+    } catch (error: unknown) { setMessage(getErrorMessage(error, '样例下载失败')) }
   }
 
   const handleChangePassword = async () => {
@@ -369,7 +392,7 @@ export default function CollaborationSyncPanel() {
         <Icon name="file" size={28} />
         <div className="member-config-description"><strong>成员初始化 / 权限更新</strong><span>管理员签发的 JSON 配置文件</span></div>
         <label className={`btn btn-primary member-config-picker ${busy ? 'is-disabled' : ''}`}><Icon name="download" />{busy ? '导入中...' : '选择配置文件'}<input type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (!file) return; setBusy(true); void collaborationSyncApi.importEmployeeConfig(file).then(result => { setLoginName(result.username); setConfigured(true); setMessage(`成员配置已导入：${result.username}`) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)); event.target.value = '' }} /></label>
-        <a className="btn btn-secondary" href={`${import.meta.env.BASE_URL}examples/patwiki-employee-config.example.json`} download><Icon name="download" />格式样例</a>
+        <button className="btn btn-secondary" type="button" onClick={() => void downloadSample()}><Icon name="download" />格式样例</button>
       </div>
       <div className="semantic-muted">样例用于查看格式。正式文件请由管理员在成员权限配置中导出，修改文件内容会使签名失效。</div>
       {configured ? <><strong style={{ fontSize: 13 }}>协同账号登录</strong>
@@ -437,7 +460,12 @@ export default function CollaborationSyncPanel() {
             <select style={inputStyle} value={newUnit} onChange={event => setNewUnit(event.target.value)}><option value="">选择所属组（可选）</option>{units.filter(unit => unit.unit_type === 'team').map(unit => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select>
             <button style={buttonStyle} disabled={busy || !loginName || password.length < 10 || (newRole === 'group_leader' && !newUnit)} onClick={() => void handleCreateAccount()}>创建账号</button>
           </div>
-          <div style={{ marginTop: 8, maxHeight: 170, overflow: 'auto', fontSize: 11, color: '#475569' }}>{accounts.map(account => <div key={account.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(90px, 1fr) minmax(105px, auto) auto', alignItems: 'center', gap: 5, padding: '3px 0' }}><span>{account.display_name || account.username} · {account.username}</span><select style={{ ...inputStyle, padding: '3px 4px', fontSize: 10 }} disabled={!account.active} value={account.roles[0] || 'member'} onChange={event => { const role = event.target.value; const unitId = account.role_assignments?.find(item => item.role === 'group_leader')?.unit_id || (newUnit ? Number(newUnit) : undefined); void collaborationSyncApi.setAccountRole(account.id, role, unitId).then(loadAdminData).catch(error => setMessage(getErrorMessage(error))) }}><option value="member">组员</option><option value="group_leader">组长</option><option value="department_leader">部门领导</option><option value="system_admin">维护管理员</option><option value="viewer">只读协作者</option></select><button style={{ ...buttonStyle, padding: '2px 5px' }} onClick={() => void collaborationSyncApi.setAccountActive(account.id, !account.active).then(loadAdminData).catch(error => setMessage(getErrorMessage(error)))}>{account.active ? '停用' : '启用'}</button></div>)}</div>
+          <div className="collaboration-account-list">{accounts.map(account => <div className="collaboration-account-row" key={account.id}>
+            <span><strong>{account.display_name || account.username}</strong><small>{account.username}</small></span>
+            <select style={inputStyle} aria-label={`${account.username} 的角色`} disabled={!account.active || busy} value={account.roles[0] || 'member'} onChange={event => { const role = event.target.value; const unitId = account.role_assignments?.find(item => item.role === 'group_leader')?.unit_id || (newUnit ? Number(newUnit) : undefined); void collaborationSyncApi.setAccountRole(account.id, role, unitId).then(loadAdminData).catch(error => setMessage(getErrorMessage(error))) }}><option value="member">组员</option><option value="group_leader">组长</option><option value="department_leader">部门领导</option><option value="system_admin">维护管理员</option><option value="viewer">只读协作者</option></select>
+            <button className="btn btn-sm btn-secondary" disabled={busy} onClick={() => void collaborationSyncApi.setAccountActive(account.id, !account.active).then(loadAdminData).catch(error => setMessage(getErrorMessage(error)))}>{account.active ? '停用' : '启用'}</button>
+            <button className="btn btn-sm btn-ghost" title={`删除 ${account.username}`} aria-label={`删除 ${account.username}`} disabled={busy || account.id === identity.id} onClick={() => void handleDeleteAccount(account)}><Icon name="trash" /></button>
+          </div>)}</div>
           <div style={{ marginTop: 6, color: '#64748b', fontSize: 11 }}>管理员和部门领导拥有本机协同管理权限；组长、组员按品类和字段授权同步；只读协作者不能应用到主表。</div>
         </div>
 

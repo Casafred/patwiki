@@ -9,12 +9,12 @@ from app.search.providers.openai_embedding import resolve_credential
 class OpenAICompatibleRerankProvider:
     """Adapter for providers exposing a Cohere-style rerank JSON endpoint."""
 
-    def __init__(self, *, endpoint: str | None, credential_ref: str | None, model: str, timeout_seconds: float = 20.0):
+    def __init__(self, *, endpoint: str | None, credential_ref: str | None, model: str, timeout_seconds: float = 20.0, inline_key: str | None = None):
         if not endpoint:
             raise SemanticError("SEMANTIC_PROVIDER_UNAVAILABLE", "Rerank provider endpoint is required")
         self.endpoint = endpoint
         self.model = model
-        self.headers = {"Authorization": f"Bearer {resolve_credential(credential_ref)}"}
+        self.headers = {"Authorization": f"Bearer {resolve_credential(credential_ref, inline_key)}"}
         self.timeout = timeout_seconds
 
     def rerank(self, query: str, documents: list[RerankDocument], top_n: int) -> list[RerankResult]:

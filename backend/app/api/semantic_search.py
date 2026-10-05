@@ -22,8 +22,12 @@ router = APIRouter(prefix="/semantic-search", tags=["semantic-search"])
 
 
 def _provider_dict(row: SemanticProviderDefinition) -> dict:
+    # The inline API Key is write-only; never echo the secret back to clients.
+    config_json = dict(row.config_json or {})
+    has_api_key = bool(config_json.pop("api_key", None))
     return {"id": row.id, "name": row.name, "provider_kind": row.provider_kind, "provider_type": row.provider_type,
-        "endpoint": row.endpoint, "credential_ref": row.credential_ref, "config_json": row.config_json or {}, "enabled": row.enabled,
+        "endpoint": row.endpoint, "credential_ref": row.credential_ref, "config_json": config_json, "enabled": row.enabled,
+        "has_api_key": has_api_key,
         "last_health_status": row.last_health_status, "last_health_at": row.last_health_at, "last_error_code": row.last_error_code}
 
 
@@ -152,6 +156,11 @@ def create_provider(body: SemanticProviderCreate, db: Session = Depends(get_db))
     if body.provider_type not in valid_types.get(body.provider_kind, set()):
         raise AppException("VALIDATION_ERROR", "Unsupported semantic provider kind or type")
     values = body.model_dump()
+    api_key = (values.pop("api_key", None) or "").strip()
+    config_json = dict(values.get("config_json") or {})
+    if api_key:
+        config_json["api_key"] = api_key
+    values["config_json"] = config_json
     values["endpoint"] = _validate_provider_endpoint(body.provider_kind, body.endpoint)
     values["credential_ref"] = _validate_credential_ref(body.credential_ref)
     row = SemanticProviderDefinition(**values)
@@ -168,6 +177,21 @@ def update_provider(provider_id: int, body: SemanticProviderUpdate, db: Session 
         raise NotFoundException("Semantic provider", provider_id)
     changes = body.model_dump(exclude_unset=True)
     credential_ref = changes.get("credential_ref")
+    if "api_key" in changes:
+        api_key = (changes.pop("api_key") or "").strip()
+        config_json = dict(changes.get("config_json") or row.config_json or {})
+        if api_key:
+            config_json["api_key"] = api_key
+        else:
+            config_json.pop("api_key", None)
+        changes["config_json"] = config_json
+    elif "config_json" in changes:
+        # Keep the previously stored API Key when only the model hint changes.
+        existing_key = (row.config_json or {}).get("api_key")
+        if existing_key:
+            merged = dict(changes["config_json"] or {})
+            merged["api_key"] = existing_key
+            changes["config_json"] = merged
     if "endpoint" in changes:
         changes["endpoint"] = _validate_provider_endpoint(row.provider_kind, changes["endpoint"])
     if credential_ref is not None:
@@ -197,7 +221,8 @@ def test_provider(provider_id: int, body: SemanticProviderTestRequest, db: Sessi
             return {"status": "healthy", "dimensions": len(vector), "checked_at": provider.last_health_at}
         if provider.provider_kind == "rerank":
             model = body.model or (provider.config_json or {}).get("model") or "rerank-default"
-            reranker = OpenAICompatibleRerankProvider(endpoint=provider.endpoint, credential_ref=provider.credential_ref, model=model)
+            reranker = OpenAICompatibleRerankProvider(endpoint=provider.endpoint, credential_ref=provider.credential_ref, model=model,
+                inline_key=(provider.config_json or {}).get("api_key"))
             result = reranker.rerank("patwiki provider health check", [RerankDocument("health-check", 0, "provider health check")], 1)
             provider.last_health_status, provider.last_health_at, provider.last_error_code = "healthy", datetime.utcnow(), None
             db.commit()

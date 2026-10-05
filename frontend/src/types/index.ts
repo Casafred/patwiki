@@ -913,6 +913,7 @@ export interface SemanticProvider {
   credential_ref?: string | null
   config_json: JsonObject
   enabled: boolean
+  has_api_key?: boolean
   last_health_status?: string | null
   last_health_at?: string | null
   last_error_code?: string | null
@@ -1364,6 +1365,25 @@ export interface SyncRun {
   retry_count: number
   started_at?: string | null
   finished_at?: string | null
+  created_at?: string | null
+}
+
+export interface SyncRecord {
+  id: number
+  sync_run_id: number
+  external_record_id: string
+  record_kind: string
+  patent_id?: number | null
+  patent_number?: string | null
+  patent_title?: string | null
+  external_snapshot_id?: number | null
+  identity_status: string
+  identity_candidate_patent_ids: number[]
+  outcome: string
+  idempotency_key: string
+  error_code?: string | null
+  error_message?: string | null
+  snapshot_payload?: JsonValue
   created_at?: string | null
 }
 

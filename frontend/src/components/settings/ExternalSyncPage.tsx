@@ -4,7 +4,7 @@ import { syncApi } from '../../api'
 import { fieldService as fieldApi } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
-import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, SyncConnector, SyncRun, SyncSubscription } from '../../types'
+import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, SyncConnector, SyncRecord, SyncRun, SyncSubscription } from '../../types'
 import McpToolWorkbench from './McpToolWorkbench'
 
 const EXTERNAL_UPDATE_FIELDS = [
@@ -22,7 +22,7 @@ function countValue(run: SyncRun, key: string): string {
   return typeof value === 'number' ? String(value) : '0'
 }
 
-type McpTab = 'connectors' | 'monitor' | 'runs'
+type McpTab = 'connectors' | 'monitor' | 'tools' | 'runs'
 
 export default function ExternalSyncPage() {
   const [searchParams] = useSearchParams()
@@ -58,6 +58,10 @@ export default function ExternalSyncPage() {
   const [tools, setTools] = useState<JsonObject | null>(null)
   const [selectedConnectorId, setSelectedConnectorId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<McpTab>('connectors')
+  const [expandedRunId, setExpandedRunId] = useState<number | null>(null)
+  const [runRecords, setRunRecords] = useState<SyncRecord[]>([])
+  const [runObservations, setRunObservations] = useState<ExternalObservation[]>([])
+  const [runDetailBusy, setRunDetailBusy] = useState(false)
 
   const defaultMonitorName = (mode: typeof monitorMode) => mode === 'applicant' ? '申请人监控' : mode === 'expression' ? '检索式监控' : '公开号跟踪'
 
@@ -93,6 +97,7 @@ export default function ExternalSyncPage() {
   useEffect(() => {
     const ids = (searchParams.get('patent_ids') || '').split(',').map(Number).filter(id => Number.isInteger(id) && id > 0)
     if (ids.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTab('monitor')
       setMonitorMode('publication')
       setName('公开号跟踪')
@@ -242,9 +247,23 @@ export default function ExternalSyncPage() {
     } finally { setBusy(false) }
   }
 
+  const toggleRunDetail = async (run: SyncRun) => {
+    if (expandedRunId === run.id) { setExpandedRunId(null); return }
+    setExpandedRunId(run.id); setRunDetailBusy(true); setRunRecords([]); setRunObservations([])
+    try {
+      const [recordResult, observationResult] = await Promise.all([syncApi.runRecords(run.id), syncApi.runObservations(run.id)])
+      setRunRecords(recordResult.items); setRunObservations(observationResult.items)
+    } catch (detailError: unknown) {
+      setError(getErrorMessage(detailError, '运行详情加载失败'))
+    } finally { setRunDetailBusy(false) }
+  }
+
+  const toolServiceCount = Array.isArray(tools?.services) ? tools.services.length : 0
+
   const tabs: { key: McpTab; label: string; badge?: number }[] = [
     { key: 'connectors', label: '连接器', badge: connectors.length },
     { key: 'monitor', label: '自动监控', badge: subscriptions.length },
+    { key: 'tools', label: '工具工作台', badge: toolServiceCount },
     { key: 'runs', label: '运行与审查', badge: observations.length },
   ]
 
@@ -344,9 +363,15 @@ export default function ExternalSyncPage() {
             </section>
           </div>
 
+          <div className="mcp-tab-hint">连接器的工具发现、工具调用和一键更新已统一收进 <button type="button" className="mcp-link-button" onClick={() => setActiveTab('tools')}>工具工作台</button>。</div>
+        </div>
+      )}
+
+      {activeTab === 'tools' && (
+        <div className="mcp-tab-body">
           {tools && (
             <section className="mcp-panel">
-              <div className="section-heading"><h3>MCP 工具目录</h3><span>{Array.isArray(tools.services) ? `${tools.services.length} 个服务` : '已发现'}</span></div>
+              <div className="section-heading"><h3>已发现的 MCP 工具</h3><span>{Array.isArray(tools.services) ? `${tools.services.length} 个服务` : '尚未发现工具'}</span></div>
               {Array.isArray(tools.services) && tools.services.map((service, index) => {
                 const item = service as JsonObject
                 const serviceTools = (Array.isArray(item.tools) ? item.tools : []) as unknown as McpToolInfo[]
@@ -363,9 +388,10 @@ export default function ExternalSyncPage() {
                   })}</div>
                 </div>
               })}
+              {!Array.isArray(tools.services) && <div className="empty-state">请在“连接器”页对 HimmPat MCP 执行“发现工具”。</div>}
             </section>
           )}
-          {tools && <McpToolWorkbench connectors={connectors} />}
+          <McpToolWorkbench connectors={connectors} databaseId={currentDatabaseId} onUpdated={load} />
         </div>
       )}
 
@@ -447,15 +473,51 @@ export default function ExternalSyncPage() {
               <div className="section-heading"><h3>最近运行</h3><span>{runs.length} 条</span></div>
               {runs.length > 0 ? (
                 <div className="mcp-run-list">
-                  {runs.slice(0, 10).map(run => (
-                    <div className="mcp-run-row" key={run.id}>
-                      <span className={`log-status ${run.status === 'succeeded' ? 'success' : run.status}`}>{run.status}</span>
-                      <span>记录 {countValue(run, 'records')}</span>
-                      <span>应用 {countValue(run, 'auto_applied')}</span>
-                      <span>审查 {countValue(run, 'review')}</span>
-                      <time>{run.finished_at || run.created_at || '-'}</time>
+                  {runs.slice(0, 10).map(run => {
+                    const expanded = expandedRunId === run.id
+                    return <div className={`mcp-run-row-wrap ${expanded ? 'expanded' : ''}`} key={run.id}>
+                      <button type="button" className="mcp-run-row" aria-expanded={expanded} onClick={() => void toggleRunDetail(run)}>
+                        <span className={`log-status ${run.status === 'succeeded' ? 'success' : run.status}`}>{run.status}</span>
+                        <span>记录 {countValue(run, 'records')}</span>
+                        <span>应用 {countValue(run, 'auto_applied')}</span>
+                        <span>审查 {countValue(run, 'review')}</span>
+                        <time>{run.finished_at || run.created_at || '-'}</time>
+                        <span className="mcp-run-toggle">{expanded ? '收起' : '详情'}</span>
+                      </button>
+                      {expanded && <div className="mcp-run-details">
+                        {runDetailBusy ? <div className="semantic-muted">正在加载运行详情…</div> : <>
+                          <div className="mcp-run-detail-grid">
+                            <div><span>连接器</span><strong>{connectors.find(item => item.id === run.connector_id)?.name || `#${run.connector_id}`}</strong></div>
+                            <div><span>触发方式</span><strong>{run.trigger}</strong></div>
+                            <div><span>开始时间</span><strong>{run.started_at || '-'}</strong></div>
+                            <div><span>结束时间</span><strong>{run.finished_at || '-'}</strong></div>
+                            <div><span>错误</span><strong>{run.error_code || run.error_message || '无'}</strong></div>
+                            <div><span>返回记录</span><strong>{runRecords.length} 条</strong></div>
+                          </div>
+                          <strong className="mcp-run-section-title">回填的专利行与单元格（{runObservations.length}）</strong>
+                          {runObservations.length > 0
+                            ? <div className="mcp-run-detail-table"><table><thead><tr><th>专利</th><th>字段</th><th>原值</th><th>新值</th><th>处理</th></tr></thead><tbody>
+                              {runObservations.slice(0, 200).map(item => <tr key={item.id}><td>#{item.patent_id ?? '-'}</td><td>{item.canonical_field_key}</td><td title={item.current_value || ''}>{item.current_value || '空'}</td><td title={item.candidate_value || ''}>{item.candidate_value || '空'}</td><td>{item.decision}</td></tr>)}
+                            </tbody></table></div>
+                            : <div className="semantic-muted">本次运行没有字段级回填记录。</div>}
+                          <strong className="mcp-run-section-title">返回内容（{runRecords.length}）</strong>
+                          {runRecords.length > 0
+                            ? <div className="mcp-run-records">
+                              {runRecords.slice(0, 50).map(record => <div className="mcp-run-record" key={record.id}>
+                                <div className="mcp-run-record-head">
+                                  <strong>{record.patent_number || record.external_record_id}</strong>
+                                  {record.patent_title && <span title={record.patent_title}>{record.patent_title}</span>}
+                                  <span>结果 {record.outcome}</span>
+                                  {record.error_message && <span>错误 {record.error_message}</span>}
+                                </div>
+                                {record.snapshot_payload !== undefined && record.snapshot_payload !== null && <details><summary>查看返回原文</summary><pre>{JSON.stringify(record.snapshot_payload, null, 2)}</pre></details>}
+                              </div>)}
+                            </div>
+                            : <div className="semantic-muted">本次运行没有返回记录。</div>}
+                        </>}
+                      </div>}
                     </div>
-                  ))}
+                  })}
                 </div>
               ) : (
                 <div className="empty-state">暂无同步运行记录。</div>

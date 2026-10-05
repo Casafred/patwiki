@@ -7,9 +7,13 @@ from openai import OpenAI
 from app.search.contracts import ModelIdentity, SemanticError
 
 
-def resolve_credential(reference: str | None) -> str:
+def resolve_credential(reference: str | None, inline_key: str | None = None) -> str:
+    # A directly configured API key (the unified model-config experience) takes
+    # precedence over a stored env:// or keyring:// reference.
+    if inline_key and inline_key.strip():
+        return inline_key.strip()
     if not reference:
-        raise SemanticError("SEMANTIC_PROVIDER_AUTH_FAILED", "Embedding provider requires a credential reference")
+        raise SemanticError("SEMANTIC_PROVIDER_AUTH_FAILED", "Embedding provider requires an API Key or credential reference")
     if reference.startswith("env://"):
         value = os.environ.get(reference.removeprefix("env://"))
     elif reference.startswith("keyring://"):
@@ -27,11 +31,11 @@ def resolve_credential(reference: str | None) -> str:
 
 
 class OpenAICompatibleEmbeddingProvider:
-    def __init__(self, *, endpoint: str | None, credential_ref: str | None, model: str, dimensions: int | None):
+    def __init__(self, *, endpoint: str | None, credential_ref: str | None, model: str, dimensions: int | None, inline_key: str | None = None):
         self.endpoint = endpoint or None
         self.model = model
         self.dimensions = dimensions
-        self.client = OpenAI(api_key=resolve_credential(credential_ref), base_url=self.endpoint)
+        self.client = OpenAI(api_key=resolve_credential(credential_ref, inline_key), base_url=self.endpoint)
 
     def model_identity(self) -> ModelIdentity:
         if not self.dimensions:

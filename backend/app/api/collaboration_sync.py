@@ -284,6 +284,40 @@ def set_account_active(target_user_id: int, request: ActiveRequest, user: User =
     return {"user_id": target_user_id, "active": credential.active}
 
 
+@router.delete("/accounts/{target_user_id}")
+def delete_account(target_user_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    credential = db.get(CollaborationCredential, target_user_id)
+    target = db.get(User, target_user_id)
+    if not credential or not target:
+        raise HTTPException(404, "协同账号不存在")
+    if target_user_id == user.id:
+        raise HTTPException(400, "不能删除当前登录的协同账号")
+    active_admin_ids = {row[0] for row in db.query(UserRoleAssignment.user_id).join(
+        User, User.id == UserRoleAssignment.user_id
+    ).join(CollaborationCredential, CollaborationCredential.user_id == User.id).filter(
+        UserRoleAssignment.role_code.in_(["system_admin", "department_leader"]),
+        UserRoleAssignment.valid_to.is_(None),
+        User.is_active.is_(True), CollaborationCredential.active.is_(True),
+    ).distinct().all()}
+    is_target_admin = db.query(UserRoleAssignment).filter(
+        UserRoleAssignment.user_id == target_user_id,
+        UserRoleAssignment.valid_to.is_(None),
+        UserRoleAssignment.role_code.in_(["system_admin", "department_leader"]),
+    ).first()
+    if is_target_admin and target_user_id in active_admin_ids and len(active_admin_ids) <= 1:
+        raise HTTPException(409, "不能删除唯一的协同管理员")
+    # Remove the collaboration login and live roles, but keep the underlying user
+    # row so historical audit, grants and responsibilities stay attributable.
+    db.query(CollaborationSession).filter_by(user_id=target_user_id).delete()
+    db.query(UserRoleAssignment).filter_by(user_id=target_user_id).delete()
+    username = credential.login_name
+    db.delete(credential)
+    audit(db, user.id, "account_deleted", detail={"target_user_id": target_user_id, "username": username})
+    db.commit()
+    return {"success": True, "user_id": target_user_id}
+
+
 @router.patch("/accounts/{target_user_id}/role")
 def set_account_role(target_user_id: int, request: AccountRoleRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_admin(db, user.id)

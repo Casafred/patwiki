@@ -791,6 +791,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       const raw = localStorage.getItem(`${DETAIL_FIELDS_STORAGE_PREFIX}${detailConfigKey}`)
       if (raw) {
         const keys = JSON.parse(raw)
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (Array.isArray(keys)) setDetailFieldConfig(current => ({ ...current, [detailConfigKey]: keys.filter(item => typeof item === 'string') }))
       }
     } catch { /* local storage is optional */ }
@@ -3985,9 +3986,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     })}
                   >
                     <td colSpan={visibleFields.length + 3}>
-                      <span className="family-group-toggle">{familyKey && collapsedFamilyKeys.has(familyKey) ? '›' : '⌄'}</span>
-                      <strong>{p.family_key || `同族 ${p.family_id}`}</strong>
-                      <span className="family-group-count">{p.family_size || 1} 件独立专利</span>
+                      <div className="family-group-header-inner">
+                        <span className="family-group-toggle">{familyKey && collapsedFamilyKeys.has(familyKey) ? '›' : '⌄'}</span>
+                        <strong>{p.family_key || `同族 ${p.family_id}`}</strong>
+                        <span className="family-group-count">{p.family_size || 1} 件独立专利</span>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -4122,7 +4125,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 {!isGroupRowCollapsed && !isFamilyRowCollapsed && rowImages(p).length > 0 && (
                   <tr className="patent-image-strip-row" key={`${p.id}-images`}>
                     <td colSpan={visibleFields.length + 3}>
-                      <PatentImageStrip attachments={rowImages(p)} />
+                      <div className="patent-image-strip-sticky">
+                        <PatentImageStrip attachments={rowImages(p)} />
+                      </div>
                     </td>
                   </tr>
                 )}

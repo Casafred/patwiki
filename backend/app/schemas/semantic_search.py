@@ -10,6 +10,9 @@ class SemanticProviderCreate(BaseModel):
     provider_type: str = "openai_compatible"
     endpoint: str | None = None
     credential_ref: str | None = None
+    # Directly configured API Key (unified model-config experience). Write-only:
+    # it is persisted in config_json and never returned by the API.
+    api_key: str | None = Field(default=None, max_length=500)
     config_json: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
 
@@ -18,6 +21,7 @@ class SemanticProviderUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     endpoint: str | None = Field(default=None, max_length=1000)
     credential_ref: str | None = Field(default=None, max_length=500)
+    api_key: str | None = Field(default=None, max_length=500)
     config_json: dict[str, Any] | None = None
     enabled: bool | None = None
 

@@ -25,6 +25,17 @@ function thresholdValue(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : undefined
 }
 
+// Provider presets mirror the unified model-config experience: a familiar
+// vendor dropdown that fills Base URL / model, plus a plain API Key field.
+const PROVIDER_PRESETS = [
+  { key: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-small' },
+  { key: 'dashscope', label: '通义千问（DashScope 兼容）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'text-embedding-v3' },
+  { key: 'zhipu', label: '智谱 AI', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'embedding-3' },
+  { key: 'siliconflow', label: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', model: 'BAAI/bge-m3' },
+  { key: 'local', label: '本地 / 自建（OpenAI 兼容）', baseUrl: 'http://localhost:1234/v1', model: '' },
+  { key: 'custom', label: '自定义', baseUrl: '', model: '' },
+] as const
+
 export default function SemanticSearchManagement({ initialTab = 'overview' }: { initialTab?: 'overview' | 'models' } = {}) {
   const [tab, setTab] = useState<'overview' | 'models' | 'indexes' | 'evaluation'>(initialTab)
   const { databases, currentDatabaseId } = useAppStore()
@@ -46,8 +57,9 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
   const [providerName, setProviderName] = useState('')
   const [providerKind, setProviderKind] = useState<'embedding' | 'rerank'>('embedding')
   const [providerEndpoint, setProviderEndpoint] = useState('')
-  const [providerCredential, setProviderCredential] = useState('env://OPENAI_API_KEY')
+  const [providerApiKey, setProviderApiKey] = useState('')
   const [providerModel, setProviderModel] = useState('')
+  const [providerHasKey, setProviderHasKey] = useState(false)
 
   const [editingProfileId, setEditingProfileId] = useState<number | null>(null)
   const [profileRerankProviderId, setProfileRerankProviderId] = useState('')
@@ -143,20 +155,31 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
   }
 
   const resetProviderForm = () => {
-    setEditingProviderId(null); setProviderName(''); setProviderKind('embedding'); setProviderEndpoint(''); setProviderCredential('env://OPENAI_API_KEY'); setProviderModel('')
+    setEditingProviderId(null); setProviderName(''); setProviderKind('embedding'); setProviderEndpoint(''); setProviderApiKey(''); setProviderModel(''); setProviderHasKey(false)
+  }
+
+  const applyProviderPreset = (key: string) => {
+    const preset = PROVIDER_PRESETS.find(item => item.key === key)
+    if (!preset || preset.key === 'custom') return
+    setProviderEndpoint(preset.baseUrl)
+    if (providerKind === 'embedding' && preset.model) setProviderModel(preset.model)
   }
 
   const editProvider = (provider: SemanticProvider) => {
     setEditingProviderId(provider.id); setProviderName(provider.name); setProviderKind(provider.provider_kind)
-    setProviderEndpoint(provider.endpoint || ''); setProviderCredential(provider.credential_ref || 'env://OPENAI_API_KEY')
+    setProviderEndpoint(provider.endpoint || ''); setProviderApiKey('')
+    setProviderHasKey(Boolean(provider.has_api_key || provider.credential_ref))
     setProviderModel(typeof provider.config_json.model === 'string' ? provider.config_json.model : '')
     setShowProviderForm(true)
   }
 
   const saveProvider = async () => {
-    if (!providerName.trim() || !providerCredential.trim() || (providerKind === 'rerank' && !providerEndpoint.trim())) { setError(providerKind === 'rerank' ? 'Rerank 供应商名称、Endpoint 和凭证引用不能为空' : '供应商名称和凭证引用不能为空'); return }
+    if (!providerName.trim()) { setError('供应商名称不能为空'); return }
+    if (providerKind === 'rerank' && !providerEndpoint.trim()) { setError('Rerank 供应商必须填写 Base URL'); return }
+    if (!editingProviderId && !providerApiKey.trim()) { setError('请填写 API Key'); return }
     await runAction(async () => {
-      const data = { name: providerName.trim(), endpoint: providerEndpoint.trim() || null, credential_ref: providerCredential.trim(), config_json: providerModel.trim() ? { model: providerModel.trim() } : {} }
+      const data: Record<string, unknown> = { name: providerName.trim(), endpoint: providerEndpoint.trim() || null, config_json: providerModel.trim() ? { model: providerModel.trim() } : {} }
+      if (providerApiKey.trim()) data.api_key = providerApiKey.trim()
       if (editingProviderId) await semanticSearchService.updateProvider(editingProviderId, data)
       else await semanticSearchService.createProvider({ ...data, provider_kind: providerKind, provider_type: providerKind === 'embedding' ? 'openai_compatible' : 'openai_compatible_rerank', enabled: true })
       resetProviderForm(); setShowProviderForm(false)
@@ -275,63 +298,69 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
 
   return (
     <div className="semantic-management">
-      <div className="page-header">
-        <div><h2 className="page-title">语义检索工作台</h2></div>
-        <button className="btn btn-secondary" onClick={() => void load()} disabled={busy}><Icon name="refresh" />刷新状态</button>
+      <div className="semantic-workbench-header">
+        <div className="semantic-workbench-title">
+          <h2>语义检索</h2>
+          <span>配置向量模型、构建索引并评测检索质量</span>
+        </div>
+        <nav className="workspace-subtabs" aria-label="语义检索模块">{([{ key: 'overview', label: '概览' }, { key: 'models', label: '模型配置' }, { key: 'indexes', label: '索引与任务' }, { key: 'evaluation', label: '质量评测' }] as const).map(item => <button key={item.key} className={tab === item.key ? 'active' : ''} onClick={() => setTab(item.key)}>{item.label}</button>)}</nav>
+        <button className="btn btn-secondary" onClick={() => void load()} disabled={busy}><Icon name="refresh" />刷新</button>
       </div>
-      <nav className="workspace-subtabs" aria-label="语义检索模块">{([{ key: 'overview', label: '工作台概览' }, { key: 'models', label: '模型配置' }, { key: 'indexes', label: '索引与任务' }, { key: 'evaluation', label: '检索质量评测' }] as const).map(item => <button key={item.key} className={tab === item.key ? 'active' : ''} onClick={() => setTab(item.key)}>{item.label}</button>)}</nav>
       {error && <div className="management-error">{error}</div>}
       {message && <div className="semantic-management-message">{message}</div>}
-      <section className="semantic-setup-guide" hidden={tab !== 'overview'}>
-        <div className="semantic-setup-header">
-          <div>
-            <strong>开始向量化</strong>
+      <div className="semantic-overview-grid" hidden={tab !== 'overview'}>
+        <section className="semantic-panel">
+          <div className="semantic-panel-title"><strong>快速开始</strong><span>按顺序完成 4 步即可开启语义检索</span></div>
+          <div className="semantic-scope-row">
+            <label>检索配置
+              <select className="form-input" value={quickProfile?.id ?? ''} onChange={event => setSelectedProfileId(Number(event.target.value) || null)}><option value="">选择检索配置</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select>
+            </label>
+            <label>索引范围
+              <select className="form-input" value={indexScope} onChange={event => setIndexScope(event.target.value as 'current' | 'global')}>
+                <option value="current">当前数据库{currentDatabaseId ? ` · ${databases.find(database => database.id === currentDatabaseId)?.name || currentDatabaseId}` : ' · 未选择'}</option>
+                <option value="global">全部数据库</option>
+              </select>
+            </label>
           </div>
-          <label className="semantic-scope-control">
-            <span>检索配置</span>
-            <select className="form-input" value={quickProfile?.id ?? ''} onChange={event => setSelectedProfileId(Number(event.target.value) || null)}><option value="">选择检索配置</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select>
-            <span>索引范围</span>
-            <select className="form-input" value={indexScope} onChange={event => setIndexScope(event.target.value as 'current' | 'global')}>
-              <option value="current">当前数据库{currentDatabaseId ? ` · ${databases.find(database => database.id === currentDatabaseId)?.name || currentDatabaseId}` : ' · 未选择'}</option>
-              <option value="global">全部数据库</option>
-            </select>
-          </label>
-        </div>
-        <div className="semantic-setup-steps">
-          <div className={`semantic-setup-step ${providers.some(provider => provider.provider_kind === 'embedding' && provider.enabled) ? 'ready' : ''}`}>
-            <span className="semantic-step-number">1</span>
-            <div><strong>配置 Embedding 供应商</strong><span>{providers.filter(provider => provider.provider_kind === 'embedding' && provider.enabled).length ? '已配置' : '尚未配置'}</span></div>
-            <button type="button" className="btn btn-secondary" onClick={() => { setTab('models'); resetProviderForm(); setShowProviderForm(true) }}>配置供应商</button>
+          <div className="semantic-step-list">
+            <div className={`semantic-step-item ${providers.some(provider => provider.provider_kind === 'embedding' && provider.enabled) ? 'ready' : ''}`}>
+              <span className="semantic-step-number">1</span>
+              <div className="semantic-step-body"><strong>配置向量模型供应商</strong><span>{providers.some(provider => provider.provider_kind === 'embedding' && provider.enabled) ? '已配置' : '尚未配置，填写 Base URL 与 API Key 即可'}</span></div>
+              <button type="button" className="btn btn-secondary" onClick={() => { setTab('models'); resetProviderForm(); setShowProviderForm(true) }}>去配置</button>
+            </div>
+            <div className={`semantic-step-item ${quickProfile?.embedding_provider_id ? 'ready' : ''}`}>
+              <span className="semantic-step-number">2</span>
+              <div className="semantic-step-body"><strong>选择检索配置</strong><span>{quickProfile ? quickProfile.name : '尚未创建'}</span></div>
+              <button type="button" className="btn btn-secondary" onClick={() => { setTab('models'); setShowProfileForm(true) }}>新建</button>
+            </div>
+            <div className={`semantic-step-item ${quickProfile?.embedding_dimensions ? 'ready' : ''}`}>
+              <span className="semantic-step-number">3</span>
+              <div className="semantic-step-body"><strong>检测向量维度</strong><span>{quickProfile?.embedding_dimensions ? `${quickProfile.embedding_dimensions} 维` : '尚未检测'}</span></div>
+              <button type="button" className="btn btn-secondary" disabled={!quickProfile?.embedding_provider_id || busy} onClick={() => quickProfile && void health(quickProfile)}>检测</button>
+            </div>
+            <div className={`semantic-step-item ${quickActiveIndex ? 'ready' : ''}`}>
+              <span className="semantic-step-number">4</span>
+              <div className="semantic-step-body"><strong>构建并启用索引</strong><span>{quickJob ? `构建中 · ${quickJob.processed_items}/${quickJob.total_items}` : quickActiveIndex ? '已启用，可以检索' : '尚未构建'}</span></div>
+              <button type="button" className="btn btn-primary" disabled={!quickProfile || !quickProfileReady || busy || Boolean(quickJob)} onClick={() => quickProfile && void rebuild(quickProfile)}>开始构建</button>
+            </div>
           </div>
-          <div className={`semantic-setup-step ${quickProfile?.embedding_provider_id ? 'ready' : ''}`}>
-            <span className="semantic-step-number">2</span>
-            <div><strong>选择向量 Profile</strong><span>{quickProfile ? quickProfile.name : '尚未创建'}</span></div>
-            <button type="button" className="btn btn-secondary" onClick={() => { setTab('models'); setShowProfileForm(true) }}>新建配置</button>
+        </section>
+        <section className="semantic-panel">
+          <div className="semantic-panel-title"><strong>运行状态</strong><span>实时概览</span></div>
+          <div className="semantic-status-grid compact">
+            <StatusTile label="可用检索配置" value={status?.configured_profiles ?? '-'} />
+            <StatusTile label="生效索引" value={status?.active_indexes ?? '-'} />
+            <StatusTile label="待处理任务" value={status?.pending_jobs ?? '-'} />
+            <StatusTile label="索引覆盖率" value={status ? `${(status.coverage_rate * 100).toFixed(1)}%` : '-'} detail={status ? `已索引 ${status.document_indexed} · 待处理 ${status.document_pending}` : undefined} />
+            <StatusTile label="失败任务" value={status ? `${status.job_failed + status.document_failed}` : '-'} detail={status ? `待重试 ${status.job_dead_letter + status.outbox_dead_letter + status.outbox_retry_wait}` : undefined} />
+            <StatusTile label="关键词检索" value={status?.sparse_available ? 'FTS5 BM25' : 'ILIKE 回退'} detail={status?.sparse_available ? '中文 trigram' : '当前 SQLite 不支持 FTS5'} />
           </div>
-          <div className={`semantic-setup-step ${quickProfile?.embedding_dimensions ? 'ready' : ''}`}>
-            <span className="semantic-step-number">3</span>
-            <div><strong>检测 Embedding 维度</strong><span>{quickProfile?.embedding_dimensions ? `${quickProfile.embedding_dimensions} 维` : '尚未检测'}</span></div>
-            <button type="button" className="btn btn-secondary" disabled={!quickProfile?.embedding_provider_id || busy} onClick={() => quickProfile && void health(quickProfile)}>检测维度</button>
-          </div>
-          <div className={`semantic-setup-step ${quickActiveIndex ? 'ready' : ''}`}>
-            <span className="semantic-step-number">4</span>
-            <div><strong>生成并激活索引</strong><span>{quickJob ? `后台处理中 · ${quickJob.processed_items}/${quickJob.total_items}` : quickActiveIndex ? '已激活，可搜索' : '尚未向量化'}</span></div>
-            <button type="button" className="btn btn-primary" disabled={!quickProfile || !quickProfileReady || busy || Boolean(quickJob)} onClick={() => quickProfile && void rebuild(quickProfile)}>开始向量化</button>
-          </div>
-        </div>
-        <div className="management-form-actions"><button className="btn btn-secondary" onClick={() => setTab('indexes')}><Icon name="database" />查看索引 / 激活索引</button></div>
-      </section>
-      <div className="semantic-status-grid" hidden={tab !== 'overview'}>
-        <StatusTile label="启用 Profile" value={status?.configured_profiles ?? '-'} />
-        <StatusTile label="Active 索引" value={status?.active_indexes ?? '-'} />
-        <StatusTile label="待处理任务" value={status?.pending_jobs ?? '-'} />
-        <StatusTile label="索引覆盖率" value={status ? `${(status.coverage_rate * 100).toFixed(1)}%` : '-'} detail={status ? `已索引 ${status.document_indexed} · 待处理 ${status.document_pending}` : undefined} />
-        <StatusTile label="失败 / 死信" value={status ? `${status.job_failed + status.document_failed} / ${status.job_dead_letter + status.outbox_dead_letter}` : '-'} detail={status ? `Outbox 重试等待 ${status.outbox_retry_wait}` : undefined} />
-        <StatusTile label="稀疏检索" value={status?.sparse_available ? 'FTS5 BM25' : 'ILIKE 回退'} detail={status?.sparse_available ? '中文 trigram' : '当前 SQLite 不支持 FTS5'} />
+          <button className="btn btn-secondary" onClick={() => setTab('indexes')}><Icon name="database" />管理索引与任务</button>
+        </section>
       </div>
 
       <section className="semantic-management-section" hidden={tab !== 'models'}>
-        <div className="management-section-title"><strong>检索模型配置</strong><button className="btn btn-primary" onClick={() => setShowProfileForm(current => !current)}><Icon name="plus" />{showProfileForm ? '关闭表单' : '新建配置'}</button></div>
+        <div className="management-section-title"><strong>检索配置</strong><button className="btn btn-primary" onClick={() => setShowProfileForm(current => !current)}><Icon name="plus" />{showProfileForm ? '关闭表单' : '新建配置'}</button></div>
         {showProfileForm && <div className="management-form compact"><div className="management-form-grid">
           <label>名称<input className="form-input" style={inputStyle} value={profileName} onChange={event => setProfileName(event.target.value)} placeholder="patent-semantic-v1" /></label>
           <label>Embedding 供应商<select className="form-input" style={inputStyle} value={profileEmbeddingProviderId} onChange={event => { setProfileEmbeddingProviderId(event.target.value); const provider = providers.find(item => item.id === Number(event.target.value)); if (typeof provider?.config_json.model === 'string') setProfileEmbeddingModel(provider.config_json.model); setProfileEmbeddingDimensions('') }}><option value="">选择供应商</option>{providers.filter(provider => provider.provider_kind === 'embedding' && provider.enabled).map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
@@ -361,22 +390,24 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
 
       <section className="semantic-management-section" hidden={tab !== 'models'}>
         <div className="management-section-title"><strong>供应商</strong><button className="btn btn-primary" onClick={() => { resetProviderForm(); setShowProviderForm(current => !current) }}>{showProviderForm ? '关闭表单' : '新增供应商'}</button></div>
-        {showProviderForm && <div className="management-form compact"><div className="management-form-grid">
-          <label>名称<input className="form-input" style={inputStyle} value={providerName} onChange={event => setProviderName(event.target.value)} placeholder="OpenAI Embedding" /></label>
-          <label>类型<select className="form-input" style={inputStyle} value={providerKind} disabled={Boolean(editingProviderId)} onChange={event => setProviderKind(event.target.value as 'embedding' | 'rerank')}><option value="embedding">Embedding</option><option value="rerank">Rerank</option></select></label>
-          <label>Endpoint（Rerank 必填）<input className="form-input" style={inputStyle} value={providerEndpoint} onChange={event => setProviderEndpoint(event.target.value)} placeholder="https://..." /></label>
-          <label>凭证引用<input className="form-input" style={inputStyle} value={providerCredential} onChange={event => setProviderCredential(event.target.value)} placeholder="env://OPENAI_API_KEY" /><span className="semantic-field-hint">只保存 env:// 或 keyring:// 引用，不保存明文 Key。</span></label>
-          <label>模型提示<input className="form-input" style={inputStyle} value={providerModel} onChange={event => setProviderModel(event.target.value)} placeholder="由 Profile 指定时可留空" /></label>
+        {showProviderForm && <div className="management-form compact"><div className="semantic-provider-form">
+          <label>名称<input className="form-input" value={providerName} onChange={event => setProviderName(event.target.value)} placeholder="OpenAI Embedding" /></label>
+          <label>类型<select className="form-input" value={providerKind} disabled={Boolean(editingProviderId)} onChange={event => setProviderKind(event.target.value as 'embedding' | 'rerank')}><option value="embedding">Embedding</option><option value="rerank">Rerank</option></select></label>
+          <label>供应商<select className="form-input" value="custom" onChange={event => applyProviderPreset(event.target.value)}><option value="custom">手动填写</option>{PROVIDER_PRESETS.filter(preset => preset.key !== 'custom').map(preset => <option key={preset.key} value={preset.key}>{preset.label}</option>)}</select></label>
+          <label>Base URL<input className="form-input" value={providerEndpoint} onChange={event => setProviderEndpoint(event.target.value)} placeholder="https://api.openai.com/v1" /></label>
+          <label>API Key<input className="form-input" type="password" autoComplete="off" value={providerApiKey} onChange={event => setProviderApiKey(event.target.value)} placeholder={providerHasKey ? '已配置，留空则保持不变' : 'sk-...'} /></label>
+          <label>模型<input className="form-input" value={providerModel} onChange={event => setProviderModel(event.target.value)} placeholder="text-embedding-3-small" /></label>
+          <span className="semantic-field-hint semantic-provider-form-full">API Key 仅用于本机向量化调用；Rerank 供应商需填写完整的 Base URL。</span>
         </div><div className="management-form-actions"><button className="btn btn-secondary" onClick={() => { resetProviderForm(); setShowProviderForm(false) }}>取消</button><button className="btn btn-primary" disabled={busy} onClick={() => void saveProvider()}>{editingProviderId ? '更新供应商' : '保存供应商'}</button></div></div>}
         <div className="semantic-model-grid">{providers.map(provider => <article className="semantic-model-card" key={provider.id}>
           <h3><Icon name="settings" />{provider.name}<span className="semantic-pill">{provider.provider_kind === 'embedding' ? 'Embedding' : 'Rerank'}</span></h3>
-          <dl><dt>模型</dt><dd>{typeof provider.config_json.model === 'string' ? provider.config_json.model : '由检索配置指定'}</dd><dt>Endpoint</dt><dd>{provider.endpoint || '默认'}</dd><dt>凭证引用</dt><dd>{provider.credential_ref || '-'}</dd><dt>状态</dt><dd>{provider.enabled ? (provider.last_health_status || '未检查') : '已停用'}</dd></dl>
+          <dl><dt>模型</dt><dd>{typeof provider.config_json.model === 'string' ? provider.config_json.model : '由检索配置指定'}</dd><dt>Base URL</dt><dd>{provider.endpoint || '默认'}</dd><dt>API Key</dt><dd>{provider.has_api_key ? '已配置' : provider.credential_ref || '未配置'}</dd><dt>状态</dt><dd>{provider.enabled ? (provider.last_health_status || '未检查') : '已停用'}</dd></dl>
           <div className="semantic-model-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => editProvider(provider)}><Icon name="edit" />编辑</button><button className="btn btn-secondary" disabled={busy || !provider.enabled} onClick={() => void testProvider(provider)}><Icon name="activity" />测试连接</button><button className="btn btn-secondary" disabled={busy} onClick={() => void toggleProvider(provider)}>{provider.enabled ? '停用' : '启用'}</button></div>
         </article>)}</div>{providers.length === 0 && <div className="semantic-empty">暂无模型供应商</div>}
       </section>
 
       <section className="semantic-management-section" hidden={tab !== 'indexes'}>
-        <div className="management-section-title"><strong>索引与任务</strong><span>后台重建完成后再手动激活，失败任务可重试，最终失败进入 dead-letter。</span></div>
+        <div className="management-section-title"><strong>索引与任务</strong><span>构建完成后手动启用；失败任务可重试。</span></div>
         <div className="management-table"><table><thead><tr><th>版本</th><th>Profile</th><th>范围</th><th>状态</th><th>文档 / 专利</th><th>操作</th></tr></thead><tbody>
           {indexes.map(index => <tr key={index.id}><td className="semantic-mono">{index.index_version}</td><td>{profileById.get(index.profile_id)?.name || index.profile_id}</td><td>{index.database_id ? `数据库 ${index.database_id}` : '全局'}</td><td><span className={index.is_active ? 'semantic-pill active' : 'semantic-pill'}>{index.is_active ? 'active' : index.status}</span></td><td>{index.document_count} / {index.patent_count}</td><td>{!index.is_active && index.status === 'validating' && <button className="btn btn-primary" disabled={busy} onClick={() => void activate(index)}>激活</button>}</td></tr>)}
         </tbody></table>{indexes.length === 0 && <div className="semantic-empty">尚未创建索引。</div>}</div>
@@ -384,10 +415,10 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
       </section>
 
       <section className="semantic-management-section" hidden={tab !== 'evaluation'}>
-        <div className="management-section-title"><strong>离线评测</strong><button className="btn btn-primary" onClick={() => setShowDatasetForm(current => !current)}>新建评测集</button></div>
+        <div className="management-section-title"><strong>检索质量评测</strong><button className="btn btn-primary" onClick={() => setShowDatasetForm(current => !current)}>新建评测集</button></div>
         {showDatasetForm && <div className="management-form compact"><div className="management-form-grid"><label>名称<input className="form-input" style={inputStyle} value={datasetName} onChange={event => setDatasetName(event.target.value)} /></label><label>版本<input className="form-input" style={inputStyle} value={datasetVersion} onChange={event => setDatasetVersion(event.target.value)} /></label></div><div className="management-form-actions"><button className="btn btn-primary" disabled={busy} onClick={() => void createDataset()}>创建</button></div></div>}
         <div className="semantic-evaluation-controls"><select className="form-input" value={selectedDatasetId ?? ''} onChange={event => setSelectedDatasetId(Number(event.target.value) || null)}><option value="">选择评测集</option>{datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.name} · {dataset.version} ({dataset.case_count ?? 0} 条)</option>)}</select><select className="form-input" value={selectedProfileId ?? ''} onChange={event => setSelectedProfileId(Number(event.target.value) || null)}><option value="">选择 Profile</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select><select className="form-input" value={selectedIndexId ?? ''} onChange={event => setSelectedIndexId(Number(event.target.value) || null)}><option value="">使用 Active 索引</option>{indexes.filter(index => !selectedProfileId || index.profile_id === selectedProfileId).map(index => <option key={index.id} value={index.id}>{index.index_version.slice(-17)} · {index.status}</option>)}</select><select className="form-input" value={evaluationMode} onChange={event => setEvaluationMode(event.target.value as 'keyword' | 'semantic' | 'hybrid')}><option value="keyword">关键词基线</option><option value="hybrid">混合</option><option value="semantic">语义</option></select><button className="btn btn-primary" disabled={busy || !selectedDatasetId || !selectedProfileId || casesDatasetId !== selectedDatasetId || !cases.some(item => item.enabled)} onClick={() => void runEvaluation()}>运行评测</button></div>
-        <div className="management-section-title"><strong>评测 Case</strong><span>{casesDatasetId === selectedDatasetId ? `${cases.filter(item => item.enabled).length} 个启用 / ${cases.length} 个总计` : '正在加载...'}</span><button className="btn btn-secondary" disabled={!selectedDatasetId} onClick={() => setShowCaseForm(current => !current)}>{showCaseForm ? '关闭' : '添加 Case'}</button></div>
+        <div className="management-section-title"><strong>评测样本</strong><span>{casesDatasetId === selectedDatasetId ? `${cases.filter(item => item.enabled).length} 个启用 / ${cases.length} 个总计` : '正在加载...'}</span><button className="btn btn-secondary" disabled={!selectedDatasetId} onClick={() => setShowCaseForm(current => !current)}>{showCaseForm ? '关闭' : '添加样本'}</button></div>
         {showCaseForm && <div className="management-form compact"><div className="management-form-grid"><label>Case Key<input className="form-input" style={inputStyle} value={caseKey} onChange={event => setCaseKey(event.target.value)} placeholder="battery-001" /></label><label>查询文本<input className="form-input" style={inputStyle} value={caseQuery} onChange={event => setCaseQuery(event.target.value)} /></label><label>数据库 ID<input className="form-input" style={inputStyle} value={caseDatabaseId} onChange={event => setCaseDatabaseId(event.target.value)} placeholder="可留空表示全局" /></label><label>相关专利 ID<input className="form-input" style={inputStyle} value={caseRelevantIds} onChange={event => setCaseRelevantIds(event.target.value)} placeholder="1, 2, 3" /></label><label>备注<input className="form-input" style={inputStyle} value={caseNotes} onChange={event => setCaseNotes(event.target.value)} /></label></div><div className="management-form-actions"><button className="btn btn-primary" disabled={busy} onClick={() => void createCase()}>保存 Case</button></div></div>}
         <div className="management-table"><table><thead><tr><th>Key</th><th>查询</th><th>相关专利</th><th>状态</th><th>操作</th></tr></thead><tbody>{cases.map(item => <tr key={item.id}><td className="semantic-mono">{item.case_key}</td><td>{item.query}{item.notes && <div className="semantic-muted">{item.notes}</div>}</td><td>{item.relevant_patent_ids.join(', ')}</td><td>{item.enabled ? '启用' : '已停用'}</td><td><button className="btn btn-secondary" disabled={busy} onClick={() => void toggleCase(item)}>{item.enabled ? '停用' : '启用'}</button> <button className="btn btn-secondary" disabled={busy} onClick={() => void deleteCase(item)}>删除</button></td></tr>)}</tbody></table>{cases.length === 0 && <div className="semantic-empty">请选择评测集并添加 Case。</div>}</div>
         <div className="management-table"><table><thead><tr><th>运行</th><th>Profile / 模式</th><th>状态</th><th>Recall@K</th><th>MRR</th><th>NDCG@K</th><th>时间</th></tr></thead><tbody>

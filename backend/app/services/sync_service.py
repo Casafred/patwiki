@@ -120,12 +120,16 @@ class SyncService:
 
     @staticmethod
     def record_dict(record: SyncRecord) -> dict[str, Any]:
+        patent = record.patent
+        snapshot = record.snapshot
         return {
             "id": record.id,
             "sync_run_id": record.sync_run_id,
             "external_record_id": record.external_record_id,
             "record_kind": record.record_kind,
             "patent_id": record.patent_id,
+            "patent_number": (patent.publication_number if patent else None),
+            "patent_title": (patent.title if patent else None),
             "external_snapshot_id": record.external_snapshot_id,
             "identity_status": record.identity_status,
             "identity_candidate_patent_ids": record.identity_candidate_patent_ids or [],
@@ -133,6 +137,7 @@ class SyncService:
             "idempotency_key": record.idempotency_key,
             "error_code": record.error_code,
             "error_message": record.error_message,
+            "snapshot_payload": (snapshot.payload_json if snapshot else None),
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
 

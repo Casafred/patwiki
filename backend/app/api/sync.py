@@ -608,17 +608,23 @@ def list_run_records(run_id: int, limit: int = Query(500, ge=1, le=2000), db: Se
     if not run:
         raise NotFoundException("同步运行不存在")
     from app.models import SyncRecord
-    records = db.query(SyncRecord).filter(SyncRecord.sync_run_id == run_id).order_by(SyncRecord.id).limit(limit).all()
+    from sqlalchemy.orm import joinedload
+    records = (db.query(SyncRecord)
+               .options(joinedload(SyncRecord.patent), joinedload(SyncRecord.snapshot))
+               .filter(SyncRecord.sync_run_id == run_id).order_by(SyncRecord.id).limit(limit).all())
     return {"items": [SyncService.record_dict(item) for item in records]}
 
 
 @router.get("/observations")
-def list_observations(decision: str | None = None, patent_id: int | None = None, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+def list_observations(decision: str | None = None, patent_id: int | None = None, run_id: int | None = None,
+                      limit: int = Query(100, ge=1, le=2000), db: Session = Depends(get_db)):
     query = db.query(ExternalFactObservation)
     if decision:
         query = query.filter(ExternalFactObservation.decision == decision)
     if patent_id is not None:
         query = query.filter(ExternalFactObservation.patent_id == patent_id)
+    if run_id is not None:
+        query = query.filter(ExternalFactObservation.sync_run_id == run_id)
     return {"items": [SyncService.observation_dict(item) for item in query.order_by(ExternalFactObservation.id.desc()).limit(limit).all()]}
 
 
