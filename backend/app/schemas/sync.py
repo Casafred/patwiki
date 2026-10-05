@@ -100,6 +100,15 @@ class SyncUpdatePreviewRequest(BaseModel):
     fields: list[str] | None = None
 
 
+class McpToolMapPreviewRequest(BaseModel):
+    database_id: int
+    patent_id: int
+    service: str = Field(min_length=1, max_length=150)
+    tool: str = Field(min_length=1, max_length=150)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    fields: list[str] | None = None
+
+
 class SyncUpdateItemChoice(BaseModel):
     item_id: int
     fields: list[str] = Field(default_factory=list)

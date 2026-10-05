@@ -30,6 +30,7 @@ from app.schemas.sync import (
     ConnectorCreate,
     ConnectorUpdate,
     CredentialCreate,
+    McpToolMapPreviewRequest,
     ObservationDecisionRequest,
     PatentRefreshRequest,
     RunRequest,
@@ -272,6 +273,10 @@ def discover_connector_tools(connector_id: int, db: Session = Depends(get_db)):
         if not callable(discover):
             raise BadRequestException("该连接器不支持 MCP 工具发现")
         catalog = discover()
+        from app.integrations.himmpat import tool_mappable_fields
+        for service in catalog.get("services", []):
+            for tool in service.get("tools", []):
+                tool["mappable_fields"] = tool_mappable_fields(tool.get("name"))
         connector.mcp_catalog_json = catalog
         from app.core.time import utc_now_naive
         connector.mcp_catalog_updated_at = utc_now_naive()
@@ -342,6 +347,79 @@ def call_connector_tool(connector_id: int, body: McpToolRequest, db: Session = D
             close = getattr(runtime, "close", None)
             if callable(close):
                 close()
+
+
+@router.post("/connectors/{connector_id}/tools/map-preview")
+def map_tool_result_preview(connector_id: int, body: McpToolMapPreviewRequest, db: Session = Depends(get_db)):
+    connector = _require_connector(db, connector_id)
+    if not connector.enabled:
+        raise BadRequestException("连接器已停用")
+    _require_database(db, body.database_id)
+    patent = db.query(Patent).filter(Patent.id == body.patent_id).first()
+    if not patent:
+        raise NotFoundException("专利不存在")
+    catalog = connector.mcp_catalog_json or {}
+    tool = next((tool for service in catalog.get("services", []) if service.get("service") == body.service
+                 for tool in service.get("tools", []) if tool.get("name") == body.tool), None)
+    if tool is None:
+        raise BadRequestException("工具不在当前连接器目录中，请先发现工具")
+    schema = tool.get("inputSchema") or {}
+    errors = list(Draft202012Validator(schema).iter_errors(body.arguments))
+    if errors:
+        first = errors[0]
+        path = ".".join(str(part) for part in first.absolute_path) or "arguments"
+        raise BadRequestException(f"工具参数 {path} 不符合规则：{first.validator}")
+    from app.integrations.himmpat import tool_mappable_fields
+    mappable = tool_mappable_fields(body.tool)
+    if not mappable:
+        raise BadRequestException("该工具的结果暂不支持映射到专利字段")
+    runtime = None
+    try:
+        runtime = get_connector(connector)
+        call = getattr(runtime, "call_discovered_tool", None)
+        extract = getattr(runtime, "extract_mapped_fields", None)
+        if not callable(call) or not callable(extract):
+            raise BadRequestException("该连接器不支持工具结果映射")
+        data, evidence = call(body.service, body.tool, body.arguments)
+        patent_id = _external_patent_id(body.arguments)
+        mapped = extract(body.tool, data, patent_id)
+        if not mapped:
+            raise BadRequestException("未能从工具结果中识别出可写入的字段")
+        record = ProviderPatentRecord(
+            external_record_id=str(patent_id or patent.publication_number or patent.id),
+            identifiers=tuple(SyncUpdateService._identifiers(patent)),
+            fields=mapped,
+            source_version="himmpat-mcp",
+            raw_payload=evidence,
+        )
+        batch = SyncUpdateService.preview_from_records(
+            db, connector, body.database_id, {patent.id: record}, body.fields,
+            request_metadata={"mode": "mcp_tool_map", "service": body.service, "tool": body.tool},
+        )
+    except BadRequestException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise BadRequestException(f"MCP 工具结果映射失败：{exc}") from exc
+    finally:
+        if runtime is not None:
+            close = getattr(runtime, "close", None)
+            if callable(close):
+                close()
+    return SyncUpdateService._batch_dict(batch)
+
+
+def _external_patent_id(arguments: dict) -> str | None:
+    for key in ("id", "patentId", "patent_id"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, list) and value:
+            return str(value[0])
+    ids = arguments.get("ids")
+    if isinstance(ids, list) and ids:
+        return str(ids[0])
+    return None
 
 
 @router.get("/connectors/{connector_id}/credentials")

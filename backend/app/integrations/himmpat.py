@@ -465,6 +465,71 @@ class HimmPatMcpAdapter(PatentConnector):
             raise ConnectorError("工具未在只读调用白名单中", error_code="unsupported_tool")
         return self._call_by_service_name(service_name, tool_name, arguments)
 
+    def extract_mapped_fields(self, tool_name: str, data: Mapping[str, Any], patent_id: str | None = None) -> dict[str, Any]:
+        """Map a raw tool result onto canonical patent fields.
+
+        The workbench lets a user run any read-only tool; this turns the
+        provider-specific payload into the same field dict the refresh
+        pipeline produces, so results can be written back through the shared
+        review/confirm flow instead of remaining an opaque snapshot.
+        """
+        spec = TOOL_FIELD_MAPPING.get(tool_name)
+        if not spec:
+            return {}
+        kind = spec["kind"]
+        if kind == "dossier":
+            item = self._select_patent_item(data, patent_id)
+            if not isinstance(item, Mapping):
+                return {}
+            return dict(self._dossier_record(str(patent_id or item.get("id") or ""), item, data).fields)
+        if kind == "text":
+            value = self._select_patent_item(data, patent_id)
+            keys = ("claims", "claim", "claimsText", "clc", "clo", "cle", "text", "content", "value") if spec["field"] == "claims" else ("description", "description_full", "descriptionText", "dec", "deo", "dee", "text", "content", "value")
+            text = _text_field(value, keys, fallback=True)
+            return {str(spec["field"]): text} if text else {}
+        if kind == "technical":
+            value = self._select_patent_item(data, patent_id)
+            if not isinstance(value, Mapping):
+                return {}
+            aliases = {
+                "technical_problem": ("technical_problem", "technicalProblem", "problem"),
+                "technical_solution": ("technical_solution", "technicalSolution", "technicalMeans", "solution"),
+                "technical_effect": ("technical_effect", "technicalEffect", "effect"),
+            }
+            result: dict[str, Any] = {}
+            for key, alias_keys in aliases.items():
+                text = _text_field(value, alias_keys)
+                if text:
+                    result[key] = text
+            return result
+        if kind == "legal":
+            value = self._select_patent_item(data, patent_id)
+            if not isinstance(value, Mapping):
+                return {}
+            result = {"legal_status": _status(value.get("state"), value.get("stc"))}
+            grant = _date(value.get("grd"))
+            if grant:
+                result["grant_date"] = grant
+            return result
+        if kind == "legal_details":
+            value = self._select_patent_item(data, patent_id)
+            if value in (None, "", [], {}):
+                return {}
+            return {str(spec["field"]): json.dumps(redact_payload(value), ensure_ascii=False, sort_keys=True)}
+        return {}
+
+    @staticmethod
+    def _select_patent_item(data: Mapping[str, Any], patent_id: str | None) -> Any:
+        if not isinstance(data, Mapping):
+            return data
+        if patent_id and patent_id in data:
+            return data[patent_id]
+        if "items" in data:
+            return data["items"]
+        if len(data) == 1:
+            return next(iter(data.values()))
+        return data
+
     def _call_by_service_name(self, service_name: str, tool_name: str, arguments: dict[str, Any]):
         raw = self.transport.call_tool(service_name, tool_name, arguments)
         if isinstance(raw, Mapping) and raw.get("isError"):

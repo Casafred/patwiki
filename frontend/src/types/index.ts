@@ -1328,6 +1328,7 @@ export interface McpToolInfo {
   name: string
   description?: string
   inputSchema?: JsonObject
+  mappable_fields?: string[]
 }
 
 export interface SyncSubscription {

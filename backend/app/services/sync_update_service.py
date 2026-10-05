@@ -352,6 +352,133 @@ class SyncUpdateService:
                     close()
 
     @classmethod
+    def preview_from_records(
+        cls,
+        db: Session,
+        connector: ConnectorDefinition,
+        database_id: int,
+        records: dict[int, ProviderPatentRecord],
+        fields: list[str] | None = None,
+        *,
+        request_metadata: dict[str, Any] | None = None,
+    ) -> SyncUpdateBatch:
+        """Build an update preview from already-fetched provider records.
+
+        The MCP tool workbench produces a raw tool result per patent; mapping
+        it to a ``ProviderPatentRecord`` lets those values flow through the
+        same review/confirm pipeline as a normal refresh, so a tool result is
+        written back to fields instead of only being stored as a snapshot.
+        """
+        selected_fields = cls._validate_fields(fields, connector)
+        requested_ids = list(dict.fromkeys(records))
+        if not requested_ids:
+            raise BadRequestException("至少选择一条专利")
+        patents = {patent.id: patent for patent in db.query(Patent).filter(Patent.id.in_(requested_ids)).all()}
+        run = SyncRun(
+            connector_id=connector.id,
+            database_id=database_id,
+            trigger="mcp_tool_map_preview",
+            status="running",
+            started_at=now(),
+            counts_json={"pages": 1, "records": 0, "matched": 0, "ready": 0, "no_change": 0, "errors": 0, "observations": 0, "legal_events": 0},
+        )
+        db.add(run)
+        db.flush()
+        batch = SyncUpdateBatch(
+            connector_id=connector.id,
+            database_id=database_id,
+            sync_run_id=run.id,
+            status="preview",
+            requested_patent_ids=requested_ids,
+            selected_fields=selected_fields,
+            expires_at=now() + timedelta(minutes=UPDATE_BATCH_TTL_MINUTES),
+        )
+        db.add(batch)
+        db.flush()
+        try:
+            for patent_id in requested_ids:
+                patent = patents.get(patent_id)
+                item = SyncUpdateItem(batch_id=batch.id, patent_id=patent_id, selected_fields=[])
+                db.add(item)
+                db.flush()
+                run.counts_json["records"] += 1
+                if patent is None:
+                    item.status = "not_found"
+                    item.error_code = "patent_not_found"
+                    item.error_message = "本地专利不存在"
+                    run.counts_json["errors"] += 1
+                    continue
+                if not cls._patent_in_database(db, patent, database_id):
+                    item.status = "out_of_scope"
+                    item.error_code = "patent_out_of_scope"
+                    item.error_message = "专利不属于当前数据库"
+                    run.counts_json["errors"] += 1
+                    continue
+                record = records[patent_id]
+                item.external_record_id = record.external_record_id
+                payload = record.as_payload()
+                snapshot = ExternalSnapshot(
+                    connector_id=connector.id,
+                    sync_run_id=run.id,
+                    request_metadata={**(request_metadata or {}), "patent_id": patent.id},
+                    payload_json=payload,
+                    payload_hash=hash_payload(payload),
+                    source_version=record.source_version,
+                )
+                db.add(snapshot)
+                db.flush()
+                sync_record = SyncRecord(
+                    sync_run_id=run.id,
+                    external_record_id=record.external_record_id,
+                    external_snapshot_id=snapshot.id,
+                    patent_id=patent.id,
+                    identity_status="matched",
+                    outcome="update_preview",
+                    idempotency_key=hash_payload({"batch": batch.id, "patent": patent.id, "record": record.external_record_id}),
+                )
+                db.add(sync_record)
+                db.flush()
+                item.sync_record_id = sync_record.id
+                item.external_snapshot_id = snapshot.id
+                run.counts_json["matched"] += 1
+                candidates = cls._record_candidates(record, selected_fields)
+                current = {field_key: cls._current_value(patent, field_key) for field_key in candidates}
+                changed = [field_key for field_key in candidates if current.get(field_key) != serialize_value(candidates[field_key])]
+                item.current_fields = current
+                item.candidate_fields = candidates
+                item.changed_fields = changed
+                item.selected_fields = changed.copy()
+                item.status = "ready" if changed or record.legal_events else "no_change"
+                run.counts_json[item.status] += 1
+                for field_key, candidate in candidates.items():
+                    observation = ExternalFactObservation(
+                        sync_run_id=run.id,
+                        external_snapshot_id=snapshot.id,
+                        sync_record_id=sync_record.id,
+                        patent_id=patent.id,
+                        canonical_field_key=field_key,
+                        raw_value=serialize_value(candidate),
+                        normalized_value=serialize_value(candidate),
+                        current_value=current.get(field_key),
+                        candidate_value=serialize_value(candidate),
+                        confidence="high",
+                        decision="pending_update" if field_key in changed else "no_change",
+                    )
+                    db.add(observation)
+                    run.counts_json["observations"] += 1
+                run.counts_json["legal_events"] += len(record.legal_events)
+            run.counts_json["errors"] = int(run.counts_json["errors"])
+            run.status = "succeeded"
+            run.finished_at = now()
+            flag_modified(run, "counts_json")
+            db.commit()
+            db.refresh(batch)
+            return batch
+        except Exception:
+            db.rollback()
+            raise
+
+    @classmethod
     def confirm(cls, db: Session, batch: SyncUpdateBatch, selected_items: list[dict[str, Any]], confirmed_by: str) -> SyncUpdateBatch:
         if batch.status != "preview":
             raise BadRequestException("该更新预览已经确认、取消或失效")

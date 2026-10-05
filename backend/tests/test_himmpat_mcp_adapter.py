@@ -2,7 +2,7 @@ import json
 import unittest
 
 from app.integrations.contracts import CanonicalPatentQuery, ProviderIdentifier
-from app.integrations.himmpat import HimmPatMcpAdapter, READ_ONLY_TOOLS
+from app.integrations.himmpat import HimmPatMcpAdapter, READ_ONLY_TOOLS, tool_mappable_fields
 
 
 class FixtureTransport:
@@ -140,6 +140,65 @@ class HimmPatAdapterTest(unittest.TestCase):
         with self.assertRaises(Exception) as raised:
             adapter.call_discovered_tool(adapter.services["dossier"], "delete_patent", {})
         self.assertEqual(raised.exception.error_code, "unsupported_tool")
+
+    def test_tool_mappable_fields_cover_each_mapping_kind(self):
+        self.assertEqual(tool_mappable_fields("get_claims_by_patent_id"), ["claims"])
+        self.assertEqual(tool_mappable_fields("get_description_by_patent_id"), ["description_full"])
+        self.assertEqual(
+            tool_mappable_fields("get_patent_ai_tech_info"),
+            ["technical_problem", "technical_solution", "technical_effect"],
+        )
+        self.assertEqual(tool_mappable_fields("get_patent_legal_status_by_patent_ids"), ["legal_status", "grant_date"])
+        self.assertEqual(tool_mappable_fields("get_legal_details_by_patent_id"), ["legal_status_details"])
+        dossier_fields = tool_mappable_fields("get_patent_publication_by_patent_ids")
+        self.assertIn("publication_number", dossier_fields)
+        self.assertIn("title", dossier_fields)
+        self.assertNotIn("claims", dossier_fields)
+        self.assertNotIn("technical_solution", dossier_fields)
+        self.assertEqual(tool_mappable_fields("query_patent_ids_by_query_expression_with_info"), [])
+
+    def test_extract_mapped_fields_recovers_number_keyed_claims_structure(self):
+        data = {"h-1": {"claims": {"1": {"text": "1. A device"}, "2": {"text": "2. The device"}}}}
+        fields = self.adapter.extract_mapped_fields("get_claims_by_patent_id", data, "h-1")
+        self.assertEqual(fields["claims"], "1. A device\n\n2. The device")
+
+    def test_extract_mapped_fields_recovers_wrapped_claim_list(self):
+        data = {"h-1": {"claimList": [{"claimText": "1. First"}, {"claimText": "2. Second"}]}}
+        fields = self.adapter.extract_mapped_fields("get_claims_by_patent_id", data, "h-1")
+        self.assertEqual(fields["claims"], "1. First\n\n2. Second")
+
+    def test_extract_mapped_fields_handles_description_and_technical(self):
+        description = {"h-1": {"description": "Detailed description"}}
+        self.assertEqual(
+            self.adapter.extract_mapped_fields("get_description_by_patent_id", description, "h-1"),
+            {"description_full": "Detailed description"},
+        )
+        technical = {"h-1": {"technicalProblem": "Problem", "technicalMeans": "Means", "technicalEffect": "Effect"}}
+        self.assertEqual(
+            self.adapter.extract_mapped_fields("get_patent_ai_tech_info", technical, "h-1"),
+            {"technical_problem": "Problem", "technical_solution": "Means", "technical_effect": "Effect"},
+        )
+
+    def test_extract_mapped_fields_handles_legal_and_details(self):
+        legal = {"h-1": {"state": "I", "stc": "GR", "grd": "2026-02-01"}}
+        fields = self.adapter.extract_mapped_fields("get_patent_legal_status_by_patent_ids", legal, "h-1")
+        self.assertEqual(fields["legal_status"], "granted")
+        self.assertEqual(fields["grant_date"].isoformat(), "2026-02-01")
+        details = {"h-1": {"state": "I", "stc": "GR"}}
+        detail_fields = self.adapter.extract_mapped_fields("get_legal_details_by_patent_id", details, "h-1")
+        self.assertIn("legal_status_details", detail_fields)
+        self.assertEqual(json.loads(detail_fields["legal_status_details"])["stc"], "GR")
+
+    def test_extract_mapped_fields_handles_dossier_and_unknown_tool(self):
+        data = {"h-1": {
+            "applicationReferenceModel": {"ap": "CN2020123.4", "apc": "cn", "apd": "2025-01-01"},
+            "inventionTitleModel": {"tio": "测试专利"},
+            "publicationReferenceModel": {"pd": "2026-01-02", "pn": "CN123A", "pnc": "cn"},
+        }}
+        fields = self.adapter.extract_mapped_fields("get_patent_publication_by_patent_ids", data, "h-1")
+        self.assertEqual(fields["title"], "测试专利")
+        self.assertEqual(fields["publication_number"], "CN123A")
+        self.assertEqual(self.adapter.extract_mapped_fields("unknown_tool", data, "h-1"), {})
 
 
 if __name__ == "__main__":
