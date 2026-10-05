@@ -260,6 +260,35 @@ def list_accounts(user: User = Depends(current_user), db: Session = Depends(get_
     return {"items": items}
 
 
+@router.delete("/accounts/{target_user_id}")
+def delete_account(target_user_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_admin(db, user.id)
+    if target_user_id == user.id:
+        raise HTTPException(400, "不能删除当前登录账号，请先退出并使用其他管理员账号")
+    credential = db.get(CollaborationCredential, target_user_id)
+    if not credential:
+        raise HTTPException(404, "协同账号不存在")
+    target = db.get(User, target_user_id)
+    active_admin_ids = {row[0] for row in db.query(UserRoleAssignment.user_id).join(
+        User, User.id == UserRoleAssignment.user_id
+    ).join(CollaborationCredential, CollaborationCredential.user_id == User.id).filter(
+        UserRoleAssignment.role_code.in_(["system_admin", "department_leader"]),
+        UserRoleAssignment.valid_to.is_(None), User.is_active.is_(True),
+        CollaborationCredential.active.is_(True),
+    ).distinct().all()}
+    if target_user_id in active_admin_ids and len(active_admin_ids) <= 1:
+        raise HTTPException(409, "不能删除唯一的协同管理员")
+    db.query(CollaborationSession).filter_by(user_id=target_user_id).delete()
+    db.query(UserRoleAssignment).filter_by(user_id=target_user_id, valid_to=None).update({"valid_to": utc_now_naive()})
+    db.query(PermissionGrant).filter_by(subject_user_id=target_user_id, revoked_at=None).update({"revoked_at": utc_now_naive()})
+    db.delete(credential)
+    if target:
+        target.is_active = False
+    audit(db, user.id, "account_deleted", detail={"target_user_id": target_user_id})
+    db.commit()
+    return {"success": True}
+
+
 @router.patch("/accounts/{target_user_id}/active")
 def set_account_active(target_user_id: int, request: ActiveRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_admin(db, user.id)

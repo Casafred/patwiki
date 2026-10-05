@@ -60,19 +60,86 @@ DOSSIER_UPDATE_FIELDS = {
     "claims", "description_full", "technical_problem", "technical_solution", "technical_effect",
 }
 
+# Maps each read-only MCP tool to the canonical patent fields its result can
+# populate.  The workbench uses this so a tool result can be written back to
+# the patent workspace through the same review pipeline as a refresh, instead
+# of being stored as an opaque snapshot only.
+TOOL_FIELD_MAPPING: dict[str, dict[str, Any]] = {
+    "get_patent_publication_by_patent_ids": {"kind": "dossier"},
+    "get_patent_record_fields_by_patent_ids": {"kind": "dossier"},
+    "get_claims_by_patent_id": {"kind": "text", "field": "claims"},
+    "get_description_by_patent_id": {"kind": "text", "field": "description_full"},
+    "get_patent_ai_tech_info": {
+        "kind": "technical",
+        "fields": ("technical_problem", "technical_solution", "technical_effect"),
+    },
+    "get_patent_legal_status_by_patent_ids": {"kind": "legal"},
+    "get_legal_details_by_patent_id": {"kind": "legal_details", "field": "legal_status_details"},
+}
 
-def _text_field(value: Any, keys: tuple[str, ...]) -> str | None:
+
+def tool_mappable_fields(tool_name: str) -> list[str]:
+    """Return the canonical patent fields a tool result can be mapped onto."""
+    spec = TOOL_FIELD_MAPPING.get(tool_name)
+    if not spec:
+        return []
+    kind = spec.get("kind")
+    if kind == "dossier":
+        return sorted(DOSSIER_UPDATE_FIELDS - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect"})
+    if kind == "text":
+        return [str(spec["field"])]
+    if kind == "technical":
+        return list(spec["fields"])
+    if kind == "legal":
+        return ["legal_status", "grant_date"]
+    if kind == "legal_details":
+        return [str(spec["field"])]
+    return []
+
+
+
+def _leaf_texts(value: Any) -> list[str]:
+    """Collect every non-empty string leaf in a provider structure.
+
+    Full-text tools (claims/description) differ in shape across HimmPat
+    services: sometimes a plain string, sometimes a mapping keyed by claim
+    number, sometimes a ``{"claimList": [...]}`` wrapper.  When no known key
+    matches we still surface the text deterministically instead of failing.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Mapping):
+        parts: list[str] = []
+        for item in value.values():
+            parts.extend(_leaf_texts(item))
+        return parts
+    if isinstance(value, (list, tuple)):
+        parts = []
+        for item in value:
+            parts.extend(_leaf_texts(item))
+        return parts
+    return []
+
+
+def _text_field(value: Any, keys: tuple[str, ...], *, fallback: bool = False) -> str | None:
     if isinstance(value, str):
         return value.strip() or None
     if isinstance(value, Mapping):
         for key in keys:
             if key in value:
-                text = _text_field(value[key], keys)
+                text = _text_field(value[key], keys, fallback=fallback)
                 if text:
                     return text
+        if fallback:
+            return "\n\n".join(_leaf_texts(value)) or None
     if isinstance(value, list):
-        parts = [_text_field(item, keys) for item in value]
-        return "\n\n".join(part for part in parts if part) or None
+        parts = [_text_field(item, keys, fallback=fallback) for item in value]
+        joined = "\n\n".join(part for part in parts if part)
+        if joined:
+            return joined
+        if fallback:
+            return "\n\n".join(_leaf_texts(value)) or None
     return None
 
 
@@ -367,11 +434,9 @@ class HimmPatMcpAdapter(PatentConnector):
                         values[key] = text
             elif field in {"claims", "description_full"}:
                 keys = ("claims", "claim", "claimsText", "clc", "clo", "cle", "text", "content", "value") if field == "claims" else ("description", "description_full", "descriptionText", "dec", "deo", "dee", "text", "content", "value")
-                text = _text_field(value, keys)
+                text = _text_field(value, keys, fallback=True)
                 if text:
                     values[field] = text
-                elif value not in (None, "", [], {}):
-                    raise ConnectorError(f"{tool} 返回的全文结构无法识别", error_code="unsupported_provider_shape")
             # Family/citation structures remain in evidence until reviewed;
             # opaque provider objects must not become local patent identities.
         return ProviderPatentRecord(record.external_record_id, record.identifiers, values, record.legal_events, record.source_updated_at, record.source_version, evidence)

@@ -145,8 +145,10 @@ export default function McpToolWorkbench({ connectors, databaseId, onUpdated }: 
       <p className="mcp-tools-hint">更新会把著录项、法律状态等基础信息写入当前库，并保留来源快照和审查记录。</p>
     </div>
 
-    <div className="mcp-tools-block">
-      <div className="section-heading"><h3>工具调用</h3><span>{tools.length} 个工具 · 常用操作一键选取</span></div>
+    {error && <div className="error-message">{error}</div>}
+    {message && <div className="success-message">{message}</div>}
+    <details className="mcp-tools-block">
+      <summary>高级工具查询 · {tools.length} 个可用工具</summary>
       <div className="mcp-preset-row">{presetTools.map(preset => <button key={preset.label} type="button" className="mcp-preset" disabled={busy || !preset.tool} onClick={() => preset.tool && selectTool(preset.tool)}><strong>{preset.label}</strong><small>{preset.tool ? preset.tool.name : preset.hint}</small></button>)}</div>
       <div className="mcp-inline-form">
         <label>服务<select className="form-input" disabled={busy} value={String(service?.service || '')} onChange={event => { setServiceName(event.target.value); setToolName(''); reset() }}>{services.map(item => <option key={String(item.service)} value={String(item.service)}>{String(item.service)}</option>)}</select></label>
@@ -176,10 +178,8 @@ export default function McpToolWorkbench({ connectors, databaseId, onUpdated }: 
           {property.description && <small>{property.description}</small>}
         </label>)}</div>
       </details>}
-      {error && <div className="error-message">{error}</div>}
-      {message && <div className="success-message">{message}</div>}
       <button className="btn btn-primary" disabled={busy || !tool} onClick={() => void execute()}>{busy ? '执行中…' : '执行查询'}</button>
       {result && <ResultView result={result} />}
-    </div>
+    </details>
   </section>
 }

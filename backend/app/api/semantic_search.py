@@ -24,9 +24,9 @@ router = APIRouter(prefix="/semantic-search", tags=["semantic-search"])
 def _provider_dict(row: SemanticProviderDefinition) -> dict:
     # The inline API Key is write-only; never echo the secret back to clients.
     config_json = dict(row.config_json or {})
-    has_api_key = bool(config_json.pop("api_key", None))
+    has_api_key = bool(config_json.pop("api_key", None) or row.credential_ref)
     return {"id": row.id, "name": row.name, "provider_kind": row.provider_kind, "provider_type": row.provider_type,
-        "endpoint": row.endpoint, "credential_ref": row.credential_ref, "config_json": config_json, "enabled": row.enabled,
+        "endpoint": row.endpoint, "config_json": config_json, "enabled": row.enabled,
         "has_api_key": has_api_key,
         "last_health_status": row.last_health_status, "last_health_at": row.last_health_at, "last_error_code": row.last_error_code}
 

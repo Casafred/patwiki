@@ -60,6 +60,7 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
   const [providerApiKey, setProviderApiKey] = useState('')
   const [providerModel, setProviderModel] = useState('')
   const [providerHasKey, setProviderHasKey] = useState(false)
+  const [providerPreset, setProviderPreset] = useState('custom')
 
   const [editingProfileId, setEditingProfileId] = useState<number | null>(null)
   const [profileRerankProviderId, setProfileRerankProviderId] = useState('')
@@ -155,7 +156,7 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
   }
 
   const resetProviderForm = () => {
-    setEditingProviderId(null); setProviderName(''); setProviderKind('embedding'); setProviderEndpoint(''); setProviderApiKey(''); setProviderModel(''); setProviderHasKey(false)
+    setEditingProviderId(null); setProviderName(''); setProviderKind('embedding'); setProviderEndpoint(''); setProviderApiKey(''); setProviderModel(''); setProviderHasKey(false); setProviderPreset('custom')
   }
 
   const applyProviderPreset = (key: string) => {
@@ -168,7 +169,7 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
   const editProvider = (provider: SemanticProvider) => {
     setEditingProviderId(provider.id); setProviderName(provider.name); setProviderKind(provider.provider_kind)
     setProviderEndpoint(provider.endpoint || ''); setProviderApiKey('')
-    setProviderHasKey(Boolean(provider.has_api_key || provider.credential_ref))
+    setProviderHasKey(Boolean(provider.has_api_key))
     setProviderModel(typeof provider.config_json.model === 'string' ? provider.config_json.model : '')
     setShowProviderForm(true)
   }
@@ -301,7 +302,6 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
       <div className="semantic-workbench-header">
         <div className="semantic-workbench-title">
           <h2>语义检索</h2>
-          <span>配置向量模型、构建索引并评测检索质量</span>
         </div>
         <nav className="workspace-subtabs" aria-label="语义检索模块">{([{ key: 'overview', label: '概览' }, { key: 'models', label: '模型配置' }, { key: 'indexes', label: '索引与任务' }, { key: 'evaluation', label: '质量评测' }] as const).map(item => <button key={item.key} className={tab === item.key ? 'active' : ''} onClick={() => setTab(item.key)}>{item.label}</button>)}</nav>
         <button className="btn btn-secondary" onClick={() => void load()} disabled={busy}><Icon name="refresh" />刷新</button>
@@ -310,7 +310,7 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
       {message && <div className="semantic-management-message">{message}</div>}
       <div className="semantic-overview-grid" hidden={tab !== 'overview'}>
         <section className="semantic-panel">
-          <div className="semantic-panel-title"><strong>快速开始</strong><span>按顺序完成 4 步即可开启语义检索</span></div>
+          <div className="semantic-panel-title"><strong>检索准备</strong></div>
           <div className="semantic-scope-row">
             <label>检索配置
               <select className="form-input" value={quickProfile?.id ?? ''} onChange={event => setSelectedProfileId(Number(event.target.value) || null)}><option value="">选择检索配置</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select>
@@ -346,14 +346,14 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
           </div>
         </section>
         <section className="semantic-panel">
-          <div className="semantic-panel-title"><strong>运行状态</strong><span>实时概览</span></div>
+          <div className="semantic-panel-title"><strong>运行状态</strong></div>
           <div className="semantic-status-grid compact">
             <StatusTile label="可用检索配置" value={status?.configured_profiles ?? '-'} />
             <StatusTile label="生效索引" value={status?.active_indexes ?? '-'} />
             <StatusTile label="待处理任务" value={status?.pending_jobs ?? '-'} />
             <StatusTile label="索引覆盖率" value={status ? `${(status.coverage_rate * 100).toFixed(1)}%` : '-'} detail={status ? `已索引 ${status.document_indexed} · 待处理 ${status.document_pending}` : undefined} />
             <StatusTile label="失败任务" value={status ? `${status.job_failed + status.document_failed}` : '-'} detail={status ? `待重试 ${status.job_dead_letter + status.outbox_dead_letter + status.outbox_retry_wait}` : undefined} />
-            <StatusTile label="关键词检索" value={status?.sparse_available ? 'FTS5 BM25' : 'ILIKE 回退'} detail={status?.sparse_available ? '中文 trigram' : '当前 SQLite 不支持 FTS5'} />
+            <StatusTile label="关键词检索" value={status?.sparse_available ? '全文检索' : '基础匹配'} />
           </div>
           <button className="btn btn-secondary" onClick={() => setTab('indexes')}><Icon name="database" />管理索引与任务</button>
         </section>
@@ -393,7 +393,7 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
         {showProviderForm && <div className="management-form compact"><div className="semantic-provider-form">
           <label>名称<input className="form-input" value={providerName} onChange={event => setProviderName(event.target.value)} placeholder="OpenAI Embedding" /></label>
           <label>类型<select className="form-input" value={providerKind} disabled={Boolean(editingProviderId)} onChange={event => setProviderKind(event.target.value as 'embedding' | 'rerank')}><option value="embedding">Embedding</option><option value="rerank">Rerank</option></select></label>
-          <label>供应商<select className="form-input" value="custom" onChange={event => applyProviderPreset(event.target.value)}><option value="custom">手动填写</option>{PROVIDER_PRESETS.filter(preset => preset.key !== 'custom').map(preset => <option key={preset.key} value={preset.key}>{preset.label}</option>)}</select></label>
+          <label>供应商<select className="form-input" value={providerPreset} onChange={event => { setProviderPreset(event.target.value); applyProviderPreset(event.target.value) }}><option value="custom">手动填写</option>{PROVIDER_PRESETS.filter(preset => preset.key !== 'custom').map(preset => <option key={preset.key} value={preset.key}>{preset.label}</option>)}</select></label>
           <label>Base URL<input className="form-input" value={providerEndpoint} onChange={event => setProviderEndpoint(event.target.value)} placeholder="https://api.openai.com/v1" /></label>
           <label>API Key<input className="form-input" type="password" autoComplete="off" value={providerApiKey} onChange={event => setProviderApiKey(event.target.value)} placeholder={providerHasKey ? '已配置，留空则保持不变' : 'sk-...'} /></label>
           <label>模型<input className="form-input" value={providerModel} onChange={event => setProviderModel(event.target.value)} placeholder="text-embedding-3-small" /></label>
@@ -401,7 +401,7 @@ export default function SemanticSearchManagement({ initialTab = 'overview' }: { 
         </div><div className="management-form-actions"><button className="btn btn-secondary" onClick={() => { resetProviderForm(); setShowProviderForm(false) }}>取消</button><button className="btn btn-primary" disabled={busy} onClick={() => void saveProvider()}>{editingProviderId ? '更新供应商' : '保存供应商'}</button></div></div>}
         <div className="semantic-model-grid">{providers.map(provider => <article className="semantic-model-card" key={provider.id}>
           <h3><Icon name="settings" />{provider.name}<span className="semantic-pill">{provider.provider_kind === 'embedding' ? 'Embedding' : 'Rerank'}</span></h3>
-          <dl><dt>模型</dt><dd>{typeof provider.config_json.model === 'string' ? provider.config_json.model : '由检索配置指定'}</dd><dt>Base URL</dt><dd>{provider.endpoint || '默认'}</dd><dt>API Key</dt><dd>{provider.has_api_key ? '已配置' : provider.credential_ref || '未配置'}</dd><dt>状态</dt><dd>{provider.enabled ? (provider.last_health_status || '未检查') : '已停用'}</dd></dl>
+          <dl><dt>模型</dt><dd>{typeof provider.config_json.model === 'string' ? provider.config_json.model : '由检索配置指定'}</dd><dt>Base URL</dt><dd>{provider.endpoint || '默认'}</dd><dt>API Key</dt><dd>{provider.has_api_key ? '已配置' : '未配置'}</dd><dt>状态</dt><dd>{provider.enabled ? (provider.last_health_status || '未检查') : '已停用'}</dd></dl>
           <div className="semantic-model-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => editProvider(provider)}><Icon name="edit" />编辑</button><button className="btn btn-secondary" disabled={busy || !provider.enabled} onClick={() => void testProvider(provider)}><Icon name="activity" />测试连接</button><button className="btn btn-secondary" disabled={busy} onClick={() => void toggleProvider(provider)}>{provider.enabled ? '停用' : '启用'}</button></div>
         </article>)}</div>{providers.length === 0 && <div className="semantic-empty">暂无模型供应商</div>}
       </section>

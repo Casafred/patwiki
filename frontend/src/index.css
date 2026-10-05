@@ -5937,7 +5937,7 @@ body {
 .workspace-subtabs button.active { background: #e0f2ed; color: #11675d; font-weight: 600; }
 .workspace-subtabs button:focus-visible { outline: 2px solid #168276; outline-offset: 2px; }
 .family-filter-panel { display: grid; gap: 12px; width: min(260px, calc(100vw - 72px)); max-width: 100%; box-sizing: border-box; padding: 14px; overflow: hidden; }
-.family-filter-panel label { display: grid; gap: 6px; font-size: 12px; color: #475569; }
+.family-filter-panel label { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; font-size: 12px; color: #475569; }
 .family-filter-panel .form-input { display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .member-config-import { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px; background: #f8fafc; border: 1px solid #dce5e8; border-radius: 8px; color: #168276; }
 .member-config-description { display: grid; gap: 5px; flex: 1; min-width: 180px; color: #334155; font-size: 13px; }
