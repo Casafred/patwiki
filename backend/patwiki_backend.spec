@@ -153,6 +153,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="patwiki-backend",
+    icon=str(backend_root.parent / "src-tauri" / "icons" / "icon.ico") if sys.platform == "win32" else None,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

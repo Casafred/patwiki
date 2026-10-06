@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import BrandLogo from '../common/BrandLogo'
 import { formApi, viewApi } from '../../api'
 import type { FormDefinition, FormFieldMeta, JsonObject, JsonValue, PatentView } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -227,9 +228,9 @@ export function SharedFormView({ token }: { token: string }) {
   }, [load])
 
   if (loading && !definition) {
-    return <div className="shared-form-page"><div className="loading-state"><div className="spinner" />加载表单...</div></div>
+    return <div className="shared-form-page"><div className="loading-state"><BrandLogo size={48} />加载表单...</div></div>
   }
-  if (error || !definition) return <div className="shared-form-page"><div className="form-view-error">{error || '公开表单不可用'}</div></div>
+  if (error || !definition) return <div className="shared-form-page"><BrandLogo size={32} /><div className="form-view-error">{error || '公开表单不可用'}</div></div>
 
   const submit = async (values: JsonObject) => {
     setSubmitting(true)
@@ -245,7 +246,7 @@ export function SharedFormView({ token }: { token: string }) {
 
   return (
     <main className="shared-form-page">
-      <div className="shared-form-header"><span>PatWiki</span><h1>{definition.view_name}</h1></div>
+      <div className="shared-form-header"><span className="shared-form-brand"><BrandLogo size={28} decorative />PatWiki</span><h1>{definition.view_name}</h1></div>
       {error && <div className="form-view-error">{error}</div>}
       <FormFields definition={definition} onSubmit={submit} submitting={submitting} successMessage={message} />
     </main>

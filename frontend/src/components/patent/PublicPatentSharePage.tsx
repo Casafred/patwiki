@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import BrandLogo from '../common/BrandLogo'
 import { patentShareApi } from '../../api'
 import type { PublicPatent, PublicPatentShare } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -71,13 +72,14 @@ export default function PublicPatentSharePage({ token }: PublicPatentSharePagePr
   }, [loadShare])
 
   if (loading) {
-    return <div className="public-share-page"><div className="public-share-state">加载技术主题...</div></div>
+    return <div className="public-share-page"><div className="public-share-state"><BrandLogo size={48} /><p>加载技术主题...</p></div></div>
   }
 
   if (error || !data) {
     return (
       <div className="public-share-page">
         <div className="public-share-state">
+          <BrandLogo size={48} />
           <div style={{ color: '#0f172a', fontSize: 20, fontWeight: 650 }}>无法打开分享页面</div>
           <div style={{ marginTop: 8, color: '#64748b', fontSize: 13 }}>{error || '页面不存在'}</div>
         </div>
@@ -102,7 +104,7 @@ export default function PublicPatentSharePage({ token }: PublicPatentSharePagePr
   return (
     <div className="public-share-page">
       <header className="public-share-header">
-        <div className="public-share-brand">PatWiki <span>技术主题</span></div>
+        <div className="public-share-brand"><BrandLogo size={32} decorative /> PatWiki <span>技术主题</span></div>
         <div style={{ color: '#94a3b8', fontSize: 12 }}>只读分享 · 访问 {data.share.access_count} 次</div>
       </header>
       <main className="public-share-layout">

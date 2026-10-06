@@ -4,6 +4,7 @@ import { useAppStore } from '../../store'
 import type { Page } from '../../App'
 import type { PatentDatabase } from '../../types'
 import Icon, { type IconName } from '../common/Icon'
+import BrandLogo from '../common/BrandLogo'
 
 const SIDEBAR_SECTIONS_STORAGE_KEY = 'patwiki_sidebar_sections'
 type SidebarSectionKey = 'workspace' | 'intelligence' | 'management'
@@ -215,7 +216,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="brand-mark">PW</div>
+        <div className="brand-mark" title="PatWiki · 专利知识工作台"><BrandLogo size={34} /></div>
         <div>
           <h1>PatWiki</h1>
           <p>专利知识工作台</p>

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1400" height="960" viewBox="0 0 1400 960">
+  <rect width="1400" height="960" fill="#f7f8fa"/>
+  <text x="80" y="76" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="600" fill="#737b87">PATWIKI / VISUAL IDENTITY</text>
+  <text x="1320" y="76" text-anchor="end" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#737b87">01</text>
+  <g transform="translate(230 220) scale(.68)">
+    <path d="M64 48h92v40h-52v40h60V96h40v40l-32 32h-68v56H64Z M164 48h40v40h-40Z" fill="#0f766e"/>
+  </g>
+  <text x="420" y="337" font-family="Segoe UI, Arial, sans-serif" font-size="106" font-weight="700" fill="#1c2d33">PATWIKI</text>
+  <text x="425" y="385" font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#737b87">PATENT KNOWLEDGE WORKSPACE</text>
+  <path d="M80 503H1320" stroke="#dfe3e9"/>
+  <text x="80" y="552" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">APPLICATION ICON</text>
+  <image x="80" y="593" width="232" height="232" xlink:href="../patwiki-logo.svg"/>
+  <text x="405" y="552" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">MONOCHROME</text>
+  <g transform="translate(410 600) scale(.94)">
+    <path d="M64 48h92v40h-52v40h60V96h40v40l-32 32h-68v56H64Z M164 48h40v40h-40Z" fill="#1c2d33"/>
+  </g>
+  <rect x="745" y="585" width="305" height="248" fill="#1c2d33"/>
+  <g transform="translate(782 594) scale(.94)">
+    <path d="M64 48h92v40h-52v40h60V96h40v40l-32 32h-68v56H64Z M164 48h40v40h-40Z" fill="#fff"/>
+  </g>
+  <text x="1140" y="552" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">SMALL SIZES</text>
+  <image x="1140" y="627" width="64" height="64" xlink:href="../patwiki-logo.svg"/>
+  <image x="1236" y="643" width="32" height="32" xlink:href="../patwiki-logo.svg"/>
+  <text x="1140" y="734" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#737b87">64 px / 32 px</text>
+  <text x="80" y="919" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">GEOMETRIC P / CONNECTED KNOWLEDGE</text>
+  <text x="1320" y="919" text-anchor="end" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">#0F766E</text>
+</svg>

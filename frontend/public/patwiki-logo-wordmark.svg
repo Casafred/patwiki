@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160" role="img" aria-labelledby="title desc">
+  <title id="title">PatWiki</title>
+  <desc id="desc">PatWiki patent knowledge management logo.</desc>
+  <g transform="translate(8 8)">
+    <rect width="144" height="144" rx="27" fill="#0f766e"/>
+    <g transform="scale(.5625) translate(-6 -8)">
+      <path d="M64 48h92v40h-52v40h60V96h40v40l-32 32h-68v56H64Z" fill="#fff"/>
+      <path d="M164 48h40v40h-40Z" fill="#8ce0d0"/>
+    </g>
+  </g>
+  <text x="184" y="104" fill="#1c2d33" font-family="Segoe UI, Arial, sans-serif" font-size="76" font-weight="700">PATWIKI</text>
+</svg>

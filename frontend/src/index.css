@@ -4244,6 +4244,7 @@ body {
 }
 
 .sidebar-collapsed .sidebar-brand {
+  flex-direction: column;
   justify-content: center;
   padding-right: 10px;
   padding-left: 10px;
@@ -4307,14 +4308,12 @@ body {
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid rgba(117, 220, 202, 0.36);
-  border-radius: 9px;
-  background: #24464a;
-  color: #8ce0d0;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.6px;
+  flex: 0 0 34px;
 }
+
+.patwiki-brand-logo { display: block; flex-shrink: 0; object-fit: contain; }
+.public-share-state > .patwiki-brand-logo { margin: 0 auto 16px; }
+.public-share-brand, .shared-form-header .shared-form-brand { display: flex; align-items: center; gap: 8px; }
 
 .sidebar-brand h1 {
   color: #f3fbfa;
@@ -5320,6 +5319,7 @@ body {
   }
 
   .sidebar-open.sidebar-collapsed .sidebar-brand {
+    flex-direction: row;
     justify-content: flex-start;
     padding-right: 18px;
     padding-left: 18px;
@@ -6534,11 +6534,11 @@ body {
 .app-initializing-mark {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 64px;
+  height: 64px;
   margin-bottom: 6px;
   border-radius: 12px;
-  background: #0f766e;
+  background: var(--teal-700);
   color: #fff;
   box-shadow: 0 8px 22px rgba(15, 118, 110, .18);
   animation: app-initializing-pulse 1.5s ease-in-out infinite;
@@ -6546,7 +6546,10 @@ body {
 .app-initializing-title { font-size: 16px; font-weight: 700; }
 .app-initializing-subtitle { color: #64748b; font-size: 12px; }
 .app-initializing-progress { width: 160px; height: 3px; margin-top: 9px; overflow: hidden; border-radius: 99px; background: #dbe5e8; }
-.app-initializing-progress span { display: block; width: 45%; height: 100%; border-radius: inherit; background: #0f766e; animation: app-initializing-progress 1.2s ease-in-out infinite; }
+.app-initializing-progress span { display: block; width: 45%; height: 100%; border-radius: inherit; background: var(--teal-700); animation: app-initializing-progress 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .app-initializing, .app-initializing-mark, .app-initializing-progress span { animation: none; }
+}
 @keyframes app-initializing-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes app-initializing-pulse { 50% { transform: scale(1.04); } }
 @keyframes app-initializing-progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(340%); } }

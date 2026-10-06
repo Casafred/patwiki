@@ -17,6 +17,7 @@ import AttachmentLibraryPage from './components/management/AttachmentLibraryPage
 import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
 import { SharedFormView } from './components/views/FormView'
 import Icon from './components/common/Icon'
+import BrandLogo from './components/common/BrandLogo'
 import { customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
@@ -314,7 +315,7 @@ function WorkspaceApp() {
   }
   return (
     <div className={`app-container ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-      {initializing && <div className="app-initializing" role="status" aria-live="polite"><div className="app-initializing-mark"><Icon name="sparkles" size={22} /></div><div className="app-initializing-title">正在初始化 PatWiki</div><div className="app-initializing-subtitle">正在准备数据库、视图和 AI 能力</div><div className="app-initializing-progress"><span /></div></div>}
+      {initializing && <div className="app-initializing" role="status" aria-live="polite"><div className="app-initializing-mark"><BrandLogo size={64} decorative /></div><div className="app-initializing-title">正在初始化 PatWiki</div><div className="app-initializing-subtitle">正在准备数据库、视图和 AI 能力</div><div className="app-initializing-progress"><span /></div></div>}
       <Sidebar
         currentPage={currentPage}
         onNavigate={handleNavigate}
