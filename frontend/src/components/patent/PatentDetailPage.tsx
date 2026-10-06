@@ -321,6 +321,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
   return (
     <>
       <div className="detail-page">
+      <div className="detail-sticky-header">
       {/* 顶部导航 */}
       <div className="detail-header">
         {onOpenSidebar && (
@@ -410,6 +411,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
             {tab.label}
           </button>
         ))}
+      </div>
       </div>
 
       {/* Tab 内容 */}

@@ -24,7 +24,12 @@ import type {
   AttachmentMeta,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
-import { HIMMPAT_UPDATE_FIELDS, HIMMPAT_OPTIONAL_FIELDS } from '../../lib/externalSync'
+import {
+  GENERIC_UPDATE_FIELD_OPTIONS,
+  HIMMPAT_OPTIONAL_FIELDS,
+  HIMMPAT_UPDATE_FIELD_OPTIONS,
+  type ExternalUpdateField,
+} from '../../lib/externalSync'
 import { formatApiDate, parseApiDate } from '../../lib/date'
 import { useDailyHistory, type DailyHistoryRecord } from '../../lib/dailyHistory'
 import Icon, { type IconName } from '../common/Icon'
@@ -45,6 +50,7 @@ import JEVQuickAnalyzeModal from '../ai/JEVQuickAnalyzeModal'
 import StatsPage from './StatsPage'
 import ViewSwitcher from '../views/ViewSwitcher'
 import DailyHistoryDialog from './DailyHistoryDialog'
+import McpFieldSelection from '../settings/McpFieldSelection'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -55,6 +61,23 @@ interface PatentListPageProps {
 
 type SortOrder = 'asc' | 'desc'
 type FilterOperator = 'contains' | 'eq' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty'
+
+function getExternalUpdateOptions(providerType: string | undefined, fields: FieldMeta[]): ExternalUpdateField[] {
+  const options = providerType === 'himmpat_mcp'
+    ? HIMMPAT_UPDATE_FIELD_OPTIONS
+    : GENERIC_UPDATE_FIELD_OPTIONS.filter(option => fields.some(field => field.key === option.key))
+  return options.map(option => ({
+    ...option,
+    label: fields.find(field => field.key === option.key)?.name || option.label,
+  }))
+}
+
+function getDefaultExternalUpdateFields(providerType: string | undefined, options: ExternalUpdateField[]): string[] {
+  return options
+    .filter(option => providerType !== 'himmpat_mcp' || !HIMMPAT_OPTIONAL_FIELDS.has(option.key))
+    .map(option => option.key)
+}
+
 // 'in' 为“值清单”多选筛选（Excel 式），值为字符串数组，不出现在手动操作符下拉里。
 type FilterConditionOperator = FilterOperator | 'in'
 interface FilterCondition {
@@ -747,10 +770,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [syncUpdateRequestedFields, setSyncUpdateRequestedFields] = useState<string[]>([])
   const [syncUpdateLoading, setSyncUpdateLoading] = useState(false)
   const syncUpdateConnector = syncUpdateConnectors.find(item => item.id === syncUpdateConnectorId)
-  const syncUpdateSupportedKeys = syncUpdateConnector?.provider_type === 'himmpat_mcp'
-    ? HIMMPAT_UPDATE_FIELDS
-    : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
-  const syncUpdateSupportedFields = fields.filter(field => syncUpdateSupportedKeys.includes(field.key))
+  const syncUpdateSupportedFields = getExternalUpdateOptions(syncUpdateConnector?.provider_type, fields)
 
   // 用于丢弃快速翻页/切库时旧请求的响应：每次发起 loadPatents 自增，
   // 返回时若 ID 不等于最新值，说明已有更新请求在路上，直接丢弃结果。
@@ -2182,10 +2202,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       const connectorId = syncUpdateConnectorId && available.some(item => item.id === syncUpdateConnectorId) ? syncUpdateConnectorId : (available[0]?.id ?? null)
       setSyncUpdateConnectorId(connectorId)
       const connector = available.find(item => item.id === connectorId)
-      const supported = connector?.provider_type === 'himmpat_mcp'
-        ? HIMMPAT_UPDATE_FIELDS
-        : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
-      setSyncUpdateRequestedFields(supported.filter(key => fields.some(field => field.key === key) && !HIMMPAT_OPTIONAL_FIELDS.has(key)))
+      setSyncUpdateRequestedFields(getDefaultExternalUpdateFields(connector?.provider_type, getExternalUpdateOptions(connector?.provider_type, fields)))
     } catch (error: unknown) {
       setShowSyncUpdate(false)
       alert('加载外部数据连接器失败: ' + getErrorMessage(error))
@@ -2259,10 +2276,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       const current = previous[itemId] || []
       return { ...previous, [itemId]: current.includes(fieldKey) ? current.filter(key => key !== fieldKey) : [...current, fieldKey] }
     })
-  }
-
-  const toggleSyncUpdateRequestedField = (fieldKey: string) => {
-    setSyncUpdateRequestedFields(previous => previous.includes(fieldKey) ? previous.filter(key => key !== fieldKey) : [...previous, fieldKey])
   }
 
   const handleCellQuickAI = (patentId: number, fieldKey: string) => {
@@ -4613,7 +4626,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       {showSyncUpdate && (
         <Modal
           title={syncUpdateBatch ? `外部更新预览 · ${syncUpdatePatentIds.length} 条` : `选择外部数据源 · ${syncUpdatePatentIds.length} 条`}
-          width={760}
+          width={1020}
           onClose={() => { if (!syncUpdateLoading) void cancelSyncUpdate() }}
         >
           {syncUpdateLoading && !syncUpdateBatch ? (
@@ -4634,10 +4647,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     const connectorId = Number(event.target.value) || null
                     setSyncUpdateConnectorId(connectorId)
                     const connector = syncUpdateConnectors.find(item => item.id === connectorId)
-                    const supported = connector?.provider_type === 'himmpat_mcp'
-                      ? HIMMPAT_UPDATE_FIELDS
-                      : ['publication_number', 'application_number', 'grant_number', 'title', 'abstract', 'applicant', 'assignee', 'inventor', 'agent', 'filing_date', 'publication_date', 'grant_date', 'country', 'ipc_main', 'ipc_all', 'cpc_main', 'priority_number', 'priority_date', 'legal_status']
-                    setSyncUpdateRequestedFields(supported.filter(key => fields.some(field => field.key === key) && !HIMMPAT_OPTIONAL_FIELDS.has(key)))
+                    setSyncUpdateRequestedFields(getDefaultExternalUpdateFields(connector?.provider_type, getExternalUpdateOptions(connector?.provider_type, fields)))
                   }}>
                     {syncUpdateConnectors.map(connector => <option key={connector.id} value={connector.id}>{connector.name} · {connector.provider_type}</option>)}
                   </select>
@@ -4645,11 +4655,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 12, color: '#475569', marginBottom: 5 }}>本次读取并可更新的字段</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px 12px', padding: 10, border: '1px solid #e2e8f0', borderRadius: 6, maxHeight: 150, overflowY: 'auto' }}>
-                  {syncUpdateSupportedFields.map(field => <label key={field.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#475569', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={syncUpdateRequestedFields.includes(field.key)} onChange={() => toggleSyncUpdateRequestedField(field.key)} />{field.name}
-                  </label>)}
-                </div>
+                <McpFieldSelection fields={syncUpdateSupportedFields} selectedFields={syncUpdateRequestedFields} onChange={setSyncUpdateRequestedFields} disabled={syncUpdateLoading} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <button className="btn btn-secondary" onClick={() => void cancelSyncUpdate()}>取消</button>

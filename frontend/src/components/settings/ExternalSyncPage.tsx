@@ -5,28 +5,9 @@ import { fieldService as fieldApi } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
 import type { ExternalObservation, FieldMeta, JsonObject, SyncConnector, SyncRecord, SyncRun, SyncSubscription } from '../../types'
+import { HIMMPAT_UPDATE_FIELD_OPTIONS } from '../../lib/externalSync'
 import McpFieldUpdate from './McpFieldUpdate'
-
-const EXTERNAL_UPDATE_FIELDS = [
-  ['publication_date', '公开日'], ['grant_date', '授权日'], ['legal_status', '法律状态'],
-  ['application_number', '申请号'], ['publication_number', '公开号'], ['title', '标题'],
-  ['abstract', '摘要'], ['applicant', '申请人'], ['assignee', '受让人'], ['inventor', '发明人'],
-  ['filing_date', '申请日'], ['country', '国家/地区'], ['ipc_all', 'IPC 分类'],
-  ['agent', '代理人'], ['priority_date', '优先权日'], ['priority_number', '优先权号'],
-  ['claims', '权利要求全文'], ['description_full', '说明书全文'],
-  ['technical_problem', '技术问题'], ['technical_solution', '技术方案'], ['technical_effect', '技术效果'],
-  ['legal_status_details', '法律事件详情'],
-  ['mcp_record_fields', '完整著录项目'], ['mcp_priority_claims', '优先权主张'],
-  ['mcp_classification_details', '分类详情'], ['mcp_party_details', '申请人/发明人/代理人详情'],
-  ['mcp_claim_metadata', '权利要求原始数据'], ['mcp_description_metadata', '说明书原始数据'],
-  ['mcp_pdf_original', 'PDF 原文（保存到附件）'], ['mcp_abstract_figure', '摘要附图（保存到附件）'],
-  ['mcp_description_figures', '说明书附图（保存到附件）'],
-  ['mcp_family_members', '同族成员'], ['mcp_citation_data', '引用完整数据'], ['mcp_cited_patents', '被引用专利'],
-  ['mcp_legal_event_details', '法律事件原始数据'], ['mcp_reexamination', '复审记录'], ['mcp_invalidation', '无效记录'],
-  ['mcp_transfer_events', '转让记录'], ['mcp_license_events', '许可记录'], ['mcp_pledge_events', '质押记录'], ['mcp_preservation_events', '保全记录'],
-  ['mcp_value_evaluation', '综合价值评估'], ['mcp_technology_value', '技术价值评估'], ['mcp_legal_value', '法律价值评估'],
-  ['mcp_market_value', '市场价值评估'], ['mcp_strategic_value', '战略价值评估'],
-] as const
+import McpFieldSelection from './McpFieldSelection'
 
 function countValue(run: SyncRun, key: string): string {
   const value = run.counts[key]
@@ -72,6 +53,10 @@ export default function ExternalSyncPage() {
   const [runRecords, setRunRecords] = useState<SyncRecord[]>([])
   const [runObservations, setRunObservations] = useState<ExternalObservation[]>([])
   const [runDetailBusy, setRunDetailBusy] = useState(false)
+  const updateFields = HIMMPAT_UPDATE_FIELD_OPTIONS.map(field => ({
+    ...field,
+    label: fields.find(meta => meta.key === field.key)?.name || field.label,
+  }))
 
   const defaultMonitorName = (mode: typeof monitorMode) => mode === 'applicant' ? '申请人监控' : mode === 'expression' ? '检索式监控' : '公开号跟踪'
 
@@ -358,7 +343,7 @@ export default function ExternalSyncPage() {
               <button className="btn btn-primary" disabled={busy || !mcpCode.trim() || !mcpName.trim() || !mcpEndpoint.trim() || !mcpApiKey.trim()} onClick={() => void createHimmPatConnector()}>创建并连接 HimmPat MCP</button>
             </section>
 
-            <McpFieldUpdate connectors={connectors} databaseId={currentDatabaseId} fields={EXTERNAL_UPDATE_FIELDS.map(([key, label]) => [key, fields.find(field => field.key === key)?.name || label] as const)} selectedFields={targetFields} onToggle={(key, checked) => setTargetFields(previous => checked ? [...previous, key] : previous.filter(item => item !== key))} onUpdated={load} />
+            <McpFieldUpdate connectors={connectors} databaseId={currentDatabaseId} fields={updateFields} selectedFields={targetFields} onChange={setTargetFields} onUpdated={load} />
           </div>
 
         </div>
@@ -390,8 +375,8 @@ export default function ExternalSyncPage() {
               <label className="mcp-form-full" style={{ display: 'block', marginTop: 10 }}>按法律状态设置扫描策略（JSON；键为 legal_status，支持 interval_days、enabled、update_fields）<textarea className="form-input" rows={4} value={statusStrategyJson} onChange={event => setStatusStrategyJson(event.target.value)} /></label>
               <fieldset className="mcp-target-fields">
                 <legend>允许自动更新的目标字段</legend>
-                <p>当前库字段名称可以调整，但需映射到对应规范属性。法律事件仍作为来源历史保存；只有勾选的属性会更新当前值。</p>
-                <div className="mcp-target-fields-grid">{EXTERNAL_UPDATE_FIELDS.map(([key, label]) => <label key={key}><input type="checkbox" checked={targetFields.includes(key)} onChange={event => setTargetFields(previous => event.target.checked ? [...previous, key] : previous.filter(item => item !== key))} />{fields.find(field => field.key === key)?.name || label}<small>{key}</small></label>)}</div>
+                <p>法律事件仍作为来源历史保存；只有勾选的属性会更新当前值。</p>
+                <McpFieldSelection fields={updateFields} selectedFields={targetFields} onChange={setTargetFields} disabled={busy} />
               </fieldset>
               <button className="btn btn-primary" disabled={busy || !currentDatabaseId || !selectedConnectorId || targetFields.length === 0} onClick={() => void createSubscription()}>保存自动监控规则</button>
             </section>
