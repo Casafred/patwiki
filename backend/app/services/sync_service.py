@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import json
 import uuid
 from typing import Any
 
@@ -555,9 +556,20 @@ class SyncService:
             patent = db.query(Patent).filter(Patent.id == observation.patent_id).one()
             if observation.canonical_field_key not in REVIEWABLE_EXTERNAL_FIELDS:
                 raise ValueError("该字段不允许外部同步直接写入")
-            before = serialize_value(getattr(patent, observation.canonical_field_key, None))
-            value = date_value(observation.candidate_value) if observation.canonical_field_key.endswith("_date") else observation.candidate_value
-            setattr(patent, observation.canonical_field_key, value)
+            if observation.canonical_field_key.startswith("mcp_"):
+                before_value = (patent.custom_fields or {}).get(observation.canonical_field_key)
+                try:
+                    value = json.loads(observation.candidate_value or "null")
+                except (TypeError, json.JSONDecodeError):
+                    value = observation.candidate_value
+                custom_fields = dict(patent.custom_fields or {})
+                custom_fields[observation.canonical_field_key] = value
+                patent.custom_fields = custom_fields
+            else:
+                before_value = getattr(patent, observation.canonical_field_key, None)
+                value = date_value(observation.candidate_value) if observation.canonical_field_key.endswith("_date") else observation.candidate_value
+                setattr(patent, observation.canonical_field_key, value)
+            before = serialize_value(before_value)
             db.add(PatentHistory(
                 patent_id=patent.id,
                 field_key=observation.canonical_field_key,

@@ -15,6 +15,17 @@ const EXTERNAL_UPDATE_FIELDS = [
   ['agent', '代理人'], ['priority_date', '优先权日'], ['priority_number', '优先权号'],
   ['claims', '权利要求全文'], ['description_full', '说明书全文'],
   ['technical_problem', '技术问题'], ['technical_solution', '技术方案'], ['technical_effect', '技术效果'],
+  ['legal_status_details', '法律事件详情'],
+  ['mcp_record_fields', '完整著录项目'], ['mcp_priority_claims', '优先权主张'],
+  ['mcp_classification_details', '分类详情'], ['mcp_party_details', '申请人/发明人/代理人详情'],
+  ['mcp_claim_metadata', '权利要求原始数据'], ['mcp_description_metadata', '说明书原始数据'],
+  ['mcp_pdf_original', 'PDF 原文（保存到附件）'], ['mcp_abstract_figure', '摘要附图（保存到附件）'],
+  ['mcp_description_figures', '说明书附图（保存到附件）'],
+  ['mcp_family_members', '同族成员'], ['mcp_citation_data', '引用完整数据'], ['mcp_cited_patents', '被引用专利'],
+  ['mcp_legal_event_details', '法律事件原始数据'], ['mcp_reexamination', '复审记录'], ['mcp_invalidation', '无效记录'],
+  ['mcp_transfer_events', '转让记录'], ['mcp_license_events', '许可记录'], ['mcp_pledge_events', '质押记录'], ['mcp_preservation_events', '保全记录'],
+  ['mcp_value_evaluation', '综合价值评估'], ['mcp_technology_value', '技术价值评估'], ['mcp_legal_value', '法律价值评估'],
+  ['mcp_market_value', '市场价值评估'], ['mcp_strategic_value', '战略价值评估'],
 ] as const
 
 function countValue(run: SyncRun, key: string): string {

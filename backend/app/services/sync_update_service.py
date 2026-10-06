@@ -7,6 +7,7 @@ never creates a Patent during preview or confirmation.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from hashlib import sha256
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -28,7 +29,7 @@ from app.models import (
 from app.services.patent_service import PatentService
 from app.services.patent_database_scope import in_database
 from app.services.sync_reconciliation import apply_legal_events, resolve_patent
-from app.services.sync_support import LEGAL_STATUS_MAP, REVIEWABLE_EXTERNAL_FIELDS, date_value, hash_payload, now, serialize_value
+from app.services.sync_support import LEGAL_STATUS_MAP, MCP_CUSTOM_FIELDS, REVIEWABLE_EXTERNAL_FIELDS, date_value, hash_payload, now, serialize_value
 
 
 EXPLICIT_UPDATE_FIELDS = frozenset(REVIEWABLE_EXTERNAL_FIELDS) | {"legal_status"}
@@ -45,7 +46,7 @@ class SyncUpdateService:
             allowed = set(DOSSIER_UPDATE_FIELDS) | {"legal_status", "grant_date"}
             if (connector.config_json or {}).get("enrich_legal_on_fetch") or (connector.config_json or {}).get("enrich_legal_status"):
                 allowed.update({"legal_status", "grant_date"})
-        defaults = sorted(allowed - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect", "agent", "priority_number", "priority_date"}) if allowed is not None else DEFAULT_UPDATE_FIELDS
+        defaults = sorted(allowed - set(MCP_CUSTOM_FIELDS) - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect", "agent", "priority_number", "priority_date"}) if allowed is not None else DEFAULT_UPDATE_FIELDS
         requested = list(dict.fromkeys(fields if fields is not None else defaults))
         invalid = sorted(set(requested) - EXPLICIT_UPDATE_FIELDS)
         if invalid:
@@ -91,6 +92,8 @@ class SyncUpdateService:
 
     @staticmethod
     def _normalized_candidate(field_key: str, value: Any) -> Any:
+        if field_key.startswith("mcp_"):
+            return value
         if field_key == "legal_status":
             mapped = LEGAL_STATUS_MAP.get(str(value).strip().lower(), "unknown")
             return None if mapped == "unknown" and str(value).strip().lower() not in {"unknown", ""} else mapped
@@ -100,8 +103,11 @@ class SyncUpdateService:
         return serialize_value(value)
 
     @staticmethod
-    def _current_value(patent: Patent, field_key: str) -> str | None:
-        value = getattr(patent, field_key, None)
+    def _current_value(patent: Patent, field_key: str) -> Any:
+        if field_key.startswith("mcp_"):
+            value = (patent.custom_fields or {}).get(field_key)
+        else:
+            value = getattr(patent, field_key, None)
         return serialize_value(value)
 
     @staticmethod
@@ -111,12 +117,53 @@ class SyncUpdateService:
             raw_value = record.fields.get(field_key)
             if field_key == "legal_status" and raw_value is None and record.legal_events:
                 raw_value = max(record.legal_events, key=lambda item: item.event_date).status
-            if raw_value is None:
+            if raw_value is None or raw_value == "" or raw_value == [] or raw_value == {}:
                 continue
             candidate = SyncUpdateService._normalized_candidate(field_key, raw_value)
             if candidate is not None:
                 candidates[field_key] = candidate
         return candidates
+
+    @staticmethod
+    def _materialize_mcp_resources(db: Session, batch: SyncUpdateBatch, patent: Patent, candidates: dict[str, Any], fields: list[str], confirmed_by: str) -> None:
+        """Download selected PDF/images into PatWiki's attachment store."""
+        resource_fields = {"mcp_pdf_original", "mcp_abstract_figure", "mcp_description_figures"}
+        selected = resource_fields.intersection(fields)
+        if not selected:
+            return
+        from app.integrations.registry import get_connector
+        from app.services.attachment_service import AttachmentService
+        from app.models import Attachment
+        runtime = get_connector(batch.connector)
+        try:
+            for field in sorted(selected):
+                raw = candidates.get(field)
+                resources = raw if isinstance(raw, list) else [raw]
+                for resource in resources:
+                    if not isinstance(resource, dict) or not resource.get("path"):
+                        continue
+                    kind = str(resource.get("resource_kind") or ("pdf" if field == "mcp_pdf_original" else "image"))
+                    content, mime = runtime.download_resource(str(resource["path"]), "pdf" if kind == "pdf" else "image")
+                    digest = sha256(content).hexdigest()
+                    duplicate = db.query(Attachment.id).filter(
+                        Attachment.database_id == batch.database_id,
+                        Attachment.patent_id == patent.id,
+                        Attachment.sha256 == digest,
+                        Attachment.deleted_at.is_(None),
+                    ).first()
+                    if duplicate:
+                        continue
+                    extension = ".pdf" if kind == "pdf" else (".png" if mime == "image/png" else ".jpg")
+                    filename = f"{patent.publication_number or patent.id}-{field}{resource.get('figure_index', '')}{extension}"
+                    AttachmentService.create_from_bytes(
+                        db, batch.database_id, patent.id, "attachments", filename, content, mime,
+                        uploaded_by=confirmed_by, source_type="mcp",
+                        source_url=f"himmpat://{kind}/{resource['path']}", commit=False,
+                    )
+        finally:
+            close = getattr(runtime, "close", None)
+            if callable(close):
+                close()
 
     @staticmethod
     def _fetch_record(connector: Any, patent: Patent, fields: list[str] | None = None) -> ProviderPatentRecord:
@@ -311,7 +358,7 @@ class SyncUpdateService:
                 run.counts_json["matched"] += 1
                 candidates = cls._record_candidates(record, selected_fields)
                 current = {field_key: cls._current_value(patent, field_key) for field_key in candidates}
-                changed = [field_key for field_key in candidates if current.get(field_key) != serialize_value(candidates[field_key])]
+                changed = [field_key for field_key in candidates if serialize_value(current.get(field_key)) != serialize_value(candidates[field_key])]
                 item.current_fields = current
                 item.candidate_fields = candidates
                 item.changed_fields = changed
@@ -327,7 +374,7 @@ class SyncUpdateService:
                         canonical_field_key=field_key,
                         raw_value=serialize_value(candidate),
                         normalized_value=serialize_value(candidate),
-                        current_value=current.get(field_key),
+                        current_value=serialize_value(current.get(field_key)),
                         candidate_value=serialize_value(candidate),
                         confidence="high",
                         decision="pending_update" if field_key in changed else "no_change",
@@ -443,7 +490,7 @@ class SyncUpdateService:
                 run.counts_json["matched"] += 1
                 candidates = cls._record_candidates(record, selected_fields)
                 current = {field_key: cls._current_value(patent, field_key) for field_key in candidates}
-                changed = [field_key for field_key in candidates if current.get(field_key) != serialize_value(candidates[field_key])]
+                changed = [field_key for field_key in candidates if serialize_value(current.get(field_key)) != serialize_value(candidates[field_key])]
                 item.current_fields = current
                 item.candidate_fields = candidates
                 item.changed_fields = changed
@@ -459,7 +506,7 @@ class SyncUpdateService:
                         canonical_field_key=field_key,
                         raw_value=serialize_value(candidate),
                         normalized_value=serialize_value(candidate),
-                        current_value=current.get(field_key),
+                        current_value=serialize_value(current.get(field_key)),
                         candidate_value=serialize_value(candidate),
                         confidence="high",
                         decision="pending_update" if field_key in changed else "no_change",
@@ -505,13 +552,21 @@ class SyncUpdateService:
                     raise BadRequestException(f"专利 {item.patent_id} 已不存在")
                 for field_key in fields:
                     before = cls._current_value(patent, field_key)
-                    if before != (item.current_fields or {}).get(field_key):
+                    if serialize_value(before) != serialize_value((item.current_fields or {}).get(field_key)):
                         raise BadRequestException(f"专利 {item.patent_id} 的字段 {field_key} 在预览后已发生变化，请重新预览")
                 update_values = {}
+                custom_values = {}
                 for field_key in fields:
                     candidate = (item.candidate_fields or {}).get(field_key)
                     if field_key != "legal_status":
-                        update_values[field_key] = date_value(candidate) if field_key.endswith("_date") else candidate
+                        if field_key.startswith("mcp_"):
+                            custom_values[field_key] = candidate
+                        else:
+                            update_values[field_key] = date_value(candidate) if field_key.endswith("_date") else candidate
+                if custom_values:
+                    update_values["custom_fields"] = custom_values
+                if any(field.startswith("mcp_") for field in fields):
+                    cls._materialize_mcp_resources(db, batch, patent, item.candidate_fields or {}, fields, confirmed_by)
                 if update_values:
                     PatentService.update_patent(db, patent, update_values, source="external_sync_update", changed_by=confirmed_by, commit=False)
                 # Legal events are retained as provider evidence whenever an
