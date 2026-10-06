@@ -658,7 +658,7 @@ def refresh_patent(body: PatentRefreshRequest, db: Session = Depends(get_db)):
         database_id = body.database_id
     identifier = ProviderIdentifier(identifier_type=body.identifier_type, raw_value=body.identifier)
     try:
-        run = SyncService.refresh_patent(db, connector, identifier, database_id, body.review_policy)
+        run = SyncService.refresh_patent(db, connector, identifier, database_id, body.review_policy, body.fields)
     except Exception as exc:
         raise BadRequestException(f"专利刷新失败：{exc}") from exc
     return SyncService.run_dict(run)

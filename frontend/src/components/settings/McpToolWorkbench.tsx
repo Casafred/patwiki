@@ -21,6 +21,16 @@ const FIELD_LABELS: Record<string, string> = {
   legal_status: '法律状态', legal_status_details: '法律状态详情',
 }
 
+const ONE_CLICK_FIELDS: Array<[string, string]> = [
+  ['publication_date', '公开日'], ['grant_date', '授权日'], ['legal_status', '法律状态'],
+  ['application_number', '申请号'], ['publication_number', '公开号'], ['title', '标题'],
+  ['abstract', '摘要'], ['applicant', '申请人'], ['assignee', '受让人'], ['inventor', '发明人'],
+  ['filing_date', '申请日'], ['country', '国家/地区'], ['ipc_all', 'IPC 分类'], ['agent', '代理人'],
+  ['priority_date', '优先权日'], ['priority_number', '优先权号'], ['claims', '权利要求全文'],
+  ['description_full', '说明书全文'], ['technical_problem', '技术问题'],
+  ['technical_solution', '技术方案'], ['technical_effect', '技术效果'],
+]
+
 function fieldLabel(key: string): string {
   return FIELD_LABELS[key] || key
 }
@@ -129,6 +139,7 @@ export default function McpToolWorkbench({ connectors, databaseId, onUpdated }: 
   const [updateIdentifierType, setUpdateIdentifierType] = useState('publication_number')
   const [updateIdentifier, setUpdateIdentifier] = useState('')
   const [updating, setUpdating] = useState(false)
+  const [updateFields, setUpdateFields] = useState<string[]>(['publication_date', 'legal_status', 'title', 'abstract'])
 
   const [mapIdentifier, setMapIdentifier] = useState('')
   const [mapping, setMapping] = useState(false)
@@ -231,6 +242,7 @@ export default function McpToolWorkbench({ connectors, databaseId, onUpdated }: 
         identifier_type: updateIdentifierType,
         identifier: updateIdentifier.trim(),
         database_id: databaseId ?? undefined,
+        fields: updateFields,
       })
       if (run.error_message) setError(`更新失败：${run.error_message}`)
       else setMessage(`已从 ${connector.name} 更新 ${updateIdentifier.trim()}：变更 ${String(run.counts?.auto_applied ?? 0)} 项，待审查 ${String(run.counts?.review ?? 0)} 项`)
@@ -253,7 +265,11 @@ export default function McpToolWorkbench({ connectors, databaseId, onUpdated }: 
         <label className="mcp-inline-grow">号码<input className="form-input" disabled={updating} value={updateIdentifier} onChange={event => setUpdateIdentifier(event.target.value)} placeholder="例如 CN123456789A" /></label>
         <button className="btn btn-primary" disabled={updating || !updateIdentifier.trim()} onClick={() => void runOneClickUpdate()}>{updating ? '更新中…' : '更新到当前库'}</button>
       </div>
-      <p className="mcp-tools-hint">更新会把著录项、法律状态等基础信息写入当前库，并保留来源快照和审查记录。</p>
+      <fieldset className="mcp-target-fields">
+        <legend>更新字段</legend>
+        <p>勾选后才会回填当前库；技术问题、技术方案、技术效果和权利要求也可在这里一并获取。</p>
+        <div className="mcp-target-fields-grid">{ONE_CLICK_FIELDS.map(([key, label]) => <label key={key}><input type="checkbox" checked={updateFields.includes(key)} onChange={event => setUpdateFields(previous => event.target.checked ? [...previous, key] : previous.filter(item => item !== key))} />{label}<small>{key}</small></label>)}</div>
+      </fieldset>
     </div>
 
     <div className="mcp-tools-block">

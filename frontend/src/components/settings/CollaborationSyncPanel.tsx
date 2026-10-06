@@ -225,7 +225,7 @@ export default function CollaborationSyncPanel() {
       anchor.href = url; anchor.download = 'patwiki-employee-config.example.json'
       document.body.appendChild(anchor); anchor.click(); anchor.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-      setMessage('成员配置样例已下载')
+      setMessage('格式样例 patwiki-employee-config.example.json 已发起下载；浏览器中可在下载列表查看，也可以点击“查看格式样例”直接打开。')
     } catch (error: unknown) { setMessage(getErrorMessage(error, '样例下载失败')) }
   }
 
@@ -384,7 +384,7 @@ export default function CollaborationSyncPanel() {
   return <section style={panelStyle} aria-label="部门协同同步">
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 12, marginBottom: 14 }}>
       <div><h3 style={{ margin: 0, fontSize: 15, color: '#1f2937' }}>部门协同与数据同步</h3><div style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>加密文件交换 · 默认只读 · 本地留存审计记录</div></div>
-      {identity && <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 12, color: '#334155' }}>{identity.display_name || identity.username} · {identity.roles.join(', ') || '成员'}</span><button style={buttonStyle} onClick={() => void handleLogout()}>退出</button></div>}
+      {identity && <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 12, color: '#334155' }}>{identity.display_name || identity.username} · {identity.roles.join(', ') || '成员'}</span><button style={buttonStyle} onClick={() => void handleLogout()}>登出协同账号</button>{isAdmin && <a href="#collaboration-accounts" style={{ fontSize: 12 }}>账号管理与删除</a>}</div>}
     </div>
 
     {!identity && <div style={{ display: 'grid', gap: 10, maxWidth: 680 }}>
@@ -394,7 +394,7 @@ export default function CollaborationSyncPanel() {
         <label className={`btn btn-primary member-config-picker ${busy ? 'is-disabled' : ''}`}><Icon name="download" />{busy ? '导入中...' : '选择配置文件'}<input type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (!file) return; setBusy(true); void collaborationSyncApi.importEmployeeConfig(file).then(result => { setLoginName(result.username); setConfigured(true); setMessage(`成员配置已导入：${result.username}`) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)); event.target.value = '' }} /></label>
         <button className="btn btn-secondary" type="button" onClick={() => void downloadSample()}><Icon name="download" />格式样例</button>
       </div>
-      <div className="semantic-muted">样例用于查看格式。正式文件请由管理员在成员权限配置中导出，修改文件内容会使签名失效。</div>
+      <a href={`${import.meta.env.BASE_URL}examples/patwiki-employee-config.example.json`} target="_blank" rel="noreferrer">查看格式样例</a>
       {configured ? <><strong style={{ fontSize: 13 }}>协同账号登录</strong>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
           <input style={inputStyle} value={loginName} onChange={event => setLoginName(event.target.value)} placeholder="协同账号" autoComplete="username" />
@@ -439,7 +439,7 @@ export default function CollaborationSyncPanel() {
       </div>}
       {isAdmin && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 18 }}>
         <div style={{ borderTop: '2px solid #0f766e', paddingTop: 10 }}>
-          <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>协同账号</h4>
+          <h4 id="collaboration-accounts" style={{ margin: '0 0 8px', fontSize: 13 }}>协同账号管理与删除</h4>
           <div style={{ display: 'grid', gap: 7, marginBottom: 10 }}>
             <input style={inputStyle} value={departmentCode} placeholder="部门标识" onChange={event => setDepartmentCode(event.target.value)} />
             <select style={inputStyle} aria-label="成员配置账号" value={configAccount} onChange={event => setConfigAccount(event.target.value)}><option value="">选择成员配置账号</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.display_name || account.username}</option>)}</select>
@@ -467,6 +467,7 @@ export default function CollaborationSyncPanel() {
             <button className="btn btn-sm btn-ghost" title={`删除 ${account.username}`} aria-label={`删除 ${account.username}`} disabled={busy || account.id === identity.id} onClick={() => void handleDeleteAccount(account)}><Icon name="trash" /></button>
           </div>)}</div>
           <div style={{ marginTop: 6, color: '#64748b', fontSize: 11 }}>管理员和部门领导拥有本机协同管理权限；组长、组员按品类和字段授权同步；只读协作者不能应用到主表。</div>
+          <div style={{ marginTop: 6, color: '#64748b', fontSize: 11 }}>删除账号请点击成员行的垃圾桶。当前登录账号须由另一位管理员删除；唯一的管理员不能删除。</div>
         </div>
 
         <div style={{ borderTop: '2px solid #0f766e', paddingTop: 10 }}>

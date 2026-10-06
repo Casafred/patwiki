@@ -505,7 +505,7 @@ class SyncService:
         return results
 
     @classmethod
-    def refresh_patent(cls, db: Session, connector: ConnectorDefinition, identifier: ProviderIdentifier, database_id: int, review_policy: str = "safe_auto_apply") -> SyncRun:
+    def refresh_patent(cls, db: Session, connector: ConnectorDefinition, identifier: ProviderIdentifier, database_id: int, review_policy: str = "safe_auto_apply", fields: list[str] | None = None) -> SyncRun:
         run = SyncRun(
             connector_id=connector.id,
             database_id=database_id,
@@ -519,8 +519,10 @@ class SyncService:
         db.refresh(run)
         try:
             runtime_connector = get_connector(connector)
-            record = runtime_connector.fetch_patent(identifier)
-            transient = SyncSubscription(database_id=database_id, connector_id=connector.id, name="manual-refresh", review_policy=review_policy)
+            fetch_fields = getattr(runtime_connector, "fetch_patent_fields", None)
+            record = fetch_fields(identifier, set(fields)) if fields and callable(fetch_fields) else runtime_connector.fetch_patent(identifier)
+            transient = SyncSubscription(database_id=database_id, connector_id=connector.id, name="manual-refresh", review_policy=review_policy,
+                                         scope_json={"update_fields": fields} if fields else {})
             process_record(db, run, transient, record)
             flag_modified(run, "counts_json")
             run.status = "succeeded"

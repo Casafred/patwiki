@@ -4,8 +4,8 @@ import { syncApi } from '../../api'
 import { fieldService as fieldApi } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
-import type { ExternalObservation, FieldMeta, JsonObject, McpToolInfo, SyncConnector, SyncRecord, SyncRun, SyncSubscription } from '../../types'
-import McpToolWorkbench from './McpToolWorkbench'
+import type { ExternalObservation, FieldMeta, JsonObject, SyncConnector, SyncRecord, SyncRun, SyncSubscription } from '../../types'
+import McpFieldUpdate from './McpFieldUpdate'
 
 const EXTERNAL_UPDATE_FIELDS = [
   ['publication_date', '公开日'], ['grant_date', '授权日'], ['legal_status', '法律状态'],
@@ -22,7 +22,7 @@ function countValue(run: SyncRun, key: string): string {
   return typeof value === 'number' ? String(value) : '0'
 }
 
-type McpTab = 'connectors' | 'monitor' | 'tools' | 'runs'
+type McpTab = 'connectors' | 'monitor' | 'runs'
 
 export default function ExternalSyncPage() {
   const [searchParams] = useSearchParams()
@@ -55,7 +55,6 @@ export default function ExternalSyncPage() {
   const [mcpEndpoint, setMcpEndpoint] = useState('https://www.himmpat.com')
   const [mcpApiKey, setMcpApiKey] = useState('')
   const [mcpEnrichLegal, setMcpEnrichLegal] = useState(false)
-  const [tools, setTools] = useState<JsonObject | null>(null)
   const [selectedConnectorId, setSelectedConnectorId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<McpTab>('connectors')
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null)
@@ -80,8 +79,6 @@ export default function ExternalSyncPage() {
       setArchivedConnectors(connectorResult.archived_items || [])
       const availableConnector = connectorResult.items.find(item => item.enabled) || connectorResult.items[0]
       setSelectedConnectorId(current => current && connectorResult.items.some(item => item.id === current) ? current : availableConnector?.id || null)
-      const savedCatalog = connectorResult.items.find(item => item.transport === 'mcp' && Object.keys(item.mcp_catalog || {}).length > 0)?.mcp_catalog
-      if (savedCatalog) setTools(savedCatalog)
       setSubscriptions(subscriptionResult.items)
       setRuns(runResult.items)
       setObservations(observationResult.items)
@@ -216,8 +213,7 @@ export default function ExternalSyncPage() {
   const discoverTools = async (connector: SyncConnector) => {
     setBusy(true); setError(''); setMessage('')
     try {
-      const result = await syncApi.discoverConnector(connector.id)
-      setTools(result)
+      await syncApi.discoverConnector(connector.id)
       setMessage(`${connector.name}：工具目录已更新`)
     } catch (discoverError: unknown) {
       setError(getErrorMessage(discoverError, 'MCP 工具发现失败'))
@@ -258,12 +254,9 @@ export default function ExternalSyncPage() {
     } finally { setRunDetailBusy(false) }
   }
 
-  const toolServiceCount = Array.isArray(tools?.services) ? tools.services.length : 0
-
   const tabs: { key: McpTab; label: string; badge?: number }[] = [
     { key: 'connectors', label: '连接器', badge: connectors.length },
     { key: 'monitor', label: '自动监控', badge: subscriptions.length },
-    { key: 'tools', label: '工具工作台', badge: toolServiceCount },
     { key: 'runs', label: '运行与审查', badge: observations.length },
   ]
 
@@ -354,46 +347,12 @@ export default function ExternalSyncPage() {
               <button className="btn btn-primary" disabled={busy || !mcpCode.trim() || !mcpName.trim() || !mcpEndpoint.trim() || !mcpApiKey.trim()} onClick={() => void createHimmPatConnector()}>创建并连接 HimmPat MCP</button>
             </section>
 
-            <section className="mcp-panel">
-              <div className="section-heading"><h3>外部信息与目标列</h3><span>按规范属性匹配</span></div>
-              <p className="mcp-panel-hint">系统以字段的规范属性匹配，而不依赖表头文字。例如“公开日”“公开日期”只要映射到 publication_date 属性，就会更新同一信息。自定义且未映射属性的列不会自动覆盖。</p>
-              <div className="mcp-field-mapping-grid">
-                {EXTERNAL_UPDATE_FIELDS.map(([key, label]) => <span key={key}>{label} → {fields.find(field => field.key === key)?.name || label} <small>({key})</small></span>)}
-              </div>
-            </section>
+            <McpFieldUpdate connectors={connectors} databaseId={currentDatabaseId} fields={EXTERNAL_UPDATE_FIELDS.map(([key, label]) => [key, fields.find(field => field.key === key)?.name || label] as const)} selectedFields={targetFields} onToggle={(key, checked) => setTargetFields(previous => checked ? [...previous, key] : previous.filter(item => item !== key))} onUpdated={load} />
           </div>
 
-          <div className="mcp-tab-hint">连接器的工具发现、工具调用和一键更新已统一收进 <button type="button" className="mcp-link-button" onClick={() => setActiveTab('tools')}>工具工作台</button>。</div>
         </div>
       )}
 
-      {activeTab === 'tools' && (
-        <div className="mcp-tab-body">
-          {tools && (
-            <section className="mcp-panel">
-              <div className="section-heading"><h3>已发现的 MCP 工具</h3><span>{Array.isArray(tools.services) ? `${tools.services.length} 个服务` : '尚未发现工具'}</span></div>
-              {Array.isArray(tools.services) && tools.services.map((service, index) => {
-                const item = service as JsonObject
-                const serviceTools = (Array.isArray(item.tools) ? item.tools : []) as unknown as McpToolInfo[]
-                return <div className="mcp-service" key={`${String(item.service || 'service')}-${index}`}>
-                  <div className="mcp-service-header"><strong>{String(item.service || '-')}</strong><span>{String(item.tool_count || serviceTools.length)} 个工具</span><span>{String(item.latency_ms || 0)} ms</span></div>
-                  <div className="mcp-tool-list">{serviceTools.map((tool, toolIndex) => {
-                    const schema = tool.inputSchema || {}
-                    const required = Array.isArray(schema.required) ? schema.required.map(String) : []
-                    return <div className="mcp-tool" key={`${tool.name}-${toolIndex}`}>
-                      <code>{tool.name || '未命名工具'}</code>
-                      <span>{tool.description || '未提供说明'}</span>
-                      <small>必填参数：{required.length ? required.join('、') : '无'}</small>
-                    </div>
-                  })}</div>
-                </div>
-              })}
-              {!Array.isArray(tools.services) && <div className="empty-state">请在“连接器”页对 HimmPat MCP 执行“发现工具”。</div>}
-            </section>
-          )}
-          <McpToolWorkbench connectors={connectors} databaseId={currentDatabaseId} onUpdated={load} />
-        </div>
-      )}
 
       {activeTab === 'monitor' && (
         <div className="mcp-tab-body">

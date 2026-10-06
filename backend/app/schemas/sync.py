@@ -80,6 +80,7 @@ class PatentRefreshRequest(BaseModel):
     identifier: str = Field(min_length=1, max_length=300)
     database_id: int | None = None
     review_policy: str = "safe_auto_apply"
+    fields: list[str] | None = None
 
 
 class ObservationDecisionRequest(BaseModel):

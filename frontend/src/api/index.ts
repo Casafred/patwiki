@@ -360,7 +360,7 @@ export const syncApi = {
   }): Promise<SyncSubscription> => api.post('/sync/subscriptions', data),
   subscriptions: (databaseId?: number | null): Promise<{ items: SyncSubscription[] }> => api.get('/sync/subscriptions', { params: { database_id: databaseId ?? undefined } }),
   runSubscription: (id: number, maxPages = 100): Promise<SyncRun> => api.post(`/sync/subscriptions/${id}/run`, { trigger: 'manual', max_pages: maxPages }),
-  refreshPatent: (data: { connector_id: number; identifier_type: string; identifier: string; database_id?: number | null; review_policy?: string }): Promise<SyncRun> => api.post('/sync/patents/refresh', data),
+  refreshPatent: (data: { connector_id: number; identifier_type: string; identifier: string; database_id?: number | null; review_policy?: string; fields?: string[] }): Promise<SyncRun> => api.post('/sync/patents/refresh', data),
   deleteSubscription: (id: number): Promise<{ success: boolean }> => api.delete(`/sync/subscriptions/${id}`),
   updateSubscription: (id: number, data: JsonObject): Promise<SyncSubscription> => api.patch(`/sync/subscriptions/${id}`, data),
   runs: (subscriptionId?: number | null): Promise<{ items: SyncRun[] }> => api.get('/sync/runs', { params: { subscription_id: subscriptionId ?? undefined, limit: 50 } }),

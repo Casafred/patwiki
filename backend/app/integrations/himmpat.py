@@ -422,16 +422,8 @@ class HimmPatMcpAdapter(PatentConnector):
             data, envelope = self._call("dossier", tool, args)
             evidence[tool] = envelope
             value: Any = data.get(patent_id, data.get("items", data)) if isinstance(data, Mapping) else data
-            if field == "technical" and isinstance(value, Mapping):
-                aliases = {
-                    "technical_problem": ("technical_problem", "technicalProblem", "problem"),
-                    "technical_solution": ("technical_solution", "technicalSolution", "technicalMeans", "solution"),
-                    "technical_effect": ("technical_effect", "technicalEffect", "effect"),
-                }
-                for key, keys in aliases.items():
-                    text = _text_field(value, keys)
-                    if text:
-                        values[key] = text
+            if field == "technical":
+                values.update(self.extract_mapped_fields(tool, value, patent_id))
             elif field in {"claims", "description_full"}:
                 keys = ("claims", "claim", "claimsText", "clc", "clo", "cle", "text", "content", "value") if field == "claims" else ("description", "description_full", "descriptionText", "dec", "deo", "dee", "text", "content", "value")
                 text = _text_field(value, keys, fallback=True)
@@ -489,12 +481,12 @@ class HimmPatMcpAdapter(PatentConnector):
             return {str(spec["field"]): text} if text else {}
         if kind == "technical":
             value = self._select_patent_item(data, patent_id)
-            if not isinstance(value, Mapping):
+            if not isinstance(value, (Mapping, list)):
                 return {}
             aliases = {
-                "technical_problem": ("technical_problem", "technicalProblem", "problem"),
-                "technical_solution": ("technical_solution", "technicalSolution", "technicalMeans", "solution"),
-                "technical_effect": ("technical_effect", "technicalEffect", "effect"),
+                "technical_problem": ("technical_problem", "technicalProblem", "aiTechProblem", "problem"),
+                "technical_solution": ("technical_solution", "technicalSolution", "technicalMeans", "aiTechMeans", "solution"),
+                "technical_effect": ("technical_effect", "technicalEffect", "aiTechEffect", "effect"),
             }
             result: dict[str, Any] = {}
             for key, alias_keys in aliases.items():

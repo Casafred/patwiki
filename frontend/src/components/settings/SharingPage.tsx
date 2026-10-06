@@ -248,7 +248,7 @@ export default function SharingPage() {
               }}
               onClick={handleLogout}
             >
-              切换身份
+              登出本地身份
             </button>
           </div>
         ) : (

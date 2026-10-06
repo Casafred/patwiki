@@ -179,6 +179,25 @@ class HimmPatAdapterTest(unittest.TestCase):
             {"technical_problem": "Problem", "technical_solution": "Means", "technical_effect": "Effect"},
         )
 
+    def test_claims_and_ai_technical_array_are_enriched_together(self):
+        class TechnicalTransport(FixtureTransport):
+            def discover(self, services):
+                return {"services": [{"service": services[0], "tools": [{"name": "get_claims_by_patent_id", "inputSchema": {"properties": {"id": {"type": "string"}}}}]}]}
+
+            def call_tool(self, service, tool, arguments):
+                if tool in {"get_claims_by_patent_id", "get_patent_ai_tech_info"}:
+                    data = {"h-1": {"claims": "<claims><claim>1. A device</claim></claims>"}} if tool == "get_claims_by_patent_id" else [{
+                        "aiTechProblem": "Problem", "aiTechMeans": "Means", "aiTechEffect": "Effect", "pubNumber": "CN123A",
+                    }]
+                    return {"content": [{"type": "text", "text": json.dumps({"code": 200, "data": data})}]}
+                return super().call_tool(service, tool, arguments)
+        adapter = HimmPatMcpAdapter({}, transport=TechnicalTransport())
+        record = adapter.fetch_patent_fields(ProviderIdentifier("publication", "CN123A"), {"claims", "technical_problem", "technical_solution", "technical_effect"})
+        self.assertIn("A device", record.fields["claims"])
+        self.assertEqual(record.fields["technical_problem"], "Problem")
+        self.assertEqual(record.fields["technical_solution"], "Means")
+        self.assertEqual(record.fields["technical_effect"], "Effect")
+
     def test_extract_mapped_fields_handles_legal_and_details(self):
         legal = {"h-1": {"state": "I", "stc": "GR", "grd": "2026-02-01"}}
         fields = self.adapter.extract_mapped_fields("get_patent_legal_status_by_patent_ids", legal, "h-1")

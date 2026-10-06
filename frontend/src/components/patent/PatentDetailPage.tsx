@@ -23,6 +23,7 @@ import type {
   JsonObject,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { patentText } from '../../lib/patentText'
 import { formatApiDate, formatApiDateTime, formatApiTime } from '../../lib/date'
 import { recordBrowse, recordEdit, type DailyHistoryInput } from '../../lib/dailyHistory'
 import PatentShareDialog from './PatentShareDialog'
@@ -1010,7 +1011,7 @@ function TechnicalTab({ patent, formData, editing, updateField }: {
             <h3>权利要求</h3>
             {claims.trim() && <span className="tech-claims-count">完整文本</span>}
           </div>
-          <div className="tech-claims-raw">{claims}</div>
+          <div className="tech-claims-raw">{patentText(claims)}</div>
         </section>
       ) : (
         <section className="tech-claims tech-claims-empty">
