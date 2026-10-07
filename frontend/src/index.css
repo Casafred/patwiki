@@ -2408,7 +2408,7 @@ input[type="checkbox"] {
 }
 
 .public-share-brand span {
-  margin-left: 8px;
+  margin-left: 0;
   color: #64748b;
   font-size: 12px;
   font-weight: 500;
@@ -2438,6 +2438,8 @@ input[type="checkbox"] {
 
 .public-share-chip {
   display: inline-flex;
+  align-items: center;
+  gap: 5px;
   max-width: 100%;
   padding: 4px 9px;
   border: 1px solid #cbd5e1;
@@ -4405,9 +4407,50 @@ body {
   }
 }
 
-.patwiki-brand-logo { display: block; flex-shrink: 0; object-fit: contain; }
+.patwiki-brand-logo, .patwiki-brand-wordmark { display: block; flex-shrink: 0; object-fit: contain; }
 .public-share-state > .patwiki-brand-logo { margin: 0 auto 16px; }
 .public-share-brand, .shared-form-header .shared-form-brand { display: flex; align-items: center; gap: 8px; }
+
+.legal-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  min-height: 54px;
+  padding: 14px 28px 18px;
+  border-top: 1px solid #e5eceb;
+  color: #71817d;
+  font-size: 11px;
+}
+.legal-footer-compact { max-width: 1180px; margin: 0 auto; padding: 18px 0 24px; border-top: 0; }
+.legal-footer-brand { display: inline-flex; align-items: center; gap: 7px; color: #23645f; font-weight: 700; }
+.legal-footer-copy { color: #879692; }
+.legal-footer-link { border: 0; padding: 0; background: transparent; color: #176b61; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.legal-footer-link:hover { color: #0c4f49; }
+.legal-modal-overlay { z-index: 1100; }
+.legal-modal { width: min(680px, calc(100vw - 28px)); max-height: min(760px, calc(100vh - 32px)); overflow: hidden; }
+.legal-modal .modal-header { align-items: flex-start; }
+.legal-modal-kicker { margin: 5px 0 0; color: #7b918d; font-size: 11px; }
+.legal-modal-body { max-height: min(560px, calc(100vh - 190px)); overflow-y: auto; color: #38504c; font-size: 13px; line-height: 1.8; }
+.legal-modal-body p { margin: 0 0 14px; }
+.legal-modal-body h3 { margin: 18px 0 6px; color: #1f4c46; font-size: 14px; }
+.legal-modal-body strong { color: #145c55; }
+.legal-modal-note { color: #8b9a97; font-size: 11px; }
+.management-brandline { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; color: #82918e; font-size: 11px; }
+.management-brandline .patwiki-brand-wordmark { width: 190px; height: auto; }
+.management-project-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.management-project-name .patwiki-brand-logo { border-radius: 6px; }
+.management-product-mark .patwiki-brand-logo { border-radius: 8px; }
+.project-wiki-eyebrow .patwiki-brand-logo { border-radius: 6px; }
+.public-share-brand .patwiki-brand-wordmark { width: 168px; height: auto; }
+.shared-form-header .shared-form-brand { min-width: 155px; }
+.shared-form-header .patwiki-brand-wordmark { width: 155px; height: auto; }
+
+@media (max-width: 640px) {
+  .legal-footer { align-items: flex-start; flex-direction: column; gap: 7px; padding: 14px 16px 18px; }
+  .legal-footer-compact { padding: 16px 0 22px; }
+  .legal-modal-body { max-height: calc(100vh - 205px); }
+}
 
 .sidebar-brand h1 {
   color: #f3fbfa;
@@ -4418,7 +4461,8 @@ body {
 .sidebar-brand p {
   margin-top: 3px;
   color: #8ba5a7;
-  font-size: 11px;
+  font-size: 8px;
+  white-space: nowrap;
 }
 
 .sidebar-database {

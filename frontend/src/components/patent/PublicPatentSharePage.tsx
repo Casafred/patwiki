@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import BrandLogo from '../common/BrandLogo'
+import BrandWordmark from '../common/BrandWordmark'
+import LegalFooter from '../common/LegalFooter'
 import { patentShareApi } from '../../api'
 import type { PublicPatent, PublicPatentShare } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -72,7 +74,7 @@ export default function PublicPatentSharePage({ token }: PublicPatentSharePagePr
   }, [loadShare])
 
   if (loading) {
-    return <div className="public-share-page"><div className="public-share-state"><BrandLogo size={48} /><p>加载技术主题...</p></div></div>
+    return <div className="public-share-page"><div className="public-share-state"><BrandLogo size={48} /><p>加载技术主题...</p></div><LegalFooter compact /></div>
   }
 
   if (error || !data) {
@@ -83,6 +85,7 @@ export default function PublicPatentSharePage({ token }: PublicPatentSharePagePr
           <div style={{ color: '#0f172a', fontSize: 20, fontWeight: 650 }}>无法打开分享页面</div>
           <div style={{ marginTop: 8, color: '#64748b', fontSize: 13 }}>{error || '页面不存在'}</div>
         </div>
+        <LegalFooter compact />
       </div>
     )
   }
@@ -104,7 +107,7 @@ export default function PublicPatentSharePage({ token }: PublicPatentSharePagePr
   return (
     <div className="public-share-page">
       <header className="public-share-header">
-        <div className="public-share-brand"><BrandLogo size={32} decorative /> PatWiki <span>技术主题</span></div>
+        <div className="public-share-brand"><BrandWordmark width={168} decorative /><span>技术主题</span></div>
         <div style={{ color: '#94a3b8', fontSize: 12 }}>只读分享 · 访问 {data.share.access_count} 次</div>
       </header>
       <main className="public-share-layout">
@@ -143,7 +146,7 @@ export default function PublicPatentSharePage({ token }: PublicPatentSharePagePr
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 6 }}>项目</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {patent.projects.map(project => <span key={project.id} className="public-share-chip">{project.name}</span>)}
+                    {patent.projects.map(project => <span key={project.id} className="public-share-chip"><BrandLogo size={15} decorative />{project.name}</span>)}
                   </div>
                 </div>
               )}
@@ -159,6 +162,7 @@ export default function PublicPatentSharePage({ token }: PublicPatentSharePagePr
           )}
         </aside>
       </main>
+      <LegalFooter compact />
     </div>
   )
 }

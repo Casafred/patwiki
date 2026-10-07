@@ -218,8 +218,8 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
       <div className="sidebar-brand">
         <div className="brand-mark" title="PatWiki · 专利知识工作台"><BrandLogo size={34} /></div>
         <div>
-          <h1>PatWiki</h1>
-          <p>专利知识工作台</p>
+          <h1>patwiki</h1>
+          <p>PATENT KNOWLEDGE WORKSPACE</p>
         </div>
         <button
           type="button"

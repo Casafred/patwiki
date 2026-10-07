@@ -1,27 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1400" height="960" viewBox="0 0 1400 960">
-  <rect width="1400" height="960" fill="#f7f8fa"/>
-  <text x="80" y="76" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="600" fill="#737b87">PATWIKI / VISUAL IDENTITY</text>
-  <text x="1320" y="76" text-anchor="end" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#737b87">01</text>
-  <g transform="translate(230 220) scale(.68)">
-    <path d="M64 48h92v40h-52v40h60V96h40v40l-32 32h-68v56H64Z M164 48h40v40h-40Z" fill="#0f766e"/>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="820" viewBox="0 0 1200 820">
+  <defs><linearGradient id="preview-teal" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#075e63"/><stop offset="1" stop-color="#147f7a"/></linearGradient></defs>
+  <rect width="1200" height="820" fill="#ffffff"/>
+  <g transform="translate(200 35) scale(1.05)">
+    <rect x="8" y="8" width="144" height="144" rx="27" fill="url(#preview-teal)"/>
+    <path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-10q0-4 4-4h28q4 0 4 4v20q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff" transform="translate(8 8) scale(.5625)"/>
+    <g transform="translate(8 8)" fill="#75e3c1"><rect x="100.1" y="13.5" width="10.1" height="36" rx="5.1"/><rect x="88.3" y="25.9" width="33.8" height="10.1" rx="5.1"/></g>
+    <text x="184" y="101" fill="#0c7775" font-family="Segoe UI, Arial, sans-serif" font-size="76" font-weight="700">patwiki</text>
+    <text x="186" y="139" fill="#315b6b" font-family="Segoe UI, Arial, sans-serif" font-size="19" font-weight="400">PATENT KNOWLEDGE WORKSPACE</text>
   </g>
-  <text x="420" y="337" font-family="Segoe UI, Arial, sans-serif" font-size="106" font-weight="700" fill="#1c2d33">PATWIKI</text>
-  <text x="425" y="385" font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#737b87">PATENT KNOWLEDGE WORKSPACE</text>
-  <path d="M80 503H1320" stroke="#dfe3e9"/>
-  <text x="80" y="552" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">APPLICATION ICON</text>
-  <image x="80" y="593" width="232" height="232" xlink:href="../patwiki-logo.svg"/>
-  <text x="405" y="552" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">MONOCHROME</text>
-  <g transform="translate(410 600) scale(.94)">
-    <path d="M64 48h92v40h-52v40h60V96h40v40l-32 32h-68v56H64Z M164 48h40v40h-40Z" fill="#1c2d33"/>
+  <g fill="#163f4a" font-family="Segoe UI, Arial, sans-serif">
+    <text x="58" y="324" font-size="24" font-weight="600">LOGO VARIANTS</text>
+    <text x="645" y="324" font-size="24" font-weight="600">DESIGN LANGUAGE</text>
   </g>
-  <rect x="745" y="585" width="305" height="248" fill="#1c2d33"/>
-  <g transform="translate(782 594) scale(.94)">
-    <path d="M64 48h92v40h-52v40h60V96h40v40l-32 32h-68v56H64Z M164 48h40v40h-40Z" fill="#fff"/>
+  <path d="M58 342H578M645 342H1142" stroke="#a9bdc4" stroke-width="2"/>
+  <g transform="translate(86 390)">
+    <rect width="168" height="168" rx="32" fill="url(#preview-teal)"/>
+    <path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-10q0-4 4-4h28q4 0 4 4v20q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff" transform="scale(.65625)"/>
+    <g fill="#75e3c1"><rect x="116.7" y="15.75" width="11.8" height="42" rx="5.9"/><rect x="103" y="30.2" width="39.4" height="11.8" rx="5.9"/></g>
   </g>
-  <text x="1140" y="552" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">SMALL SIZES</text>
-  <image x="1140" y="627" width="64" height="64" xlink:href="../patwiki-logo.svg"/>
-  <image x="1236" y="643" width="32" height="32" xlink:href="../patwiki-logo.svg"/>
-  <text x="1140" y="734" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#737b87">64 px / 32 px</text>
-  <text x="80" y="919" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">GEOMETRIC P / CONNECTED KNOWLEDGE</text>
-  <text x="1320" y="919" text-anchor="end" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#737b87">#0F766E</text>
+  <rect x="317" y="390" width="168" height="168" rx="32" fill="#090d0e"/>
+  <g transform="translate(346 420) scale(.53)">
+    <path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-10q0-4 4-4h28q4 0 4 4v20q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff"/>
+    <g fill="#fff"><rect x="178" y="24" width="18" height="64" rx="9"/><rect x="157" y="46" width="60" height="18" rx="9"/></g>
+  </g>
+  <g transform="translate(84 596)"><rect width="48" height="48" rx="9" fill="url(#preview-teal)"/><path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-10q0-4 4-4h28q4 0 4 4v20q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff" transform="scale(.1875)"/><g fill="#75e3c1"><rect x="33.4" y="4.5" width="3.4" height="12" rx="1.7"/><rect x="29.4" y="8.6" width="11.3" height="3.4" rx="1.7"/></g></g>
+  <g transform="translate(155 596)"><rect width="32" height="32" rx="6" fill="url(#preview-teal)"/><path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-10q0-4 4-4h28q4 0 4 4v20q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff" transform="scale(.125)"/><g fill="#75e3c1"><rect x="22.25" y="3" width="2.25" height="8" rx="1.1"/><rect x="19.6" y="5.75" width="7.5" height="2.25" rx="1.1"/></g></g>
+  <g fill="#315b6b" font-family="Segoe UI, Arial, sans-serif" font-size="18">
+    <text x="86" y="582">APP ICON</text>
+    <text x="317" y="582">MONOCHROME MARK</text>
+    <text x="84" y="672">48 px</text>
+    <text x="155" y="672">32 px</text>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#173b40">
+    <rect x="645" y="378" width="14" height="14" rx="4" fill="#0c7775"/><text x="682" y="392" font-size="20">Geometric P · patent architecture</text>
+    <rect x="645" y="430" width="14" height="14" rx="4" fill="#75e3c1"/><text x="682" y="444" font-size="20">Active node · knowledge module</text>
+    <rect x="645" y="482" width="14" height="14" rx="4" fill="#315b6b"/><text x="682" y="496" font-size="20">Connected network · open collaboration</text>
+    <rect x="645" y="534" width="14" height="14" rx="4" fill="#dfe9e8"/><text x="682" y="548" font-size="20">Custom geometry · precise and modern</text>
+  </g>
+  <path d="M58 730H1142" stroke="#e2ebea"/>
+  <text x="58" y="774" fill="#315b6b" font-family="Segoe UI, Arial, sans-serif" font-size="16">PATWIKI · PATENT KNOWLEDGE WORKSPACE</text>
+  <text x="1142" y="774" text-anchor="end" fill="#315b6b" font-family="Segoe UI, Arial, sans-serif" font-size="16">ALFRED SHI TEAM</text>
 </svg>

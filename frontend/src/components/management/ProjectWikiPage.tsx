@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { attachmentApi, patentApi, productApi, productLineApi, projectApi } from '../../api'
 import type { AttachmentMeta, Patent, Product, ProductLine, Project, ProjectHistoryEntry } from '../../types'
 import Icon from '../common/Icon'
+import BrandLogo from '../common/BrandLogo'
 import { getErrorMessage } from '../../lib/errors'
 
 const fieldLabels: Record<string, string> = {
@@ -171,7 +172,7 @@ export default function ProjectWikiPage() {
   return <div className="project-wiki-page">
     <header className="project-wiki-hero">
       <div className="project-wiki-hero-copy">
-        <div className="project-wiki-eyebrow"><Icon name="file" size={14} /> 项目 Wiki <span>项目空间</span></div>
+        <div className="project-wiki-eyebrow"><BrandLogo size={22} decorative /> <Icon name="file" size={14} /> 项目 Wiki <span>项目空间</span></div>
         <h2>{project.name}</h2>
         <p>{project.description || '集中查看项目资料、关联专利、附件和信息变更。'}</p>
         <div className="project-wiki-hero-meta">

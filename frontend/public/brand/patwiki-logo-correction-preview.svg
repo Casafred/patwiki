@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="920" viewBox="0 0 1100 920" role="img" aria-labelledby="title desc">
+  <title id="title">PatWiki corrected logo preview</title>
+  <desc id="desc">Corrected PatWiki app icon, monochrome mark and favicon preview.</desc>
+  <defs>
+    <linearGradient id="teal" x1="36" y1="32" x2="284" y2="284" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#075e63"/>
+      <stop offset="1" stop-color="#147f7a"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop stop-color="#75e3c1" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#75e3c1" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1100" height="920" fill="#fff"/>
+
+  <g transform="translate(295 36)">
+    <rect width="330" height="330" rx="62" fill="url(#teal)"/>
+    <circle cx="244" cy="66" r="52" fill="url(#glow)"/>
+    <g transform="translate(-8 -10) scale(1.35)">
+      <path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-22q0-4 4-4h28q4 0 4 4v32q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff"/>
+    </g>
+    <g fill="#75e3c1"><rect x="232.3" y="22.4" width="24.3" height="86.4" rx="12.2"/><rect x="204" y="52.1" width="81" height="24.3" rx="12.2"/></g>
+  </g>
+  <text x="550" y="415" text-anchor="middle" fill="#0c7775" font-family="Segoe UI, Arial, sans-serif" font-size="72" font-weight="700" letter-spacing="-2">patwiki</text>
+  <text x="550" y="451" text-anchor="middle" fill="#315b6b" font-family="Segoe UI, Arial, sans-serif" font-size="18" letter-spacing="1.3">PATENT KNOWLEDGE WORKSPACE</text>
+
+  <path d="M70 516H1030" stroke="#dce8e6"/>
+  <text x="70" y="564" fill="#183f49" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600">MONOCHROME</text>
+  <text x="435" y="564" fill="#183f49" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600">32 × 32 FAVICON</text>
+  <text x="760" y="564" fill="#183f49" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600">APP ICON</text>
+
+  <g transform="translate(88 602)">
+    <rect width="196" height="196" rx="36" fill="#090d0e"/>
+    <g transform="scale(.78)">
+      <path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-22q0-4 4-4h28q4 0 4 4v32q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff"/>
+      <g fill="#fff"><rect x="178" y="24" width="18" height="64" rx="9"/><rect x="157" y="46" width="60" height="18" rx="9"/></g>
+    </g>
+  </g>
+
+  <g transform="translate(440 600) scale(1.05)">
+    <rect width="152" height="152" rx="29" fill="url(#teal)"/>
+    <g transform="scale(.594)"><path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-22q0-4 4-4h28q4 0 4 4v32q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff"/></g>
+    <g fill="#75e3c1"><rect x="105.7" y="14.3" width="10.7" height="38" rx="5.3"/><rect x="93.3" y="27.3" width="35.6" height="10.7" rx="5.3"/></g>
+  </g>
+
+  <g transform="translate(790 602)">
+    <rect width="152" height="152" rx="29" fill="url(#teal)"/>
+    <circle cx="112" cy="38" r="25" fill="url(#glow)"/>
+    <g transform="scale(.594)"><path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-22q0-4 4-4h28q4 0 4 4v32q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff"/></g>
+    <g fill="#75e3c1"><rect x="105.7" y="14.3" width="10.7" height="38" rx="5.3"/><rect x="93.3" y="27.3" width="35.6" height="10.7" rx="5.3"/></g>
+  </g>
+  <g fill="#315b6b" font-family="Segoe UI, Arial, sans-serif" font-size="16"><text x="88" y="822">Black P + white node</text><text x="440" y="822">No square behind the plus</text><text x="790" y="822">Soft glow only</text></g>
+</svg>

@@ -18,6 +18,7 @@ import PublicPatentSharePage from './components/patent/PublicPatentSharePage'
 import { SharedFormView } from './components/views/FormView'
 import Icon from './components/common/Icon'
 import BrandLogo from './components/common/BrandLogo'
+import LegalFooter from './components/common/LegalFooter'
 import { customFieldApi, tagApi, projectApi, databaseApi, viewApi } from './api'
 import { useAppStore } from './store'
 import './index.css'
@@ -371,6 +372,7 @@ function WorkspaceApp() {
             <Route path="*" element={<Navigate to="/patents" replace />} />
           </Routes>
         </div>
+        <LegalFooter />
       </div>
 
       {showImport && (

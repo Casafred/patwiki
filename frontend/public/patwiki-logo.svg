@@ -1,9 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
   <title id="title">PatWiki</title>
-  <desc id="desc">A geometric P mark representing a patent knowledge network.</desc>
-  <rect width="256" height="256" rx="48" fill="#0f766e"/>
-  <g transform="translate(-6 -8)">
-    <path d="M64 48h92v40h-52v40h60V96h40v40l-32 32h-68v56H64Z" fill="#fff"/>
-    <path d="M164 48h40v40h-40Z" fill="#8ce0d0"/>
+  <desc id="desc">PatWiki geometric P mark with an active knowledge node.</desc>
+  <defs>
+    <linearGradient id="patwiki-teal" x1="18" y1="18" x2="238" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#075e63"/>
+      <stop offset="1" stop-color="#147f7a"/>
+    </linearGradient>
+    <radialGradient id="patwiki-plus-glow" cx="187" cy="56" r="38" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#75e3c1" stop-opacity=".36"/>
+      <stop offset="1" stop-color="#75e3c1" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#patwiki-teal)"/>
+  <path d="M60 48h84q4 0 4 4v28q0 4-4 4H96v70l20-24q4-4 10-4h34q4 0 4-4v-10q0-4 4-4h28q4 0 4 4v20q0 5-4 9l-24 24q-4 4-10 4H96v48q0 4-4 4H60q-4 0-4-4V52q0-4 4-4Z" fill="#fff"/>
+  <circle cx="187" cy="56" r="38" fill="url(#patwiki-plus-glow)"/>
+  <g fill="#75e3c1">
+    <rect x="178" y="24" width="18" height="64" rx="9"/>
+    <rect x="157" y="46" width="60" height="18" rx="9"/>
   </g>
 </svg>
