@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { fieldApi, importApi } from '../../api'
-import type { FieldMeta, GovernanceAction, GovernanceDecision, GovernanceObservation } from '../../types'
+import type { FieldMeta, GovernanceAction, GovernanceDecision, GovernanceObservation, ImportFieldGovernanceAudit } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { formatApiDateTime } from '../../lib/date'
 import { useAppStore } from '../../store'
+import SyncConflictQueue from './SyncConflictQueue'
 
 const ACTION_LABELS: Record<GovernanceAction, string> = {
   retain_source: '保留来源',
-  ignore: '忽略默认展示',
+  ignore: '忽略展示',
   map_existing: '映射已有字段',
   propose_field: '提交字段候选',
 }
@@ -22,13 +23,37 @@ const DIFFERENCE_LABELS: Record<string, string> = {
   quarantined: '待隔离',
 }
 
+const RESOLUTION_LABELS: Record<string, string> = {
+  mapped: '已映射字段',
+  unmapped_retained: '来源值待映射',
+  quarantined: '已隔离',
+  source_only: '保留来源',
+  ignored: '忽略展示',
+  candidate: '字段候选',
+}
+
+const REVIEW_ACTION_LABELS: Record<string, string> = {
+  adopt: '采用导入值',
+  keep_existing: '保留现有值',
+  fill_empty: '仅填充空值',
+  merge: '融合合并',
+  ignore: '忽略本单元格',
+  quarantine: '隔离待处理',
+}
+
 function compact(value?: string | null) {
   if (!value) return '-'
-  return value.length > 120 ? `${value.slice(0, 120)}...` : value
+  return value.length > 180 ? `${value.slice(0, 180)}...` : value
 }
 
 function formatDate(value?: string | null) {
   return formatApiDateTime(value)
+}
+
+function displayAuditValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return '（空）'
+  if (typeof value === 'string') return value
+  return JSON.stringify(value, null, 2)
 }
 
 export default function ImportGovernancePage() {
@@ -40,8 +65,11 @@ export default function ImportGovernancePage() {
   const [items, setItems] = useState<GovernanceObservation[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
-  const pageSize = 50
+  const [pageSize, setPageSize] = useState(50)
   const [fields, setFields] = useState<FieldMeta[]>([])
+  const [allFields, setAllFields] = useState<FieldMeta[]>([])
+  const [activeView, setActiveView] = useState<'conflicts' | 'fields' | 'audits'>('conflicts')
+  const [conflictCount, setConflictCount] = useState(0)
   const [sourceField, setSourceField] = useState('')
   const [batchId, setBatchId] = useState(() => searchParams.get('batch_id')?.replace(/\D/g, '') || '')
   const [patentId, setPatentId] = useState(() => searchParams.get('patent_id')?.replace(/\D/g, '') || '')
@@ -57,6 +85,15 @@ export default function ImportGovernancePage() {
   const [historyBusyKey, setHistoryBusyKey] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [auditItems, setAuditItems] = useState<ImportFieldGovernanceAudit[]>([])
+  const [auditTotal, setAuditTotal] = useState(0)
+  const [auditOffset, setAuditOffset] = useState(0)
+  const [auditSearch, setAuditSearch] = useState('')
+  const [auditQuery, setAuditQuery] = useState('')
+  const [auditField, setAuditField] = useState('')
+  const [auditSource, setAuditSource] = useState('')
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditPageSize, setAuditPageSize] = useState(30)
 
   const loadItems = useCallback(async () => {
     setLoading(true)
@@ -75,7 +112,7 @@ export default function ImportGovernancePage() {
       setTotal(result.total)
       return result
     } catch (requestError: unknown) {
-      setError(getErrorMessage(requestError, '待治理属性加载失败'))
+      setError(getErrorMessage(requestError, '待治理字段加载失败'))
     } finally {
       setLoading(false)
     }
@@ -83,16 +120,43 @@ export default function ImportGovernancePage() {
   }, [batchId, currentDatabaseId, databaseId, offset, pageSize, patentId, sourceField, sourceRowId])
 
   useEffect(() => {
-    // Synchronize the table with the current filters.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadItems()
+    const timer = window.setTimeout(() => void loadItems(), 220)
+    return () => window.clearTimeout(timer)
   }, [loadItems])
 
   useEffect(() => {
     fieldApi.list()
-      .then(result => setFields(result.filter(field => field.editable !== false && !field.is_formula)))
-      .catch(() => setFields([]))
+      .then(result => {
+        setAllFields(result)
+        setFields(result.filter(field => field.editable !== false && !field.is_formula))
+      })
+      .catch(() => { setFields([]); setAllFields([]) })
   }, [])
+
+  const loadAudits = useCallback(async () => {
+    setAuditLoading(true)
+    setError('')
+    try {
+      const result = await importApi.listImportGovernanceAudits({
+        database_id: databaseId ? Number(databaseId) : currentDatabaseId ?? undefined,
+        q: auditQuery.trim() || undefined,
+        field_key: auditField.trim() || undefined,
+        source_kind: auditSource || undefined,
+        offset: auditOffset,
+        limit: auditPageSize,
+      })
+      setAuditItems(result.items)
+      setAuditTotal(result.total)
+    } catch (requestError: unknown) {
+      setError(getErrorMessage(requestError, '导入变更审计加载失败'))
+    } finally {
+      setAuditLoading(false)
+    }
+  }, [auditField, auditOffset, auditPageSize, auditQuery, auditSource, currentDatabaseId, databaseId])
+
+  useEffect(() => {
+    void loadAudits()
+  }, [loadAudits])
 
   const sourceFields = useMemo(
     () => [...new Set(items.map(item => item.source_field_name))].sort((a, b) => a.localeCompare(b)),
@@ -159,123 +223,247 @@ export default function ImportGovernancePage() {
   const pageNumber = Math.floor(offset / pageSize) + 1
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const revertibleBatchId = history.find(decision => decision.decision_batch_id && !decision.reversed)?.decision_batch_id
+  const scopedDatabaseId = databaseId ? Number(databaseId) : currentDatabaseId ?? undefined
 
   return (
-    <div className="management-page">
+    <div className="management-page gov-page">
       <div className="page-header">
         <div>
           <h2 className="page-title">数据治理</h2>
-          <p className="page-subtitle">待治理字段保存在来源记录中；隔离或待补身份的整行需修正来源后重新导入</p>
+          <p className="page-subtitle">来源差异与字段取舍</p>
         </div>
         <div className="workspace-page-actions">
           <button className="btn btn-secondary" onClick={() => navigate(databaseId ? `/db/${databaseId}/patents${location.search}` : `/patents${location.search}`)}>返回数据表</button>
-          <button className="btn btn-secondary" onClick={() => void loadItems()} disabled={loading}>刷新</button>
+          {activeView === 'fields' && <button className="btn btn-secondary" onClick={() => void loadItems()} disabled={loading}>刷新</button>}
+          {activeView === 'audits' && <button className="btn btn-secondary" onClick={() => void loadAudits()} disabled={auditLoading}>刷新</button>}
         </div>
       </div>
 
-      {error && <div className="management-error" style={{ marginBottom: 12 }}>{error}</div>}
-      {notice && <div style={{ margin: '0 28px 12px', padding: '9px 12px', border: '1px solid #bfe6de', borderRadius: 6, background: '#eefaf7', color: '#226d65', fontSize: 12 }}>{notice}</div>}
-
-      <div className="management-split" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        <input className="form-input" value={sourceField} onChange={event => { setSourceField(event.target.value); setOffset(0) }} placeholder="按来源列筛选" style={{ width: 190 }} list="governance-source-fields" />
-        <datalist id="governance-source-fields">
-          {sourceFields.map(field => <option key={field} value={field} />)}
-        </datalist>
-        <input className="form-input" value={batchId} onChange={event => { setBatchId(event.target.value.replace(/\D/g, '')); setOffset(0) }} placeholder="导入批次 ID" inputMode="numeric" style={{ width: 130 }} />
-        <input className="form-input" value={patentId} onChange={event => { setPatentId(event.target.value.replace(/\D/g, '')); setOffset(0) }} placeholder="专利 ID" inputMode="numeric" style={{ width: 110 }} />
-        <input className="form-input" value={sourceRowId} onChange={event => { setSourceRowId(event.target.value.replace(/\D/g, '')); setOffset(0) }} placeholder="来源行 ID" inputMode="numeric" style={{ width: 120 }} />
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#475569' }}>
-          <input type="checkbox" checked={batchScope} onChange={event => setBatchScope(event.target.checked)} />
-          按同批次同来源列处理
-        </label>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#475569' }}>
-          <input type="checkbox" checked={adoptedValue} onChange={event => setAdoptedValue(event.target.checked)} />
-          映射时采用来源值覆盖已有值
-        </label>
-        <span style={{ marginLeft: 'auto', color: '#64748b', fontSize: 12 }}>待处理 {total} 个字段值，本页 {items.length} 个</span>
+      <div className="gov-overview">
+        <div className="gov-overview-stat"><span>待处理冲突</span><strong>{conflictCount}</strong></div>
+        <div className="gov-overview-stat"><span>待治理字段值</span><strong>{total}</strong></div>
+        <div className="gov-overview-stat gov-overview-detail"><span>导入取舍审计</span><strong>{auditTotal}</strong></div>
       </div>
 
-      <div className="management-table" style={{ overflowX: 'auto' }}>
-        {loading ? (
-          <div className="loading-state" style={{ minHeight: 180 }}>加载中...</div>
-        ) : items.length === 0 ? (
-          <div className="empty-state" style={{ minHeight: 180 }}>暂无待治理属性</div>
-        ) : (
-          <table className="data-grid" style={{ minWidth: 1280 }}>
-            <thead>
-              <tr>
-                <th>来源</th>
-                <th>专利/行</th>
-                <th>原始列</th>
-                <th>原始值</th>
-                <th>当前值</th>
-                <th>候选值</th>
-                <th>差异</th>
-                <th>映射目标</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
+      <div className="gov-main-tabs" role="tablist" aria-label="数据治理视图">
+        <button type="button" role="tab" aria-selected={activeView === 'conflicts'} className={activeView === 'conflicts' ? 'is-active' : ''} onClick={() => setActiveView('conflicts')}>
+          冲突处理 <span>{conflictCount}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={activeView === 'fields'} className={activeView === 'fields' ? 'is-active' : ''} onClick={() => setActiveView('fields')}>
+          字段治理 <span>{total}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={activeView === 'audits'} className={activeView === 'audits' ? 'is-active' : ''} onClick={() => setActiveView('audits')}>
+          导入取舍审计 <span>{auditTotal}</span>
+        </button>
+      </div>
+
+      {activeView === 'conflicts' ? (
+        <SyncConflictQueue databaseId={scopedDatabaseId} fields={allFields} onCountChange={setConflictCount} />
+      ) : activeView === 'fields' ? (
+        <section className="gov-workspace">
+          {error && <div className="management-error gov-message">{error}</div>}
+          {notice && <div className="gov-notice gov-message" role="status">{notice}</div>}
+
+          <div className="gov-observation-toolbar">
+            <div className="gov-filter-group">
+              <label className="gov-search-field">
+                <span>来源列</span>
+                <input className="form-input" value={sourceField} onChange={event => { setSourceField(event.target.value); setOffset(0) }} placeholder="选择或输入来源列" list="governance-source-fields" />
+                <datalist id="governance-source-fields">
+                  {sourceFields.map(field => <option key={field} value={field} />)}
+                </datalist>
+              </label>
+              <label className="gov-search-field gov-id-filter">
+                <span>批次 ID</span>
+                <input className="form-input" value={batchId} onChange={event => { setBatchId(event.target.value.replace(/\D/g, '')); setOffset(0) }} inputMode="numeric" />
+              </label>
+              <label className="gov-search-field gov-id-filter">
+                <span>专利 ID</span>
+                <input className="form-input" value={patentId} onChange={event => { setPatentId(event.target.value.replace(/\D/g, '')); setOffset(0) }} inputMode="numeric" />
+              </label>
+              <label className="gov-search-field gov-id-filter">
+                <span>来源行 ID</span>
+                <input className="form-input" value={sourceRowId} onChange={event => { setSourceRowId(event.target.value.replace(/\D/g, '')); setOffset(0) }} inputMode="numeric" />
+              </label>
+            </div>
+          <div className="gov-filter-options">
+            <label><input type="checkbox" checked={batchScope} onChange={event => setBatchScope(event.target.checked)} />按同批次同来源列处理</label>
+            <label><input type="checkbox" checked={adoptedValue} onChange={event => setAdoptedValue(event.target.checked)} />映射时采用来源值</label>
+            <button className="btn btn-secondary" onClick={() => { setSourceField(''); setBatchId(''); setPatentId(''); setSourceRowId(''); setOffset(0) }} disabled={loading || (!sourceField && !batchId && !patentId && !sourceRowId)}>清除筛选</button>
+            <label className="gov-audit-page-size"><span>每页</span><select className="form-input" value={pageSize} onChange={event => { setOffset(0); setPageSize(Number(event.target.value)) }}><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select></label>
+            <span>共 {total} 项</span>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="loading-state gov-empty">正在加载字段记录...</div>
+          ) : items.length === 0 ? (
+            <div className="empty-state gov-empty">当前筛选下没有待治理字段</div>
+          ) : (
+            <div className="gov-observation-list">
               {items.map(item => {
                 const selectedField = mappingBySource[item.source_field_name] || ''
                 const busy = busyKey?.startsWith(`${item.id}:`) ?? false
+                const quarantined = item.field_resolution === 'quarantined' || item.source_row_status === 'retained_source_row' || item.source_row_status === 'quarantined'
                 return (
-                  <tr key={item.id}>
-                    <td style={{ maxWidth: 180 }}>
-                      <div title={item.filename}>{compact(item.filename)}</div>
-                      <small>{compact(item.source_table_title)} / {compact(item.worksheet_name)}</small>
-                    </td>
-                    <td>{item.patent_id ? `#${item.patent_id}` : '未入专利库'}<br /><small>批次 #{item.batch_id} / 第 {item.source_row} 行</small>{item.source_row_reason && <small title={item.source_row_reason} style={{ display: 'block' }}>{compact(item.source_row_reason)}</small>}</td>
-                    <td><strong>{item.source_field_name}</strong><br /><small>{item.field_resolution}</small></td>
-                    <td title={item.raw_value || ''}>{compact(item.raw_value)}</td>
-                    <td title={item.current_value || ''}>{compact(item.current_value)}</td>
-                    <td title={item.candidate_value || ''}>{compact(item.candidate_value)}</td>
-                    <td>{DIFFERENCE_LABELS[item.difference_type] || item.difference_type}</td>
-                    <td>
-                      <select
-                        className="form-input"
-                        value={selectedField}
-                        onChange={event => setMappingBySource(previous => ({ ...previous, [item.source_field_name]: event.target.value }))}
-                        style={{ minWidth: 170 }}
-                      >
-                        <option value="">选择已有字段</option>
-                        {fields.map(field => <option key={field.key} value={field.key}>{field.name} ({field.key})</option>)}
-                      </select>
-                    </td>
-                    <td>
-                      {item.field_resolution === 'quarantined' || item.source_row_status === 'retained_source_row' || item.source_row_status === 'quarantined' ? <small>来源行待修正；原始值已保存，修正后重新导入</small> : <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', minWidth: 260 }}>
-                        <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'retain_source')}>保留来源</button>
-                        <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'ignore')}>忽略</button>
-                        <button className="btn btn-secondary" disabled={busy || !selectedField} onClick={() => void decide(item, 'map_existing', adoptedValue)}>映射</button>
-                        <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'propose_field')}>提交候选</button>
-                        <button className="btn btn-secondary" disabled={busy} onClick={() => void showHistory(item)}>查看历史</button>
-                      </div>}
-                      <small style={{ display: 'block', marginTop: 4 }}>最近决策：{item.final_decision || '-'} / {formatDate(item.decided_at)}</small>
-                    </td>
-                  </tr>
+                  <article className="gov-observation-card" key={item.id}>
+                    <header className="gov-observation-header">
+                      <div className="gov-observation-field">
+                        <strong>{item.source_field_name}</strong>
+                        <span>{RESOLUTION_LABELS[item.field_resolution] || item.field_resolution} · {DIFFERENCE_LABELS[item.difference_type] || item.difference_type}</span>
+                      </div>
+                      <div className="gov-observation-source">
+                        <strong title={item.filename}>{compact(item.filename)}</strong>
+                        <span>{compact(item.source_table_title)}{item.worksheet_name ? ` · ${compact(item.worksheet_name)}` : ''}</span>
+                      </div>
+                    </header>
+
+                    <div className="gov-observation-meta">
+                      <span>{item.patent_id ? `专利 #${item.patent_id}` : '尚未关联专利'}</span>
+                      <span>批次 #{item.batch_id}</span>
+                      <span>来源第 {item.source_row} 行</span>
+                      {item.source_row_reason && <span title={item.source_row_reason}>{compact(item.source_row_reason)}</span>}
+                      <span>最近决策 {item.final_decision ? REVIEW_ACTION_LABELS[item.final_decision] || item.final_decision : '未处理'} · {formatDate(item.decided_at)}</span>
+                    </div>
+
+                    <div className="gov-observation-values">
+                      <div className="gov-value-panel gov-value-base"><span>来源原始值</span><pre>{item.raw_value || '-'}</pre></div>
+                      <div className="gov-value-panel gov-value-local"><span>当前字段值</span><pre>{item.current_value || '-'}</pre></div>
+                      <div className="gov-value-panel gov-value-remote"><span>候选值</span><pre>{item.candidate_value || '-'}</pre></div>
+                    </div>
+
+                    {item.source_row_values && Object.keys(item.source_row_values).length > 0 && (
+                      <details className="gov-evidence-details">
+                        <summary>展开来源行证据 · {Object.keys(item.source_row_values).length} 个字段</summary>
+                        <div className="gov-evidence-grid">
+                          {Object.entries(item.source_row_values).map(([key, value]) => {
+                            const evidence = typeof value === 'string' ? value : JSON.stringify(value)
+                            return (
+                              <div key={key}>
+                                <strong>{key}</strong>
+                                <span title={evidence}>{compact(evidence)}</span>
+                                {item.source_row_hyperlinks?.[key] && <a href={item.source_row_hyperlinks[key]} target="_blank" rel="noreferrer">打开来源链接</a>}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </details>
+                    )}
+
+                    <footer className="gov-observation-actions">
+                      <div className="gov-mapping-control">
+                        <label htmlFor={`governance-map-${item.id}`}>映射到已有字段</label>
+                        <select
+                          id={`governance-map-${item.id}`}
+                          className="form-input"
+                          value={selectedField}
+                          onChange={event => setMappingBySource(previous => ({ ...previous, [item.source_field_name]: event.target.value }))}
+                        >
+                          <option value="">选择字段</option>
+                          {fields.map(field => <option key={field.key} value={field.key}>{field.name} ({field.key})</option>)}
+                        </select>
+                      </div>
+                      {quarantined ? (
+                        <span className="gov-quarantine-note">来源行需修正后重新导入；原始值已保留</span>
+                      ) : (
+                        <div className="gov-action-group">
+                          <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'retain_source')}>保留来源</button>
+                          <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'ignore')}>忽略展示</button>
+                          <button className="btn btn-primary" disabled={busy || !selectedField} onClick={() => void decide(item, 'map_existing', adoptedValue)}>映射字段</button>
+                          <button className="btn btn-secondary" disabled={busy} onClick={() => void decide(item, 'propose_field')}>提交候选</button>
+                          <button className="btn btn-secondary" disabled={busy} onClick={() => void showHistory(item)}>查看历史</button>
+                        </div>
+                      )}
+                    </footer>
+                  </article>
                 )
               })}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 12 }}>
-        <button className="btn btn-secondary" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - pageSize))}>上一页</button>
-        <span style={{ color: '#64748b', fontSize: 12 }}>第 {pageNumber} / {pageCount} 页</span>
-        <button className="btn btn-secondary" disabled={offset + pageSize >= total || loading} onClick={() => setOffset(offset + pageSize)}>下一页</button>
-      </div>
-
-      {historyItem && (
-        <section style={{ marginTop: 18, borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: 15, color: '#1e293b' }}>治理历史</h3>
-              <div style={{ marginTop: 4, color: '#64748b', fontSize: 12 }}>
-                {historyItem.source_field_name} / 第 {historyItem.source_row} 行 / {compact(historyItem.raw_value)}
-              </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          )}
+
+          <div className="gov-pagination">
+            <button className="btn btn-secondary" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - pageSize))}>上一页</button>
+            <span>第 {pageNumber} / {pageCount} 页</span>
+            <button className="btn btn-secondary" disabled={offset + pageSize >= total || loading} onClick={() => setOffset(offset + pageSize)}>下一页</button>
+          </div>
+        </section>
+      ) : (
+        <section className="gov-workspace">
+          {error && <div className="management-error gov-message">{error}</div>}
+          <div className="gov-audit-toolbar">
+            <label className="gov-search-field gov-audit-search">
+              <span>检索专利、字段或来源</span>
+              <input className="form-input" value={auditSearch} onChange={event => setAuditSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { setAuditOffset(0); setAuditQuery(auditSearch.trim()) } }} placeholder="标题、专利号、字段名、来源" />
+            </label>
+            <label className="gov-search-field gov-field-filter">
+              <span>字段</span>
+              <input className="form-input" value={auditField} onChange={event => { setAuditField(event.target.value); setAuditOffset(0) }} placeholder="全部字段" list="governance-audit-fields" />
+              <datalist id="governance-audit-fields">{allFields.map(field => <option key={field.key} value={field.key} label={field.name} />)}</datalist>
+            </label>
+            <label className="gov-search-field gov-audit-source">
+              <span>导入来源</span>
+              <select className="form-input" value={auditSource} onChange={event => { setAuditSource(event.target.value); setAuditOffset(0) }}>
+                <option value="">全部来源</option>
+                <option value="file_import">文件导入</option>
+                <option value="collaboration_sync">协同同步</option>
+                <option value="department_publication">部门发布</option>
+                <option value="external_sync">外部同步</option>
+                <option value="governance_import">治理映射</option>
+              </select>
+            </label>
+            <button className="btn btn-secondary" onClick={() => { setAuditOffset(0); setAuditQuery(auditSearch.trim()) }} disabled={auditLoading}>查询</button>
+            <button className="btn btn-secondary" onClick={() => { setAuditSearch(''); setAuditQuery(''); setAuditField(''); setAuditSource(''); setAuditOffset(0) }} disabled={auditLoading || (!auditSearch && !auditQuery && !auditField && !auditSource)}>清除</button>
+            <label className="gov-audit-page-size"><span>每页</span><select className="form-input" value={auditPageSize} onChange={event => { setAuditOffset(0); setAuditPageSize(Number(event.target.value)) }}><option value={30}>30</option><option value={50}>50</option><option value={100}>100</option></select></label>
+            <span className="gov-result-count">共 {auditTotal} 条</span>
+          </div>
+          {auditLoading ? <div className="loading-state gov-empty">正在加载导入取舍审计...</div> : auditItems.length === 0 ? <div className="empty-state gov-empty">当前筛选下没有非空异值取舍记录</div> : (
+            <div className="gov-observation-list">
+              {auditItems.map(item => (
+                <article className="gov-audit-item" key={item.id}>
+                  <header className="gov-audit-header">
+                    <div className="gov-conflict-subject">
+                      <strong>{item.patent_id ? <Link className="gov-patent-link" to={databaseId ? `/db/${databaseId}/patents/${item.patent_id}` : `/patents/${item.patent_id}`}>{item.patent_title || `专利 #${item.patent_id}`}</Link> : item.patent_title || `专利 #${item.patent_uid || '已删除'}`}</strong>
+                      <span>{[item.application_number, item.publication_number].filter(Boolean).join(' · ') || `专利 #${item.patent_id}`}</span>
+                    </div>
+                    <div className="gov-conflict-tags">
+                      <span className="gov-tag gov-tag-field">{item.field_key}</span>
+                      <span className="gov-tag">{item.source_label || item.source_kind}</span>
+                      <span className="gov-tag">{item.resolution === 'merge' ? '融合合并' : item.resolution === 'manual' ? '自定义取值' : item.resolution === 'keep_existing' ? '保留原值' : item.resolution === 'quarantine' ? '隔离待处理' : '采用导入值'}</span>
+                    </div>
+                  </header>
+                  <div className="gov-audit-context">
+                    <span>{formatDate(item.created_at)}</span>
+                    {item.import_batch_id && <span>批次 #{item.import_batch_id}</span>}
+                    {item.source_row && <span>来源第 {item.source_row} 行</span>}
+                    {item.source_field_name && <span>来源列：{item.source_field_name}</span>}
+                    {item.decided_by && <span>处理人：{item.decided_by}</span>}
+                  </div>
+                  <div className="gov-value-grid gov-audit-values">
+                    <div className="gov-value-panel gov-value-local"><span>导入前</span><pre>{displayAuditValue(item.old_value)}</pre></div>
+                    <div className="gov-value-panel gov-value-remote"><span>导入候选</span><pre>{displayAuditValue(item.incoming_value)}</pre></div>
+                    <div className="gov-value-panel gov-value-final"><span>最终值</span><pre>{displayAuditValue(item.final_value)}</pre></div>
+                  </div>
+                  {item.reason && <p className="gov-audit-reason">{item.reason}</p>}
+                </article>
+              ))}
+            </div>
+          )}
+          <div className="gov-pagination">
+            <button className="btn btn-secondary" disabled={auditOffset === 0 || auditLoading} onClick={() => setAuditOffset(Math.max(0, auditOffset - auditPageSize))}>上一页</button>
+            <span>第 {Math.floor(auditOffset / auditPageSize) + 1} / {Math.max(1, Math.ceil(auditTotal / auditPageSize))} 页</span>
+            <button className="btn btn-secondary" disabled={auditOffset + auditPageSize >= auditTotal || auditLoading} onClick={() => setAuditOffset(auditOffset + auditPageSize)}>下一页</button>
+          </div>
+        </section>
+      )}
+
+      {historyItem && activeView === 'fields' && (
+        <section className="gov-history-panel">
+          <div className="gov-history-header">
+            <div>
+              <h3>治理历史</h3>
+              <div>{historyItem.source_field_name} / 第 {historyItem.source_row} 行 / {compact(historyItem.raw_value)}</div>
+            </div>
+            <div className="gov-action-group">
               {revertibleBatchId && (
                 <button className="btn btn-secondary" disabled={historyBusyKey !== null} onClick={() => void revertBatch(revertibleBatchId)}>
                   恢复最近治理批次
@@ -285,12 +473,12 @@ export default function ImportGovernancePage() {
             </div>
           </div>
           {historyLoading ? (
-            <div className="loading-state" style={{ minHeight: 80 }}>加载中...</div>
+            <div className="loading-state gov-empty">加载中...</div>
           ) : history.length === 0 ? (
-            <div className="empty-state" style={{ minHeight: 80 }}>暂无治理历史</div>
+            <div className="empty-state gov-empty">暂无治理历史</div>
           ) : (
-            <div className="management-table" style={{ overflowX: 'auto', marginTop: 10 }}>
-              <table className="data-grid" style={{ minWidth: 900 }}>
+            <div className="management-table gov-history-table">
+              <table className="data-grid">
                 <thead><tr><th>时间</th><th>动作</th><th>批次</th><th>映射版本</th><th>操作者</th><th>原因</th><th>状态</th></tr></thead>
                 <tbody>
                   {history.map(decision => (

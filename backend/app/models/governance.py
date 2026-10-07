@@ -97,3 +97,31 @@ class GovernanceReversal(Base):
     reversed_by = Column(String(100), nullable=False, default="local-user")
     reason = Column(Text)
     created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+class ImportFieldGovernanceAudit(Base):
+    """Unified audit of non-empty imported candidates and their resolution."""
+
+    __tablename__ = "import_field_governance_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patent_id = Column(Integer, ForeignKey("patents.id", ondelete="SET NULL"), nullable=True, index=True)
+    patent_uid = Column(String(100), nullable=True, index=True)
+    patent_title = Column(String(1000))
+    application_number = Column(String(100))
+    publication_number = Column(String(100))
+    database_id = Column(Integer, ForeignKey("patent_databases.id", ondelete="SET NULL"), nullable=True, index=True)
+    field_key = Column(String(200), nullable=False, index=True)
+    old_value = Column(JSON, nullable=False)
+    incoming_value = Column(JSON, nullable=False)
+    final_value = Column(JSON, nullable=False)
+    source_kind = Column(String(50), nullable=False, index=True)
+    source_label = Column(String(500))
+    source_reference = Column(String(200), index=True)
+    import_batch_id = Column(Integer, ForeignKey("import_batches.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_row = Column(Integer)
+    source_field_name = Column(String(500))
+    resolution = Column(String(40), nullable=False, default="use_incoming")
+    decided_by = Column(String(100))
+    reason = Column(Text)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)

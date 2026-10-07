@@ -10,13 +10,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, load_only
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app.core.time import utc_now_naive
-from app.models import DatabaseMembership, LegalStatus, Patent, PatentDatabase, PatentDatabaseMembership, PatentHistory, PatentType, Product, RiskLevel, User
+from app.models import DatabaseMembership, ImportBatch, ImportBatchStatus, LegalStatus, Patent, PatentDatabase, PatentDatabaseMembership, PatentHistory, PatentType, Product, RiskLevel, User
 from app.services.patent_identity_service import ensure_patent_identifiers
 from app.models.collaboration_sync import (
     CollaborationCredential, PermissionGrant, SyncConflict, SyncEntityFieldState,
@@ -32,6 +32,7 @@ from app.services.patent_identity_service import (
 from app.services.patent_service import PatentService, _stringify_value
 from app.services.patent_database_scope import in_database
 from app.services.collaboration_library_field_service import PRIVATE_FIELDS, plan_library_fields, apply_library_fields
+from app.services.field_registry import get_all_fields_meta
 
 EXPORT_FIELDS = frozenset({
     "application_number", "publication_number", "grant_number", "title", "abstract", "claims",
@@ -43,6 +44,15 @@ EXPORT_FIELDS = frozenset({
     "risk_description", "module", "application_status", "scope_description", "notes", "custom_fields",
 })
 PRIVILEGED = {"system_admin", "department_leader"}
+MERGE_BLOCKED_SYNC_FIELDS = {
+    "__delete__", "application_number", "publication_number", "grant_number", "filing_date",
+    "publication_date", "grant_date", "priority_date", "legal_status_date", "legal_status",
+    "patent_type", "has_risk", "risk_level", "country",
+}
+MERGE_BLOCKED_SYNC_TYPES = {
+    "date", "datetime", "number", "boolean", "select", "single_select", "rating",
+    "link", "url", "attachment", "formula", "lookup", "rollup",
+}
 
 
 def _owned_export_databases(db: Session, user_id: int) -> set[int]:
@@ -1061,7 +1071,11 @@ _PUBLICATION_FIELDS = EXPORT_FIELDS - {"custom_fields", "notes", "scope_descript
     "technical_problem", "technical_effect", "technical_solution", "has_risk", "risk_level", "risk_description", "application_status"}
 
 
-def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: User | None) -> None:
+def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: User | None,
+                           batch: ImportBatch, source_table_title: str, source_import_note: str,
+                           database_id: int, skipped_fields: set[str] | None = None,
+                           incoming_values: dict | None = None,
+                           resolutions: dict[str, str] | None = None) -> None:
     """Keep legacy risk projections auditable when a sync package carries them."""
     for field_key in _RISK_PROJECTION_FIELDS.intersection(updates):
         new_value = _coerce_remote_value(field_key, updates[field_key])
@@ -1077,7 +1091,31 @@ def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: Us
             new_value=_stringify_value(new_value),
             source="collaboration_sync",
             changed_by=actor.username if actor else None,
+            import_batch_id=batch.id,
+            source_table_title=source_table_title,
+            source_import_note=source_import_note,
+            source_field_name=field_key,
         ))
+        if field_key in (skipped_fields or set()):
+            continue
+        from app.services.import_governance_service import record_import_field_change
+        record_import_field_change(
+            db,
+            patent=patent,
+            field_key=field_key,
+            old_value=old_value,
+            incoming_value=(incoming_values or {}).get(field_key, new_value),
+            final_value=new_value,
+            database_id=database_id,
+            source_kind="collaboration_sync",
+            source_label=source_table_title,
+            source_reference=f"batch:{batch.id}",
+            import_batch_id=batch.id,
+            source_field_name=field_key,
+            resolution=(resolutions or {}).get(field_key, "use_incoming"),
+            decided_by=actor.username if actor else None,
+            reason=source_import_note,
+        )
 
 
 def apply_package(db: Session, user_id: int, package_uid: str, request, *, commit: bool = True) -> dict:
@@ -1090,13 +1128,67 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
         decision_details = {(item.entity_uid, item.field_key): item for item in request.decisions}
         if len(decisions) != len(request.decisions):
             raise HTTPException(400, "冲突决策重复")
+        if any(field_key == "__delete__" and choice in {"manual", "merge"}
+               for (_, field_key), choice in decisions.items()):
+            raise HTTPException(400, "删除冲突只能选择保留本地或接受来源删除")
+        if any(choice == "merge" and (
+                decision_details[key].value is None
+                or isinstance(decision_details[key].value, str) and not decision_details[key].value.strip()
+        ) for key, choice in decisions.items()):
+            raise HTTPException(400, "融合合并必须提供合并后的最终值")
+        field_types = {
+            str(field.get("key")): str(field.get("field_type") or "").lower()
+            for field in get_all_fields_meta(db)
+        }
+        for (_, field_key), choice in decisions.items():
+            actual_key = field_key.split(":", 2)[-1] if field_key.startswith("library:") else field_key
+            if choice == "merge" and (
+                actual_key in MERGE_BLOCKED_SYNC_FIELDS
+                or field_types.get(actual_key) in MERGE_BLOCKED_SYNC_TYPES
+            ):
+                raise HTTPException(400, f"字段 {field_key} 是单值字段，不适用融合合并，请选择保留本地或采用来源")
         conflict_keys = {(item["entity_uid"], item["field_key"]) for item in conflicts}
         if set(decisions) - conflict_keys:
             raise HTTPException(400, "决策包含当前包中不存在的冲突字段")
         origin_node_uid = package.manifest_json["origin_node_uid"]
         by_conflict_key = {(item["entity_uid"], item["field_key"]): item for item in conflicts}
         backup_path = _create_apply_backup(db, package_uid)
+        source_database_entries = (package.manifest_json or {}).get("databases", [])
+        if source_database_uid:
+            source_database_entries = [item for item in source_database_entries
+                                       if item.get("database_uid") == source_database_uid]
+        source_database_names = [item.get("name") or item.get("database_uid")
+                                 for item in source_database_entries]
+        source_table_title = f"来源库：{'、'.join(source_database_names) or '同步包'} → 目标库：{database.name}"
+        source_import_note = f"同步包 UID：{package.package_uid}"
+        import_batch = ImportBatch(
+            filename=f"协同同步包 {package.package_uid}.pwshare",
+            status=ImportBatchStatus.PROCESSING,
+            total_rows=len(records),
+            processed_rows=0,
+            source_table_title=source_table_title,
+            source_system="collaboration_sync",
+            import_note=source_import_note,
+            mapping_version="collaboration_sync_v1",
+            file_hash=package.file_hash,
+            review_config={
+                "batch_kind": "collaboration_sync",
+                "database_id": database.id,
+                "target_database_uid": database.database_uid,
+                "target_database_name": database.name,
+                "package_uid": package.package_uid,
+                "source_databases": source_database_entries,
+                "source_database_uid": source_database_uid,
+                "pending_conflicts": 0,
+                "backup_path": str(backup_path) if backup_path else None,
+            },
+            created_patent_ids=[],
+            started_at=utc_now_naive(),
+        )
+        db.add(import_batch)
+        db.flush()
         created = updated = unchanged = pending = 0
+        created_patent_ids = []
         actor = db.get(User, user_id)
         for plan in plans:
             row: SyncPackageRecord = plan["record"]
@@ -1117,18 +1209,45 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                         prior = db.query(SyncConflict).filter_by(package_id=package.id, entity_uid=row.entity_uid, field_key="__delete__").first()
                         if prior is None:
                             db.add(SyncConflict(conflict_uid=uid("conflict"), package_id=package.id,
-                                origin_node_uid=origin_node_uid, entity_uid=row.entity_uid, entity_type="patent",
+                                origin_node_uid=origin_node_uid, target_database_uid=database.database_uid,
+                                source_database_uid=source_database_uid, entity_uid=row.entity_uid, entity_type="patent",
                                 field_key="__delete__", base_value=conflict["base_value"], local_value=conflict["local_value"], remote_value="delete"))
+                        else:
+                            prior.target_database_uid = database.database_uid
+                            prior.source_database_uid = source_database_uid
+                            prior.base_value = conflict["base_value"]
+                            prior.local_value = conflict["local_value"]
+                            prior.remote_value = "delete"
+                            prior.status = "pending"
+                            prior.decision = None
+                            prior.final_value = None
+                            prior.decision_reason = None
+                            prior.decided_by = None
+                            prior.decided_at = None
                         pending += 1
                         continue
                     audit(db, user_id, "deletion_decided", package_id=package.id,
                         detail={**conflict, "choice": decisions[key], "reason": getattr(decision_details[key], "reason", None)})
                     prior = db.query(SyncConflict).filter_by(package_id=package.id, entity_uid=row.entity_uid, field_key="__delete__").first()
-                    if prior:
-                        prior.status = "resolved"
-                        prior.decision = decisions[key]
-                        prior.decided_by = user_id
-                        prior.decided_at = utc_now_naive()
+                    if prior is None:
+                        prior = SyncConflict(
+                            conflict_uid=uid("conflict"), package_id=package.id,
+                            origin_node_uid=origin_node_uid, target_database_uid=database.database_uid,
+                            source_database_uid=source_database_uid, entity_uid=row.entity_uid,
+                            entity_type="patent", field_key="__delete__",
+                        )
+                        db.add(prior)
+                    prior.base_value = conflict["base_value"]
+                    prior.local_value = conflict["local_value"]
+                    prior.remote_value = "delete"
+                    prior.status = "resolved"
+                    prior.decision = decisions[key]
+                    prior.target_database_uid = database.database_uid
+                    prior.source_database_uid = source_database_uid
+                    prior.final_value = "delete" if decisions[key] == "remote" else conflict["local_value"]
+                    prior.decision_reason = getattr(decision_details[key], "reason", None)
+                    prior.decided_by = user_id
+                    prior.decided_at = utc_now_naive()
                     if decisions[key] == "local":
                         unchanged += 1
                         continue
@@ -1155,7 +1274,8 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                 data["title"] = data.get("title")
                 patent = Patent(**data, custom_fields=custom_fields, database_id=database.id,
                                 product_id=product.id if product else None, entity_uid=row.entity_uid,
-                                origin_node_uid=origin_node_uid, record_version=row.record_version)
+                                origin_node_uid=origin_node_uid, record_version=row.record_version,
+                                source_batch_id=import_batch.id)
                 db.add(patent)
                 db.flush()
                 _ensure_database_memberships(db, patent, database)
@@ -1166,20 +1286,28 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                                 patent_id=patent.id, field_key=f"custom_fields.{custom_key}",
                                 field_display_name=custom_key, old_value=None,
                                 new_value=_stringify_value(custom_value), source="collaboration_sync",
-                                changed_by=actor.username if actor else None))
+                                changed_by=actor.username if actor else None,
+                                import_batch_id=import_batch.id, source_table_title=source_table_title,
+                                source_import_note=source_import_note, source_field_name=f"custom_fields.{custom_key}"))
                     else:
                         db.add(PatentHistory(
                             patent_id=patent.id, field_key=field_key, field_display_name=field_key,
                             old_value=None, new_value=_stringify_value(_coerce_remote_value(field_key, remote_value)),
-                            source="collaboration_sync", changed_by=actor.username if actor else None))
+                            source="collaboration_sync", changed_by=actor.username if actor else None,
+                            import_batch_id=import_batch.id, source_table_title=source_table_title,
+                            source_import_note=source_import_note, source_field_name=field_key))
                 ensure_patent_identifiers(db, patent, source_system="collaboration_sync")
                 from app.services.formula_service import FormulaService
                 FormulaService.recalculate_patent(db, patent, commit=False)
                 from app.services.semantic_index_service import SemanticIndexService
                 SemanticIndexService.enqueue_patent(db, patent.id, "collaboration_sync_created")
                 created += 1
+                created_patent_ids.append(patent.id)
             else:
                 updates = dict(plan["updates"])
+                governance_resolutions: dict[str, str] = {}
+                governance_incoming_values = dict(updates)
+                governance_skip_fields: set[str] = set()
                 for conflict in plan["conflicts"]:
                     key = (conflict["entity_uid"], conflict["field_key"])
                     choice = decisions.get(key)
@@ -1188,23 +1316,59 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                     ).first()
                     if choice == "remote" and not key[1].startswith("library:"):
                         updates[key[1]] = conflict["remote_value"]
-                    elif choice == "manual" and not key[1].startswith("library:"):
+                        governance_incoming_values[key[1]] = conflict["remote_value"]
+                        governance_resolutions[key[1]] = "use_incoming"
+                    elif choice in {"manual", "merge"} and not key[1].startswith("library:"):
                         updates[key[1]] = decision_details[key].value
+                        governance_incoming_values[key[1]] = conflict["remote_value"]
+                        governance_resolutions[key[1]] = "merge" if choice == "merge" else "manual"
                     if choice:
                         if prior is None:
                             prior = SyncConflict(conflict_uid=uid("conflict"), package_id=package.id,
-                                                origin_node_uid=origin_node_uid, entity_uid=key[0],
+                                                origin_node_uid=origin_node_uid, target_database_uid=database.database_uid,
+                                                source_database_uid=source_database_uid, entity_uid=key[0],
                                                 entity_type="patent", field_key=key[1])
                             db.add(prior)
                         prior.base_value = conflict["base_value"]
                         prior.local_value = conflict["local_value"]
                         prior.remote_value = conflict["remote_value"]
                         prior.status = "resolved"
+                        prior.target_database_uid = database.database_uid
+                        prior.source_database_uid = source_database_uid
                         prior.decision = choice
-                        prior.final_value = updates.get(key[1], conflict["local_value"])
+                        if key[1].startswith("library:"):
+                            prior.final_value = (
+                                conflict["remote_value"] if choice == "remote" else
+                                decision_details[key].value if choice in {"manual", "merge"} else
+                                conflict["local_value"]
+                            )
+                        else:
+                            prior.final_value = updates.get(key[1], conflict["local_value"])
                         prior.decision_reason = getattr(decision_details[key], "reason", None)
                         prior.decided_by = user_id
                         prior.decided_at = utc_now_naive()
+                        if not key[1].startswith("library:") and key[1] != "__delete__":
+                            from app.services.import_governance_service import record_import_field_change
+                            record_import_field_change(
+                                db,
+                                patent=patent,
+                                field_key=key[1],
+                                old_value=conflict["local_value"],
+                                incoming_value=conflict["remote_value"],
+                                final_value=prior.final_value,
+                                database_id=database.id,
+                                source_kind="collaboration_sync",
+                                source_label=source_table_title,
+                                source_reference=f"package:{package.package_uid}:{key[0]}:{key[1]}",
+                                import_batch_id=import_batch.id,
+                                source_field_name=key[1],
+                                resolution=("keep_existing" if choice == "local" else
+                                            "use_incoming" if choice == "remote" else
+                                            "merge" if choice == "merge" else "manual"),
+                                decided_by=actor.username if actor else None,
+                                reason=prior.decision_reason,
+                            )
+                            governance_skip_fields.add(key[1])
                         audit(db, user_id, "conflict_decided", package_id=package.id, detail={
                             "entity_uid": key[0], "field_key": key[1], "base_value": prior.base_value,
                             "local_value": prior.local_value, "remote_value": prior.remote_value,
@@ -1212,6 +1376,8 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                     elif prior is None:
                         db.add(SyncConflict(conflict_uid=uid("conflict"), package_id=package.id,
                                             origin_node_uid=origin_node_uid, entity_uid=key[0],
+                                            target_database_uid=database.database_uid,
+                                            source_database_uid=source_database_uid,
                                             entity_type="patent", field_key=key[1],
                                             base_value=conflict["base_value"], local_value=conflict["local_value"],
                                             remote_value=conflict["remote_value"], status="pending"))
@@ -1219,6 +1385,14 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                         prior.base_value = conflict["base_value"]
                         prior.local_value = conflict["local_value"]
                         prior.remote_value = conflict["remote_value"]
+                        prior.target_database_uid = database.database_uid
+                        prior.source_database_uid = source_database_uid
+                        prior.status = "pending"
+                        prior.decision = None
+                        prior.final_value = None
+                        prior.decision_reason = None
+                        prior.decided_by = None
+                        prior.decided_at = None
                     if not choice:
                         pending += 1
                 if updates:
@@ -1227,9 +1401,18 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                     if converted:
                         PatentService.update_patent(db, patent, converted, source="collaboration_sync",
                                                     changed_by=actor.username if actor else None, commit=False,
-                                                    run_post_update_hooks=False)
+                                                    run_post_update_hooks=False, import_batch_id=import_batch.id,
+                                                    source_table_title=source_table_title,
+                                                    source_import_note=source_import_note,
+                                                    governance_resolutions=governance_resolutions,
+                                                    governance_incoming_values=governance_incoming_values,
+                                                    governance_database_id=database.id,
+                                                    governance_skip_fields=governance_skip_fields)
                     if risk_updates:
-                        _apply_risk_projection(db, patent, risk_updates, actor)
+                        _apply_risk_projection(db, patent, risk_updates, actor, import_batch,
+                                               source_table_title, source_import_note, database.id,
+                                               governance_skip_fields, governance_incoming_values,
+                                               governance_resolutions)
                     if converted or risk_updates:
                         from app.services.semantic_index_service import SemanticIndexService
                         SemanticIndexService.enqueue_patent(db, patent.id, "collaboration_sync_updated")
@@ -1254,7 +1437,8 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                         PatentService.update_patent(db, personal_patent,
                             {key: _coerce_remote_value(key, value) for key, value in personal_updates.items()},
                             source="department_publication", changed_by=actor.username if actor else None,
-                            commit=False, run_post_update_hooks=False)
+                            commit=False, run_post_update_hooks=False, import_batch_id=import_batch.id,
+                            source_table_title=source_table_title, source_import_note=source_import_note)
             for field_key, remote_value in payload.items():
                 key = (row.entity_uid, field_key)
                 if key in by_conflict_key and key not in decisions:
@@ -1274,6 +1458,21 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
             manifest["applied_target_database_uid"] = database.database_uid
         manifest["last_apply_backup_path"] = str(backup_path) if backup_path else None
         package.manifest_json = manifest
+        import_batch.status = ImportBatchStatus.REVIEW_REQUIRED if pending else ImportBatchStatus.COMPLETED
+        import_batch.processed_rows = len(records)
+        import_batch.inserted_count = created
+        import_batch.updated_count = updated
+        import_batch.skipped_count = unchanged
+        import_batch.error_count = pending
+        import_batch.errors = ([{"reason": "存在待处理的字段冲突，请在部门协同同步中处理", "count": pending}]
+                               if pending else None)
+        import_batch.created_patent_ids = created_patent_ids
+        import_batch.completed_at = utc_now_naive()
+        import_batch.review_config = {
+            **(import_batch.review_config or {}),
+            "pending_conflicts": pending,
+            "result_status": package.status,
+        }
         audit(db, user_id, "package_applied", package_id=package.id,
               detail={"created": created, "updated": updated, "unchanged": unchanged,
                       "pending_conflicts": pending, "database_uid": database.database_uid,
@@ -1302,6 +1501,191 @@ def _visible_package(db: Session, user_id: int, package_uid: str) -> SyncPackage
     if not package or (package.created_by != user_id and not (roles(db, user_id) & PRIVILEGED)):
         raise HTTPException(404, "同步包不存在")
     return package
+
+
+def list_governance_conflicts(db: Session, user_id: int, *, database_id: int | None = None,
+                              status: str = "pending", query: str = "", field_key: str = "",
+                              offset: int = 0, limit: int = 50) -> dict:
+    if status not in {"pending", "resolved"}:
+        raise HTTPException(400, "冲突状态无效")
+    privileged = bool(roles(db, user_id) & PRIVILEGED)
+    accessible_ids = set()
+    if not privileged:
+        accessible_ids.update(row[0] for row in db.query(PatentDatabase.id).filter(
+            PatentDatabase.owner_id == user_id).all())
+        accessible_ids.update(row[0] for row in db.query(DatabaseMembership.database_id).filter(
+            DatabaseMembership.user_id == user_id,
+            DatabaseMembership.role.in_(["owner", "editor"])).all())
+    if database_id is not None:
+        target = db.get(PatentDatabase, database_id)
+        if not target or (not privileged and database_id not in accessible_ids):
+            raise HTTPException(404, "目标数据库不存在或无权处理其中的冲突")
+        database_scope = {target.database_uid}
+    else:
+        database_scope = None
+
+    conflict_query = db.query(SyncConflict, SyncPackage).join(
+        SyncPackage, SyncPackage.id == SyncConflict.package_id,
+    ).filter(SyncConflict.status == status, SyncPackage.direction == "inbox")
+    if not privileged:
+        conflict_query = conflict_query.filter(SyncPackage.created_by == user_id)
+    if database_scope is not None:
+        conflict_query = conflict_query.filter(or_(
+            SyncConflict.target_database_uid.in_(database_scope),
+            SyncConflict.target_database_uid.is_(None),
+        ))
+    if field_key.strip():
+        conflict_query = conflict_query.filter(SyncConflict.field_key.ilike(f"%{field_key.strip()}%"))
+    if status == "pending":
+        conflict_query = conflict_query.order_by(SyncConflict.created_at.asc(), SyncConflict.id.asc())
+    else:
+        conflict_query = conflict_query.order_by(SyncConflict.created_at.desc(), SyncConflict.id.desc())
+    rows = conflict_query.limit(20000).all()
+    if not rows:
+        return {"items": [], "total": 0, "status": status}
+
+    package_by_id = {package.id: package for _, package in rows}
+    entity_uids = list(dict.fromkeys(conflict.entity_uid for conflict, _ in rows))
+    record_by_key = {}
+    conflict_ids = [conflict.id for conflict, _ in rows]
+    for start in range(0, len(conflict_ids), 400):
+        records = db.query(SyncPackageRecord).join(
+            SyncConflict,
+            and_(SyncPackageRecord.package_id == SyncConflict.package_id,
+                 SyncPackageRecord.entity_uid == SyncConflict.entity_uid),
+        ).filter(SyncConflict.id.in_(conflict_ids[start:start + 400])).all()
+        for record in records:
+            record_by_key[(record.package_id, record.entity_uid)] = record
+
+    patent_by_uid: dict[str, Patent] = {}
+    patent_by_origin_uid: dict[tuple[str, str], Patent] = {}
+    for start in range(0, len(entity_uids), 400):
+        for patent in db.query(Patent).filter(Patent.entity_uid.in_(entity_uids[start:start + 400])).all():
+            patent_by_uid[patent.entity_uid] = patent
+    origin_uids = {
+        (package.manifest_json or {}).get("origin_node_uid")
+        for package in package_by_id.values()
+        if (package.manifest_json or {}).get("origin_node_uid")
+    }
+    for origin_uid in origin_uids:
+        for start in range(0, len(entity_uids), 400):
+            aliases = db.query(SyncUidMapping, Patent).join(
+                Patent, Patent.id == SyncUidMapping.patent_id,
+            ).filter(
+                SyncUidMapping.origin_node_uid == origin_uid,
+                SyncUidMapping.remote_uid.in_(entity_uids[start:start + 400]),
+            ).all()
+            for alias, patent in aliases:
+                patent_by_origin_uid[(origin_uid, alias.remote_uid)] = patent
+
+    databases = db.query(PatentDatabase).all()
+    database_by_uid = {item.database_uid: item for item in databases if item.database_uid}
+    package_names: dict[int, dict[str, str]] = {}
+    shaped = []
+    search_text = query.strip().casefold()
+    for conflict, package in rows:
+        manifest = package.manifest_json or {}
+        record = record_by_key.get((package.id, conflict.entity_uid))
+        record_database_uids = set((record.scope_json or {}).get("database_uids", [])) if record else set()
+        source_results = manifest.get("shared_source_results") or {}
+        source_entries = manifest.get("databases") or []
+        source_names = package_names.setdefault(package.id, {
+            entry.get("database_uid"): entry.get("name") or entry.get("database_uid")
+            for entry in source_entries if entry.get("database_uid")
+        })
+        source_uid = conflict.source_database_uid
+        candidate_uids = [
+            uid_value for uid_value, result in source_results.items()
+            if uid_value in record_database_uids
+            and (status != "pending" or int(result.get("pending_conflicts") or 0) > 0)
+            and (database_scope is None or result.get("target_database_uid") in database_scope)
+        ]
+        if not candidate_uids and source_results:
+            candidate_uids = [
+                uid_value for uid_value, result in source_results.items()
+                if (status != "pending" or int(result.get("pending_conflicts") or 0) > 0)
+                and (not record_database_uids or uid_value in record_database_uids)
+                and (database_scope is None or result.get("target_database_uid") in database_scope)
+            ]
+        source_options = [{"database_uid": uid_value, "name": source_names.get(uid_value, uid_value)}
+                          for uid_value in candidate_uids]
+        if source_uid and source_uid not in source_results:
+            source_uid = None
+        if source_uid is None and len(candidate_uids) == 1:
+            source_uid = candidate_uids[0]
+
+        target_uid = conflict.target_database_uid
+        if source_uid and source_uid in source_results:
+            target_uid = target_uid or source_results[source_uid].get("target_database_uid")
+        if not target_uid:
+            candidate_targets = {
+                source_results[item].get("target_database_uid")
+                for item in candidate_uids if source_results[item].get("target_database_uid")
+            }
+            if len(candidate_targets) == 1:
+                target_uid = next(iter(candidate_targets))
+            else:
+                target_uid = manifest.get("applied_target_database_uid")
+        target_database = database_by_uid.get(target_uid)
+        if not target_database:
+            continue
+        if database_scope is not None and target_uid not in database_scope:
+            continue
+        if not privileged and target_database.id not in accessible_ids:
+            continue
+
+        origin_uid = manifest.get("origin_node_uid")
+        patent = patent_by_uid.get(conflict.entity_uid) or patent_by_origin_uid.get((origin_uid, conflict.entity_uid))
+        current_local_value = None
+        current_local_value_available = bool(
+            patent and conflict.field_key != "__delete__" and not conflict.field_key.startswith("library:")
+        )
+        if current_local_value_available:
+            try:
+                current_local_value = _local_value(patent, conflict.field_key)
+            except (AttributeError, TypeError):
+                current_local_value = None
+                current_local_value_available = False
+        item = {
+            "conflict_uid": conflict.conflict_uid,
+            "package_uid": package.package_uid,
+            "package_status": package.status,
+            "status": conflict.status,
+            "entity_uid": conflict.entity_uid,
+            "field_key": conflict.field_key,
+            "base_value": conflict.base_value,
+            "local_value": conflict.local_value,
+            "current_local_value": current_local_value,
+            "current_local_value_available": current_local_value_available,
+            "remote_value": conflict.remote_value,
+            "decision": conflict.decision,
+            "final_value": conflict.final_value,
+            "decision_reason": conflict.decision_reason,
+            "decided_at": conflict.decided_at.isoformat() if conflict.decided_at else None,
+            "created_at": conflict.created_at.isoformat() if conflict.created_at else None,
+            "target_database_id": target_database.id,
+            "target_database_name": target_database.name,
+            "source_database_uid": source_uid,
+            "source_database_name": source_names.get(source_uid) if source_uid else None,
+            "source_database_options": source_options,
+            "patent_id": patent.id if patent else None,
+            "patent_title": patent.title if patent else None,
+            "application_number": patent.application_number if patent else None,
+            "publication_number": patent.publication_number if patent else None,
+            "grant_number": patent.grant_number if patent else None,
+        }
+        if search_text:
+            searchable = " ".join(str(item.get(key) or "") for key in (
+                "package_uid", "entity_uid", "field_key", "patent_title", "application_number",
+                "publication_number", "grant_number", "source_database_name", "target_database_name",
+            )).casefold()
+            if search_text not in searchable:
+                continue
+        shaped.append(item)
+    total = len(shaped)
+    start = max(0, offset)
+    end = start + min(max(1, limit), 100)
+    return {"items": shaped[start:end], "total": total, "status": status}
 
 
 def shared_package_sources(db: Session, user_id: int, package_uid: str) -> list[dict]:

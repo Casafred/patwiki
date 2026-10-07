@@ -18,7 +18,7 @@ from app.models import (
     PatentType, RiskLevel,
     Attachment,
 )
-from app.services.field_registry import SYSTEM_FIELD_KEYS
+from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
 from app.services.import_service import ImportService, IMPORT_SKIP_FIELD
 from app.services.excel_image_service import ExcelImage, extract_embedded_images
 from app.services.attachment_service import AttachmentService
@@ -30,10 +30,18 @@ from app.services.patent_identity_service import (
 from app.services.patent_database_scope import in_database
 from app.models.database_membership import PatentDatabaseMembership
 
-REVIEW_ACTIONS = {"adopt", "keep_existing", "fill_empty", "ignore", "quarantine"}
+REVIEW_ACTIONS = {"adopt", "keep_existing", "fill_empty", "merge", "ignore", "quarantine"}
 PROTECTED_FIELDS = {"has_risk", "risk_level", "risk_description"}
 RELATION_FIELDS = {"family_members", "cited_patents", "citing_patents"}
 DATE_FIELDS = {"filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date"}
+MERGE_BLOCKED_FIELDS = DATE_FIELDS | {
+    "application_number", "publication_number", "grant_number", "legal_status",
+    "patent_type", "has_risk", "risk_level", "country", "attachments",
+}
+MERGE_BLOCKED_FIELD_TYPES = {
+    "date", "datetime", "number", "boolean", "select", "single_select", "rating",
+    "link", "url", "attachment", "formula", "lookup", "rollup",
+}
 
 
 def is_unmapped_target_error(reason: str | None) -> bool:
@@ -76,6 +84,48 @@ def current_value(patent: Patent | None, field_key: str) -> str | None:
     if field_key in SYSTEM_FIELD_KEYS:
         return text_value(getattr(patent, field_key, None))
     return text_value((patent.custom_fields or {}).get(field_key))
+
+
+def raw_current_value(patent: Patent, field_key: str) -> Any:
+    if field_key in SYSTEM_FIELD_KEYS:
+        return getattr(patent, field_key, None)
+    return (patent.custom_fields or {}).get(field_key)
+
+
+def merge_import_value(old_value: Any, incoming_value: Any, explicit_value: Any = None) -> Any:
+    def decode_container(value: Any) -> Any:
+        if isinstance(value, str) and value.lstrip().startswith(("[", "{")):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return value
+            return parsed if isinstance(parsed, (list, dict)) else value
+        return value
+
+    old = decode_container(old_value)
+    incoming = decode_container(incoming_value)
+    if explicit_value is not None:
+        merged = decode_container(explicit_value)
+        if isinstance(merged, str) and not merged.strip():
+            raise BadRequestException("合并结果不能为空")
+        return merged
+    if isinstance(old, list) and isinstance(incoming, list):
+        result = list(old)
+        seen = {json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) for item in result}
+        for item in incoming:
+            key = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+            if key not in seen:
+                result.append(item)
+                seen.add(key)
+        return result
+    if isinstance(old, dict) and isinstance(incoming, dict):
+        result = dict(old)
+        for key, value in incoming.items():
+            if key in result and result[key] != value:
+                raise BadRequestException("对象字段存在内部差异，请在预审中填写合并后的最终值")
+            result[key] = value
+        return result
+    raise BadRequestException("此字段不能自动合并，请在导入预审中填写合并后的最终值")
 
 
 def candidate_value(field_key: str, patent_data: dict | None, virtual: dict | None) -> str | None:
@@ -556,17 +606,28 @@ def stage_import(
     }
 
 
-def list_batch_changes(db: Session, batch_id: int, *, only_differences: bool = False, limit: int = 2000) -> dict:
+def list_batch_changes(
+    db: Session,
+    batch_id: int,
+    *,
+    only_differences: bool = False,
+    offset: int = 0,
+    limit: int = 2000,
+) -> dict:
     batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
     if not batch:
         raise NotFoundException("导入批次不存在")
-    source_by_id = {row.id: row for row in source_rows(db, batch_id)}
     query = db.query(FieldObservation).filter(FieldObservation.import_batch_id == batch_id)
     if only_differences:
         query = query.filter(FieldObservation.difference_type.in_(["new", "content", "format"]))
     total = query.count()
-    items = query.order_by(FieldObservation.source_row_id.asc(), FieldObservation.source_column_index.asc()).limit(limit).all()
-    return {"batch_id": batch.id, "status": batch.status.value, "total": total,
+    items = query.order_by(FieldObservation.source_row_id.asc(), FieldObservation.source_column_index.asc()).offset(offset).limit(limit).all()
+    source_row_ids = {item.source_row_id for item in items}
+    source_by_id = {
+        row.id: row
+        for row in db.query(ImportSourceRow).filter(ImportSourceRow.id.in_(source_row_ids)).all()
+    } if source_row_ids else {}
+    return {"batch_id": batch.id, "status": batch.status.value, "total": total, "offset": offset, "limit": limit,
             "items": [observation_payload(item, source_by_id[item.source_row_id], batch)
                       for item in items if item.source_row_id in source_by_id]}
 
@@ -577,16 +638,31 @@ def review_batch(db: Session, batch_id: int, *, items: Iterable[dict] = (),
     batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
     if not batch:
         raise NotFoundException("导入批次不存在")
+    if (batch.review_config or {}).get("batch_kind") == "collaboration_sync":
+        raise BadRequestException("协同同步冲突请在部门协同同步中处理")
     if batch.status != ImportBatchStatus.REVIEW_REQUIRED:
         raise BadRequestException("当前导入批次不在待审查状态")
     if default_action_name is not None and default_action_name not in REVIEW_ACTIONS:
         raise BadRequestException(f"不支持的导入审查动作：{default_action_name}")
-    staged = observations(db, batch_id)
-    by_id = {int(item["observation_id"]): str(item["action"]) for item in items}
+    review_items = list(items)
+    by_id = {int(item["observation_id"]): str(item["action"]) for item in review_items}
+    if default_action_name is not None:
+        staged = observations(db, batch_id)
+    elif by_id:
+        staged = db.query(FieldObservation).filter(
+            FieldObservation.import_batch_id == batch_id,
+            FieldObservation.id.in_(by_id),
+        ).all()
+    else:
+        staged = []
     unknown_ids = set(by_id) - set(item.id for item in staged)
     if unknown_ids:
         raise BadRequestException(f"审查项不属于该导入批次：{sorted(unknown_ids)[:5]}")
     actor = reviewed_by.strip() or "local-user"
+    field_types = {
+        str(field.get("key")): str(field.get("field_type") or "").lower()
+        for field in get_all_fields_meta(db)
+    }
     count = 0
     for item in staged:
         action = by_id.get(item.id)
@@ -596,13 +672,27 @@ def review_batch(db: Session, batch_id: int, *, items: Iterable[dict] = (),
             continue
         if action not in REVIEW_ACTIONS:
             raise BadRequestException(f"不支持的导入审查动作：{action}")
-        if item.field_resolution == "unmapped_retained" and action == "adopt":
+        if item.field_resolution == "unmapped_retained" and action in {"adopt", "merge"}:
             raise BadRequestException("未治理字段必须先映射到正式字段，不能直接采用")
+        if action == "merge" and item.difference_type != "content":
+            raise BadRequestException("只有现有值与导入值均非空且内容不同时才能选择融合合并")
+        if action == "merge" and item.canonical_field_key in MERGE_BLOCKED_FIELDS:
+            raise BadRequestException(f"字段 {item.canonical_field_key} 不适用融合合并，请选择保留或采用来源值")
+        if action == "merge" and field_types.get(item.canonical_field_key or "") in MERGE_BLOCKED_FIELD_TYPES:
+            raise BadRequestException(f"字段 {item.canonical_field_key} 是单值字段，不适用融合合并，请选择保留或采用来源值")
         item.final_decision = action
         item.decided_by = actor
         item.decided_at = utc_now_naive()
         count += 1
     config = dict(batch.review_config or {})
+    merge_values = dict(config.get("review_merge_values") or {})
+    for item in review_items:
+        observation_id = str(int(item["observation_id"]))
+        if item.get("action") == "merge" and item.get("merge_value") is not None:
+            merge_values[observation_id] = item["merge_value"]
+        else:
+            merge_values.pop(observation_id, None)
+    config["review_merge_values"] = merge_values
     config["last_review"] = {"reviewed_by": actor, "reason": reason, "reviewed_at": utc_now_naive().isoformat()}
     batch.review_config = config
     db.commit()
@@ -638,7 +728,13 @@ def coerce_value(field_key: str, value: str):
     return value
 
 
-def write_value(patent: Patent, field_key: str, value: str) -> tuple[Any, Any]:
+def write_value(
+    patent: Patent,
+    field_key: str,
+    value: str,
+    *,
+    merge_original_links: bool = True,
+) -> tuple[Any, Any]:
     old = current_value(patent, field_key)
     new = coerce_value(field_key, value)
     if field_key in RELATION_FIELDS:
@@ -646,9 +742,8 @@ def write_value(patent: Patent, field_key: str, value: str) -> tuple[Any, Any]:
     elif field_key == "original_links":
         existing = (patent.custom_fields or {}).get(field_key) or []
         additions = json.loads(value) if isinstance(value, str) else value
-        merged = _merge_original_links(existing, additions)
-        patent.custom_fields = {**(patent.custom_fields or {}), field_key: merged}
-        new = merged
+        new = _merge_original_links(existing, additions) if merge_original_links else additions
+        patent.custom_fields = {**(patent.custom_fields or {}), field_key: new}
     elif field_key in SYSTEM_FIELD_KEYS:
         setattr(patent, field_key, new)
     else:
@@ -796,6 +891,8 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
     batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
     if not batch:
         raise NotFoundException("导入批次不存在")
+    if (batch.review_config or {}).get("batch_kind") == "collaboration_sync":
+        raise BadRequestException("协同同步批次不能按文件导入流程执行")
     if batch.status != ImportBatchStatus.REVIEW_REQUIRED:
         raise BadRequestException("导入批次必须先完成审查，且只能执行一次")
     config = batch.review_config or {}
@@ -840,6 +937,10 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
         ).all():
             existing_by_publication[(existing.publication_number, (existing.country or "CN").upper())] = existing
     actor = applied_by.strip() or "local-user"
+    field_types = {
+        str(field.get("key")): str(field.get("field_type") or "").lower()
+        for field in get_all_fields_meta(db)
+    }
     inserted = updated = unchanged = 0
     errors: list[dict] = []
     created_ids: list[int] = []
@@ -1094,7 +1195,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                         if not item.candidate_value and key not in parse_errors:
                             continue
                         current = current_value(patent, key)
-                        if action == "adopt" and key != "original_links" and source.patent_id and not created_in_batch and current != item.current_value:
+                        if action in {"adopt", "merge"} and key != "original_links" and source.patent_id and not created_in_batch and current != item.current_value:
                             detail = {
                                 "row": source.source_row,
                                 "status": "field_conflict",
@@ -1109,8 +1210,27 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                             item.difference_type = "quarantined"
                             item.field_resolution = "quarantined"
                             item.final_decision = "quarantine"
+                            from app.services.import_governance_service import record_import_field_change
+                            record_import_field_change(
+                                db,
+                                patent=patent,
+                                field_key=key,
+                                old_value=current,
+                                incoming_value=import_storage_value(item),
+                                final_value=current,
+                                database_id=config.get("database_id"),
+                                source_kind="file_import",
+                                source_label=batch.source_table_title or batch.filename,
+                                source_reference=f"batch:{batch.id}:row:{source.source_row}",
+                                import_batch_id=batch.id,
+                                source_row=source.source_row,
+                                source_field_name=item.source_field_name,
+                                resolution="quarantine",
+                                decided_by=actor,
+                                reason="预审后当前字段再次变化，导入候选已隔离，保留最新当前值",
+                            )
                             continue
-                        if action in {"adopt", "fill_empty"}:
+                        if action in {"adopt", "fill_empty", "merge"}:
                             if key in parse_errors or item.difference_type == "quarantined":
                                 # A malformed source cell is isolated at field
                                 # level. Other valid fields in this row still
@@ -1129,13 +1249,45 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 # The value was filled by somebody else after
                                 # review. Keep that newer value and retain a
                                 # no-op provenance event for this decision.
+                                from app.services.import_governance_service import record_import_field_change
+                                record_import_field_change(
+                                    db,
+                                    patent=patent,
+                                    field_key=key,
+                                    old_value=current,
+                                    incoming_value=import_storage_value(item),
+                                    final_value=current,
+                                    database_id=config.get("database_id"),
+                                    source_kind="file_import",
+                                    source_label=batch.source_table_title or batch.filename,
+                                    source_reference=f"batch:{batch.id}:row:{source.source_row}",
+                                    import_batch_id=batch.id,
+                                    source_row=source.source_row,
+                                    source_field_name=item.source_field_name,
+                                    resolution="keep_existing",
+                                    decided_by=actor,
+                                    reason="预审后字段已由其他写入填充，保持当前值",
+                                )
                                 add_import_history(
                                     db, patent=patent, item=item, batch=batch,
                                     source=source, old_value=current,
                                     new_value=current, actor=actor,
                                 )
                                 continue
-                            storage_value = import_storage_value(item)
+                            incoming_value = import_storage_value(item)
+                            storage_value = incoming_value
+                            if action == "merge":
+                                if key in MERGE_BLOCKED_FIELDS:
+                                    raise BadRequestException(f"字段 {key} 不适用融合合并，请选择保留或采用来源值")
+                                merge_values = (batch.review_config or {}).get("review_merge_values") or {}
+                                explicit_merge = merge_values.get(str(item.id))
+                                storage_value = merge_import_value(
+                                    raw_current_value(patent, key),
+                                    incoming_value,
+                                    explicit_merge,
+                                )
+                                if field_types.get(key) in {"multiselect", "multi_select"} and not isinstance(storage_value, list):
+                                    raise BadRequestException(f"多选字段 {key} 的融合结果必须是 JSON 数组")
                             if (
                                 key == "publication_number"
                                 and current
@@ -1146,6 +1298,25 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 # 保留已有主公开号，本行公开号仅作为额外公开号由
                                 # PatentIdentifier 索引保留（下方 ensure_patent_identifiers），
                                 # 不覆盖，也不隔离，避免丢失来源数据。
+                                from app.services.import_governance_service import record_import_field_change
+                                record_import_field_change(
+                                    db,
+                                    patent=patent,
+                                    field_key=key,
+                                    old_value=current,
+                                    incoming_value=incoming_value,
+                                    final_value=current,
+                                    database_id=config.get("database_id"),
+                                    source_kind="file_import",
+                                    source_label=batch.source_table_title or batch.filename,
+                                    source_reference=f"batch:{batch.id}:row:{source.source_row}",
+                                    import_batch_id=batch.id,
+                                    source_row=source.source_row,
+                                    source_field_name=item.source_field_name,
+                                    resolution="keep_existing",
+                                    decided_by=actor,
+                                    reason="同一申请号已存在不同公开号，主公开号保留，来源公开号另存为专利标识",
+                                )
                                 add_import_history(
                                     db, patent=patent, item=item, batch=batch,
                                     source=source, old_value=current,
@@ -1153,7 +1324,12 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 )
                                 continue
                             try:
-                                old, _ = write_value(patent, key, storage_value)
+                                old, _ = write_value(
+                                    patent,
+                                    key,
+                                    storage_value,
+                                    merge_original_links=True,
+                                )
                             except Exception as exc:
                                 detail = {
                                     "row": source.source_row,
@@ -1171,6 +1347,25 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                             new = current_value(patent, key)
                             if text_value(old) != text_value(new):
                                 row_changes += 1
+                            from app.services.import_governance_service import record_import_field_change
+                            record_import_field_change(
+                                db,
+                                patent=patent,
+                                field_key=key,
+                                old_value=old,
+                                incoming_value=incoming_value,
+                                final_value=new,
+                                database_id=config.get("database_id"),
+                                source_kind="file_import",
+                                source_label=batch.source_table_title or batch.filename,
+                                source_reference=f"batch:{batch.id}:row:{source.source_row}",
+                                import_batch_id=batch.id,
+                                source_row=source.source_row,
+                                source_field_name=item.source_field_name,
+                                resolution="merge" if action == "merge" else "use_incoming",
+                                decided_by=actor,
+                                reason=f"导入审查动作：{action}",
+                            )
                             add_import_history(
                                 db, patent=patent, item=item, batch=batch,
                                 source=source, old_value=old, new_value=new,
@@ -1186,6 +1381,26 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                 source=source, old_value=current,
                                 new_value=current, actor=actor,
                             )
+                            if action == "keep_existing":
+                                from app.services.import_governance_service import record_import_field_change
+                                record_import_field_change(
+                                    db,
+                                    patent=patent,
+                                    field_key=key,
+                                    old_value=current,
+                                    incoming_value=import_storage_value(item),
+                                    final_value=current,
+                                    database_id=config.get("database_id"),
+                                    source_kind="file_import",
+                                    source_label=batch.source_table_title or batch.filename,
+                                    source_reference=f"batch:{batch.id}:row:{source.source_row}",
+                                    import_batch_id=batch.id,
+                                    source_row=source.source_row,
+                                    source_field_name=item.source_field_name,
+                                    resolution="keep_existing",
+                                    decided_by=actor,
+                                    reason="导入审查动作：保留现有值",
+                                )
                     attachments_added = 0
                     if row_changes or attachments_added:
                         updated += 1
@@ -1303,13 +1518,15 @@ def restore_value(patent: Patent, field_key: str, value: str | None) -> None:
     elif value is None:
         setattr(patent, field_key, None)
     else:
-        write_value(patent, field_key, value)
+        write_value(patent, field_key, value, merge_original_links=False)
 
 
 def rollback_batch(db: Session, batch_id: int, *, rolled_back_by: str = "local-user") -> dict:
     batch = db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
     if not batch:
         raise NotFoundException("导入批次不存在")
+    if (batch.review_config or {}).get("batch_kind") == "collaboration_sync":
+        raise BadRequestException("协同同步记录不能通过文件导入回撤，请使用同步冲突处理流程")
     if batch.status == ImportBatchStatus.ROLLED_BACK:
         raise BadRequestException("该导入批次已经回撤，不能重复操作")
     if batch.status != ImportBatchStatus.COMPLETED:

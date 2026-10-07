@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text, or_
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 import json
 import pandas as pd
 from io import BytesIO, StringIO
@@ -47,6 +47,7 @@ from app.models import (
     ImportBatch,
     ImportBatchStatus,
     ImportSourceRow,
+    ImportFieldGovernanceAudit,
     FieldObservation,
     Patent,
     PatentHistory,
@@ -134,12 +135,13 @@ class GovernanceRevertRequest(BaseModel):
 
 class ImportReviewItemRequest(BaseModel):
     observation_id: int
-    action: Literal["adopt", "keep_existing", "fill_empty", "ignore", "quarantine"]
+    action: Literal["adopt", "keep_existing", "fill_empty", "merge", "ignore", "quarantine"]
+    merge_value: Any = None
 
 
 class ImportReviewRequest(BaseModel):
     items: list[ImportReviewItemRequest] = []
-    default_action: Optional[Literal["adopt", "keep_existing", "fill_empty", "ignore", "quarantine"]] = None
+    default_action: Optional[Literal["adopt", "keep_existing", "fill_empty", "merge", "ignore", "quarantine"]] = None
     reviewed_by: str = "local-user"
     reason: Optional[str] = None
 
@@ -1149,10 +1151,13 @@ def confirm_import(
 def get_import_batch_changes(
     batch_id: int,
     only_differences: bool = Query(False),
+    offset: int = Query(0, ge=0),
     limit: int = Query(2000, ge=1, le=10000),
     db: Session = Depends(get_db),
 ):
-    return list_batch_changes(db, batch_id, only_differences=only_differences, limit=limit)
+    return list_batch_changes(
+        db, batch_id, only_differences=only_differences, offset=offset, limit=limit,
+    )
 
 
 @router.post("/import/batches/{batch_id}/review")
@@ -1394,6 +1399,7 @@ def decide_import_observation(
     updated_items = []
 
     for target in targets:
+        source_row = source_rows.get(target.source_row_id)
         before_field_resolution = target.field_resolution
         before_final_decision = target.final_decision
         before_proposed_action = target.proposed_action
@@ -1442,6 +1448,27 @@ def decide_import_observation(
                         changed_values += 1
                         patent_value_after = new_value
                         patent_value_changed = True
+                else:
+                    old_value = new_value = current
+                from app.services.import_governance_service import record_import_field_change
+                record_import_field_change(
+                    db,
+                    patent=patent,
+                    field_key=target_field,
+                    old_value=old_value,
+                    incoming_value=candidate,
+                    final_value=new_value,
+                    database_id=(batch.review_config or {}).get("database_id"),
+                    source_kind="governance_import",
+                    source_label=batch.source_table_title or batch.filename,
+                    source_reference=f"batch:{batch.id}:observation:{target.id}",
+                    import_batch_id=batch.id,
+                    source_row=source_row.source_row if source_row else None,
+                    source_field_name=target.source_field_name,
+                    resolution="use_incoming" if should_adopt or should_fill else "keep_existing",
+                    decided_by=target.decided_by,
+                    reason=req.reason or ("治理映射：采用来源值" if should_adopt or should_fill else "治理映射：保留现有值"),
+                )
 
         db.add(GovernanceDecision(
             observation_id=target.id,
@@ -1696,6 +1723,73 @@ def list_unmapped_observations(
         "offset": offset,
         "limit": limit,
         "items": [_observation_to_dict(observation, source_row, batch) for observation, source_row, batch in rows],
+    }
+
+
+@router.get("/import/governance/audits")
+def list_import_governance_audits(
+    database_id: Optional[int] = None,
+    field_key: Optional[str] = None,
+    source_kind: Optional[str] = None,
+    q: Optional[str] = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(30, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    query = db.query(ImportFieldGovernanceAudit, Patent).outerjoin(
+        Patent, Patent.id == ImportFieldGovernanceAudit.patent_id,
+    )
+    if database_id is not None:
+        query = query.filter(ImportFieldGovernanceAudit.database_id == database_id)
+    if field_key:
+        query = query.filter(ImportFieldGovernanceAudit.field_key.ilike(f"%{field_key.strip()}%"))
+    if source_kind:
+        query = query.filter(ImportFieldGovernanceAudit.source_kind == source_kind)
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        query = query.filter(or_(
+            Patent.title.ilike(term),
+            ImportFieldGovernanceAudit.patent_title.ilike(term),
+            Patent.application_number.ilike(term),
+            ImportFieldGovernanceAudit.application_number.ilike(term),
+            Patent.publication_number.ilike(term),
+            ImportFieldGovernanceAudit.publication_number.ilike(term),
+            Patent.grant_number.ilike(term),
+            ImportFieldGovernanceAudit.field_key.ilike(term),
+            ImportFieldGovernanceAudit.source_label.ilike(term),
+            ImportFieldGovernanceAudit.source_field_name.ilike(term),
+        ))
+    total = query.count()
+    rows = query.order_by(
+        ImportFieldGovernanceAudit.created_at.desc(),
+        ImportFieldGovernanceAudit.id.desc(),
+    ).offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "items": [{
+            "id": audit.id,
+            "patent_id": audit.patent_id,
+            "patent_uid": audit.patent_uid,
+            "patent_title": (patent.title if patent else None) or audit.patent_title,
+            "application_number": (patent.application_number if patent else None) or audit.application_number,
+            "publication_number": (patent.publication_number if patent else None) or audit.publication_number,
+            "field_key": audit.field_key,
+            "old_value": audit.old_value,
+            "incoming_value": audit.incoming_value,
+            "final_value": audit.final_value,
+            "source_kind": audit.source_kind,
+            "source_label": audit.source_label,
+            "source_reference": audit.source_reference,
+            "import_batch_id": audit.import_batch_id,
+            "source_row": audit.source_row,
+            "source_field_name": audit.source_field_name,
+            "resolution": audit.resolution,
+            "decided_by": audit.decided_by,
+            "reason": audit.reason,
+            "created_at": audit.created_at.isoformat() if audit.created_at else None,
+        } for audit, patent in rows],
     }
 
 

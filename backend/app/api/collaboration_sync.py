@@ -625,6 +625,24 @@ def get_packages(user: User = Depends(current_user), db: Session = Depends(get_d
     return {"items": list_packages(db, user.id)}
 
 
+@router.get("/conflicts")
+def get_governance_conflicts(
+    database_id: int | None = None,
+    status: str = "pending",
+    q: str = "",
+    field_key: str = "",
+    offset: int = 0,
+    limit: int = 50,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    from app.services.collaboration_sync_service import list_governance_conflicts
+    return list_governance_conflicts(
+        db, user.id, database_id=database_id, status=status, query=q,
+        field_key=field_key, offset=offset, limit=limit,
+    )
+
+
 @router.get("/packages/{package_uid}/records")
 def get_package_records(package_uid: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return {"items": package_records(db, user.id, package_uid)}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { collaborationSyncApi, syncApi } from '../../api'
-import type { CollaborationPackage, PatentDatabase, SyncConnector, SyncUpdateBatch } from '../../types'
+import { collaborationSyncApi, fieldApi, syncApi } from '../../api'
+import type { CollaborationPackage, FieldMeta, PatentDatabase, SyncConnector, SyncUpdateBatch } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 type Conflict = { package_uid: string; entity_uid: string; field_key: string; base_value: unknown; local_value: unknown; remote_value: unknown }
@@ -14,14 +14,16 @@ export default function SyncAggregationPanel({ databases, packages }: { database
   const [recipients, setRecipients] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [decisions, setDecisions] = useState<Record<string, 'local' | 'remote' | 'manual'>>({})
+  const [decisions, setDecisions] = useState<Record<string, 'local' | 'remote' | 'merge'>>({})
   const [manualValues, setManualValues] = useState<Record<string, string>>({})
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [connectors, setConnectors] = useState<SyncConnector[]>([])
   const [connectorId, setConnectorId] = useState('')
   const [updateBatch, setUpdateBatch] = useState<SyncUpdateBatch | null>(null)
   const [updateChoices, setUpdateChoices] = useState<Record<number, string[]>>({})
+  const [fields, setFields] = useState<FieldMeta[]>([])
   useEffect(() => { void syncApi.connectors().then(result => setConnectors(result.items.filter(item => item.enabled))).catch(error => setMessage(getErrorMessage(error))) }, [])
+  useEffect(() => { void fieldApi.list().then(setFields).catch(() => setFields([])) }, [])
   const runUpdate = async (confirm: boolean) => {
     setBusy(true)
     try {
@@ -40,6 +42,13 @@ export default function SyncAggregationPanel({ databases, packages }: { database
   const batchUid = String(batch?.batch_uid || '')
   const preview = batch?.preview as { conflicts?: Conflict[]; auto_merge?: number; new?: number; deleted?: number; conflict?: number; unmatched?: number; unchanged?: number } | undefined
   const conflictKey = (item: Conflict) => `${item.package_uid}:${item.entity_uid}:${item.field_key}`
+  const mergeAllowed = (fieldKey: string) => {
+    const actualKey = fieldKey.startsWith('library:') ? fieldKey.split(':').slice(2).join(':') : fieldKey
+    if (['application_number', 'publication_number', 'grant_number', 'filing_date', 'publication_date', 'grant_date', 'priority_date', 'legal_status_date', 'legal_status', 'patent_type', 'has_risk', 'risk_level', 'country'].includes(actualKey)) return false
+    const field = fields.find(item => item.key === actualKey)
+    if (!field) return fieldKey.startsWith('library:')
+    return !['date', 'datetime', 'number', 'boolean', 'select', 'single_select', 'rating', 'link', 'url', 'attachment', 'formula', 'lookup', 'rollup'].includes(field.field_type)
+  }
   const submit = async () => {
     const choices = (preview?.conflicts || []).flatMap(item => {
       const key = conflictKey(item)
@@ -47,10 +56,10 @@ export default function SyncAggregationPanel({ databases, packages }: { database
       if (!choice) return []
       const raw = manualValues[key] || ''
       let value: unknown = undefined
-      if (choice === 'manual') {
+      if (choice === 'merge') {
         const reference = item.remote_value ?? item.local_value
         value = typeof reference === 'string' || reference == null ? raw : JSON.parse(raw)
-        if (reference != null && typeof reference !== typeof value) throw new Error('手工合并值的类型与字段不一致')
+        if (reference != null && typeof reference !== typeof value) throw new Error('合并值的类型与字段不一致')
       }
       return [{ entity_uid: item.entity_uid, field_key: item.field_key, package_uid: item.package_uid, choice, value, reason: reasons[key] }]
     })
@@ -71,8 +80,8 @@ export default function SyncAggregationPanel({ databases, packages }: { database
           <strong style={{ fontSize: 12 }}>{item.field_key} · {item.entity_uid}</strong>
           <span style={{ fontSize: 11, overflowWrap: 'anywhere' }}>来源：{item.package_uid}</span>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, fontSize: 12, overflowWrap: 'anywhere' }}><span>基线：{JSON.stringify(item.base_value)}</span><span>总库：{JSON.stringify(item.local_value)}</span><span>成员：{JSON.stringify(item.remote_value)}</span></div>
-          <select aria-label={`处理 ${item.field_key} 冲突`} value={decisions[conflictKey(item)] || ''} onChange={event => setDecisions(current => { const next = { ...current }; if (event.target.value) next[conflictKey(item)] = event.target.value as 'local' | 'remote' | 'manual'; else delete next[conflictKey(item)]; return next })}><option value="">暂不处理</option><option value="local">保留总库值</option><option value="remote">接受此成员值</option><option value="manual">手工合并</option></select>
-          {decisions[conflictKey(item)] === 'manual' && <textarea aria-label="手工最终值" value={manualValues[conflictKey(item)] || ''} placeholder="最终值" onChange={event => setManualValues(current => ({ ...current, [conflictKey(item)]: event.target.value }))} />}
+          <select aria-label={`处理 ${item.field_key} 冲突`} value={decisions[conflictKey(item)] || ''} onChange={event => setDecisions(current => { const next = { ...current }; if (event.target.value) next[conflictKey(item)] = event.target.value as 'local' | 'remote' | 'merge'; else delete next[conflictKey(item)]; return next })}><option value="">暂不处理</option><option value="local">保留总库值</option><option value="remote">接受此成员值</option>{mergeAllowed(item.field_key) && <option value="merge">融合合并</option>}</select>
+          {decisions[conflictKey(item)] === 'merge' && <textarea aria-label="融合后的最终值" value={manualValues[conflictKey(item)] || ''} placeholder="根据总库值与成员增量填写最终值" onChange={event => setManualValues(current => ({ ...current, [conflictKey(item)]: event.target.value }))} />}
           <input aria-label="处理理由" placeholder="处理理由" value={reasons[conflictKey(item)] || ''} onChange={event => setReasons(current => ({ ...current, [conflictKey(item)]: event.target.value }))} />
         </div>)}
         <button disabled={busy || batch.status === 'published' || !batch.preview} onClick={() => void run(submit)}>提交汇总 / 保存冲突处理</button>

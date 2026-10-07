@@ -550,6 +550,8 @@ class SyncService:
         from app.services.sync_support import REVIEWABLE_EXTERNAL_FIELDS
         if decision not in {"accepted", "rejected"}:
             raise ValueError("decision must be accepted or rejected")
+        sync_run = db.get(SyncRun, observation.sync_run_id)
+        audit_database_id = sync_run.database_id if sync_run else None
         if decision == "accepted":
             if not observation.patent_id:
                 raise ValueError("没有关联专利的观察不能直接接受")
@@ -578,7 +580,58 @@ class SyncService:
                 source="external_sync_review",
                 changed_by=decided_by,
             ))
+            from app.services.import_governance_service import record_import_field_change
+            record_import_field_change(
+                db,
+                patent=patent,
+                field_key=observation.canonical_field_key,
+                old_value=before_value,
+                incoming_value=value,
+                final_value=value,
+                database_id=audit_database_id,
+                source_kind="external_sync",
+                source_label=f"外部同步运行 #{observation.sync_run_id}",
+                source_reference=f"observation:{observation.id}",
+                decided_by=decided_by,
+                reason=reason or "用户接受外部同步观察",
+            )
             observation.current_value = before
+        elif observation.patent_id:
+            patent = db.query(Patent).filter(Patent.id == observation.patent_id).one_or_none()
+            if patent:
+                field_key = observation.canonical_field_key
+                current = (
+                    (patent.custom_fields or {}).get(field_key)
+                    if field_key.startswith("mcp_")
+                    else getattr(patent, field_key, None)
+                )
+                raw_candidate = observation.candidate_value
+                if field_key.startswith("mcp_"):
+                    try:
+                        candidate = json.loads(raw_candidate or "null")
+                    except (TypeError, json.JSONDecodeError):
+                        candidate = raw_candidate
+                else:
+                    candidate = raw_candidate
+                if field_key.endswith("_date"):
+                    candidate = date_value(candidate)
+                from app.services.import_governance_service import record_import_field_change
+                record_import_field_change(
+                    db,
+                    patent=patent,
+                    field_key=field_key,
+                    old_value=current,
+                    incoming_value=candidate,
+                    final_value=current,
+                    database_id=audit_database_id,
+                    source_kind="external_sync",
+                    source_label=f"外部同步运行 #{observation.sync_run_id}",
+                    source_reference=f"observation:{observation.id}",
+                    resolution="keep_existing",
+                    decided_by=decided_by,
+                    reason=reason or "用户拒绝外部同步观察，保留现有值",
+                )
+                observation.current_value = serialize_value(current)
         observation.decision = decision
         observation.decision_reason = reason
         observation.decided_by = decided_by

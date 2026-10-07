@@ -39,7 +39,7 @@ def apply_library_fields(db, package, database, record, patent, plans, decisions
         choice = decisions.get((record.entity_uid, plan["conflict_key"]))
         if choice == "remote" or (state.has_overlay and state.local_value == plan["remote"]):
             state.has_overlay = False
-        if choice == "manual":
+        if choice in {"manual", "merge"}:
             state.local_value = details[(record.entity_uid, plan["conflict_key"])].value
             state.has_overlay = True
             state.editor_user_id = user_id

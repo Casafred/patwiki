@@ -9,14 +9,14 @@ import type {
   PatentGraphResponse, PatentFamilyResponse, PatentCitationResponse, FormulaReturnType, FormDefinition, FormShareLink, GanttResponse, AttachmentMeta,
   Dashboard, DashboardCard, DashboardData, AutomationRule, AutomationLog, CommentRecord,
   SyncConnector, SyncSubscription, SyncRun, SyncRecord, ExternalObservation, LegalStatusEvent, WatchEvent, SyncUpdateBatch,
-  GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch,
+  GovernanceAction, GovernanceDecision, GovernanceObservation, GovernanceBatch, ImportFieldGovernanceAudit,
   ImportChangeReview, ImportReviewAction,
   ProjectSolutionVersion, RiskCase,
   ProjectHistoryEntry,
   SemanticSearchMode, SemanticSearchResponse,
   SemanticProvider, SemanticProfile, SemanticIndex, SemanticJob, SemanticStatus,
   SemanticEvaluationDataset, SemanticEvaluationCase, SemanticEvaluationRun,
-  CollaborationIdentity, CollaborationPackage,
+  CollaborationIdentity, CollaborationPackage, SyncGovernanceConflict,
 } from '../types'
 
 export const fieldApi = {
@@ -588,10 +588,10 @@ export const importApi = {
     api.get('/import/batches', { params }),
 
   getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
-  getChanges: (id: number, onlyDifferences = false): Promise<{ batch_id: number; status: string; total: number; items: ImportChangeReview[] }> =>
-    api.get(`/import/batches/${id}/changes`, { params: { only_differences: onlyDifferences } }),
+  getChanges: (id: number, onlyDifferences = false, offset = 0, limit = 2000): Promise<{ batch_id: number; status: string; total: number; offset: number; limit: number; items: ImportChangeReview[] }> =>
+    api.get(`/import/batches/${id}/changes`, { params: { only_differences: onlyDifferences, offset, limit } }),
   reviewBatch: (id: number, data: {
-    items?: { observation_id: number; action: ImportReviewAction }[]
+    items?: { observation_id: number; action: ImportReviewAction; merge_value?: string }[]
     default_action?: ImportReviewAction
     reviewed_by?: string
     reason?: string
@@ -601,6 +601,8 @@ export const importApi = {
     api.post(`/import/batches/${id}/rollback`, { rolled_back_by: rolledBackBy }),
   listUnmapped: (params: JsonObject = {}): Promise<{ total: number; offset: number; limit: number; items: GovernanceObservation[] }> =>
     api.get('/import/unmapped', { params }),
+  listImportGovernanceAudits: (params: { database_id?: number; field_key?: string; source_kind?: string; q?: string; offset?: number; limit?: number } = {}): Promise<{ total: number; offset: number; limit: number; items: ImportFieldGovernanceAudit[] }> =>
+    api.get('/import/governance/audits', { params }),
   decideObservation: (
     observationId: number,
     request: {
@@ -935,7 +937,7 @@ export const collaborationSyncApi = {
     return api.post('/collaboration-sync/accounts/provision/file', data)
   },
   previewAggregationBatch: (batchUid: string): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/preview`, {}),
-  submitAggregationBatch: (batchUid: string, data: { edit_password?: string; decisions?: Array<{ entity_uid: string; field_key: string; package_uid?: string; choice: 'local' | 'remote' | 'manual'; value?: unknown; reason?: string }> }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/submit`, data),
+  submitAggregationBatch: (batchUid: string, data: { edit_password?: string; decisions?: Array<{ entity_uid: string; field_key: string; package_uid?: string; choice: 'local' | 'remote' | 'manual' | 'merge'; value?: unknown; reason?: string }> }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/submit`, data),
   publishAggregationBatch: (batchUid: string, data: { recipient_names: string[]; password: string; fields?: string[]; expires_days?: number }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/publish`, data),
   inspect: (file: File, password: string): Promise<{ count: number; sample: unknown[]; manifest: Record<string, unknown> }> => {
     const body = new FormData(); body.append('file', file); body.append('password', password)
@@ -946,8 +948,10 @@ export const collaborationSyncApi = {
     return api.post('/collaboration-sync/packages/import', body)
   },
   listPackages: (): Promise<{ items: CollaborationPackage[] }> => api.get('/collaboration-sync/packages'),
+  listGovernanceConflicts: (params: { database_id?: number; status?: 'pending' | 'resolved'; q?: string; field_key?: string; offset?: number; limit?: number }): Promise<{ items: SyncGovernanceConflict[]; total: number; status: string }> =>
+    api.get('/collaboration-sync/conflicts', { params }),
   records: (packageUid: string): Promise<{ items: unknown[] }> => api.get(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/records`),
   previewApply: (packageUid: string, data: { database_id: number; edit_password?: string; decisions?: Array<{ entity_uid: string; field_key: string; choice: 'local' | 'remote' }> }): Promise<{ create_count: number; update_count: number; unchanged_count: number; conflicts: Array<Record<string, unknown>> }> => api.post(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/preview-apply`, data),
-  apply: (packageUid: string, data: { database_id: number; edit_password?: string; decisions?: Array<{ entity_uid: string; field_key: string; choice: 'local' | 'remote' }> }): Promise<{ status: string; created: number; updated: number; unchanged: number; pending_conflicts: number; backup_path: string | null; conflicts: Array<Record<string, unknown>> }> => api.post(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/apply`, data),
+  apply: (packageUid: string, data: { database_id: number; edit_password?: string; source_database_uid?: string; decisions?: Array<{ entity_uid: string; field_key: string; choice: 'local' | 'remote' | 'manual' | 'merge'; value?: JsonValue; reason?: string }> }): Promise<{ status: string; created: number; updated: number; unchanged: number; pending_conflicts: number; backup_path: string | null; conflicts: Array<Record<string, unknown>> }> => api.post(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/apply`, data),
   download: (packageUid: string): Promise<Blob> => api.get(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/download`, { responseType: 'blob' }),
 }

@@ -4,7 +4,8 @@ import type { ClipboardEvent } from 'react'
 import { importApi, databaseApi, viewApi } from '../../api'
 import { fieldService } from '../../services'
 import { useAppStore } from '../../store'
-import type { ImportPreview, FieldMapping, PatentView, ImportChangeReview, ImportReviewAction, ImportResult } from '../../types'
+import { mergeImportedCollectionValues } from '../../lib/importMerge'
+import type { FieldMeta, ImportPreview, FieldMapping, PatentView, ImportChangeReview, ImportReviewAction, ImportResult } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 
 interface ImportModalProps {
@@ -80,6 +81,32 @@ function importReportReason(report: { status?: string; reason?: string; error?: 
   return '请在导入治理中检查该行字段'
 }
 
+function initialReviewMergeValues(items: ImportChangeReview[]) {
+  return Object.fromEntries(items.map(item => {
+    const parseArray = (value?: string | null) => {
+      if (!value) return null
+      try {
+        const parsed: unknown = JSON.parse(value)
+        return Array.isArray(parsed) ? parsed : null
+      } catch {
+        return null
+      }
+    }
+    const current = parseArray(item.current_value)
+    const incoming = parseArray(item.candidate_value || item.raw_value)
+    if (!current || !incoming) return [item.id, '']
+    const merged = mergeImportedCollectionValues(item.canonical_field_key || '', current, incoming)
+    return [item.id, JSON.stringify(merged, null, 2)]
+  }))
+}
+
+function canMergeImportField(fieldKey: string | null | undefined, fields: FieldMeta[]) {
+  if (!fieldKey || ['application_number', 'publication_number', 'grant_number', 'filing_date', 'publication_date', 'grant_date', 'priority_date', 'legal_status_date', 'legal_status', 'patent_type', 'has_risk', 'risk_level', 'country'].includes(fieldKey)) return false
+  const field = fields.find(item => item.key === fieldKey)
+  if (!field) return false
+  return !['date', 'datetime', 'number', 'boolean', 'select', 'single_select', 'rating', 'link', 'url', 'attachment', 'formula', 'lookup', 'rollup'].includes(field.field_type)
+}
+
 export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const navigate = useNavigate()
   const {
@@ -107,13 +134,19 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<number | ''>('')
   // P0-14：导入到指定视图
   const [views, setViews] = useState<PatentView[]>([])
+  const [fields, setFields] = useState<FieldMeta[]>([])
   const [selectedViewId, setSelectedViewId] = useState<number | ''>('')
   const [showCreateView, setShowCreateView] = useState(false)
   const [newViewName, setNewViewName] = useState('')
   const [creatingView, setCreatingView] = useState(false)
   const [dedupeField, setDedupeField] = useState<'application_number' | 'publication_number' | 'both'>('publication_number')
   const [reviewChanges, setReviewChanges] = useState<ImportChangeReview[]>([])
+  const [reviewTotal, setReviewTotal] = useState(0)
+  const [reviewOffset, setReviewOffset] = useState(0)
+  const [reviewPageSize, setReviewPageSize] = useState(50)
+  const [reviewLoading, setReviewLoading] = useState(false)
   const [reviewActions, setReviewActions] = useState<Record<number, ImportReviewAction>>({})
+  const [mergeValues, setMergeValues] = useState<Record<number, string>>({})
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [uploading, setUploading] = useState(false)
   const [clipboardUploading, setClipboardUploading] = useState(false)
@@ -121,6 +154,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [error, setError] = useState('')
 
   const unchangedCount = importResult?.unchanged ?? importResult?.skipped ?? 0
+  const reviewPageNumber = Math.floor(reviewOffset / reviewPageSize) + 1
+  const reviewPageCount = Math.max(1, Math.ceil(reviewTotal / reviewPageSize))
   const importIssueReports = importResult
     ? [
         ...(importResult.row_reports || importResult.error_details || []),
@@ -160,6 +195,10 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     }
     viewApi.list(currentDatabaseId).then(setViews).catch(() => setViews([]))
   }, [currentDatabaseId])
+
+  useEffect(() => {
+    void fieldService.list().then(setFields).catch(() => setFields([]))
+  }, [])
 
   const handleCreateView = useCallback(async () => {
     if (!newViewName.trim() || !currentDatabaseId) return
@@ -269,6 +308,44 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     }
   }, [])
 
+  const loadReviewPage = useCallback(async (batchId: number, offset: number, limit: number) => {
+    const page = await importApi.getChanges(batchId, false, offset, limit)
+    setReviewChanges(page.items)
+    setReviewTotal(page.total)
+    setReviewOffset(offset)
+    setReviewActions(Object.fromEntries(page.items.map(item => [item.id, item.review_action])))
+    setMergeValues(initialReviewMergeValues(page.items))
+  }, [])
+
+  const saveCurrentReviewPage = useCallback(async () => {
+    if (!importResult?.batch_id) return
+    await importApi.reviewBatch(importResult.batch_id, {
+      items: reviewChanges.map(item => ({
+        observation_id: item.id,
+        action: reviewActions[item.id] || item.review_action,
+        merge_value: (reviewActions[item.id] || item.review_action) === 'merge'
+          ? mergeValues[item.id]?.trim() || undefined
+          : undefined,
+      })),
+      reviewed_by: 'local-user',
+    })
+  }, [importResult, mergeValues, reviewActions, reviewChanges])
+
+  const handleReviewPageChange = useCallback(async (nextOffset: number, nextPageSize = reviewPageSize) => {
+    if (!importResult?.batch_id) return
+    setReviewLoading(true)
+    setError('')
+    try {
+      await saveCurrentReviewPage()
+      await loadReviewPage(importResult.batch_id, nextOffset, nextPageSize)
+      setReviewPageSize(nextPageSize)
+    } catch (pageError: unknown) {
+      setError(getErrorMessage(pageError, '保存当前页决策失败，未切换预审页'))
+    } finally {
+      setReviewLoading(false)
+    }
+  }, [importResult, loadReviewPage, reviewPageSize, saveCurrentReviewPage])
+
   const handleImport = useCallback(async () => {
     if (!preview) return
     if (!currentDatabaseId) {
@@ -311,9 +388,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       }
       setImportResult(result)
       if (!result.batch_id) throw new Error('预审批次未返回 batch_id')
-      const changes = await importApi.getChanges(result.batch_id, false)
-      setReviewChanges(changes.items)
-      setReviewActions(Object.fromEntries(changes.items.map(item => [item.id, item.review_action])))
+      setReviewPageSize(50)
+      await loadReviewPage(result.batch_id, 0, 50)
       setStep('review')
     } catch (error: unknown) {
       setError(getErrorMessage(error, '导入失败'))
@@ -321,7 +397,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     } finally {
       setImporting(false)
     }
-  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId, selectedSheet, importNote])
+  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId, selectedSheet, importNote, loadReviewPage])
 
   const handleApplyReviewedImport = useCallback(async () => {
     if (!importResult?.batch_id) return
@@ -329,12 +405,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     setError('')
     setStep('processing')
     try {
-      await importApi.reviewBatch(importResult.batch_id, {
-        items: Object.entries(reviewActions).map(([observationId, action]) => ({
-          observation_id: Number(observationId), action,
-        })),
-        reviewed_by: 'local-user',
-      })
+      await saveCurrentReviewPage()
       const result = await importApi.applyBatch(importResult.batch_id)
       setImportResult(result)
       setStep('complete')
@@ -355,7 +426,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     } finally {
       setImporting(false)
     }
-  }, [importResult, mapping, reviewActions])
+  }, [importResult, mapping, saveCurrentReviewPage])
 
   const handleRollbackImport = useCallback(async () => {
     if (!importResult?.batch_id) return
@@ -828,7 +899,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
           {step === 'review' && importResult?.batch_id && (
             <div>
                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 13, color: '#9a3412' }}>
-                 预审已完成。系统不会自动覆盖已有值，请逐项选择“采用导入值”或“保留现有值”；未治理列仍会作为待治理字段保留。
+                 预审已完成。请比较当前值与导入值，选择保留、采用或融合；未治理列仍会作为待治理字段保留。
                </div>
                {(importResult.mapping_warnings?.length || 0) > 0 && (
                  <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 12, color: '#92400e' }}>
@@ -836,19 +907,21 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                    {importResult.mapping_warnings?.map(issue => <div key={`${issue.column}-${issue.target_field || ''}`}>{issue.column}: {issue.reason}</div>)}
                  </div>
                )}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <button className="btn btn-secondary" onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.difference_type === 'new' ? 'fill_empty' : 'keep_existing'])))}>全部按安全建议</button>
-                <button className="btn btn-secondary" onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.field_resolution === 'mapped' ? 'adopt' : 'keep_existing'])))}>映射字段全部采用</button>
-                <span style={{ fontSize: 12, color: '#64748b', alignSelf: 'center' }}>共 {reviewChanges.length} 个来源单元格</span>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                <button className="btn btn-secondary" disabled={reviewLoading || importing} onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.difference_type === 'new' ? 'fill_empty' : 'keep_existing'])))}>本页按安全建议</button>
+                <button className="btn btn-secondary" disabled={reviewLoading || importing} onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.field_resolution === 'mapped' ? 'adopt' : 'keep_existing'])))}>本页映射字段采用来源值</button>
+                <span style={{ fontSize: 12, color: '#64748b', marginLeft: 'auto' }}>共 {reviewTotal} 项 · 当前 {reviewChanges.length} 项 · 第 {reviewPageNumber} / {reviewPageCount} 页</span>
+                <label className="gov-audit-page-size"><span>每页</span><select className="form-input" value={reviewPageSize} disabled={reviewLoading || importing} onChange={event => void handleReviewPageChange(0, Number(event.target.value))}><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select></label>
               </div>
-              <div style={{ maxHeight: 420, overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <div style={{ maxHeight: '55vh', minHeight: 240, overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                <table style={{ width: '100%', minWidth: 1120, borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead><tr style={{ background: '#f8fafc' }}>
                     <th style={{ padding: 8, textAlign: 'left' }}>公开号 / 行</th>
                     <th style={{ padding: 8, textAlign: 'left' }}>字段</th>
                     <th style={{ padding: 8, textAlign: 'left' }}>当前值</th>
                     <th style={{ padding: 8, textAlign: 'left' }}>导入值</th>
                     <th style={{ padding: 8, textAlign: 'left' }}>处理</th>
+                    <th style={{ padding: 8, textAlign: 'left' }}>合并结果</th>
                   </tr></thead>
                   <tbody>{reviewChanges.map(item => {
                     const publication = String(item.source_row_values?.['公开号'] || item.source_row_values?.publication_number || '-')
@@ -865,18 +938,27 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                         <option value="keep_existing">保留现有值</option>
                         {!isUnknown && <option value="adopt">采用导入值</option>}
                         {!isUnknown && <option value="fill_empty">仅填充空值</option>}
+                        {!isUnknown && item.difference_type === 'content' && item.current_value && item.candidate_value && canMergeImportField(item.canonical_field_key, fields) && <option value="merge">融合合并</option>}
                         <option value="ignore">忽略本单元格</option>
                         <option value="quarantine">隔离待处理</option>
                       </select></td>
+                      <td style={{ padding: 6, minWidth: 260 }}>{reviewActions[item.id] === 'merge' ? (
+                        <textarea className="form-input" rows={2} value={mergeValues[item.id] || ''} onChange={event => setMergeValues(previous => ({ ...previous, [item.id]: event.target.value }))} placeholder="填写融合后的最终值；集合值已自动去重合并" />
+                      ) : '-'}</td>
                     </tr>
                   })}</tbody>
                 </table>
+              </div>
+              <div className="gov-pagination" style={{ marginTop: 10 }}>
+                <button className="btn btn-secondary" disabled={reviewOffset === 0 || reviewLoading || importing} onClick={() => void handleReviewPageChange(Math.max(0, reviewOffset - reviewPageSize))}>{reviewLoading ? '保存中...' : '上一页'}</button>
+                <span>本页决策会在翻页时保存</span>
+                <button className="btn btn-secondary" disabled={reviewOffset + reviewPageSize >= reviewTotal || reviewLoading || importing} onClick={() => void handleReviewPageChange(reviewOffset + reviewPageSize)}>下一页</button>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>
                 <button className="btn btn-secondary" onClick={() => setStep('mapping')}>返回调整映射</button>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn btn-secondary" onClick={onClose}>取消</button>
-                  <button className="btn btn-primary" disabled={importing} onClick={() => void handleApplyReviewedImport()}>{importing ? '执行中...' : '确认并执行导入'}</button>
+                  <button className="btn btn-primary" disabled={importing || reviewLoading} onClick={() => void handleApplyReviewedImport()}>{importing ? '执行中...' : '确认并执行导入'}</button>
                 </div>
               </div>
             </div>

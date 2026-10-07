@@ -695,8 +695,15 @@ class PatentService:
         changed_by: Optional[str] = None,
         source_view_id: Optional[int] = None,
         source_view_name: Optional[str] = None,
+        import_batch_id: Optional[int] = None,
+        source_table_title: Optional[str] = None,
+        source_import_note: Optional[str] = None,
         commit: bool = True,
         run_post_update_hooks: bool = True,
+        governance_resolutions: Optional[dict[str, str]] = None,
+        governance_incoming_values: Optional[dict[str, Any]] = None,
+        governance_database_id: Optional[int] = None,
+        governance_skip_fields: Optional[set[str]] = None,
     ) -> Patent:
         """更新专利字段并写入历史记录。
 
@@ -772,6 +779,9 @@ class PatentService:
                 changed_by=changed_by,
                 source_view_id=source_view_id,
                 source_view_name=source_view_name,
+                import_batch_id=import_batch_id,
+                source_table_title=source_table_title,
+                source_import_note=source_import_note,
             )
 
         # 系统字段修改
@@ -818,6 +828,59 @@ class PatentService:
         # 批量插入历史记录
         for h in history_entries:
             db.add(h)
+        imported_sources = {
+            "import": "file_import",
+            "collaboration_sync": "collaboration_sync",
+            "department_publication": "department_publication",
+            "external_sync_update": "external_sync",
+            "external_sync": "external_sync",
+            "external_sync_review": "external_sync",
+            "governance": "governance_import",
+        }
+        source_kind = imported_sources.get(source)
+        if source_kind:
+            source_labels = {
+                "import": "文件导入",
+                "collaboration_sync": "协同同步",
+                "department_publication": "部门发布",
+                "external_sync_update": "外部同步",
+                "external_sync": "外部同步",
+                "external_sync_review": "外部同步",
+                "governance": "治理映射",
+            }
+            from app.services.import_governance_service import record_import_field_change
+            for history in history_entries:
+                skip_fields = governance_skip_fields or set()
+                if history.field_key in skip_fields or (
+                    history.field_key.startswith("custom_fields.") and "custom_fields" in skip_fields
+                ):
+                    continue
+                incoming_values = governance_incoming_values or {}
+                incoming_value = incoming_values.get(history.field_key)
+                if incoming_value is None and history.field_key.startswith("custom_fields."):
+                    incoming_custom = incoming_values.get("custom_fields")
+                    if isinstance(incoming_custom, dict):
+                        incoming_value = incoming_custom.get(history.field_key.removeprefix("custom_fields."))
+                resolution = (governance_resolutions or {}).get(history.field_key)
+                if resolution is None and history.field_key.startswith("custom_fields."):
+                    resolution = (governance_resolutions or {}).get("custom_fields")
+                record_import_field_change(
+                    db,
+                    patent=patent,
+                    field_key=history.field_key,
+                    old_value=history.old_value,
+                    incoming_value=history.new_value if incoming_value is None else incoming_value,
+                    final_value=history.new_value,
+                    database_id=governance_database_id,
+                    source_kind=source_kind,
+                    source_label=source_table_title or source_import_note or source_labels.get(source, source),
+                    source_reference=f"batch:{import_batch_id}" if import_batch_id else None,
+                    import_batch_id=import_batch_id,
+                    source_field_name=history.source_field_name,
+                    resolution=resolution or "use_incoming",
+                    decided_by=changed_by,
+                    reason=source_import_note,
+                )
         if changed_fields:
             from app.services.semantic_index_service import SemanticIndexService
             SemanticIndexService.enqueue_patent(db, patent.id, "field_changed")

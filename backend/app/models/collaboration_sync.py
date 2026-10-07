@@ -376,6 +376,8 @@ class SyncConflict(Base):
     conflict_uid = Column(String(80), unique=True, nullable=False, index=True)
     package_id = Column(Integer, ForeignKey("collaboration_sync_packages.id", ondelete="CASCADE"), nullable=True, index=True)
     origin_node_uid = Column(String(80), nullable=True, index=True)
+    target_database_uid = Column(String(100), nullable=True, index=True)
+    source_database_uid = Column(String(100), nullable=True)
     entity_uid = Column(String(100), nullable=False, index=True)
     entity_type = Column(String(50), nullable=False)
     field_key = Column(String(200), nullable=False)

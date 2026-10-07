@@ -1029,7 +1029,7 @@ export interface SemanticEvaluationRun {
   completed_at?: string | null
 }
 
-export type ImportReviewAction = 'adopt' | 'keep_existing' | 'fill_empty' | 'ignore' | 'quarantine'
+export type ImportReviewAction = 'adopt' | 'keep_existing' | 'fill_empty' | 'merge' | 'ignore' | 'quarantine'
 
 export interface ImportChangeReview {
   id: number
@@ -1110,6 +1110,29 @@ export interface GovernanceBatch {
   reversed: boolean
   reversal_reason?: string | null
   reversed_at?: string | null
+}
+
+export interface ImportFieldGovernanceAudit {
+  id: number
+  patent_id?: number | null
+  patent_uid?: string | null
+  patent_title?: string | null
+  application_number?: string | null
+  publication_number?: string | null
+  field_key: string
+  old_value: JsonValue
+  incoming_value: JsonValue
+  final_value: JsonValue
+  source_kind: string
+  source_label?: string | null
+  source_reference?: string | null
+  import_batch_id?: number | null
+  source_row?: number | null
+  source_field_name?: string | null
+  resolution: string
+  decided_by?: string | null
+  reason?: string | null
+  created_at?: string | null
 }
 
 export interface Stats {
@@ -1546,6 +1569,35 @@ export interface CollaborationPackage {
   created_at?: string | null
   signature_status?: string
   signer_fingerprint?: string | null
+}
+
+export interface SyncGovernanceConflict {
+  conflict_uid: string
+  package_uid: string
+  package_status: string
+  status: 'pending' | 'resolved'
+  entity_uid: string
+  field_key: string
+  base_value?: JsonValue | null
+  local_value?: JsonValue | null
+  current_local_value?: JsonValue | null
+  current_local_value_available: boolean
+  remote_value?: JsonValue | null
+  decision?: string | null
+  final_value?: JsonValue | null
+  decision_reason?: string | null
+  decided_at?: string | null
+  created_at?: string | null
+  target_database_id: number
+  target_database_name: string
+  source_database_uid?: string | null
+  source_database_name?: string | null
+  source_database_options: Array<{ database_uid: string; name: string }>
+  patent_id?: number | null
+  patent_title?: string | null
+  application_number?: string | null
+  publication_number?: string | null
+  grant_number?: string | null
 }
 
 export interface DatabaseMember {

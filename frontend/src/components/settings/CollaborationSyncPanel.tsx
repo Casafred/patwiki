@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { collaborationSyncApi, databaseApi, productApi } from '../../api'
 import type { CollaborationIdentity, CollaborationPackage, PatentDatabase, Product } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -41,6 +42,7 @@ type ApplyConflict = { entity_uid: string; field_key: string; base_value: unknow
 type ApplyPreview = { create_count: number; update_count: number; unchanged_count: number; conflicts: ApplyConflict[] }
 
 export default function CollaborationSyncPanel() {
+  const navigate = useNavigate()
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [setupPath, setSetupPath] = useState('')
   const [identity, setIdentity] = useState<CollaborationIdentity | null>(null)
@@ -98,6 +100,7 @@ export default function CollaborationSyncPanel() {
   const [applyDatabaseId, setApplyDatabaseId] = useState('')
   const [applyEditPassword] = useState('')
   const [applyPreview, setApplyPreview] = useState<ApplyPreview | null>(null)
+  const [governanceTargetDatabaseId, setGovernanceTargetDatabaseId] = useState('')
   const [applyDecisions, setApplyDecisions] = useState<Record<string, 'local' | 'remote'>>({})
 
   const isAdmin = useMemo(() => Boolean(identity?.roles.some(role => role === 'system_admin' || role === 'department_leader')), [identity])
@@ -321,6 +324,7 @@ export default function CollaborationSyncPanel() {
         database_id: Number(applyDatabaseId), edit_password: applyEditPassword || undefined, decisions,
       })
       setMessage(`主表应用完成：新增 ${result.created} 条、更新 ${result.updated} 条、待处理冲突 ${result.pending_conflicts} 项；同步前备份：${result.backup_path || '未生成（仅内存数据库）'}`)
+      setGovernanceTargetDatabaseId(result.pending_conflicts ? applyDatabaseId : '')
       setApplyPreview(null); setApplyDecisions({})
       await loadPackages()
     } catch (error: unknown) { setMessage(getErrorMessage(error, '主表应用失败')) }
@@ -540,8 +544,8 @@ export default function CollaborationSyncPanel() {
           <option value="">选择已导入的成员文件</option>{packages.filter(item => item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status)).map(item => <option key={item.package_uid} value={item.package_uid}>{item.package_uid}</option>)}
         </select>
         {packages.find(item => item.package_uid === selectedPackage)?.package_type === 'department_publication'
-          ? <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.applyDepartmentPublication(selectedPackage).then(async result => { setApplyDatabaseId(String(result.database_id)); setMessage(`部门总库已更新，待审冲突 ${result.pending_conflicts} 项`); await Promise.all([loadPackages(), loadReferenceData()]); if (result.pending_conflicts) { setApplyPackageUid(selectedPackage); const next = await collaborationSyncApi.previewApply(selectedPackage, { database_id: result.database_id }); setApplyPreview(next as ApplyPreview) } }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>建立或更新部门总库</button>
-          : sharedSources.map(source => <div key={source.database_uid} style={{ display: 'flex', gap: 8, padding: '8px 0', flexWrap: 'wrap' }}><span>{source.name}</span><button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.applySharedLibrary(selectedPackage, source.database_uid).then(async result => { setMessage(`共享库导入完成：${String(result.status)}`); await Promise.all([loadPackages(), loadReferenceData()]) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>建立或更新共享库</button></div>)}
+          ? <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.applyDepartmentPublication(selectedPackage).then(async result => { setApplyDatabaseId(String(result.database_id)); setMessage(`部门总库已更新，待审冲突 ${result.pending_conflicts} 项`); setGovernanceTargetDatabaseId(result.pending_conflicts ? String(result.database_id) : ''); await Promise.all([loadPackages(), loadReferenceData()]); if (result.pending_conflicts) { setApplyPackageUid(selectedPackage); const next = await collaborationSyncApi.previewApply(selectedPackage, { database_id: result.database_id }); setApplyPreview(next as ApplyPreview) } }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>建立或更新部门总库</button>
+          : sharedSources.map(source => <div key={source.database_uid} style={{ display: 'flex', gap: 8, padding: '8px 0', flexWrap: 'wrap' }}><span>{source.name}</span><button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.applySharedLibrary(selectedPackage, source.database_uid).then(async result => { setMessage(`共享库导入完成：${String(result.status)} · 待处理冲突 ${String(result.pending_conflicts || 0)} 项`); setGovernanceTargetDatabaseId(result.pending_conflicts ? String(result.database_id) : ''); await Promise.all([loadPackages(), loadReferenceData()]) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>建立或更新共享库</button></div>)}
         <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>同步包收发记录</h4>
         {packages.length === 0 ? <div style={{ fontSize: 12, color: '#64748b' }}>暂无同步包</div> : packages.map((item: CollaborationPackage) => <div key={item.package_uid} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', alignItems: 'center', gap: 8, borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><span style={{ overflowWrap: 'anywhere' }}>{item.direction === 'inbox' ? '收到' : '发出'} · {item.package_uid} · {item.count} 条 · {item.status} · {item.signature_status === 'trusted' || item.signature_status === 'signed' ? '签名' : item.signature_status === 'signed_untrusted' ? '待信任' : '未签名'}</span>{item.direction === 'outbox' && <button style={buttonStyle} onClick={() => void collaborationSyncApi.download(item.package_uid).then(blob => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${item.package_uid}.pwshare`; anchor.click(); URL.revokeObjectURL(url) }).catch(error => setMessage(getErrorMessage(error)))}>下载</button>}{item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status) && <button style={buttonStyle} disabled={busy || !databases.length} onClick={() => void handlePreviewApply(item.package_uid)}>预览主表应用</button>}<button style={buttonStyle} onClick={() => void handleShowRecords(item.package_uid)}>查看只读记录</button></div>)}
         {applyPackageUid && <div style={{ display: 'grid', gap: 8, marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
@@ -564,6 +568,6 @@ export default function CollaborationSyncPanel() {
         {selectedPackage && <div style={{ marginTop: 8 }}><div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>{selectedPackage} · 最多显示 1000 条</div><pre style={{ maxHeight: 240, overflow: 'auto', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, padding: 10, fontSize: 10 }}>{JSON.stringify(selectedRecords, null, 2)}</pre></div>}
       </div>
     </>}
-    {message && <div role="status" style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 8, fontSize: 12, color: '#334155', overflowWrap: 'anywhere' }}>{message}</div>}
+    {message && <div role="status" style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 8, fontSize: 12, color: '#334155', overflowWrap: 'anywhere' }}>{message}{governanceTargetDatabaseId && <button style={{ ...buttonStyle, marginLeft: 8, background: '#eef8f5', borderColor: '#65aa98' }} onClick={() => navigate(`/db/${governanceTargetDatabaseId}/governance`)}>到数据治理处理冲突</button>}</div>}
   </section>
 }

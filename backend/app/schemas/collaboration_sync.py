@@ -101,7 +101,7 @@ class LibraryGrantRequest(RequestModel):
 class SyncConflictDecision(RequestModel):
     entity_uid: str = Field(pattern=r"^pat_[a-f0-9]{32}$")
     field_key: str = Field(min_length=1, max_length=200)
-    choice: Literal["local", "remote", "manual"]
+    choice: Literal["local", "remote", "manual", "merge"]
     package_uid: str | None = None
     value: Any = None
     reason: str | None = Field(default=None, max_length=2000)

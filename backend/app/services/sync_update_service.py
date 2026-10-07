@@ -568,7 +568,15 @@ class SyncUpdateService:
                 if any(field.startswith("mcp_") for field in fields):
                     cls._materialize_mcp_resources(db, batch, patent, item.candidate_fields or {}, fields, confirmed_by)
                 if update_values:
-                    PatentService.update_patent(db, patent, update_values, source="external_sync_update", changed_by=confirmed_by, commit=False)
+                    PatentService.update_patent(
+                        db,
+                        patent,
+                        update_values,
+                        source="external_sync_update",
+                        changed_by=confirmed_by,
+                        commit=False,
+                        governance_database_id=batch.database_id,
+                    )
                 # Legal events are retained as provider evidence whenever an
                 # item is confirmed.  The current Patent projection changes
                 # only when the user explicitly selects legal_status.

@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-10-01.3"
+CURRENT_MIGRATION_VERSION = "2026-10-07.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -36,6 +36,7 @@ KEY_TABLES = (
     "import_source_rows",
     "field_observations",
     "governance_decisions",
+    "import_field_governance_audits",
     "source_table_definitions",
     "field_definitions",
     "source_field_mappings",
@@ -78,6 +79,9 @@ def _unique_index(table: str, name: str, column: str) -> SchemaOperation:
 SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("collaboration_sync_conflicts", "final_value", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN final_value JSON"),
     _column("collaboration_sync_conflicts", "decision_reason", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN decision_reason TEXT"),
+    _column("collaboration_sync_conflicts", "target_database_uid", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN target_database_uid VARCHAR(100)"),
+    _column("collaboration_sync_conflicts", "source_database_uid", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN source_database_uid VARCHAR(100)"),
+    _index("collaboration_sync_conflicts", "ix_collaboration_sync_conflicts_target_database_uid", "target_database_uid"),
     _column("patent_databases", "sync_provenance", "ALTER TABLE patent_databases ADD COLUMN sync_provenance JSON"),
     _column("patent_databases", "kind", "ALTER TABLE patent_databases ADD COLUMN kind VARCHAR(30) NOT NULL DEFAULT 'personal'"),
     _column("collaboration_sync_aggregation_batches", "publication_package_uid", "ALTER TABLE collaboration_sync_aggregation_batches ADD COLUMN publication_package_uid VARCHAR(80)"),

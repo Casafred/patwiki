@@ -1621,6 +1621,8 @@ const SOURCE_LABELS: Record<string, { label: string; color: string; bg: string }
   attachment: { label: '附件变更', color: '#475569', bg: '#e2e8f0' },
   external_sync: { label: 'MCP 外部同步', color: '#0f766e', bg: '#ccfbf1' },
   external_sync_update: { label: 'MCP 更新确认', color: '#0f766e', bg: '#ccfbf1' },
+  collaboration_sync: { label: '部门协同同步', color: '#047857', bg: '#d1fae5' },
+  department_publication: { label: '部门数据发布', color: '#047857', bg: '#d1fae5' },
 }
 
 function formatValue(v: string | null | undefined): string {
@@ -1650,18 +1652,17 @@ function HistoryTab({ patent, history, loading, onReload }: {
 
   type HistoryItem = { kind: 'entry'; history: PatentHistory } | { kind: 'import_batch'; key: string; histories: PatentHistory[] }
 
-  // 按日期分组；同一次导入只在时间线中显示一个可展开的摘要。
+  // 按日期分组；同一次文件导入或协同同步只显示一个可展开摘要。
   const groups: Record<string, HistoryItem[]> = {}
   const importItemsByKey = new Map<string, Extract<HistoryItem, { kind: 'import_batch' }>>()
   filtered.forEach(h => {
       const day = h.created_at ? formatApiDate(h.created_at) : '未知日期'
     if (!groups[day]) groups[day] = []
-    if (h.source !== 'import') {
+    if (h.import_batch_id == null && h.source !== 'import') {
       groups[day].push({ kind: 'entry', history: h })
       return
     }
-    // New batches have an immutable ID. Older records fall back to table + minute,
-    // so they remain compact without accidentally merging separate imports.
+    // New batches have an immutable ID. Older file imports fall back to source + minute.
     const fallbackTime = h.created_at ? h.created_at.slice(0, 16) : String(h.id)
     const batchKey = h.import_batch_id != null
       ? `batch:${h.import_batch_id}`
@@ -1675,7 +1676,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
     batch.histories.push(h)
   })
 
-  const sourceOptions = ['all', 'manual', 'bulk', 'ai', 'import', 'api', 'attachment', 'external_sync', 'external_sync_update']
+  const sourceOptions = ['all', 'manual', 'bulk', 'ai', 'import', 'collaboration_sync', 'department_publication', 'api', 'attachment', 'external_sync', 'external_sync_update']
 
   return (
     <div>
@@ -1735,6 +1736,7 @@ function HistoryTab({ patent, history, loading, onReload }: {
                     const first = item.histories[0]
                     const rows = [...new Set(item.histories.map(history => history.source_row).filter((row): row is number => row != null))]
                     const sourceName = first.source_table_title || '未标注来源文件'
+                    const isSyncBatch = first.source === 'collaboration_sync' || first.source === 'department_publication'
                     const isExpanded = expandedImportBatches.has(item.key)
                     return (
                       <div key={item.key} className="history-import-batch" style={{ border: '1px solid #fde68a', borderRadius: 8, background: '#fffbeb' }}>
@@ -1750,9 +1752,9 @@ function HistoryTab({ patent, history, loading, onReload }: {
                           style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
                         >
                           <span style={{ color: '#92400e', fontSize: 14 }}>{isExpanded ? '▾' : '▸'}</span>
-                          <span style={{ padding: '1px 8px', borderRadius: 10, fontSize: 11, background: '#fef3c7', color: '#92400e', fontWeight: 500 }}>导入批次</span>
-                          <strong className="history-import-batch-name" style={{ fontSize: 13, color: '#78350f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sourceName}</strong>
-                          <span className="history-import-batch-count" style={{ marginLeft: 'auto', fontSize: 11, color: '#a16207', whiteSpace: 'nowrap' }}>
+                          <span style={{ padding: '1px 8px', borderRadius: 10, fontSize: 11, background: isSyncBatch ? '#d1fae5' : '#fef3c7', color: isSyncBatch ? '#047857' : '#92400e', fontWeight: 500 }}>{isSyncBatch ? '同步批次' : '导入批次'}</span>
+                          <strong className="history-import-batch-name" style={{ fontSize: 13, color: isSyncBatch ? '#065f46' : '#78350f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sourceName}</strong>
+                          <span className="history-import-batch-count" style={{ marginLeft: 'auto', fontSize: 11, color: isSyncBatch ? '#047857' : '#a16207', whiteSpace: 'nowrap' }}>
                             {item.histories.length} 项字段变更{rows.length > 0 ? ` · 来源行 ${rows.join('、')}` : ''}
                           </span>
                           {first.source_import_note && <span style={{ fontSize: 11, color: '#92400e' }}>备注：{first.source_import_note}</span>}
