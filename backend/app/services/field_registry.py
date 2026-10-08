@@ -169,6 +169,37 @@ class PatentAttachmentFieldHandler(FieldHandler):
         record.custom_fields = values
 
 
+class PatentFiguresFieldHandler(FieldHandler):
+    """Patent figures are stored separately from the general attachment library."""
+
+    definition: FieldMeta = {
+        "key": "patent_figures",
+        "name": "专利附图",
+        "field_type": "attachment",
+        "group_name": "文档",
+        "options": None,
+        "width": 260,
+        "sortable": False,
+        "filterable": False,
+        "editable": True,
+        "frozen": False,
+        "visible": True,
+        "is_system": False,
+        "description": "专利附图专区：聚合 Excel 导入、MCP 更新与手动上传的图片，不进入统一附件库",
+    }
+
+    def list_fields(self, db=None) -> list[FieldMeta]:
+        return [dict(self.definition)]
+
+    def read_value(self, record: Any, key: str) -> Any:
+        return (getattr(record, "custom_fields", None) or {}).get(key)
+
+    def write_value(self, record: Any, key: str, value: Any) -> None:
+        values = dict(getattr(record, "custom_fields", None) or {})
+        values[key] = value
+        record.custom_fields = values
+
+
 class PatentOriginalLinksFieldHandler(FieldHandler):
     """Structured source URLs grouped by publication/grant identifier."""
 
@@ -790,7 +821,7 @@ SYSTEM_FIELD_DEFINITIONS = [
 SYSTEM_FIELD_HANDLERS = tuple(SystemFieldHandler(definition) for definition in SYSTEM_FIELD_DEFINITIONS)
 SYSTEM_FIELDS_REGISTRY = [handler.list_fields()[0] for handler in SYSTEM_FIELD_HANDLERS]
 SYSTEM_FIELD_KEYS = {field["key"] for field in SYSTEM_FIELDS_REGISTRY}
-FIELD_REGISTRY = FieldRegistry((*SYSTEM_FIELD_HANDLERS, PatentAttachmentFieldHandler(), PatentOriginalLinksFieldHandler(), CustomFieldHandler()))
+FIELD_REGISTRY = FieldRegistry((*SYSTEM_FIELD_HANDLERS, PatentAttachmentFieldHandler(), PatentFiguresFieldHandler(), PatentOriginalLinksFieldHandler(), CustomFieldHandler()))
 
 
 def get_system_field_meta(key: str) -> FieldMeta | None:

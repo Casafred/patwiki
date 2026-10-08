@@ -12,7 +12,7 @@ def plan_library_fields(db, package, database, record, patent):
     sources = (record.scope_json or {}).get("database_uids", [])
     fields = {key: value for key, value in payload.items() if key in PRIVATE_FIELDS and key != "custom_fields"}
     fields.update({f"custom_fields.{key}": value for key, value in (payload.get("custom_fields") or {}).items()
-        if key != "attachments"})
+        if key not in {"attachments", "patent_figures"}})
     plans, conflicts = [], []
     incoming = {(source, key): remote for source in sources for key, remote in fields.items()}
     for item in (record.field_provenance or {}).get("library_values", []):

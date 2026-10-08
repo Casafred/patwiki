@@ -143,11 +143,16 @@ class SyncUpdateService:
                     if not isinstance(resource, dict) or not resource.get("path"):
                         continue
                     kind = str(resource.get("resource_kind") or ("pdf" if field == "mcp_pdf_original" else "image"))
+                    # PDF originals stay in the general attachment library;
+                    # abstract/description figures belong to the dedicated
+                    # patent-figure area so they render in the patent Wiki.
+                    target_field = "attachments" if kind == "pdf" else "patent_figures"
                     content, mime = runtime.download_resource(str(resource["path"]), "pdf" if kind == "pdf" else "image")
                     digest = sha256(content).hexdigest()
                     duplicate = db.query(Attachment.id).filter(
                         Attachment.database_id == batch.database_id,
                         Attachment.patent_id == patent.id,
+                        Attachment.field_key == target_field,
                         Attachment.sha256 == digest,
                         Attachment.deleted_at.is_(None),
                     ).first()
@@ -156,7 +161,7 @@ class SyncUpdateService:
                     extension = ".pdf" if kind == "pdf" else (".png" if mime == "image/png" else ".jpg")
                     filename = f"{patent.publication_number or patent.id}-{field}{resource.get('figure_index', '')}{extension}"
                     AttachmentService.create_from_bytes(
-                        db, batch.database_id, patent.id, "attachments", filename, content, mime,
+                        db, batch.database_id, patent.id, target_field, filename, content, mime,
                         uploaded_by=confirmed_by, source_type="mcp",
                         source_url=f"himmpat://{kind}/{resource['path']}", commit=False,
                     )

@@ -53,7 +53,10 @@ def list_patent_attachments(
 @router.get("/library")
 def list_attachment_library(db: Session = Depends(get_db)):
     items = []
-    for attachment in db.query(Attachment).filter(Attachment.deleted_at.is_(None)).order_by(Attachment.uploaded_at.desc(), Attachment.id.desc()).all():
+    for attachment in db.query(Attachment).filter(
+        Attachment.deleted_at.is_(None),
+        Attachment.field_key != "patent_figures",
+    ).order_by(Attachment.uploaded_at.desc(), Attachment.id.desc()).all():
         item = AttachmentService._metadata(attachment)
         patent = db.query(Patent).filter(Patent.id == attachment.patent_id).first()
         item["owner_label"] = f"专利 · {patent.publication_number if patent and patent.publication_number else '无公开号'} · {patent.title if patent else '已删除专利'}"
@@ -71,7 +74,10 @@ def list_attachment_library(db: Session = Depends(get_db)):
 @router.get("/trash")
 def list_attachment_trash(db: Session = Depends(get_db)):
     items = []
-    for attachment in db.query(Attachment).filter(Attachment.deleted_at.is_not(None)).all():
+    for attachment in db.query(Attachment).filter(
+        Attachment.deleted_at.is_not(None),
+        Attachment.field_key != "patent_figures",
+    ).all():
         item = AttachmentService._metadata(attachment)
         item["deleted_at"] = attachment.deleted_at.isoformat()
         item["owner_label"] = f"专利 #{attachment.patent_id}"

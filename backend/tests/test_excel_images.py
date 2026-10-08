@@ -80,7 +80,7 @@ class ExcelEmbeddedImageTest(unittest.TestCase):
                 )
                 self.assertEqual(result["embedded_image_count"], 1)
                 changes = list_batch_changes(self.db, result["batch_id"])["items"]
-                image_change = next(item for item in changes if item["canonical_field_key"] == "attachments")
+                image_change = next(item for item in changes if item["canonical_field_key"] == "patent_figures")
                 self.assertIn("image", image_change["candidate_value"])
 
                 review_batch(self.db, result["batch_id"], default_action_name="adopt")
@@ -88,9 +88,13 @@ class ExcelEmbeddedImageTest(unittest.TestCase):
                 self.assertEqual(applied["created"], 1)
 
                 patent = self.db.query(Patent).filter(Patent.publication_number == "CN123456789A1").one()
-                self.assertEqual(self.db.query(Attachment).count(), 0)
+                # Excel 嵌入图片进入「专利附图」专区，而不是统一附件库。
+                self.assertEqual(self.db.query(Attachment).count(), 1)
                 self.assertFalse((patent.custom_fields or {}).get("attachments"))
-                self.assertEqual(applied["imported_image_count"], 0)
+                figures = (patent.custom_fields or {}).get("patent_figures") or []
+                self.assertEqual(len(figures), 1)
+                self.assertTrue(figures[0].get("is_image"))
+                self.assertEqual(applied["imported_image_count"], 1)
 
     def test_image_column_mapped_to_other_field_still_imports_image(self):
         content = self.workbook_bytes()
@@ -110,7 +114,7 @@ class ExcelEmbeddedImageTest(unittest.TestCase):
                 )
                 self.assertEqual(result["embedded_image_count"], 1)
                 changes = list_batch_changes(self.db, result["batch_id"])["items"]
-                image_changes = [item for item in changes if item["canonical_field_key"] == "attachments"]
+                image_changes = [item for item in changes if item["canonical_field_key"] == "patent_figures"]
                 self.assertEqual(len(image_changes), 1)
                 self.assertIn("image", image_changes[0]["candidate_value"])
 
@@ -119,8 +123,9 @@ class ExcelEmbeddedImageTest(unittest.TestCase):
                 self.assertEqual(applied["created"], 1)
 
                 patent = self.db.query(Patent).filter(Patent.publication_number == "CN123456789A1").one()
-                self.assertEqual(self.db.query(Attachment).count(), 0)
+                self.assertEqual(self.db.query(Attachment).count(), 1)
                 self.assertFalse((patent.custom_fields or {}).get("attachments"))
+                self.assertEqual(len((patent.custom_fields or {}).get("patent_figures") or []), 1)
 
 
 if __name__ == "__main__":

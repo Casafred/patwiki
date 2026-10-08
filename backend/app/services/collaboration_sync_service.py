@@ -302,7 +302,7 @@ def _record_batch(db: Session, user_id: int, request, fields: list[str], databas
             # Attachment IDs, local paths and download URLs are machine-local.
             payload["custom_fields"] = {
                 key: value for key, value in payload["custom_fields"].items()
-                if key != "attachments"
+                if key not in {"attachments", "patent_figures"}
             }
         records.append({"entity_type": "patent", "entity_uid": patent.entity_uid,
                         "record_version": patent.record_version or 1,
@@ -740,7 +740,7 @@ def _local_value(patent: Patent, field_key: str):
     if field_key == "custom_fields":
         return {
             key: value for key, value in (patent.custom_fields or {}).items()
-            if key != "attachments"
+            if key not in {"attachments", "patent_figures"}
         }
     return _value(getattr(patent, field_key))
 

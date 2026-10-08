@@ -21,6 +21,7 @@ import type {
   PatentFamilyMember,
   PatentCitationItem,
   JsonObject,
+  AttachmentMeta,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import { patentText } from '../../lib/patentText'
@@ -30,6 +31,7 @@ import PatentShareDialog from './PatentShareDialog'
 import PatentGraph from './PatentGraph'
 import CommentPanel from './CommentPanel'
 import AttachmentField from '../common/AttachmentField'
+import PatentFiguresField from '../common/PatentFiguresField'
 import ProjectRiskContextPanel from './ProjectRiskContextPanel'
 import Icon from '../common/Icon'
 
@@ -40,7 +42,7 @@ interface PatentDetailPageProps {
   onOpenSidebar?: () => void
 }
 
-type Tab = 'basic' | 'project-info' | 'provenance' | 'technical' | 'ai' | 'custom' | 'relations' | 'comments'
+type Tab = 'basic' | 'figures' | 'project-info' | 'provenance' | 'technical' | 'ai' | 'custom' | 'relations' | 'comments'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
 const LEGAL_STATUS_LABELS: Record<string, string> = {
@@ -307,8 +309,14 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
     )
   }
 
+  const figureList: AttachmentMeta[] = Array.isArray(patent.custom_fields?.patent_figures)
+    ? (patent.custom_fields?.patent_figures as unknown as AttachmentMeta[])
+    : []
+  const figureCount = figureList.filter(item => item?.is_image || item?.mime_type?.startsWith('image/')).length
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'basic', label: '基础著录' },
+    { key: 'figures', label: `专利附图${figureCount > 0 ? ` (${figureCount})` : ''}` },
     { key: 'relations', label: '同族与引用关系' },
     { key: 'project-info', label: '项目信息' },
     { key: 'provenance', label: `来源与审计${history.length > 0 ? ` (${history.length})` : ''}` },
@@ -418,6 +426,22 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
       <div className="detail-content">
         {activeTab === 'basic' && (
           <BasicInfoTab patent={patent} formData={formData} editing={editing} updateField={updateField} products={products} />
+        )}
+        {activeTab === 'figures' && (
+          <div className="patent-detail-section">
+            <div className="patent-detail-section-heading">
+              <div>
+                <h3>专利附图</h3>
+                <p>Excel 批量导入、MCP 更新与手动上传的图片汇总于此；与项目信息中的图片附件相互独立。点击缩略图可放大并通过左右按钮切换查看。</p>
+              </div>
+            </div>
+            <PatentFiguresField
+              patentId={patent.id}
+              databaseId={patent.database_id ?? null}
+              value={patent.custom_fields?.patent_figures ?? null}
+              onChange={() => { void loadPatent() }}
+            />
+          </div>
         )}
         {activeTab === 'provenance' && (
           <div className="patent-provenance-layout">

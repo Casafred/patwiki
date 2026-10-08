@@ -19,7 +19,7 @@ from app.models import (
     Attachment,
 )
 from app.services.field_registry import SYSTEM_FIELD_KEYS, get_all_fields_meta
-from app.services.import_service import ImportService, IMPORT_SKIP_FIELD
+from app.services.import_service import ImportService, IMPORT_SKIP_FIELD, IMPORT_IMAGE_FIELDS
 from app.services.excel_image_service import ExcelImage, extract_embedded_images
 from app.services.attachment_service import AttachmentService
 from app.services.patent_identity_service import (
@@ -36,7 +36,7 @@ RELATION_FIELDS = {"family_members", "cited_patents", "citing_patents"}
 DATE_FIELDS = {"filing_date", "publication_date", "grant_date", "priority_date", "legal_status_date"}
 MERGE_BLOCKED_FIELDS = DATE_FIELDS | {
     "application_number", "publication_number", "grant_number", "legal_status",
-    "patent_type", "has_risk", "risk_level", "country", "attachments",
+    "patent_type", "has_risk", "risk_level", "country", "attachments", "patent_figures",
 }
 MERGE_BLOCKED_FIELD_TYPES = {
     "date", "datetime", "number", "boolean", "select", "single_select", "rating",
@@ -162,7 +162,7 @@ def default_action(observation: FieldObservation) -> str:
         return "keep_existing"
     # Attachments are append-only source artifacts.  A content difference is
     # a new file to add, not a replacement of the existing projection.
-    if observation.canonical_field_key == "attachments" and observation.difference_type in {"new", "content"}:
+    if observation.canonical_field_key in {"attachments", "patent_figures"} and observation.difference_type in {"new", "content"}:
         return "adopt"
     if observation.canonical_field_key == "original_links" and observation.difference_type in {"new", "content"}:
         return "adopt"
@@ -261,24 +261,26 @@ def add_observations(
             # 嵌入图片本身就是这一列的值：即使单元格文本为空也要进入审查。
             # 关键：图片永远不能被静默丢弃。即便该列被映射到其它字段（例如
             # 「附图说明」被模糊匹配成 notes），这里仍为图片单独生成一条
-            # attachments 观察记录；若该列还有文本，则文本继续走下方常规映射，
+            # patent_figures 观察记录；若该列还有文本，则文本继续走下方常规映射，
             # 两条观察彼此独立，既保留文本又不丢图片。
+            # 图片统一进入「专利附图」专区，与统一附件库（attachments）分离。
+            image_field = "patent_figures"
             image_names = ", ".join(image.filename for image in column_images)
             marker = f"[嵌入图片] {image_names}"
-            current = current_value(patent, "attachments")
+            current = current_value(patent, image_field)
             diff = "quarantined" if source.resolution_status == "quarantined" else difference_type(current, image_names)
             item = FieldObservation(
                 import_batch_id=batch.id, source_row_id=source.id,
                 patent_id=patent.id if patent else None,
                 source_field_name=column, source_column_index=index,
-                canonical_field_key="attachments", raw_value=marker,
+                canonical_field_key=image_field, raw_value=marker,
                 normalized_value=image_names, current_value=current,
                 candidate_value=image_names, difference_type=diff,
                 field_resolution="quarantined" if source.resolution_status == "quarantined" else "mapped",
             )
             item.proposed_action = default_action(item)
             db.add(item)
-            if target == "attachments":
+            if target in IMPORT_IMAGE_FIELDS:
                 # 该列专职承载图片，无需再生成第二条文本观察记录。
                 continue
             if not value:
@@ -826,23 +828,30 @@ def apply_embedded_images(
     source: ImportSourceRow,
     actor: str,
 ) -> int:
-    """Attach reviewed Excel images and update the JSON projection."""
-    attachment_items = [
+    """Attach reviewed Excel images and update the JSON projection.
+
+    Excel drawings are promoted into the dedicated ``patent_figures`` field so
+    they render in the patent Wiki figure area.  They are deliberately kept out
+    of the unified attachment library (``attachments``).
+    """
+    image_items = [
         item for item in items
-        if item.canonical_field_key == "attachments" and item.source_column_index is not None
+        if item.canonical_field_key in IMPORT_IMAGE_FIELDS and item.source_column_index is not None
     ]
-    if not attachment_items:
+    if not image_items:
         return 0
     images_by_column: dict[int, list[ExcelImage]] = {}
     for image in images:
         images_by_column.setdefault(image.source_column, []).append(image)
     imported_count = 0
-    current_projection = list((patent.custom_fields or {}).get("attachments") or [])
-    for item in attachment_items:
+    database_id = int((batch.review_config or {}).get("database_id"))
+    for item in image_items:
         selected = images_by_column.get(item.source_column_index, [])
         action = actions.get(item.id)
         if not selected:
             continue
+        field_key = item.canonical_field_key
+        current_projection = list((patent.custom_fields or {}).get(field_key) or [])
         old_projection = list(current_projection)
         if action in {"adopt", "fill_empty"}:
             if action == "fill_empty" and current_projection:
@@ -854,9 +863,9 @@ def apply_embedded_images(
             for image in selected:
                 metadata = AttachmentService.create_from_bytes(
                     db,
-                    int((batch.review_config or {}).get("database_id")),
+                    database_id,
                     patent.id,
-                    "attachments",
+                    field_key,
                     image.filename,
                     image.content,
                     image.mime_type,
@@ -874,7 +883,7 @@ def apply_embedded_images(
                 )
                 current_projection.append(metadata)
                 imported_count += 1
-            patent.custom_fields = {**(patent.custom_fields or {}), "attachments": current_projection}
+            patent.custom_fields = {**(patent.custom_fields or {}), field_key: current_projection}
             add_import_history(
                 db, patent=patent, item=item, batch=batch, source=source,
                 old_value=old_projection, new_value=current_projection, actor=actor,
@@ -1169,7 +1178,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     for item in items:
                         if actions.get(item.id) not in {"adopt", "fill_empty"} or not item.canonical_field_key or not item.candidate_value:
                             continue
-                        if item.canonical_field_key == "attachments":
+                        if item.canonical_field_key in IMPORT_IMAGE_FIELDS:
                             continue
                         add_import_history(
                             db,
@@ -1181,8 +1190,14 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                             new_value=import_storage_value(item),
                             actor=actor,
                         )
-                    # Excel drawings are retained in source evidence and are
-                    # intentionally never promoted to the attachment library.
+                    # Excel drawings are promoted into the dedicated patent
+                    # figures area (never the unified attachment library).
+                    imported_image_count += apply_embedded_images(
+                        db, patent=patent,
+                        images=embedded_images_by_row.get(source.source_row, []),
+                        items=items, actions=actions, batch=batch,
+                        source=source, actor=actor,
+                    )
                 else:
                     row_changes = 0
                     for item in items:
@@ -1190,7 +1205,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                         action = actions.get(item.id)
                         if not key:
                             continue
-                        if key == "attachments":
+                        if key in IMPORT_IMAGE_FIELDS:
                             continue
                         if not item.candidate_value and key not in parse_errors:
                             continue
@@ -1401,7 +1416,13 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                                     decided_by=actor,
                                     reason="导入审查动作：保留现有值",
                                 )
-                    attachments_added = 0
+                    attachments_added = apply_embedded_images(
+                        db, patent=patent,
+                        images=embedded_images_by_row.get(source.source_row, []),
+                        items=items, actions=actions, batch=batch,
+                        source=source, actor=actor,
+                    )
+                    imported_image_count += attachments_added
                     if row_changes or attachments_added:
                         updated += 1
                         changed_ids.add(patent.id)
@@ -1500,7 +1521,7 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
 
 
 def restore_value(patent: Patent, field_key: str, value: str | None) -> None:
-    if field_key == "attachments":
+    if field_key in IMPORT_IMAGE_FIELDS:
         custom = dict(patent.custom_fields or {})
         if value is None:
             custom.pop(field_key, None)

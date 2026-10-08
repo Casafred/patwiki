@@ -54,6 +54,7 @@ const SYSTEM_FIELD_LABELS: Record<string, string> = {
   cited_patents: '引用专利',
   citing_patents: '被引用专利',
   attachments: '嵌入图片/附件',
+  patent_figures: '专利附图',
 }
 
 const SKIP_COLUMN = '__skip__'

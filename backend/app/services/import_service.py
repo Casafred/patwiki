@@ -22,7 +22,9 @@ from app.services.patent_identity_service import normalize_publication_number
 VIRTUAL_FIELDS = {"family_members", "cited_patents", "citing_patents"}
 # Attachment fields are accepted only when the source contains embedded image
 # objects.  ``validate_mapping`` keeps the warning for non-image sources.
-IMPORT_IMAGE_FIELDS = {"attachments"}
+# ``patent_figures`` is the dedicated patent-figure area (Excel/MCP/manual) and
+# is kept out of the unified attachment library.
+IMPORT_IMAGE_FIELDS = {"attachments", "patent_figures"}
 IMPORT_SKIP_FIELD = "__skip__"
 
 STANDARD_FIELD_MAPPINGS = {
@@ -84,6 +86,11 @@ STANDARD_FIELD_MAPPINGS = {
     "应用状态": "application_status",
     "备注": "notes",
     "说明": "notes",
+    # 专利附图：Excel 嵌入图片进入专利附图专区（与统一附件库分离）
+    "附图": "patent_figures",
+    "专利附图": "patent_figures",
+    "说明书附图": "patent_figures",
+    "附图图片": "patent_figures",
     # P0-10：同族/引用列（虚拟字段，单独处理）
     "同族专利号": "family_members",
     "同族": "family_members",
@@ -616,7 +623,7 @@ class ImportService:
                 # 自定义字段
                 # Embedded image bytes are handled separately by the staged
                 # import service.  Never serialize them into Patent JSON.
-                if field_key == "attachments":
+                if field_key in IMPORT_IMAGE_FIELDS:
                     continue
                 if field_key == "original_links":
                     raw_hyperlinks = row.get("__excel_hyperlinks__") or {}
