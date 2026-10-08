@@ -1,3 +1,4 @@
+import TableDropdownOverlay from './TableDropdown'
 import { useState } from 'react'
 import { exportApi } from '../../api'
 import type { FieldMeta, JsonObject, JsonValue } from '../../types'
@@ -89,7 +90,7 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <TableDropdownOverlay className="modal-overlay" onClose={onClose} width={900} onClick={onClose}>
       <div className="modal modal-lg export-dialog" onClick={event => event.stopPropagation()}>
         <div className="modal-header">
           <h3>导出数据</h3>
@@ -144,6 +145,6 @@ export default function ExportDialog({ fields, databaseId, viewId, selectedIds =
           <button type="button" className="btn btn-primary" onClick={() => void handleExport()} disabled={saving}>{saving ? '导出中...' : '开始导出'}</button>
         </div>
       </div>
-    </div>
+    </TableDropdownOverlay>
   )
 }

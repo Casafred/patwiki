@@ -6,6 +6,7 @@ import { getErrorMessage } from '../../lib/errors'
 import { formatApiDateTime } from '../../lib/date'
 import { useAppStore } from '../../store'
 import Icon from '../common/Icon'
+import ImportModal from './ImportModal'
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '等待中',
@@ -43,6 +44,12 @@ export default function ImportHistoryPage() {
   const [reviewTotal, setReviewTotal] = useState(0)
   const [reviewActions, setReviewActions] = useState<Record<number, ImportReviewAction>>({})
   const [reviewBusy, setReviewBusy] = useState(false)
+  const [recordScope, setRecordScope] = useState('all')
+  const [onlyConflicts, setOnlyConflicts] = useState(false)
+  const [resumeId, setResumeId] = useState<string | null>(null)
+  const isMaster = databases.find(database => database.id === currentDatabaseId)?.is_default
+  const isSynchronized = (batch: ImportBatch) => isCollaborationSyncBatch(batch) || (isMaster && Number(batch.review_config?.database_id) !== currentDatabaseId)
+  const visibleBatches = batches.filter(batch => recordScope === 'all' || (recordScope === 'sync' ? isSynchronized(batch) : !isSynchronized(batch)))
 
   const summary = batches.reduce((result, batch) => ({
     batches: result.batches + 1,
@@ -84,7 +91,7 @@ export default function ImportHistoryPage() {
     setReviewBusy(true)
     setError('')
     try {
-      const result = await importApi.getChanges(batchId)
+      const result = await importApi.getChanges(batchId, false, 0, 2000, onlyConflicts)
       setReviewChanges(result.items)
       setReviewTotal(result.total)
       setReviewActions(Object.fromEntries(result.items.map(item => [item.id, item.review_action])))
@@ -142,6 +149,7 @@ export default function ImportHistoryPage() {
             <option value="">全部状态</option>
             {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
+          <select aria-label="记录来源" className="form-input" value={recordScope} onChange={event => setRecordScope(event.target.value)}><option value="all">全部记录</option><option value="import">本库导入</option><option value="sync">同步记录</option></select>
           <button className="btn btn-secondary" onClick={() => void loadBatches()} disabled={loading}>刷新</button>
         </div>
       </div>
@@ -163,7 +171,7 @@ export default function ImportHistoryPage() {
       <div className="import-history-table-wrap">
         {loading ? (
           <div className="loading-state" style={{ minHeight: 180 }}>加载中...</div>
-        ) : batches.length === 0 ? (
+        ) : visibleBatches.length === 0 ? (
           <div className="empty-state" style={{ minHeight: 180 }}>暂无导入记录</div>
         ) : (
           <table className="data-grid import-history-table">
@@ -182,7 +190,7 @@ export default function ImportHistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {batches.map(batch => {
+              {visibleBatches.map(batch => {
                  const statusKey = batch.status.toLowerCase()
                  const isSyncBatch = isCollaborationSyncBatch(batch)
                  const expanded = expandedBatchIds.has(batch.id)
@@ -203,6 +211,7 @@ export default function ImportHistoryPage() {
                      <td className="import-file-cell" title={batch.filename}>
                       <strong>{batch.filename}</strong>
                       <span>{batch.source_table_title || '未命名来源表'}{batch.worksheet_name ? ` · ${batch.worksheet_name}` : ''}</span>
+                      <span>{isSynchronized(batch) ? '同步来源：' : '来源库：'}{String(databases.find(database => database.id === Number(batch.review_config?.database_id))?.name || batch.review_config?.target_database_name || '历史记录')}</span>
                     </td>
                     <td>
                       <span className={`status-badge status-${statusKey}`}>
@@ -246,12 +255,21 @@ export default function ImportHistoryPage() {
                            </div>}
                            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                              {!isSyncBatch && statusKey === 'review_required' && <button className="btn btn-primary" disabled={reviewBusy} onClick={() => void openReview(batch.id)}>继续审查并执行</button>}
+                             {!isSyncBatch && statusKey === 'review_required' && Number(batch.review_config?.database_id) === currentDatabaseId && <button className="btn btn-secondary" disabled={reviewBusy} onClick={() => {
+                               setReviewBusy(true)
+                               void importApi.resumeBatch(batch.id).then(result => setResumeId(result.import_id)).catch(error => setError(getErrorMessage(error))).finally(() => setReviewBusy(false))
+                             }}>返回字段映射</button>}
                              {statusKey === 'completed' && <button className="btn btn-secondary" onClick={() => navigate(databaseId ? `/db/${databaseId}/patents` : `/db/${currentDatabaseId}/patents`)}>查看目标数据库</button>}
                              {!isSyncBatch && statusKey === 'completed' && <button className="btn btn-danger" disabled={reviewBusy} onClick={() => void rollback(batch.id)}>撤回本次导入</button>}
                              {!isSyncBatch && <button className="btn btn-secondary" onClick={() => navigate(`${databaseId ? `/db/${databaseId}` : currentDatabaseId ? `/db/${currentDatabaseId}` : ''}/governance?batch_id=${batch.id}`)}>查看本批待治理数据</button>}
                            </div>
                            {reviewBatchId === batch.id && <div style={{ marginTop: 14 }}>
                              <strong>字段审查 · {reviewChanges.length} / {reviewTotal} 个来源值</strong>
+                             <label style={{ marginLeft: 12 }}><input type="checkbox" checked={onlyConflicts} disabled={reviewBusy} onChange={event => {
+                               const checked = event.target.checked
+                               setReviewBusy(true)
+                               void importApi.reviewBatch(batch.id, { items: Object.entries(reviewActions).map(([id, action]) => ({ observation_id: Number(id), action })) }).then(() => importApi.getChanges(batch.id, false, 0, 2000, checked)).then(result => { setOnlyConflicts(checked); setReviewChanges(result.items); setReviewTotal(result.total); setReviewActions(Object.fromEntries(result.items.map(item => [item.id, item.review_action]))) }).catch(error => setError(getErrorMessage(error))).finally(() => setReviewBusy(false))
+                             }} />仅新旧值冲突</label>
                              {reviewTotal > reviewChanges.length && <div style={{ color: '#64748b', fontSize: 12, marginTop: 4 }}>当前显示前 {reviewChanges.length} 项，其余项目将按系统建议处理。</div>}
                              <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
                                <table className="data-grid"><thead><tr><th>行</th><th>来源字段</th><th>当前值</th><th>导入值</th><th>处理</th></tr></thead>
@@ -295,6 +313,7 @@ export default function ImportHistoryPage() {
         )}
       </div>
       </div>
+      {resumeId && <ImportModal initialDraftId={resumeId} onClose={() => { setResumeId(null); void loadBatches() }} onSuccess={() => { setResumeId(null); void loadBatches() }} />}
     </div>
   )
 }

@@ -1225,6 +1225,12 @@ export interface FieldMeta {
   frozen?: boolean
   visible?: boolean
   is_system?: boolean
+  value_source?: 'system' | 'manual'
+  value_stability?: 'fixed' | 'variable'
+  merge_policy?: 'version_latest' | 'keep_existing' | 'fill_empty' | 'quarantine'
+  validation_rules?: { required?: boolean; max_length?: number; minimum?: number; maximum?: number }
+  versioned?: boolean
+  is_temporary?: boolean
   ai_config?: AIConfig | null
   formula_config?: FormulaConfig | null
   is_formula?: boolean
@@ -1569,6 +1575,23 @@ export interface CollaborationPackage {
   created_at?: string | null
   signature_status?: string
   signer_fingerprint?: string | null
+}
+
+export interface FieldVersions {
+  field: FieldMeta
+  current_value: string | null
+  versions: { id: number; old_value: string | null; value: string | null; source: string; source_label?: string; source_row?: number; import_batch_id?: number; created_at?: string }[]
+  imports: { id: number; value: string | null; decision?: string; batch_id: number | null; filename: string; status: string; created_at?: string }[]
+}
+
+export interface ImportDraft {
+  database_id: number
+  mapping: Record<string, string>
+  selected_sheet?: string | null
+  product_id?: number | null
+  project_id?: number | null
+  view_id?: number | null
+  import_note: string
 }
 
 export interface SyncGovernanceConflict {

@@ -1788,6 +1788,57 @@ input, select, textarea {
   border-color: #2563eb;
 }
 
+/* Main-table dropdowns are portaled to avoid toolbar clipping and table zoom. */
+.table-dropdown {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #dce3eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  outline: none;
+}
+.table-dropdown > div {
+  width: 100% !important;
+  max-width: none !important;
+  max-height: inherit !important;
+  min-height: 0;
+  box-sizing: border-box;
+  box-shadow: none !important;
+  flex-shrink: 0;
+}
+.table-dropdown .modal { flex-shrink: 1; }
+.table-dropdown .modal-body { min-height: 0; }
+.table-dropdown .modal-header { gap: 12px; flex-wrap: wrap; }
+.table-dropdown .modal-footer { flex-wrap: wrap; }
+.table-dropdown .table-settings-row-height { display: flex; flex-wrap: wrap; gap: 6px; }
+.table-dropdown .table-settings-note { margin: 8px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+.table-dropdown input, .table-dropdown select, .table-dropdown textarea { min-width: 0; }
+.table-dropdown-menu { padding: 6px; scrollbar-gutter: auto; }
+.table-dropdown-menu .menu-item { width: 100%; text-align: left; white-space: normal; }
+@media (max-width: 600px) {
+  .table-dropdown .modal-header, .table-dropdown .modal-body { padding: 12px; }
+  .table-dropdown .modal-footer { padding: 10px 12px; }
+  .table-dropdown .table-group-config-row { grid-template-columns: minmax(0, 1fr) 90px !important; }
+  .table-dropdown .table-format-config-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .table-dropdown .jev-item-config { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important; }
+  .table-dropdown .jev-result-layout { grid-template-columns: minmax(0, 1fr) !important; }
+  .datagrid-toolbar { position: relative; z-index: 31; }
+  .workbench-main > .datagrid-toolbar {
+    max-height: min(42dvh, 340px);
+    box-sizing: border-box;
+    overflow-y: auto !important;
+    flex-shrink: 0;
+  }
+  .datagrid-toolbar .datagrid-search-form { flex: 0 0 auto; width: 100%; }
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;

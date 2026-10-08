@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect } from 'react'
+import TableDropdownOverlay from '../common/TableDropdown'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ClipboardEvent } from 'react'
-import { importApi, databaseApi, viewApi } from '../../api'
+import { importApi, databaseApi, viewApi, customFieldApi } from '../../api'
 import { fieldService } from '../../services'
 import { useAppStore } from '../../store'
 import { mergeImportedCollectionValues } from '../../lib/importMerge'
@@ -11,6 +12,7 @@ import { getErrorMessage } from '../../lib/errors'
 interface ImportModalProps {
   onClose: () => void
   onSuccess: () => void
+  initialDraftId?: string
 }
 
 const SYSTEM_FIELD_LABELS: Record<string, string> = {
@@ -108,7 +110,7 @@ function canMergeImportField(fieldKey: string | null | undefined, fields: FieldM
   return !['date', 'datetime', 'number', 'boolean', 'select', 'single_select', 'rating', 'link', 'url', 'attachment', 'formula', 'lookup', 'rollup'].includes(field.field_type)
 }
 
-export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
+export default function ImportModal({ onClose, onSuccess, initialDraftId }: ImportModalProps) {
   const navigate = useNavigate()
   const {
     currentDatabaseId,
@@ -146,6 +148,8 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   const [reviewOffset, setReviewOffset] = useState(0)
   const [reviewPageSize, setReviewPageSize] = useState(50)
   const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewFilter, setReviewFilter] = useState<'all' | 'differences' | 'conflicts'>('all')
+  const [drafts, setDrafts] = useState<Awaited<ReturnType<typeof importApi.listDrafts>>>([])
   const [reviewActions, setReviewActions] = useState<Record<number, ImportReviewAction>>({})
   const [mergeValues, setMergeValues] = useState<Record<number, string>>({})
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
@@ -200,6 +204,59 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   useEffect(() => {
     void fieldService.list().then(setFields).catch(() => setFields([]))
   }, [])
+
+  useEffect(() => {
+    if (currentDatabaseId) void importApi.listDrafts(currentDatabaseId).then(setDrafts).catch(error => setError(getErrorMessage(error, '导入草稿加载失败')))
+  }, [currentDatabaseId])
+
+  const saveDraft = useCallback(async () => {
+    if (!preview || !currentDatabaseId || step === 'complete') return
+    await importApi.saveDraft(preview.import_id, {
+      database_id: currentDatabaseId, mapping, selected_sheet: selectedSheet,
+      product_id: selectedProductId || null, project_id: selectedProjectId || null,
+      view_id: selectedViewId || null, import_note: importNote,
+    })
+  }, [preview, currentDatabaseId, mapping, selectedSheet, selectedProductId, selectedProjectId, selectedViewId, importNote, step])
+
+  useEffect(() => {
+    if (!preview || step === 'complete' || step === 'processing') return
+    const timer = window.setTimeout(() => { void saveDraft().catch(error => setError(getErrorMessage(error, '导入草稿保存失败'))) }, 400)
+    return () => window.clearTimeout(timer)
+  }, [preview, step, saveDraft])
+
+  const resumeDraft = useCallback(async (id: string) => {
+    setUploading(true); setError('')
+    try {
+      const saved = await importApi.getDraft(id)
+      setPreview(saved.preview); setMapping(saved.draft.mapping)
+      setSelectedSheet(saved.draft.selected_sheet || null); setImportNote(saved.draft.import_note)
+      setSelectedProductId(saved.draft.product_id || ''); setSelectedProjectId(saved.draft.project_id || ''); setSelectedViewId(saved.draft.view_id || '')
+      setFile(new File([], saved.filename)); setStep('mapping')
+      if (saved.batch_id) {
+        const batch = await importApi.getBatch(saved.batch_id)
+        setImportResult({ batch_id: batch.id, status: batch.status, total: batch.total_rows, created: 0, updated: 0, skipped: 0, errors: 0 })
+      } else setImportResult(null)
+    } catch (error) { setError(getErrorMessage(error, '恢复导入失败')) }
+    finally { setUploading(false) }
+  }, [])
+  const restoredDraft = useRef<string | null>(null)
+  useEffect(() => {
+    if (initialDraftId && restoredDraft.current !== initialDraftId) {
+      restoredDraft.current = initialDraftId
+      void resumeDraft(initialDraftId)
+    }
+  }, [initialDraftId, resumeDraft])
+
+  const retainAsCustomField = async (column: string) => {
+    setError('')
+    try {
+      const created = await customFieldApi.create({ key: `custom_${crypto.randomUUID().replaceAll('-', '')}`, name: column, field_type: 'textarea', group_name: '导入扩展', is_active: true })
+      fieldService.invalidate()
+      const refreshed = await fieldService.list(true)
+      setFields(refreshed); setPreview(previous => previous ? { ...previous, available_fields: refreshed } : previous)
+      setMapping(previous => ({ ...previous, [column]: created.key }))
+    } catch (error) { setError(getErrorMessage(error, '保留自定义列失败')) }
+  }
 
   const handleCreateView = useCallback(async () => {
     if (!newViewName.trim() || !currentDatabaseId) return
@@ -277,7 +334,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     setUploading(true)
     setError('')
     try {
-      const result = await importApi.upload(file, sheet)
+      const result = file.size === 0 && preview ? (await importApi.getDraft(preview.import_id, sheet)).preview : await importApi.upload(file, sheet)
       setPreview(result)
       setSelectedSheet(result.selected_sheet || sheet)
       setMapping(result.suggested_mapping || {})
@@ -286,7 +343,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     } finally {
       setUploading(false)
     }
-  }, [file])
+  }, [file, preview])
 
   const handleClipboardPaste = useCallback(async (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const text = event.clipboardData.getData('text/plain')
@@ -309,14 +366,14 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     }
   }, [])
 
-  const loadReviewPage = useCallback(async (batchId: number, offset: number, limit: number) => {
-    const page = await importApi.getChanges(batchId, false, offset, limit)
+  const loadReviewPage = useCallback(async (batchId: number, offset: number, limit: number, filter = reviewFilter) => {
+    const page = await importApi.getChanges(batchId, filter === 'differences', offset, limit, filter === 'conflicts')
     setReviewChanges(page.items)
     setReviewTotal(page.total)
     setReviewOffset(offset)
     setReviewActions(Object.fromEntries(page.items.map(item => [item.id, item.review_action])))
     setMergeValues(initialReviewMergeValues(page.items))
-  }, [])
+  }, [reviewFilter])
 
   const saveCurrentReviewPage = useCallback(async () => {
     if (!importResult?.batch_id) return
@@ -363,6 +420,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     setImporting(true)
     setStep('processing')
     try {
+      await saveDraft()
       const fieldMappings: FieldMapping[] = preview.detected_columns.map(source => ({
         source_column: source,
         target_field: mapping[source] || '',
@@ -398,7 +456,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     } finally {
       setImporting(false)
     }
-  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId, selectedSheet, importNote, loadReviewPage])
+  }, [preview, mapping, dedupeField, selectedProductId, selectedProjectId, currentDatabaseId, selectedViewId, selectedSheet, importNote, loadReviewPage, saveDraft])
 
   const handleApplyReviewedImport = useCallback(async () => {
     if (!importResult?.batch_id) return
@@ -440,8 +498,13 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     }
   }, [importResult])
 
+  const closeImport = async () => {
+    if (importing) return
+    try { await saveDraft(); if (step === 'review') await saveCurrentReviewPage(); onClose() }
+    catch (error) { setError(getErrorMessage(error, '保存导入进度失败')) }
+  }
   const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose()
+    if (e.target === e.currentTarget) void closeImport()
   }
   const unmappedColumns = new Set(preview?.unmapped_columns || [])
   const unmappedCount = preview?.unmapped_count ?? unmappedColumns.size
@@ -481,20 +544,21 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
   }[step]
 
   return (
-    <div
+    <TableDropdownOverlay onClose={() => { if (!importing) void closeImport() }} width={step === 'review' ? 1500 : 1100}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
       }}
       onClick={handleBackdropClick}
     >
-      <div style={{ background: 'white', borderRadius: 12, width: '90%', maxWidth: 800, maxHeight: '90vh', overflow: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
+      <div style={{ background: 'white', borderRadius: 8, width: '96%', maxWidth: step === 'review' ? 1500 : 1100, maxHeight: '94vh', overflow: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
         <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>{stepTitle}</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#94a3b8' }}>×</button>
+          <button disabled={importing} onClick={() => void closeImport()} aria-label="保存并关闭导入" style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#94a3b8' }}>×</button>
         </div>
 
         <div style={{ padding: 24 }}>
+          {step === 'upload' && drafts.length > 0 && <div style={{ marginBottom: 16 }}><h4>未完成的导入</h4>{drafts.map(draft => <div key={draft.import_id} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '6px 0' }}><span style={{ overflowWrap: 'anywhere' }}>{draft.filename}</span><button className="btn btn-secondary" disabled={uploading} onClick={() => void resumeDraft(draft.import_id)}>恢复字段映射</button></div>)}</div>}
           {error && (
             <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 13 }}>
               {error}
@@ -556,7 +620,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
-                <button className="btn btn-secondary" onClick={onClose}>取消</button>
+                <button className="btn btn-secondary" onClick={() => void closeImport()}>保存并关闭</button>
                 <button
                   className="btn btn-primary"
                   disabled={!selectedDatabaseId}
@@ -679,7 +743,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
-                <button className="btn btn-secondary" onClick={onClose}>取消</button>
+                <button className="btn btn-secondary" onClick={() => void closeImport()}>保存并关闭</button>
                 <button className="btn btn-primary" disabled={!file || uploading} onClick={handleUpload}>
                   {uploading ? '解析中...' : '下一步：预览字段'}
                 </button>
@@ -737,19 +801,10 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                             >
                               <option value="">-- 保留原始列，待治理（默认）--</option>
                               <option value={SKIP_COLUMN}>-- 跳过本列 --</option>
-                              <optgroup label="系统字段">
-                                {Object.entries(SYSTEM_FIELD_LABELS).map(([f, l]) => (
-                                  <option key={f} value={f}>{l} ({f})</option>
-                                ))}
-                              </optgroup>
-                              {(preview.available_fields || []).filter(field => !field.is_system && field.key !== mappedKey).length > 0 && (
-                                <optgroup label="已有自定义字段">
-                                  {(preview.available_fields || []).filter(field => !field.is_system && field.key !== mappedKey).map(field => (
-                                    <option key={field.key} value={field.key}>{field.name} ({field.key})</option>
-                                  ))}
-                                </optgroup>
-                              )}
+                              {[...new Set((preview.available_fields || fields).filter(field => !field.is_temporary && !['id', 'created_at', 'updated_at'].includes(field.key)).map(field => field.group_name))].map(group => <optgroup key={group} label={group}>{(preview.available_fields || fields).filter(field => field.group_name === group && !field.is_temporary && !['id', 'created_at', 'updated_at'].includes(field.key)).map(field => <option key={field.key} value={field.key}>{field.name} · {field.value_source === 'manual' ? '人工' : '系统'} · {field.value_stability === 'variable' ? '可变' : '固定'}</option>)}</optgroup>)}
+                              {!preview.available_fields?.length && Object.entries(SYSTEM_FIELD_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                             </select>
+                            {!mappedKey && <button className="btn btn-secondary" onClick={() => void retainAsCustomField(col)}>保留为自定义列</button>}
                             {isGovernancePending && (
                               <span style={{ display: 'inline-block', marginLeft: 6, padding: '1px 6px', fontSize: 10, background: '#fef3c7', color: '#92400e', borderRadius: 3 }}>
                                 保留待治理
@@ -888,7 +943,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <button className="btn btn-secondary" onClick={() => setStep('upload')}>返回</button>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-secondary" onClick={onClose}>取消</button>
+                  <button className="btn btn-secondary" onClick={() => void closeImport()}>保存并关闭</button>
                   <button className="btn btn-primary" disabled={importing || !preview.detected_columns.some(column => mapping[column] === 'publication_number')} onClick={handleImport}>
                     {importing ? '分析中...' : `开始预审 ${preview.total_rows} 条数据`}
                   </button>
@@ -909,7 +964,13 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
                  </div>
                )}
               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                <button className="btn btn-secondary" disabled={reviewLoading || importing} onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.difference_type === 'new' ? 'fill_empty' : 'keep_existing'])))}>本页按安全建议</button>
+                <select aria-label="审查范围" className="form-input" style={{ width: 'auto' }} value={reviewFilter} disabled={reviewLoading || importing} onChange={event => {
+                  const filter = event.target.value as typeof reviewFilter
+                  if (!importResult.batch_id) return
+                  setReviewLoading(true)
+                  void saveCurrentReviewPage().then(() => loadReviewPage(importResult.batch_id!, 0, reviewPageSize, filter)).then(() => setReviewFilter(filter)).catch(error => setError(getErrorMessage(error))).finally(() => setReviewLoading(false))
+                }}><option value="all">全部单元格</option><option value="differences">全部差异（含新值）</option><option value="conflicts">仅新旧值冲突</option></select>
+                <button className="btn btn-secondary" disabled={reviewLoading || importing} onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.review_action])))}>本页按字段规则</button>
                 <button className="btn btn-secondary" disabled={reviewLoading || importing} onClick={() => setReviewActions(Object.fromEntries(reviewChanges.map(item => [item.id, item.field_resolution === 'mapped' ? 'adopt' : 'keep_existing'])))}>本页映射字段采用来源值</button>
                 <span style={{ fontSize: 12, color: '#64748b', marginLeft: 'auto' }}>共 {reviewTotal} 项 · 当前 {reviewChanges.length} 项 · 第 {reviewPageNumber} / {reviewPageCount} 页</span>
                 <label className="gov-audit-page-size"><span>每页</span><select className="form-input" value={reviewPageSize} disabled={reviewLoading || importing} onChange={event => void handleReviewPageChange(0, Number(event.target.value))}><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select></label>
@@ -958,7 +1019,7 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>
                 <button className="btn btn-secondary" onClick={() => setStep('mapping')}>返回调整映射</button>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-secondary" onClick={onClose}>取消</button>
+                  <button className="btn btn-secondary" onClick={() => void closeImport()}>保存并关闭</button>
                   <button className="btn btn-primary" disabled={importing || reviewLoading} onClick={() => void handleApplyReviewedImport()}>{importing ? '执行中...' : '确认并执行导入'}</button>
                 </div>
               </div>
@@ -1046,6 +1107,6 @@ export default function ImportModal({ onClose, onSuccess }: ImportModalProps) {
           )}
         </div>
       </div>
-    </div>
+    </TableDropdownOverlay>
   )
 }

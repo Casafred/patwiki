@@ -1,3 +1,4 @@
+import TableDropdownOverlay from '../common/TableDropdown'
 import { useState } from 'react'
 import type { ConditionalFormatRule, FieldMeta, PatentView } from '../../types'
 
@@ -55,7 +56,7 @@ export default function ConditionalFormatPanel({ open, view, fields, onClose, on
   }
 
   return (
-    <div className="modal-overlay">
+    <TableDropdownOverlay className="modal-overlay" onClose={onClose} width={760}>
       <div className="modal" style={{ maxWidth: 760 }}>
         <div className="modal-header">
           <div className="modal-title">条件格式</div>
@@ -65,7 +66,7 @@ export default function ConditionalFormatPanel({ open, view, fields, onClose, on
           <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
             条件按顺序匹配，单元格使用第一条命中的样式。
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr 54px 54px auto', gap: 6, alignItems: 'center', marginBottom: 16 }}>
+          <div className="table-format-config-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) 54px 54px auto', gap: 6, alignItems: 'center', marginBottom: 16 }}>
             <select className="form-select" value={field} onChange={event => setField(event.target.value)}>
               {fields.map(item => <option key={item.key} value={item.key}>{item.name}</option>)}
             </select>
@@ -100,6 +101,6 @@ export default function ConditionalFormatPanel({ open, view, fields, onClose, on
           <button className="btn btn-primary" type="button" onClick={() => void save()} disabled={saving}>{saving ? '保存中...' : '保存设置'}</button>
         </div>
       </div>
-    </div>
+    </TableDropdownOverlay>
   )
 }

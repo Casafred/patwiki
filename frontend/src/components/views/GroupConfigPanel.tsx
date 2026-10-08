@@ -1,3 +1,4 @@
+import TableDropdownOverlay from '../common/TableDropdown'
 import { useState } from 'react'
 import type { FieldMeta, PatentView, ViewGroupField } from '../../types'
 
@@ -42,7 +43,7 @@ export default function GroupConfigPanel({ open, view, fields, onClose, onSave }
   }
 
   return (
-    <div className="modal-overlay">
+    <TableDropdownOverlay className="modal-overlay" onClose={onClose} width={620}>
       <div className="modal" style={{ maxWidth: 620 }}>
         <div className="modal-header">
           <div className="modal-title">分组设置</div>
@@ -59,7 +60,7 @@ export default function GroupConfigPanel({ open, view, fields, onClose, onSave }
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {draft.map((item, index) => (
-              <div key={`${item.field}-${index}`} style={{ display: 'grid', gridTemplateColumns: '1fr 110px auto auto', gap: 8, alignItems: 'center' }}>
+              <div key={`${item.field}-${index}`} className="table-group-config-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 110px auto auto', gap: 8, alignItems: 'center' }}>
                 <select
                   className="form-select"
                   value={item.field}
@@ -96,6 +97,6 @@ export default function GroupConfigPanel({ open, view, fields, onClose, onSave }
           <button className="btn btn-primary" type="button" onClick={() => void save()} disabled={saving}>{saving ? '保存中...' : '保存设置'}</button>
         </div>
       </div>
-    </div>
+    </TableDropdownOverlay>
   )
 }

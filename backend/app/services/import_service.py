@@ -349,7 +349,8 @@ class ImportService:
         mapping_issues: list[dict[str, str]] = []
 
         custom_fields = db.query(CustomField).all()
-        custom_field_by_name = {cf.name: cf.key for cf in custom_fields}
+        custom_field_by_name = {cf.name: (cf.ai_config or {}).get("consolidated_target", cf.key) for cf in custom_fields
+                                if cf.is_active or (cf.ai_config or {}).get("consolidated_target")}
 
         for col in columns:
             col_clean = col.strip()

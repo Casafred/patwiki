@@ -69,6 +69,90 @@ TEMP_FILES: dict[str, dict] = {}
 TEMP_TTL = 6 * 3600  # 6小时过期
 
 
+def _session_path(import_id: str) -> Path:
+    try:
+        key = str(uuid.UUID(import_id))
+    except ValueError as exc:
+        raise BadRequestException("无效的导入会话") from exc
+    return SOURCE_DIR / f"{key}.json"
+
+
+def _read_session(import_id: str) -> dict:
+    path = _session_path(import_id)
+    if not path.exists():
+        raise NotFoundException("导入草稿不存在")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_session(import_id: str, session: dict) -> None:
+    path = _session_path(import_id)
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")
+    os.replace(temp, path)
+
+
+class ImportDraftRequest(BaseModel):
+    database_id: int
+    mapping: dict[str, str]
+    selected_sheet: str | None = None
+    product_id: int | None = None
+    project_id: int | None = None
+    view_id: int | None = None
+    import_note: str = ""
+
+
+@router.put("/import/sessions/{import_id}")
+def save_import_draft(import_id: str, req: ImportDraftRequest, db: Session = Depends(get_db)):
+    if not db.get(PatentDatabase, req.database_id):
+        raise NotFoundException("专利库不存在")
+    session = _read_session(import_id)
+    session["draft"] = req.model_dump()
+    session["updated_at"] = utc_now_naive().isoformat()
+    _save_session(import_id, session)
+    return {"saved": True}
+
+
+@router.get("/import/sessions")
+def list_import_drafts(database_id: int, db: Session = Depends(get_db)):
+    items = []
+    for path in SOURCE_DIR.glob("*.json"):
+        try:
+            session = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        if (session.get("draft") or {}).get("database_id") != database_id:
+            continue
+        batch = db.get(ImportBatch, session["batch_id"]) if session.get("batch_id") else None
+        if batch and batch.status in {ImportBatchStatus.COMPLETED, ImportBatchStatus.ROLLED_BACK}:
+            continue
+        if session.get("preview"):
+            items.append({"import_id": session["preview"]["import_id"], "filename": session["info"]["filename"],
+                          "batch_id": session.get("batch_id"), "updated_at": session.get("updated_at")})
+    return sorted(items, key=lambda item: item.get("updated_at") or "", reverse=True)
+
+
+@router.get("/import/sessions/{import_id}")
+def get_import_draft(import_id: str, sheet_name: str | None = None, db: Session = Depends(get_db)):
+    session = _read_session(import_id)
+    if sheet_name and sheet_name != session["preview"].get("selected_sheet"):
+        content = Path(session["info"]["artifact_path"]).read_bytes()
+        filename = session["info"]["filename"]
+        if sheet_name not in ImportService.list_sheets(content, filename):
+            raise BadRequestException("工作表不存在")
+        frame, columns = ImportService.parse_excel(content, filename, sheet_name)
+        mapping, issues = ImportService.suggest_mapping(columns, db)
+        images = extract_embedded_images(content, filename, sheet_name, columns)
+        session["preview"].update(detected_columns=columns, total_rows=len(frame),
+            preview_rows=[{str(key): str(value) for key, value in row.to_dict().items()} for _, row in frame.head(3).iterrows()],
+            selected_sheet=sheet_name, suggested_mapping=mapping, mapping_issues=issues,
+            unmapped_columns=[column for column in columns if not mapping.get(column)],
+            embedded_image_count=len(images), embedded_images=[image.metadata(include_hash=False) for image in images])
+        _save_session(import_id, session)
+    session["preview"]["available_fields"] = get_all_fields_meta(db)
+    return {"preview": session["preview"], "draft": session.get("draft"), "batch_id": session.get("batch_id"),
+            "filename": session["info"]["filename"]}
+
+
 def _cleanup_expired():
     """定期清理过期的临时文件"""
     while True:
@@ -200,7 +284,7 @@ async def preview_import(
     databases = DatabaseService.list_databases(db)
     default_db = DatabaseService.get_default_database(db)
 
-    return {
+    preview = {
         "import_id": import_id,
         "detected_columns": columns,
         "preview_rows": preview_rows_list,
@@ -219,6 +303,9 @@ async def preview_import(
         "embedded_image_count": len(embedded_images),
         "embedded_images": [image.metadata(include_hash=False) for image in embedded_images],
     }
+    _save_session(import_id, {"info": TEMP_FILES[import_id], "preview": preview,
+                             "updated_at": utc_now_naive().isoformat()})
+    return preview
 
 
 def _apply_patent_update(patent: Patent, data: dict):
@@ -1091,10 +1178,14 @@ def confirm_import(
     db: Session = Depends(get_db),
 ):
     """Create a reviewable import batch; Patent rows are not changed here."""
+    session = _read_session(req.import_id) if _session_path(req.import_id).exists() else {}
+    info = session.get("info") or TEMP_FILES.get(req.import_id) or {}
     temp_path = TEMP_DIR / f"{req.import_id}.bin"
+    if not temp_path.exists() and info.get("artifact_path"):
+        temp_path = Path(info["artifact_path"])
     if not temp_path.exists():
         raise BadRequestException("导入会话已过期或文件不存在，请重新上传文件")
-    info = TEMP_FILES.get(req.import_id) or {
+    info = info or {
         "path": str(temp_path),
         "filename": "upload.xlsx",
         "created_at": temp_path.stat().st_mtime,
@@ -1119,6 +1210,9 @@ def confirm_import(
         if not DatabaseService.get_database(db, database_id):
             raise BadRequestException(f"库不存在：{database_id}")
     mapping = {item.source_column: (item.target_field or "").strip() for item in req.field_mappings}
+    prior = db.get(ImportBatch, session["batch_id"]) if session.get("batch_id") else None
+    if prior and prior.status == ImportBatchStatus.COMPLETED:
+        raise BadRequestException("该导入已完成，请重新上传新文件")
     try:
         result = stage_import(
             db,
@@ -1137,10 +1231,20 @@ def confirm_import(
         )
         result["database_id"] = database_id
         result["unknown_columns"] = [column for column, target in mapping.items() if not target and target != IMPORT_SKIP_FIELD]
+        if prior and prior.status == ImportBatchStatus.REVIEW_REQUIRED:
+            prior.status = ImportBatchStatus.ROLLED_BACK
+            prior.review_config = {**(prior.review_config or {}), "superseded_by": result["batch_id"]}
+            db.commit()
+        if session:
+            session["batch_id"] = result["batch_id"]
+            session["draft"] = {"database_id": database_id, "mapping": mapping, "selected_sheet": req.sheet_name,
+                                "product_id": req.product_id, "project_id": req.project_id, "view_id": req.view_id,
+                                "import_note": req.import_note or ""}
+            _save_session(req.import_id, session)
         return result
     finally:
         info = TEMP_FILES.pop(req.import_id, None)
-        if info and os.path.exists(info["path"]):
+        if info and session.get("batch_id") and os.path.exists(info["path"]):
             try:
                 os.remove(info["path"])
             except OSError:
@@ -1151,12 +1255,13 @@ def confirm_import(
 def get_import_batch_changes(
     batch_id: int,
     only_differences: bool = Query(False),
+    only_conflicts: bool = Query(False),
     offset: int = Query(0, ge=0),
     limit: int = Query(2000, ge=1, le=10000),
     db: Session = Depends(get_db),
 ):
     return list_batch_changes(
-        db, batch_id, only_differences=only_differences, offset=offset, limit=limit,
+        db, batch_id, only_differences=only_differences, only_conflicts=only_conflicts, offset=offset, limit=limit,
     )
 
 
@@ -1207,7 +1312,7 @@ def list_import_batches(
             query = query.filter(ImportBatch.status == ImportBatchStatus(status))
         except ValueError as exc:
             raise BadRequestException(f"不支持的导入状态：{status}") from exc
-    if database_id is not None:
+    if database_id is not None and not db.query(PatentDatabase).filter(PatentDatabase.id == database_id, PatentDatabase.is_default.is_(True)).first():
         # ImportBatch deliberately keeps database scope in review_config so
         # older databases remain schema-compatible. Filter at the API
         # boundary so the history screen never mixes libraries.
@@ -1221,6 +1326,25 @@ def get_import_batch(batch_id: int, db: Session = Depends(get_db)):
     if not batch:
         raise NotFoundException("导入批次不存在")
     return batch
+
+
+@router.post("/import/batches/{batch_id}/resume")
+async def resume_import_batch(batch_id: int, db: Session = Depends(get_db)):
+    batch = db.get(ImportBatch, batch_id)
+    if not batch or batch.status != ImportBatchStatus.REVIEW_REQUIRED or (batch.review_config or {}).get("batch_kind") == "collaboration_sync":
+        raise BadRequestException("该批次无法返回文件映射")
+    if not batch.artifact_path or not Path(batch.artifact_path).exists():
+        raise BadRequestException("历史批次原始文件不存在")
+    preview = await preview_import(UploadFile(filename=batch.filename, file=BytesIO(Path(batch.artifact_path).read_bytes())),
+                                   batch.worksheet_name, db)
+    session = _read_session(preview["import_id"])
+    config = batch.review_config or {}
+    session["draft"] = {"database_id": config.get("database_id"), "mapping": batch.mapping_config or {},
+                        "selected_sheet": batch.worksheet_name, "product_id": config.get("product_id"),
+                        "project_id": config.get("project_id"), "view_id": config.get("view_id"), "import_note": batch.import_note or ""}
+    session["batch_id"] = batch.id
+    _save_session(preview["import_id"], session)
+    return {"import_id": preview["import_id"]}
 
 
 def _unmapped_observation_query(

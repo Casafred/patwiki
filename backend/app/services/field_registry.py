@@ -829,4 +829,5 @@ def get_system_field_meta(key: str) -> FieldMeta | None:
 
 
 def get_all_fields_meta(db) -> list[FieldMeta]:
-    return [*FIELD_REGISTRY.list_fields(db), *get_pending_import_fields(db)]
+    from app.services.field_policy_service import enrich_field_policies
+    return enrich_field_policies(db, [*FIELD_REGISTRY.list_fields(db), *get_pending_import_fields(db)])

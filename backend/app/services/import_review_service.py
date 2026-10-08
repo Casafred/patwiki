@@ -155,11 +155,13 @@ def difference_type(current: str | None, candidate: str | None) -> str:
     return "content"
 
 
-def default_action(observation: FieldObservation) -> str:
+def default_action(observation: FieldObservation, policy: dict | None = None) -> str:
     if observation.field_resolution == "quarantined" or observation.difference_type == "quarantined":
         return "quarantine"
     if observation.field_resolution == "unmapped_retained":
         return "keep_existing"
+    if policy is None and observation.proposed_action in REVIEW_ACTIONS:
+        return observation.proposed_action
     # Attachments are append-only source artifacts.  A content difference is
     # a new file to add, not a replacement of the existing projection.
     if observation.canonical_field_key in {"attachments", "patent_figures"} and observation.difference_type in {"new", "content"}:
@@ -170,6 +172,10 @@ def default_action(observation: FieldObservation) -> str:
         return "adopt"
     if observation.difference_type == "new":
         return "fill_empty"
+    if observation.difference_type in {"content", "format"}:
+        from app.services.field_policy_service import IDENTITY_FIELDS
+        mode = (policy or {}).get("merge_policy", "keep_existing" if observation.canonical_field_key in IDENTITY_FIELDS else "version_latest")
+        return {"version_latest": "adopt", "fill_empty": "fill_empty", "quarantine": "quarantine"}.get(mode, "keep_existing")
     return "keep_existing"
 
 
@@ -248,11 +254,19 @@ def add_observations(
     embedded_images = embedded_images or []
     for index, column in enumerate(columns):
         value = source.raw_row.get(column, "")
+        target = mapping.get(column, "").strip()
+        policy = (batch.review_config or {}).get("field_policies", {}).get(target, {})
         column_images = [image for image in embedded_images if image.source_column == index]
         if not value:
             # An embedded image is a value even when the Excel cell itself is
             # blank.  It participates in the same review decision as text.
             if not column_images:
+                if target and (policy.get("validation_rules") or {}).get("required"):
+                    db.add(FieldObservation(import_batch_id=batch.id, source_row_id=source.id,
+                        patent_id=patent.id if patent else None, source_field_name=column,
+                        source_column_index=index, canonical_field_key=target, raw_value="",
+                        current_value=current_value(patent, target), candidate_value="",
+                        difference_type="quarantined", field_resolution="quarantined", proposed_action="quarantine"))
                 continue
         target = mapping.get(column, "").strip()
         if target == IMPORT_SKIP_FIELD:
@@ -339,7 +353,14 @@ def add_observations(
             candidate_value=candidate or value, difference_type=diff,
             field_resolution="mapped",
         )
-        item.proposed_action = default_action(item)
+        policy = (batch.review_config or {}).get("field_policies", {}).get(target, {})
+        from app.services.field_policy_service import validate_field_value
+        try:
+            validate_field_value({"name": column, **policy}, candidate)
+        except BadRequestException:
+            item.field_resolution = "quarantined"
+            item.difference_type = "quarantined"
+        item.proposed_action = default_action(item, policy)
         db.add(item)
     original_links = (data or {}).get("custom_fields", {}).get("original_links") or []
     if original_links:
@@ -404,7 +425,8 @@ def stage_import(
          started_at=utc_now_naive(), total_rows=len(df), mapping_config=mapping,
          review_config={"database_id": database_id, "product_id": product_id,
                         "project_id": project_id, "view_id": view_id,
-                        "source_system": source_system, "mapping_warnings": mapping_warnings},
+                        "source_system": source_system, "mapping_warnings": mapping_warnings,
+                        "field_policies": {field["key"]: {key: field.get(key) for key in ("merge_policy", "validation_rules", "value_source", "value_stability")} for field in get_all_fields_meta(db)}},
         created_patent_ids=[],
     )
     db.add(batch)
@@ -613,6 +635,7 @@ def list_batch_changes(
     batch_id: int,
     *,
     only_differences: bool = False,
+    only_conflicts: bool = False,
     offset: int = 0,
     limit: int = 2000,
 ) -> dict:
@@ -622,6 +645,8 @@ def list_batch_changes(
     query = db.query(FieldObservation).filter(FieldObservation.import_batch_id == batch_id)
     if only_differences:
         query = query.filter(FieldObservation.difference_type.in_(["new", "content", "format"]))
+    if only_conflicts:
+        query = query.filter(FieldObservation.difference_type.in_(["content", "format"]))
     total = query.count()
     items = query.order_by(FieldObservation.source_row_id.asc(), FieldObservation.source_column_index.asc()).offset(offset).limit(limit).all()
     source_row_ids = {item.source_row_id for item in items}
@@ -1484,6 +1509,9 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
             result = _process_relations(db, patent, virtual, database_id)
             family_links += result["family_links"]
             citation_links += result["citation_links"]
+        if pending_relations:
+            from app.services.relation_service import rebuild_database_families
+            rebuild_database_families(db, database_id, commit=False)
         batch.inserted_count = inserted
         batch.updated_count = updated
         batch.skipped_count = unchanged

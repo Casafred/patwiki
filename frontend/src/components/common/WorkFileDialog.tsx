@@ -1,3 +1,4 @@
+import TableDropdownOverlay from './TableDropdown'
 import { useEffect, useMemo, useState } from 'react'
 import { exportApi } from '../../api'
 import type { FieldMeta, JsonObject, JsonValue, PatentExportTemplate } from '../../types'
@@ -163,7 +164,7 @@ export default function WorkFileDialog({ databaseId, viewId, fields = [], select
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <TableDropdownOverlay className="modal-overlay" onClose={onClose} width={900} onClick={onClose}>
       <div className="modal modal-lg work-file-modal" onClick={event => event.stopPropagation()}>
         <div className="modal-header">
           <div>
@@ -246,6 +247,6 @@ export default function WorkFileDialog({ databaseId, viewId, fields = [], select
           </>
         )}
       </div>
-    </div>
+    </TableDropdownOverlay>
   )
 }

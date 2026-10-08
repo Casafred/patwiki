@@ -1,3 +1,4 @@
+import TableDropdownOverlay from '../common/TableDropdown'
 import { useMemo, useState } from 'react'
 import {
   clearDailyHistory,
@@ -52,7 +53,7 @@ export default function DailyHistoryDialog({ onClose, onOpen }: DailyHistoryDial
   }
 
   return (
-    <div
+    <TableDropdownOverlay onClose={onClose} width={760}
       role="presentation"
       onMouseDown={event => {
         if (event.target === event.currentTarget) onClose()
@@ -65,7 +66,7 @@ export default function DailyHistoryDialog({ onClose, onOpen }: DailyHistoryDial
     >
       <div
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby="daily-history-title"
         style={{
           width: 'min(760px, 100%)', maxHeight: 'min(760px, 90vh)', display: 'flex', flexDirection: 'column',
@@ -161,6 +162,6 @@ export default function DailyHistoryDialog({ onClose, onOpen }: DailyHistoryDial
           <button className="btn btn-secondary" onClick={handleClear} disabled={records.length === 0}>清空今日记录</button>
         </div>
       </div>
-    </div>
+    </TableDropdownOverlay>
   )
 }

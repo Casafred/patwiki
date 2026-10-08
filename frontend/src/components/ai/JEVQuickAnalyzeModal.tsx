@@ -1,3 +1,4 @@
+import TableDropdownOverlay from '../common/TableDropdown'
 import { useMemo, useState } from "react";
 import type { JsonObject, JsonValue, Patent } from "../../types";
 import { aiService } from "../../services";
@@ -208,8 +209,8 @@ export default function JEVQuickAnalyzeModal({ patents, onClose }: Props) {
   };
   const answerEntries = result ? Object.entries(result.answers || {}) : [];
   return (
-    <div
-      className="modal-overlay"
+    <TableDropdownOverlay
+      className="modal-overlay" onClose={onClose} width={1120}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -367,6 +368,7 @@ export default function JEVQuickAnalyzeModal({ patents, onClose }: Props) {
                   }}
                 >
                   <div
+                    className="jev-item-config"
                     style={{
                       display: "grid",
                       gridTemplateColumns:
@@ -506,9 +508,10 @@ export default function JEVQuickAnalyzeModal({ patents, onClose }: Props) {
         )}
         {step === 3 && (
           <div
+            className="jev-result-layout"
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(240px, .75fr) minmax(420px, 1.25fr)",
+              gridTemplateColumns: "minmax(0, .75fr) minmax(0, 1.25fr)",
               gap: 16,
             }}
           >
@@ -759,6 +762,6 @@ export default function JEVQuickAnalyzeModal({ patents, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </TableDropdownOverlay>
   );
 }

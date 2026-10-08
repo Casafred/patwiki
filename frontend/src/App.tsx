@@ -8,6 +8,7 @@ import SettingsPage from './components/settings/SettingsPage'
 import SharingPage from './components/settings/SharingPage'
 import AgentAnalysisPage from './components/analytics/AgentAnalysisPage'
 import ImportModal from './components/import/ImportModal'
+import { TableDropdownScope } from './components/common/TableDropdown'
 import ImportHistoryPage from './components/import/ImportHistoryPage'
 import ImportGovernancePage from './components/import/ImportGovernancePage'
 import AICapabilityCenter from './components/ai/AICapabilityCenter'
@@ -401,7 +402,7 @@ function App() {
       </Routes>
     )
   }
-  return <WorkspaceApp />
+  return <TableDropdownScope><WorkspaceApp /></TableDropdownScope>
 }
 
 export default App

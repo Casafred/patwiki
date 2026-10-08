@@ -282,7 +282,7 @@ def get_collaboration_states(patent_id: int, authorization: str | None = Header(
 
 
 @router.get("/{patent_id}/family")
-def get_patent_family(patent_id: int, db: Session = Depends(get_db)):
+def get_patent_family(patent_id: int, database_id: int | None = None, db: Session = Depends(get_db)):
     """返回当前专利所在库中的同族成员。
 
     同族成员是独立 Patent 记录，详情页需要用其 id 进行真实导航；
@@ -291,12 +291,14 @@ def get_patent_family(patent_id: int, db: Session = Depends(get_db)):
     root = db.query(PatentModel).filter(PatentModel.id == patent_id).first()
     if not root:
         raise NotFoundException("Patent not found")
+    scope_id = database_id if database_id is not None else root.database_id
+    visible_ids = {row[0] for row in db.query(PatentModel.id).filter(in_database(scope_id), PatentModel.deleted_at.is_(None)).all()} if scope_id is not None else {root.id}
 
     members = [root]
     if root.family_id is not None:
         members = db.query(PatentModel).filter(
             PatentModel.family_id == root.family_id,
-            in_database(root.database_id),
+            PatentModel.id.in_(visible_ids), PatentModel.deleted_at.is_(None),
         ).order_by(
             (PatentModel.id == root.id).desc(),
             PatentModel.filing_date.desc(),
@@ -319,15 +321,15 @@ def get_patent_family(patent_id: int, db: Session = Depends(get_db)):
             "grant_date": member.grant_date.isoformat() if member.grant_date else None,
             "is_current": member.id == root.id,
             "database_id": member.database_id,
-            "in_current_database": member.database_id == root.database_id,
-            "status": status or ("in_database" if member.database_id == root.database_id else "other_database"),
+            "in_current_database": member.id in visible_ids,
+            "status": status or ("in_database" if member.id in visible_ids else "other_database"),
         }
 
     external_members: list[dict[str, Any]] = []
     if root.family_id is not None:
         external = db.query(PatentModel).filter(
             PatentModel.family_id == root.family_id,
-            PatentModel.database_id != root.database_id,
+            ~PatentModel.id.in_(visible_ids), PatentModel.deleted_at.is_(None),
         ).order_by(PatentModel.id.asc()).all()
         external_members = [serialize(member, "other_database") for member in external]
 
@@ -353,10 +355,10 @@ def get_patent_family(patent_id: int, db: Session = Depends(get_db)):
                 "in_current_database": False,
                 "status": "missing_record",
             })
-        elif existing.database_id == root.database_id and existing.id not in current_member_ids:
+        elif existing.id in visible_ids and existing.id not in current_member_ids:
             observed_current_members.append(serialize(existing))
             current_member_ids.add(existing.id)
-        elif existing.database_id != root.database_id and existing.id not in external_member_ids:
+        elif existing.id not in visible_ids and existing.id not in external_member_ids:
             external_members.append(serialize(existing, "other_database"))
             external_member_ids.add(existing.id)
 

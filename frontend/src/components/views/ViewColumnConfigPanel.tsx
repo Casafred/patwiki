@@ -1,3 +1,4 @@
+import TableDropdownOverlay from '../common/TableDropdown'
 import { useEffect, useMemo, useState } from 'react'
 import type { FieldMeta, PatentView, ViewColumnConfig } from '../../types'
 import Icon from '../common/Icon'
@@ -74,7 +75,7 @@ export default function ViewColumnConfigPanel({ open, view, fields, onClose, onS
   const renderColumn = (column: ViewColumnConfig, targetVisible: boolean) => {
     const field = fields.find(item => item.key === column.key)
     const position = draft.findIndex(item => item.key === column.key)
-    return <div key={column.key} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', column.key); setDraggedKey(column.key) }} onDragEnd={() => setDraggedKey(null)} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={event => { event.stopPropagation(); const sourceKey = draggedKey || event.dataTransfer.getData('text/plain'); if (sourceKey) moveColumn(sourceKey, column.key, targetVisible); setDraggedKey(null) }} style={{ display: 'grid', gridTemplateColumns: '26px minmax(180px, 1fr) 82px 74px', gap: 8, alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: targetVisible ? '#fff' : '#f8fafc', opacity: targetVisible ? 1 : 0.72, cursor: 'grab', userSelect: 'none' }}>
+    return <div key={column.key} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', column.key); setDraggedKey(column.key) }} onDragEnd={() => setDraggedKey(null)} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={event => { event.stopPropagation(); const sourceKey = draggedKey || event.dataTransfer.getData('text/plain'); if (sourceKey) moveColumn(sourceKey, column.key, targetVisible); setDraggedKey(null) }} style={{ display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr) 82px 74px', gap: 8, alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: targetVisible ? '#fff' : '#f8fafc', opacity: targetVisible ? 1 : 0.72, cursor: 'grab', userSelect: 'none' }}>
       <input type="checkbox" checked={targetVisible} onChange={event => updateColumn(column.key, { visible: event.target.checked })} aria-label={`显示${field?.name || column.key}`} />
       <div style={{ minWidth: 0 }}><div style={{ fontSize: 13, color: '#1f2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field?.name || column.key}</div><div style={{ fontSize: 10, color: '#94a3b8' }}>{field ? `字段类型：${field.field_type}` : '未注册字段'}</div></div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#64748b' }}>宽<input type="number" min={40} max={1200} value={column.width ?? 150} onChange={event => updateColumn(column.key, { width: Number(event.target.value) })} style={{ width: 58, padding: '3px 4px', border: '1px solid #cbd5e1', borderRadius: 3 }} /></label>
@@ -82,8 +83,8 @@ export default function ViewColumnConfigPanel({ open, view, fields, onClose, onS
     </div>
   }
   return (
-    <div
-      className="modal-overlay"
+    <TableDropdownOverlay
+      className="modal-overlay" onClose={onClose} width={760}
       onMouseDown={event => {
         if (event.target === event.currentTarget) onClose()
       }}
@@ -139,6 +140,6 @@ export default function ViewColumnConfigPanel({ open, view, fields, onClose, onS
           <button className="btn btn-primary" type="button" onClick={() => void save()} disabled={saving}>{saving ? '保存中...' : '保存当前视图'}</button>
         </div>
       </div>
-    </div>
+    </TableDropdownOverlay>
   )
 }

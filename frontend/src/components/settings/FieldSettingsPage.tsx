@@ -4,6 +4,7 @@ import type { CustomField, FieldMeta, LinkConfig, LookupConfig, RollupConfig } f
 import { useAppStore } from '../../store'
 import { getErrorMessage } from '../../lib/errors'
 import FormulaEditor from './FormulaEditor'
+import FieldPolicyPanel from './FieldPolicyPanel'
 
 const SYSTEM_MAPPING_OPTIONS = [
   ['title', '标题'], ['abstract', '摘要'], ['claims', '权利要求'], ['applicant', '申请人'],
@@ -118,7 +119,7 @@ function RelationConfigFields({ fieldType, field, availableFields, onChange }: R
 }
 
 export default function FieldSettingsPage() {
-  const [fieldMode, setFieldMode] = useState<'ai' | 'all'>('ai')
+  const [fieldMode, setFieldMode] = useState<'ai' | 'all' | 'registry'>('registry')
   const [fields, setFields] = useState<CustomField[]>([])
   const [availableFieldsForAI, setAvailableFieldsForAI] = useState<FieldMeta[]>([])
   const [loading, setLoading] = useState(true)
@@ -253,7 +254,7 @@ export default function FieldSettingsPage() {
   }
 
   // 字段管理页同时管理普通自定义字段和 AI 字段；AI 配置只是其中一部分能力。
-  const aiFields = fieldMode === 'ai' ? fields.filter(field => field.field_type === 'ai_field' || isAiField(field)) : fields
+  const aiFields = fieldMode === 'registry' ? [] : fieldMode === 'ai' ? fields.filter(field => field.field_type === 'ai_field' || isAiField(field)) : fields
 
   if (loading) {
     return (
@@ -281,9 +282,11 @@ export default function FieldSettingsPage() {
       </div>
 
       <nav className="ai-field-mode-tabs" aria-label="字段类型">
+        <button className={fieldMode === 'registry' ? 'active' : ''} onClick={() => setFieldMode('registry')}>统一字段与归并</button>
         <button className={fieldMode === 'ai' ? 'active' : ''} onClick={() => setFieldMode('ai')}>AI 抽取配置</button>
         <button className={fieldMode === 'all' ? 'active' : ''} onClick={() => setFieldMode('all')}>全部自定义字段</button>
       </nav>
+      {fieldMode === 'registry' && <FieldPolicyPanel onChanged={() => void loadFields()} />}
 
       {showAddForm && (
         <div style={{
@@ -591,7 +594,7 @@ export default function FieldSettingsPage() {
         ))}
       </div>
 
-      {aiFields.length === 0 && !loading && (
+      {aiFields.length === 0 && !loading && fieldMode !== 'registry' && (
         <div style={{
           textAlign: 'center',
           padding: 60,

@@ -34,6 +34,8 @@ import AttachmentField from '../common/AttachmentField'
 import PatentFiguresField from '../common/PatentFiguresField'
 import ProjectRiskContextPanel from './ProjectRiskContextPanel'
 import Icon from '../common/Icon'
+import FieldVersionsPanel from './FieldVersionsPanel'
+import { customFieldApi } from '../../api'
 
 interface PatentDetailPageProps {
   patentId: number
@@ -42,7 +44,7 @@ interface PatentDetailPageProps {
   onOpenSidebar?: () => void
 }
 
-type Tab = 'basic' | 'figures' | 'project-info' | 'provenance' | 'technical' | 'ai' | 'custom' | 'relations' | 'comments'
+type Tab = 'basic' | 'figures' | 'project-info' | 'provenance' | 'technical' | 'ai' | 'custom' | 'relations' | 'comments' | 'versions'
 type PatentEditData = Partial<Patent> & { tag_ids?: number[]; project_ids?: number[] }
 
 const LEGAL_STATUS_LABELS: Record<string, string> = {
@@ -320,6 +322,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
     { key: 'relations', label: '同族与引用关系' },
     { key: 'project-info', label: '项目信息' },
     { key: 'provenance', label: `来源与审计${history.length > 0 ? ` (${history.length})` : ''}` },
+    { key: 'versions', label: '字段版本' },
     { key: 'technical', label: '技术信息' },
     { key: 'ai', label: 'AI 分析' },
     { key: 'custom', label: '自定义字段' },
@@ -443,6 +446,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
             />
           </div>
         )}
+        {activeTab === 'versions' && <FieldVersionsPanel patentId={patent.id} onChanged={() => { void patentApi.get(patent.id).then(data => { setPatent(data); setFormData(data) }); void loadHistory(); void loadIdentity() }} />}
         {activeTab === 'provenance' && (
           <div className="patent-provenance-layout">
             <section className="patent-detail-section">
@@ -1262,7 +1266,10 @@ function CustomTab({ patent, editing, updateField }: {
   updateField: (key: keyof PatentEditData, value: unknown) => void
 }) {
   const customData = patent.custom_fields || {}
-  const keys = Object.keys(customData)
+  const [definitions, setDefinitions] = useState<CustomField[]>([])
+  useEffect(() => { void customFieldApi.list().then(setDefinitions).catch(() => setDefinitions([])) }, [])
+  const definitionsByKey = new Map(definitions.map(field => [field.key, field]))
+  const keys = Object.keys(customData).filter(key => !['attachments', 'patent_figures', 'family_members', 'cited_patents', 'citing_patents', 'original_links'].includes(key) && definitionsByKey.get(key)?.is_active !== false)
 
   return (
     <div>
@@ -1274,7 +1281,7 @@ function CustomTab({ patent, editing, updateField }: {
       ) : (
         <div className="detail-grid">
           {keys.map(key => (
-            <Field key={key} label={key}>
+            <Field key={key} label={definitionsByKey.get(key)?.name || key}>
               {editing ? (
                 <input
                   className="form-input"

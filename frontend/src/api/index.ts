@@ -17,10 +17,15 @@ import type {
   SemanticProvider, SemanticProfile, SemanticIndex, SemanticJob, SemanticStatus,
   SemanticEvaluationDataset, SemanticEvaluationCase, SemanticEvaluationRun,
   CollaborationIdentity, CollaborationPackage, SyncGovernanceConflict,
+  FieldVersions, ImportDraft,
 } from '../types'
 
 export const fieldApi = {
   list: (): Promise<FieldMeta[]> => api.get('/fields'),
+  setPolicy: (key: string, policy: Pick<FieldMeta, 'value_source' | 'value_stability' | 'merge_policy' | 'validation_rules'>): Promise<FieldMeta> => api.put(`/fields/${encodeURIComponent(key)}/policy`, policy),
+  versions: (id: number, key: string): Promise<FieldVersions> => api.get(`/patents/${id}/field/${encodeURIComponent(key)}/versions`),
+  saveVersion: (id: number, key: string, value: string | null, expectedValue: string | null): Promise<FieldVersions> => api.put(`/patents/${id}/field/${encodeURIComponent(key)}/versions`, { value, expected_value: expectedValue }),
+  consolidate: (key: string, target: string, action: string, apply = false): Promise<{ records: number; changed: number; conflicts: number; applied: boolean; issues: { patent_id: number; reason: string }[] }> => api.post(`/fields/${encodeURIComponent(key)}/consolidate`, { target_field: target, conflict_action: action, apply }),
 }
 
 // P0-11：库（Database）API
@@ -588,8 +593,12 @@ export const importApi = {
     api.get('/import/batches', { params }),
 
   getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
-  getChanges: (id: number, onlyDifferences = false, offset = 0, limit = 2000): Promise<{ batch_id: number; status: string; total: number; offset: number; limit: number; items: ImportChangeReview[] }> =>
-    api.get(`/import/batches/${id}/changes`, { params: { only_differences: onlyDifferences, offset, limit } }),
+  resumeBatch: (id: number): Promise<{ import_id: string }> => api.post(`/import/batches/${id}/resume`),
+  getChanges: (id: number, onlyDifferences = false, offset = 0, limit = 2000, onlyConflicts = false): Promise<{ batch_id: number; status: string; total: number; offset: number; limit: number; items: ImportChangeReview[] }> =>
+    api.get(`/import/batches/${id}/changes`, { params: { only_differences: onlyDifferences, only_conflicts: onlyConflicts, offset, limit } }),
+  listDrafts: (databaseId: number): Promise<{ import_id: string; filename: string; batch_id?: number; updated_at?: string }[]> => api.get('/import/sessions', { params: { database_id: databaseId } }),
+  getDraft: (id: string, sheet?: string): Promise<{ preview: ImportPreview; draft: ImportDraft; batch_id?: number; filename: string }> => api.get(`/import/sessions/${id}`, { params: { sheet_name: sheet } }),
+  saveDraft: (id: string, draft: ImportDraft): Promise<{ saved: boolean }> => api.put(`/import/sessions/${id}`, draft),
   reviewBatch: (id: number, data: {
     items?: { observation_id: number; action: ImportReviewAction; merge_value?: string }[]
     default_action?: ImportReviewAction

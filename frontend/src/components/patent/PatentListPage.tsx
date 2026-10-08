@@ -1,3 +1,4 @@
+import TableDropdownOverlay, { TableDropdown } from '../common/TableDropdown'
 import { Fragment, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -544,24 +545,18 @@ function ToolbarMenu({
   align = 'left',
   children,
 }: ToolbarMenuProps) {
-  const [open, setOpen] = useState(false)
-  const wrapperRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const handleClickOutside = (event: MouseEvent) => {
-      if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('click', handleClickOutside)
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [open])
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const open = anchor !== null
 
   return (
-    <div className="toolbar-menu" ref={wrapperRef}>
+    <div className="toolbar-menu">
       <button
         type="button"
         className={triggerClassName}
-        onClick={() => setOpen(value => !value)}
+        onClick={event => {
+          const trigger = event.currentTarget
+          setAnchor(current => current ? null : trigger)
+        }}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={iconOnly ? title : undefined}
@@ -572,9 +567,9 @@ function ToolbarMenu({
           : <>{icon && <Icon name={icon} size={14} />} {label} <Icon name={open ? 'chevron-up' : 'chevron-down'} size={13} /></>}
       </button>
       {open && (
-        <div className={`datagrid-tool-menu ${align === 'right' ? 'datagrid-tool-menu-right' : 'datagrid-tool-menu-left'}`} role="menu">
-          {children(() => setOpen(false))}
-        </div>
+        <TableDropdown anchor={anchor} onClose={() => setAnchor(null)} width={320} className={`table-dropdown-menu table-dropdown-menu-${align}`} role="menu" label={title}>
+          {children(() => setAnchor(null))}
+        </TableDropdown>
       )}
     </div>
   )
@@ -4594,8 +4589,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       {showJEVAnalyze && <JEVQuickAnalyzeModal patents={patents.filter(patent => jevAnalyzePatentIds.includes(patent.id))} onClose={() => setShowJEVAnalyze(false)} />}
 
       {showClearDatabase && (
-        <div className="modal-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !clearingDatabase) setShowClearDatabase(false) }}>
-          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="clear-db-title">
+        <TableDropdownOverlay className="modal-overlay" onClose={() => { if (!clearingDatabase) setShowClearDatabase(false) }} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !clearingDatabase) setShowClearDatabase(false) }}>
+          <div className="modal" role="dialog" aria-modal="false" aria-labelledby="clear-db-title">
             <div className="modal-header">
               <h2 id="clear-db-title">清空当前库专利</h2>
               <button type="button" className="modal-close" onClick={() => setShowClearDatabase(false)} disabled={clearingDatabase} aria-label="关闭">×</button>
@@ -4611,7 +4606,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </button>
             </div>
           </div>
-        </div>
+        </TableDropdownOverlay>
       )}
 
       {urlImagePreview && (
@@ -5333,37 +5328,13 @@ function Modal({ title, children, onClose, width = 480 }: {
   onClose: () => void
   width?: number
 }) {
-  return (
-    <div
-      style={{
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1000, padding: 20,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: 'white', borderRadius: 8, padding: 20, width: '100%', maxWidth: width,
-          maxHeight: '90vh', overflowY: 'auto',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>{title}</h3>
-          <button
-            onClick={onClose}
-            style={{
-              border: 'none', background: 'transparent', fontSize: 20, cursor: 'pointer',
-              color: '#9ca3af', padding: 4, lineHeight: 1,
-            }}
-          >
-            ×
-          </button>
-        </div>
-        {children}
+  return <TableDropdown onClose={onClose} width={width} label={title}>
+    <div style={{ padding: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>{title}</h3>
+        <button type="button" className="modal-close" onClick={onClose} aria-label={`关闭${title}`}>×</button>
       </div>
+      {children}
     </div>
-  )
+  </TableDropdown>
 }

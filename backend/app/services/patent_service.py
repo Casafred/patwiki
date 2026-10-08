@@ -257,6 +257,13 @@ class PatentService:
             setattr(patent, field_key, value)
         else:
             raise BadRequestException(f"字段 {field_key} 不支持回滚")
+        from app.services.field_policy_service import validate_field_value
+        key = field_key.removeprefix("custom_fields.")
+        meta = next((field for field in get_all_fields_meta(db) if field["key"] == key), None)
+        if meta:
+            validate_field_value(meta, value)
+        from app.services.patent_identity_service import ensure_patent_identifiers
+        ensure_patent_identifiers(db, patent, source_system="rollback")
         if _is_value_changed(old, value):
             db.add(PatentHistory(patent_id=patent.id, field_key=field_key,
                 field_display_name=history.field_display_name, old_value=_stringify_value(old),
@@ -729,6 +736,11 @@ class PatentService:
         tag_ids = update_data.pop("tag_ids", None)
         project_ids = update_data.pop("project_ids", None)
         custom_fields_data = update_data.pop("custom_fields", None)
+        from app.services.field_policy_service import validate_field_value
+        policies = {field["key"]: field for field in get_all_fields_meta(db)}
+        for key, value in {**update_data, **(custom_fields_data or {})}.items():
+            if key in policies:
+                validate_field_value(policies[key], value)
 
         forbidden_projection_fields = RISK_PROJECTION_FIELDS.intersection(update_data)
         if forbidden_projection_fields:

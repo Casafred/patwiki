@@ -880,8 +880,7 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
         patent = local_patents[row.id]
         if not privileged and database.kind == "department_master" and package.package_type != "department_publication":
             raise HTTPException(403, "普通成员不能直接修改部门已发布基线")
-        annotations, annotation_conflicts = plan_library_fields(db, package, database, row, patent)
-        payload = {key: value for key, value in payload.items() if key not in PRIVATE_FIELDS}
+        annotations, annotation_conflicts = [], []
         record_plan = {"record": row, "patent": patent, "product": product, "updates": {}, "conflicts": annotation_conflicts,
             "annotation_plans": annotations}
         conflicts.extend(annotation_conflicts)
@@ -1067,8 +1066,7 @@ def _create_apply_backup(db: Session, package_uid: str) -> Path | None:
 
 
 _RISK_PROJECTION_FIELDS = {"has_risk", "risk_level", "risk_description"}
-_PUBLICATION_FIELDS = EXPORT_FIELDS - {"custom_fields", "notes", "scope_description", "category", "subcategory", "module",
-    "technical_problem", "technical_effect", "technical_solution", "has_risk", "risk_level", "risk_description", "application_status"}
+_PUBLICATION_FIELDS = EXPORT_FIELDS
 
 
 def _apply_risk_projection(db: Session, patent: Patent, updates: dict, actor: User | None,
@@ -1197,7 +1195,6 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
             payload = row.payload_json or {}
             if package.package_type == "department_publication":
                 payload = {key: value for key, value in payload.items() if key in _PUBLICATION_FIELDS}
-            payload = {key: value for key, value in payload.items() if key not in PRIVATE_FIELDS}
             if plan.get("operation") == "ignore_delete":
                 unchanged += 1
                 continue

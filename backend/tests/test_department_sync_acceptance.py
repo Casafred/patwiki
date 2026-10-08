@@ -74,7 +74,7 @@ def test_simultaneous_member_changes_keep_master_until_reviewed(db):
     assert len(requests[0]["sources"]) == 2
 
 
-def test_publication_preserves_private_fields_and_unsubmitted_edit(db):
+def test_publication_reviews_manual_fields_and_preserves_unresolved_edits(db):
     user, database, patent = setup_records(db)
     item, row = package(db, user, patent, "b", "Published", "department_publication")
     row.payload_json = {"title": "Published", "notes": "Remote private note", "risk_description": "Remote judgement"}
@@ -83,10 +83,18 @@ def test_publication_preserves_private_fields_and_unsubmitted_edit(db):
     with patch.object(sync, "roles", return_value={"system_admin"}):
         result = sync.apply_package(db, user.id, item.package_uid,
             SimpleNamespace(database_id=database.id, edit_password=None, decisions=[]))
-    assert result["pending_conflicts"] == 1
+    assert result["pending_conflicts"] == 3
     assert patent.title == "Local edit"
     assert patent.notes == "Private note"
     assert patent.risk_description is None
+    with patch.object(sync, "roles", return_value={"system_admin"}):
+        resolved = sync.apply_package(db, user.id, item.package_uid,
+            SimpleNamespace(database_id=database.id, edit_password=None, decisions=[
+                SimpleNamespace(entity_uid=row.entity_uid, field_key=key, choice="remote", reason="采用统一 Wiki 来源")
+                for key in ("title", "notes", "risk_description")]))
+    assert resolved["pending_conflicts"] == 0
+    assert patent.notes == "Remote private note"
+    assert patent.risk_description == "Remote judgement"
 
 
 def test_personal_exit_does_not_delete_department_record(db):
