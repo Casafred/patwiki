@@ -4,6 +4,9 @@
 // 2. 健康检查后端就绪后加载前端
 // 3. 应用退出时优雅终止后端进程
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use std::fs::{self, File};
 use std::path::PathBuf;
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
@@ -11,6 +14,12 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use sysinfo::{ProcessesToUpdate, System};
 use tauri::Manager;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const HEALTH_CHECK_TIMEOUT_SECS: u64 = 60;
 
@@ -57,10 +66,19 @@ fn spawn_backend(app: &tauri::App, port: u16) -> std::io::Result<Child> {
 
     println!("[PatWiki] 后端路径: {:?}", backend_path);
 
-    Command::new(backend_path)
+    let log_dir = app.path().app_log_dir().map_err(std::io::Error::other)?;
+    fs::create_dir_all(&log_dir)?;
+    let log_file = File::create(log_dir.join("backend.log"))?;
+
+    let mut command = Command::new(backend_path);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    command
         .env("PATWIKI_PORT", port.to_string())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log_file.try_clone()?))
+        .stderr(Stdio::from(log_file))
         .spawn()
 }
 
@@ -97,6 +115,7 @@ fn kill_backend(child: &mut Child) {
     #[cfg(target_os = "windows")]
     {
         let _ = Command::new("taskkill")
+            .creation_flags(CREATE_NO_WINDOW)
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
