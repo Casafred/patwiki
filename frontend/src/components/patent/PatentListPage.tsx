@@ -576,6 +576,7 @@ function ToolbarMenu({
 }
 
 export default function PatentListPage({ onPatentClick, viewId = null, onOpenImport, onOpenSidebar }: PatentListPageProps) {
+  const [viewSidebarOpen, setViewSidebarOpen] = useState(false)
   const {
     patents, totalPatents, currentProductId, currentDatabaseId, loading, databases, products,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
@@ -3258,9 +3259,16 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
   return (
     <div className="workbench-shell" style={{ display: 'flex', height: '100%', background: '#f3f4f6' }}>
-      <aside className="workbench-view-sidebar" aria-label="工作台视图">
+      {viewSidebarOpen && <>
+      <button type="button" className="workbench-view-scrim" aria-label="关闭视图栏" onClick={() => setViewSidebarOpen(false)} />
+      <aside id="workbench-view-sidebar" className="workbench-view-sidebar" aria-label="工作台视图">
+        <div className="workbench-view-sidebar-heading">
+          <strong>视图</strong>
+          <button type="button" className="btn btn-xs btn-ghost" title="收起视图栏" aria-label="收起视图栏" onClick={() => setViewSidebarOpen(false)}><Icon name="x" size={16} /></button>
+        </div>
         <ViewSwitcher onOpenView={() => undefined} />
       </aside>
+      </>}
       <div className="workbench-main" style={{ display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0, flex: 1 }}>
       <div className="datagrid-toolbar">
         <div className="datagrid-toolbar-heading">
@@ -3275,6 +3283,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               <Icon name="menu" />
             </button>
           )}
+          <button type="button" className="btn btn-sm btn-secondary workbench-view-toggle" aria-expanded={viewSidebarOpen} aria-controls="workbench-view-sidebar" aria-label={viewSidebarOpen ? '收起视图栏' : '展开视图栏'} title={viewSidebarOpen ? '收起视图栏' : '展开视图栏'} onClick={() => setViewSidebarOpen(open => !open)}>
+            <Icon name="columns" size={16} />
+          </button>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#111827' }}>
             {activeView?.name || '专利列表'}
           </h2>

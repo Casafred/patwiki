@@ -1,25 +1,33 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import BrandLogo from './BrandLogo'
+import Icon from './Icon'
 
 interface LegalFooterProps {
   compact?: boolean
 }
 
 export default function LegalFooter({ compact = false }: LegalFooterProps) {
+  return <footer className={`legal-footer ${compact ? 'legal-footer-compact' : ''}`}>
+    <div className="legal-footer-brand">
+      <BrandLogo size={18} decorative />
+      <span>PatWiki</span>
+    </div>
+    <span className="legal-footer-copy">© {new Date().getFullYear()} designed by ALFRED SHI TEAM</span>
+  </footer>
+}
+
+export function UserAgreementLink() {
   const [agreementOpen, setAgreementOpen] = useState(false)
 
   return (
     <>
-      <footer className={`legal-footer ${compact ? 'legal-footer-compact' : ''}`}>
-        <div className="legal-footer-brand">
-          <BrandLogo size={compact ? 20 : 24} decorative />
-          <span>PatWiki</span>
-        </div>
-        <span className="legal-footer-copy">© {new Date().getFullYear()} ALFRED SHI TEAM · 保留所有权利</span>
-        <button type="button" className="legal-footer-link" onClick={() => setAgreementOpen(true)}>用户使用协议</button>
-      </footer>
+      <button type="button" className="nav-item sidebar-agreement" title="用户使用协议" aria-label="用户使用协议" onClick={() => setAgreementOpen(true)}>
+        <Icon name="file" size={17} />
+        <span className="nav-label">用户使用协议</span>
+      </button>
 
-      {agreementOpen && (
+      {agreementOpen && createPortal(
         <div className="modal-overlay legal-modal-overlay" role="presentation" onMouseDown={event => {
           if (event.target === event.currentTarget) setAgreementOpen(false)
         }}>
@@ -49,7 +57,7 @@ export default function LegalFooter({ compact = false }: LegalFooterProps) {
               <button type="button" className="btn btn-primary" onClick={() => setAgreementOpen(false)}>关闭</button>
             </div>
           </section>
-        </div>
+        </div>, document.body
       )}
     </>
   )

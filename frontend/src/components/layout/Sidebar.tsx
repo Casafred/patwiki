@@ -5,6 +5,7 @@ import type { Page } from '../../App'
 import type { PatentDatabase } from '../../types'
 import Icon, { type IconName } from '../common/Icon'
 import BrandLogo from '../common/BrandLogo'
+import { UserAgreementLink } from '../common/LegalFooter'
 
 const SIDEBAR_SECTIONS_STORAGE_KEY = 'patwiki_sidebar_sections'
 type SidebarSectionKey = 'workspace' | 'intelligence' | 'management'
@@ -307,6 +308,7 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCo
         ))}
       </nav>
 
+      <UserAgreementLink />
       <button className="sidebar-account" onClick={() => onNavigate('sharing', currentDatabaseId)} title="管理协作与权限">
         <div className={`account-avatar ${currentUser ? '' : 'muted'}`}>
           {currentUser ? (currentUser.display_name || currentUser.username).charAt(0).toUpperCase() : '?'}
