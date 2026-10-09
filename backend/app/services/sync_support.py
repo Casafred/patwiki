@@ -31,7 +31,8 @@ MCP_CUSTOM_FIELDS = {
     "mcp_strategic_value", "mcp_pdf_original", "mcp_abstract_figure", "mcp_description_figures",
 }
 
-REVIEWABLE_EXTERNAL_FIELDS = REVIEWABLE_EXTERNAL_FIELDS | MCP_CUSTOM_FIELDS
+EXTERNAL_RELATION_FIELDS = {"family_members", "cited_patents", "citing_patents"}
+REVIEWABLE_EXTERNAL_FIELDS = REVIEWABLE_EXTERNAL_FIELDS | MCP_CUSTOM_FIELDS | EXTERNAL_RELATION_FIELDS
 
 LEGAL_STATUS_MAP = {
     "pending": "pending", "published": "published", "examining": "examining",

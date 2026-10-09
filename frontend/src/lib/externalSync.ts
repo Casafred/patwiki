@@ -40,8 +40,8 @@ export const HIMMPAT_UPDATE_FIELD_GROUPS: ExternalUpdateFieldGroup[] = [
   {
     label: '同族与引用',
     fields: [
-      { key: 'mcp_family_members', label: '同族成员' }, { key: 'mcp_citation_data', label: '引用完整数据' },
-      { key: 'mcp_cited_patents', label: '被引用专利' },
+      { key: 'family_members', label: '同族成员' }, { key: 'mcp_citation_data', label: '引用完整数据' },
+      { key: 'cited_patents', label: '引用专利' }, { key: 'citing_patents', label: '被引用专利' },
     ],
   },
   {
@@ -76,6 +76,7 @@ export const HIMMPAT_UPDATE_FIELDS = HIMMPAT_UPDATE_FIELD_OPTIONS.map(field => f
 export const HIMMPAT_OPTIONAL_FIELDS = new Set([
   'agent', 'priority_number', 'priority_date', 'claims', 'description_full',
   'technical_problem', 'technical_solution', 'technical_effect', 'legal_status_details',
+  'family_members', 'cited_patents', 'citing_patents',
   ...HIMMPAT_UPDATE_FIELDS.filter(key => key.startsWith('mcp_')),
 ])
 

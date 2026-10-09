@@ -1293,13 +1293,13 @@ function CustomTab({ patent, editing, updateField }: {
               {editing ? (
                 <input
                   className="form-input"
-                  value={String(customData[key] ?? '')}
+                  value={formatAIValue(customData[key])}
                   onChange={e => {
                     const newData = { ...customData, [key]: e.target.value }
                     updateField('custom_fields', newData)
                   }}
                 />
-              ) : <div className="field-value">{String(customData[key] ?? '-')}</div>}
+              ) : <div className="field-value">{formatAIValue(customData[key]) || '-'}</div>}
             </Field>
           ))}
         </div>

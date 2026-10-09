@@ -22,6 +22,24 @@ from app.services.sync_update_service import SyncUpdateService
 
 
 class ExplicitSyncUpdateTest(unittest.TestCase):
+    def test_family_alias_confirms_relation_projection_without_creating_patents(self):
+        member = Patent(title="Family member", publication_number="US11712787B2", database_id=self.database.id)
+        self.db.add(member)
+        records = deepcopy(self.connector.config_json["records"])
+        records[0]["fields"]["family_members"] = "US11712787B2, US20200130150A1"
+        self.connector.config_json = {"records": records}
+        self.db.commit()
+        batch = SyncUpdateService.preview(self.db, self.connector, self.database.id, [self.patent.id], ["mcp_family_members"])
+        self.assertEqual(batch.selected_fields, ["family_members"])
+        self.assertIsNone(self.patent.family_id)
+        SyncUpdateService.confirm(self.db, batch, [{"item_id": batch.items[0].id, "fields": ["family_members"]}], "tester")
+        self.assertEqual(self.db.query(Patent).count(), 2)
+        self.assertEqual(self.patent.family_id, member.family_id)
+        self.assertIsNotNone(self.patent.family_id)
+        self.assertEqual(self.patent.custom_fields["family_members"], "US11712787B2, US20200130150A1")
+        self.assertNotIn("mcp_family_members", self.patent.custom_fields)
+        self.assertEqual(self.db.query(PatentHistory).filter(PatentHistory.field_key == "family_members").count(), 1)
+
     def setUp(self):
         self.engine = create_engine(
             "sqlite://",

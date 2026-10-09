@@ -81,6 +81,7 @@ DOSSIER_UPDATE_FIELDS = {
     "agent", "filing_date", "publication_date", "country", "ipc_all", "priority_number", "priority_date",
     "claims", "description_full", "technical_problem", "technical_solution", "technical_effect",
     "legal_status_details",
+    "family_members", "cited_patents", "citing_patents",
     "mcp_record_fields", "mcp_priority_claims", "mcp_classification_details", "mcp_party_details",
     "mcp_claim_metadata", "mcp_description_metadata", "mcp_family_members", "mcp_citation_data",
     "mcp_cited_patents", "mcp_legal_event_details", "mcp_reexamination", "mcp_invalidation",
@@ -104,8 +105,8 @@ TOOL_FIELD_MAPPING: dict[str, dict[str, Any]] = {
     },
     "get_patent_legal_status_by_patent_ids": {"kind": "legal"},
     "get_legal_details_by_patent_id": {"kind": "legal_details", "field": "legal_status_details"},
-    "get_patent_family_by_patent_id": {"kind": "custom", "field": "mcp_family_members"},
-    "get_patent_citations_by_patent_id": {"kind": "custom", "field": "mcp_cited_patents"},
+    "get_patent_family_by_patent_id": {"kind": "relation", "field": "family_members"},
+    "get_patent_citations_by_patent_id": {"kind": "relations", "fields": ("cited_patents", "citing_patents")},
     "get_patent_citation_data_by_patent_id": {"kind": "custom", "field": "mcp_citation_data"},
     "get_abstract_and_figures_by_patent_ids": {"kind": "resource", "field": "mcp_abstract_figure", "resource_kind": "abstract_figure"},
     "get_figures_by_patent_ids": {"kind": "resource", "field": "mcp_description_figures", "resource_kind": "description_figure"},
@@ -132,6 +133,7 @@ def tool_mappable_fields(tool_name: str) -> list[str]:
     kind = spec.get("kind")
     if kind in {"dossier", "dossier_full"}:
         base = DOSSIER_UPDATE_FIELDS - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect"} - {
+            "family_members", "cited_patents", "citing_patents", "legal_status_details",
             "mcp_record_fields", "mcp_priority_claims", "mcp_classification_details", "mcp_party_details",
             "mcp_claim_metadata", "mcp_description_metadata", "mcp_family_members", "mcp_citation_data",
             "mcp_cited_patents", "mcp_legal_event_details", "mcp_reexamination", "mcp_invalidation",
@@ -144,13 +146,13 @@ def tool_mappable_fields(tool_name: str) -> list[str]:
         return sorted(base)
     if kind == "text":
         return [str(spec["field"])]
-    if kind == "technical":
+    if kind in {"technical", "relations"}:
         return list(spec["fields"])
     if kind == "legal":
         return ["legal_status", "grant_date"]
     if kind == "legal_details":
         return [str(spec["field"])]
-    if kind in {"custom", "resource"}:
+    if kind in {"custom", "resource", "relation"}:
         return [str(spec["field"])]
     return []
 
@@ -399,17 +401,37 @@ class HimmPatMcpAdapter(PatentConnector):
             ids = next(iter(data.values()), None)
         if not isinstance(ids, list) or not ids:
             raise ConnectorError("HimmPat 未找到对应专利", error_code="patent_not_found")
+        if len(set(str(item) for item in ids)) != 1:
+            raise ConnectorError("HimmPat 专利号码匹配多个 ID，请使用明确公开号", error_code="ambiguous_patent_id")
         patent_id = str(ids[0])
-        dossier_data, dossier_envelope = self._call("dossier", "get_patent_publication_by_patent_ids", {"ids": [patent_id]})
-        item = dossier_data.get(patent_id) if isinstance(dossier_data, Mapping) else None
-        if not isinstance(item, Mapping):
-            raise ConnectorError("HimmPat 著录项响应无效", error_code="invalid_response_shape")
-        record = self._dossier_record(patent_id, item, dossier_envelope)
+        # Identity matching only needs the supplied identifier.  Do not fetch
+        # the billable dossier tool when the user selected an enrichment-only
+        # field such as family members.
+        dossier_fields = DOSSIER_UPDATE_FIELDS - {
+            "claims", "description_full", "technical_problem", "technical_solution",
+            "technical_effect", "legal_status_details",
+            "family_members", "cited_patents", "citing_patents", "agent", "priority_number", "priority_date",
+            *[field for field in DOSSIER_UPDATE_FIELDS if field.startswith("mcp_")],
+        }
+        record = ProviderPatentRecord(
+            external_record_id=patent_id,
+            identifiers=(identifier,),
+            fields={"publication_number": identifier.raw_value} if identifier.identifier_type.casefold() in {"publication", "pn"} else {},
+            source_version="himmpat-mcp",
+            raw_payload={},
+        )
+        full_dossier = requested_fields.intersection({"agent", "priority_number", "priority_date", "mcp_record_fields", "mcp_priority_claims", "mcp_classification_details", "mcp_party_details"})
+        if not requested_fields or (requested_fields.intersection(dossier_fields) and not full_dossier):
+            dossier_data, dossier_envelope = self._call("dossier", "get_patent_publication_by_patent_ids", {"ids": [patent_id]})
+            item = dossier_data.get(patent_id) if isinstance(dossier_data, Mapping) else None
+            if not isinstance(item, Mapping):
+                raise ConnectorError("HimmPat 著录项响应无效", error_code="invalid_response_shape")
+            record = self._dossier_record(patent_id, item, dossier_envelope)
         # Only selected fields trigger the larger, potentially billable tools.
         extra = set(requested_fields)
         if extra:
             record = self._enrich_dossier(record, patent_id, extra)
-        if self.config.get("enrich_legal_on_fetch", False) or self.config.get("enrich_legal_status", False) or extra.intersection({"legal_status", "grant_date", "legal_status_details"}):
+        if (not requested_fields and (self.config.get("enrich_legal_on_fetch", False) or self.config.get("enrich_legal_status", False))) or extra.intersection({"legal_status", "grant_date"}):
             record = self._enrich_legal([record])[0]
         return record
 
@@ -487,6 +509,8 @@ class HimmPatMcpAdapter(PatentConnector):
             "technical": ("get_patent_ai_tech_info", {"ids": [patent_id]}),
             "family_members": ("get_patent_family_by_patent_id", {"id": patent_id}),
             "cited_patents": ("get_patent_citations_by_patent_id", {"id": patent_id}),
+            "citing_patents": ("get_patent_citations_by_patent_id", {"id": patent_id}),
+            "legal_status_details": ("get_legal_details_by_patent_id", {"id": patent_id}),
             "mcp_family_members": ("get_patent_family_by_patent_id", {"id": patent_id}),
             "mcp_citation_data": ("get_patent_citation_data_by_patent_id", {"id": patent_id}),
             "mcp_cited_patents": ("get_patent_citations_by_patent_id", {"id": patent_id}),
@@ -526,6 +550,7 @@ class HimmPatMcpAdapter(PatentConnector):
             fields = fields | {"technical"}
         # A selected custom projection may need a provider tool from another
         # service.  The requested field remains the stable local contract.
+        fetched: dict[str, tuple[Any, Any]] = {}
         for field in sorted(fields):
             spec = calls.get(field)
             if not spec:
@@ -540,7 +565,9 @@ class HimmPatMcpAdapter(PatentConnector):
                 service_key = "operations"
             elif tool in _read_only_tools("value"):
                 service_key = "value"
-            data, envelope = self._call(service_key, tool, args)
+            if tool not in fetched:
+                fetched[tool] = self._call(service_key, tool, args)
+            data, envelope = fetched[tool]
             evidence[tool] = envelope
             value: Any = data.get(patent_id, data.get("items", data)) if isinstance(data, Mapping) else data
             if field == "technical":
@@ -552,13 +579,55 @@ class HimmPatMcpAdapter(PatentConnector):
                     values[field] = _clean_claim_text(text) if field == "claims" and re.search(r"<claims?\b", text, flags=re.IGNORECASE) else text
             elif field in {"mcp_claim_metadata", "mcp_description_metadata"}:
                 values[field] = redact_payload(value)
-            elif field in {"family_members", "cited_patents"}:
-                values[f"mcp_{field}"] = redact_payload(value)
+            elif field in {"family_members", "mcp_family_members", "cited_patents", "citing_patents", "mcp_cited_patents", "legal_status_details"}:
+                values.update(self.extract_mapped_fields(tool, data, patent_id))
             elif field in {"mcp_pdf_original", "mcp_abstract_figure", "mcp_description_figures"}:
                 values[field] = self._resource_projection(value, field, tool, patent_id)
             else:
                 values[field] = redact_payload(value)
         return ProviderPatentRecord(record.external_record_id, record.identifiers, values, record.legal_events, record.source_updated_at, record.source_version, evidence)
+
+    @staticmethod
+    def _patent_numbers(value: Any) -> list[str]:
+        """Extract publication numbers from HimmPat family/citation wrappers."""
+        result: list[str] = []
+        root = value
+        visited_refs: set[str] = set()
+        def visit(item: Any) -> None:
+            if isinstance(item, Mapping):
+                reference = item.get("$ref")
+                if isinstance(reference, str) and reference not in visited_refs:
+                    visited_refs.add(reference)
+                    match = re.fullmatch(r"\$\.(?:data\.)?([A-Za-z][A-Za-z0-9_]*)\[(\d+)\]", reference)
+                    if match and isinstance(root, Mapping):
+                        members = root.get(match[1])
+                        if isinstance(members, list) and int(match[2]) < len(members):
+                            visit(members[int(match[2])])
+                    return
+                for key in ("pn", "publication_number", "publicationNumber", "pubNumber"):
+                    raw = item.get(key)
+                    if raw and isinstance(raw, (str, int)):
+                        number = str(raw).strip()
+                        if number and number not in result:
+                            result.append(number)
+                for child in item.values():
+                    if isinstance(child, (Mapping, list, tuple)):
+                        visit(child)
+            elif isinstance(item, (list, tuple)):
+                for child in item:
+                    visit(child)
+            elif isinstance(item, str) and re.fullmatch(r"[A-Za-z]{2}\d+[A-Za-z]\d*", item.strip()):
+                if item.strip() not in result:
+                    result.append(item.strip())
+        if isinstance(value, Mapping) and any(key in value for key in ("simpleFamily", "himmpatFamily", "inPaDocFamily")):
+            for key in ("simpleFamily", "himmpatFamily", "inPaDocFamily"):
+                if value.get(key):
+                    visit(value[key])
+                    if result:
+                        break
+        else:
+            visit(value)
+        return result
 
     @staticmethod
     def _resource_projection(value: Any, field: str, tool: str, patent_id: str) -> Any:
@@ -696,6 +765,28 @@ class HimmPatMcpAdapter(PatentConnector):
             if value in (None, "", [], {}):
                 return {}
             return {str(spec["field"]): json.dumps(redact_payload(value), ensure_ascii=False, sort_keys=True)}
+        if kind in {"relation", "relations"}:
+            value = self._select_patent_item(data, patent_id)
+            if kind == "relation":
+                numbers = self._patent_numbers(value)
+                return {str(spec["field"]): ", ".join(numbers)} if numbers else {}
+            result = {}
+            if isinstance(value, Mapping):
+                for field, keys in {
+                    "cited_patents": ("cited_patents", "citations", "citation", "citedPatents", "backwardCitations"),
+                    "citing_patents": ("citing_patents", "citingPatents", "citedBy", "forwardCitations"),
+                }.items():
+                    for key in keys:
+                        if key in value:
+                            numbers = self._patent_numbers(value[key])
+                            if numbers:
+                                result[field] = ", ".join(numbers)
+                            break
+            elif isinstance(value, list):
+                numbers = self._patent_numbers(value)
+                if numbers:
+                    result["cited_patents"] = ", ".join(numbers)
+            return result
         if kind in {"custom", "resource"}:
             value = self._select_patent_item(data, patent_id)
             field = str(spec["field"])

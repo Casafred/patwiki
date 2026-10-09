@@ -22,6 +22,34 @@ from app.services.patent_identity_service import (
 from app.services.patent_database_scope import in_database
 
 
+def apply_external_relation(db: Session, patent: Patent, field_key: str, value: str,
+                            database_id: Optional[int], changed_by: str,
+                            *, source: str = "external_sync_update", record_audit: bool = True) -> None:
+    """Retain the reviewed relation projection and link existing records."""
+    from app.models import PatentHistory
+    from app.services.import_governance_service import record_import_field_change
+    processors = {
+        "family_members": process_family_members,
+        "cited_patents": process_citations,
+        "citing_patents": process_citing_patents,
+    }
+    old = (patent.custom_fields or {}).get(field_key)
+    processors[field_key](db, patent, parse_patent_numbers(value or ""),
+                          database_id=database_id, create_placeholders=False)
+    if old != value:
+        patent.custom_fields = {**(patent.custom_fields or {}), field_key: value}
+        db.add(PatentHistory(patent_id=patent.id, field_key=field_key,
+                             old_value=old, new_value=value, source=source,
+                             changed_by=changed_by))
+        if record_audit:
+            record_import_field_change(
+                db, patent=patent, field_key=field_key, old_value=old,
+                incoming_value=value, final_value=value, database_id=database_id,
+                source_kind="external_sync", source_label="MCP relation update",
+                decided_by=changed_by,
+            )
+
+
 # 同族/引用列的常见分隔符：分号、逗号、顿号、竖线、换行、Tab、连续空格（≥2）
 # 竖线 | 是 incopat 等导出工具常见分隔符；连续空格用于应对无显式分隔符但用空格对齐的情况
 SPLIT_PATTERN = re.compile(r"[;；,，、|/\\\n\r\t]+|\s{2,}")

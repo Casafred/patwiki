@@ -558,7 +558,13 @@ class SyncService:
             patent = db.query(Patent).filter(Patent.id == observation.patent_id).one()
             if observation.canonical_field_key not in REVIEWABLE_EXTERNAL_FIELDS:
                 raise ValueError("该字段不允许外部同步直接写入")
-            if observation.canonical_field_key.startswith("mcp_"):
+            if observation.canonical_field_key in {"family_members", "cited_patents", "citing_patents"}:
+                from app.services.relation_service import apply_external_relation
+                before_value = (patent.custom_fields or {}).get(observation.canonical_field_key)
+                value = observation.candidate_value
+                apply_external_relation(db, patent, observation.canonical_field_key, value,
+                                        audit_database_id, decided_by, source="external_sync_review", record_audit=False)
+            elif observation.canonical_field_key.startswith("mcp_"):
                 before_value = (patent.custom_fields or {}).get(observation.canonical_field_key)
                 try:
                     value = json.loads(observation.candidate_value or "null")
@@ -572,14 +578,15 @@ class SyncService:
                 value = date_value(observation.candidate_value) if observation.canonical_field_key.endswith("_date") else observation.candidate_value
                 setattr(patent, observation.canonical_field_key, value)
             before = serialize_value(before_value)
-            db.add(PatentHistory(
+            if observation.canonical_field_key not in {"family_members", "cited_patents", "citing_patents"}:
+                db.add(PatentHistory(
                 patent_id=patent.id,
                 field_key=observation.canonical_field_key,
                 old_value=before,
                 new_value=observation.candidate_value,
                 source="external_sync_review",
                 changed_by=decided_by,
-            ))
+                ))
             from app.services.import_governance_service import record_import_field_change
             record_import_field_change(
                 db,

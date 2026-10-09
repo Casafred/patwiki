@@ -29,7 +29,7 @@ from app.models import (
 from app.services.patent_service import PatentService
 from app.services.patent_database_scope import in_database
 from app.services.sync_reconciliation import apply_legal_events, resolve_patent
-from app.services.sync_support import LEGAL_STATUS_MAP, MCP_CUSTOM_FIELDS, REVIEWABLE_EXTERNAL_FIELDS, date_value, hash_payload, now, serialize_value
+from app.services.sync_support import EXTERNAL_RELATION_FIELDS, LEGAL_STATUS_MAP, MCP_CUSTOM_FIELDS, REVIEWABLE_EXTERNAL_FIELDS, date_value, hash_payload, now, serialize_value
 
 
 EXPLICIT_UPDATE_FIELDS = frozenset(REVIEWABLE_EXTERNAL_FIELDS) | {"legal_status"}
@@ -46,8 +46,10 @@ class SyncUpdateService:
             allowed = set(DOSSIER_UPDATE_FIELDS) | {"legal_status", "grant_date"}
             if (connector.config_json or {}).get("enrich_legal_on_fetch") or (connector.config_json or {}).get("enrich_legal_status"):
                 allowed.update({"legal_status", "grant_date"})
-        defaults = sorted(allowed - set(MCP_CUSTOM_FIELDS) - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect", "agent", "priority_number", "priority_date"}) if allowed is not None else DEFAULT_UPDATE_FIELDS
+        defaults = sorted(allowed - set(MCP_CUSTOM_FIELDS) - EXTERNAL_RELATION_FIELDS - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect", "agent", "priority_number", "priority_date"}) if allowed is not None else DEFAULT_UPDATE_FIELDS
         requested = list(dict.fromkeys(fields if fields is not None else defaults))
+        aliases = {"mcp_family_members": "family_members", "mcp_cited_patents": "cited_patents"}
+        requested = list(dict.fromkeys(aliases.get(field, field) for field in requested))
         invalid = sorted(set(requested) - EXPLICIT_UPDATE_FIELDS)
         if invalid:
             raise BadRequestException("外部更新不允许覆盖字段：" + ", ".join(invalid))
@@ -104,7 +106,7 @@ class SyncUpdateService:
 
     @staticmethod
     def _current_value(patent: Patent, field_key: str) -> Any:
-        if field_key.startswith("mcp_"):
+        if field_key.startswith("mcp_") or field_key in EXTERNAL_RELATION_FIELDS:
             value = (patent.custom_fields or {}).get(field_key)
         else:
             value = getattr(patent, field_key, None)
@@ -115,6 +117,10 @@ class SyncUpdateService:
         candidates: dict[str, Any] = {}
         for field_key in fields:
             raw_value = record.fields.get(field_key)
+            if field_key == "family_members" and raw_value is None:
+                # The provider keeps the auditable payload under mcp_*, while
+                # the editable PatWiki projection is the relation field.
+                raw_value = SyncUpdateService._family_numbers(record.fields.get("mcp_family_members"))
             if field_key == "legal_status" and raw_value is None and record.legal_events:
                 raw_value = max(record.legal_events, key=lambda item: item.event_date).status
             if raw_value is None or raw_value == "" or raw_value == [] or raw_value == {}:
@@ -123,6 +129,11 @@ class SyncUpdateService:
             if candidate is not None:
                 candidates[field_key] = candidate
         return candidates
+
+    @staticmethod
+    def _family_numbers(value: Any) -> str:
+        from app.integrations.himmpat import HimmPatMcpAdapter
+        return ", ".join(HimmPatMcpAdapter._patent_numbers(value))
 
     @staticmethod
     def _materialize_mcp_resources(db: Session, batch: SyncUpdateBatch, patent: Patent, candidates: dict[str, Any], fields: list[str], confirmed_by: str) -> None:
@@ -563,6 +574,8 @@ class SyncUpdateService:
                 custom_values = {}
                 for field_key in fields:
                     candidate = (item.candidate_fields or {}).get(field_key)
+                    if field_key in EXTERNAL_RELATION_FIELDS:
+                        continue
                     if field_key != "legal_status":
                         if field_key.startswith("mcp_"):
                             custom_values[field_key] = candidate
@@ -570,6 +583,9 @@ class SyncUpdateService:
                             update_values[field_key] = date_value(candidate) if field_key.endswith("_date") else candidate
                 if custom_values:
                     update_values["custom_fields"] = custom_values
+                for field_key in EXTERNAL_RELATION_FIELDS.intersection(fields):
+                    from app.services.relation_service import apply_external_relation
+                    apply_external_relation(db, patent, field_key, (item.candidate_fields or {}).get(field_key), batch.database_id, confirmed_by)
                 if any(field.startswith("mcp_") for field in fields):
                     cls._materialize_mcp_resources(db, batch, patent, item.candidate_fields or {}, fields, confirmed_by)
                 if update_values:

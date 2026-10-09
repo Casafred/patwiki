@@ -37,6 +37,28 @@ class FixtureTransport:
 
 
 class HimmPatAdapterTest(unittest.TestCase):
+    def test_family_only_skips_dossier_and_configured_legal_calls(self):
+        class FamilyTransport(FixtureTransport):
+            def discover(self, services):
+                return {"services": [{"tools": [{"name": "get_patent_family_by_patent_id", "inputSchema": {"properties": {"id": {"type": "string"}}}}]}]}
+
+            def call_tool(self, service, tool, arguments):
+                if tool == "get_patent_family_by_patent_id":
+                    self.calls.append((service, tool, arguments))
+                    return {"structuredContent": {"code": 200, "data": {
+                        "himmpatFamily": [{"pn": "US20200130150A1"}, {"pn": "US11712787B2"}],
+                        "simpleFamily": [{"$ref": "$.data.himmpatFamily[0]"}, {"$ref": "$.data.himmpatFamily[1]"}],
+                    }}}
+                return super().call_tool(service, tool, arguments)
+
+        transport = FamilyTransport()
+        adapter = HimmPatMcpAdapter({"enrich_legal_on_fetch": True}, transport=transport)
+        record = adapter.fetch_patent_fields(ProviderIdentifier("publication", "CN123A"), {"family_members", "mcp_family_members"})
+        self.assertEqual(record.fields["family_members"], "US20200130150A1, US11712787B2")
+        self.assertNotIn("mcp_family_members", record.fields)
+        self.assertEqual([call[1] for call in transport.calls], ["search_patent_by_patent_numbers", "get_patent_family_by_patent_id"])
+        self.assertEqual(tool_mappable_fields("get_patent_family_by_patent_id"), ["family_members"])
+
     def setUp(self):
         self.transport = FixtureTransport()
         self.adapter = HimmPatMcpAdapter({"enrich_legal_on_fetch": True}, transport=self.transport)

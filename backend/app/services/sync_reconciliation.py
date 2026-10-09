@@ -91,7 +91,7 @@ def record_observation(
     database_id: int,
     review_policy: str,
 ) -> ExternalFactObservation:
-    current = ((patent.custom_fields or {}).get(field_key) if patent and field_key.startswith("mcp_") else getattr(patent, field_key, None)) if patent else None
+    current = ((patent.custom_fields or {}).get(field_key) if patent and (field_key.startswith("mcp_") or field_key in {"family_members", "cited_patents", "citing_patents"}) else getattr(patent, field_key, None)) if patent else None
     current_serialized = serialize_value(current)
     candidate_serialized = serialize_value(candidate)
     changed = current_serialized != candidate_serialized
