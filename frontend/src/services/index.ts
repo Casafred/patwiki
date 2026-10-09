@@ -42,7 +42,7 @@ export const fieldService = {
 
 export const patentService = {
   list: (params: JsonObject = {}) => patentApi.list(params),
-  get: (id: number) => patentApi.get(id),
+  get: (id: number, publication?: string) => patentApi.get(id, publication),
   collaborationStates: (id: number) => patentApi.collaborationStates(id),
   resolvePublicationNumber: (...args: Parameters<typeof patentApi.resolvePublicationNumber>) => patentApi.resolvePublicationNumber(...args),
   family: (id: number) => patentApi.family(id),

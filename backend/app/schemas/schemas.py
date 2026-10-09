@@ -57,6 +57,7 @@ class PatentCreate(PatentBase):
 
 
 class PatentUpdate(BaseSchema):
+    document_number: Optional[str] = None
     application_number: Optional[str] = None
     publication_number: Optional[str] = None
     grant_number: Optional[str] = None
@@ -95,6 +96,11 @@ class PatentUpdate(BaseSchema):
 
 class Patent(PatentBase):
     id: int
+    publication_versions: dict[str, Any] = {}
+    document_number: Optional[str] = None
+    document_kind: Optional[str] = None
+    row_key: Optional[str] = None
+    version_data_available: bool = True
     created_at: datetime
     updated_at: datetime
     ai_fields: Optional[dict[str, Any]] = {}

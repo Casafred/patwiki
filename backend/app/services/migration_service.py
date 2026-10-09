@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-10-07.1"
+CURRENT_MIGRATION_VERSION = "2026-10-09.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -77,6 +77,8 @@ def _unique_index(table: str, name: str, column: str) -> SchemaOperation:
 # tables and model-defined indexes are handled by Base.metadata.create_all;
 # these entries cover columns/indexes that create_all cannot add to an old DB.
 SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
+    _column("patents", "publication_versions", "ALTER TABLE patents ADD COLUMN publication_versions JSON"),
+    _column("patent_databases", "browsing_config", "ALTER TABLE patent_databases ADD COLUMN browsing_config JSON"),
     _column("collaboration_sync_conflicts", "final_value", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN final_value JSON"),
     _column("collaboration_sync_conflicts", "decision_reason", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN decision_reason TEXT"),
     _column("collaboration_sync_conflicts", "target_database_uid", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN target_database_uid VARCHAR(100)"),

@@ -1018,6 +1018,8 @@ def _legacy_confirm_import(
                                 source_timestamp=utc_now_naive(),
                             )
                             source_row.patent_id = current_patent.id
+                            from app.services.publication_version_service import save_document
+                            save_document(current_patent, patent_data, source="import", db=db, batch_id=batch.id)
                             source_row.resolution_status = "resolved"
                             unknown_in_row = _record_field_observations(
                                 db, batch, source_row, source_row.raw_row, columns, mapping,
@@ -1326,6 +1328,41 @@ def get_import_batch(batch_id: int, db: Session = Depends(get_db)):
     if not batch:
         raise NotFoundException("导入批次不存在")
     return batch
+
+
+@router.get("/import/batches/{batch_id}/records")
+def get_import_records(batch_id: int, offset: int = Query(0, ge=0),
+                       limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+    batch = db.get(ImportBatch, batch_id)
+    if not batch:
+        raise NotFoundException("导入批次不存在")
+    query = db.query(ImportSourceRow).filter(ImportSourceRow.import_batch_id == batch_id)
+    total = query.count()
+    rows = query.order_by(ImportSourceRow.source_row, ImportSourceRow.id).offset(offset).limit(limit).all()
+    items = []
+    for row in rows:
+        observations = db.query(FieldObservation).filter(FieldObservation.source_row_id == row.id,
+            FieldObservation.canonical_field_key.in_(["application_number", "publication_number", "grant_number"])).all()
+        numbers = {item.canonical_field_key: item.raw_value for item in observations if item.raw_value}
+        patent = db.get(Patent, row.patent_id) if row.patent_id else None
+        items.append({"source_row": row.source_row, "patent_id": patent.id if patent and not patent.deleted_at else None,
+            "title": patent.title if patent else None, "status": row.resolution_status,
+            "reason": row.resolution_reason, "numbers": numbers,
+            "publication_number": numbers.get("publication_number") or numbers.get("grant_number") or (patent.publication_number if patent else None),
+            "application_number": numbers.get("application_number") or (patent.application_number if patent else None)})
+    if not total:
+        # Older imports and collaboration batches may predate source-row lineage.
+        ids = set(batch.created_patent_ids or [])
+        ids.update((batch.review_config or {}).get("involved_patent_ids") or [])
+        ids.update(id_ for (id_,) in db.query(PatentHistory.patent_id).filter(PatentHistory.import_batch_id == batch_id).distinct())
+        ids.update(id_ for (id_,) in db.query(Patent.id).filter(Patent.source_batch_id == batch_id))
+        patents = db.query(Patent).filter(Patent.id.in_(ids)).order_by(Patent.id).all()
+        total = len(patents)
+        items = [{"source_row": patent.source_row, "patent_id": patent.id if not patent.deleted_at else None,
+                  "title": patent.title, "status": "历史关联", "numbers": {},
+                  "publication_number": patent.publication_number or patent.grant_number,
+                  "application_number": patent.application_number} for patent in patents[offset:offset + limit]]
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @router.post("/import/batches/{batch_id}/resume")

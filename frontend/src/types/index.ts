@@ -16,6 +16,11 @@ export interface FormulaConfig {
 }
 
 export interface Patent {
+  publication_versions?: Record<string, { kind: 'grant' | 'publication'; fields: Partial<Patent>; source?: string; data_available?: boolean }>
+  document_number?: string
+  document_kind?: 'grant' | 'publication'
+  row_key?: string
+  version_data_available?: boolean
   id: number
   application_number?: string
   publication_number?: string
@@ -225,6 +230,7 @@ export interface PatentGraphResponse {
 
 // P0-8：库（PatentDatabase）类型
 export interface PatentDatabase {
+  browsing_config?: BrowsingConfig
   id: number
   name: string
   code?: string
@@ -1110,6 +1116,14 @@ export interface GovernanceBatch {
   reversed: boolean
   reversal_reason?: string | null
   reversed_at?: string | null
+}
+
+export interface BrowsingConfig {
+  application_mode: 'merged' | 'separate'
+  preferred_version: 'grant' | 'publication'
+  family_representative: boolean
+  country_order: string[]
+  representative_date: 'earliest' | 'latest'
 }
 
 export interface ImportFieldGovernanceAudit {

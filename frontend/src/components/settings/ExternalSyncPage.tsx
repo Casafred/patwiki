@@ -458,9 +458,9 @@ export default function ExternalSyncPage() {
                           <strong className="mcp-run-section-title">返回内容（{runRecords.length}）</strong>
                           {runRecords.length > 0
                             ? <div className="mcp-run-records">
-                              {runRecords.slice(0, 50).map(record => <div className="mcp-run-record" key={record.id}>
+                              {runRecords.map(record => <div className="mcp-run-record" key={record.id}>
                                 <div className="mcp-run-record-head">
-                                  <strong>{record.patent_number || record.external_record_id}</strong>
+                                  <strong>{record.patent_id ? <a href={`${currentDatabaseId ? `/db/${currentDatabaseId}` : ''}/patents/${record.patent_id}?publication=${encodeURIComponent(record.patent_number || '')}`}>{record.patent_number || record.external_record_id}</a> : record.patent_number || record.external_record_id}</strong>
                                   {record.patent_title && <span title={record.patent_title}>{record.patent_title}</span>}
                                   <span>结果 {record.outcome}</span>
                                   {record.error_message && <span>错误 {record.error_message}</span>}

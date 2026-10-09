@@ -1187,6 +1187,7 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
         db.flush()
         created = updated = unchanged = pending = 0
         created_patent_ids = []
+        involved_patent_ids = []
         actor = db.get(User, user_id)
         for plan in plans:
             row: SyncPackageRecord = plan["record"]
@@ -1418,6 +1419,7 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                     unchanged += 1
                 _ensure_database_memberships(db, patent, database)
             _save_uid_mapping(db, package, row, patent)
+            involved_patent_ids.append(patent.id)
             apply_library_fields(db, package, database, row, patent, plan.get("annotation_plans", []), decisions, decision_details, user_id)
             _save_remote_changes(db, package, row)
             if package.package_type == "department_publication" and patent is not None and plan.get("operation") != "delete":
@@ -1468,6 +1470,7 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
         import_batch.review_config = {
             **(import_batch.review_config or {}),
             "pending_conflicts": pending,
+            "involved_patent_ids": list(dict.fromkeys(involved_patent_ids)),
             "result_status": package.status,
         }
         audit(db, user_id, "package_applied", package_id=package.id,

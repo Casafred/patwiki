@@ -79,6 +79,9 @@ def row_hash(row: dict[str, str]) -> str:
 def current_value(patent: Patent | None, field_key: str) -> str | None:
     if patent is None:
         return None
+    if field_key.startswith("publication_versions."):
+        value = (patent.publication_versions or {}).get(field_key.split(".", 1)[1])
+        return json.dumps(value, ensure_ascii=False) if value is not None else None
     if field_key in RELATION_FIELDS:
         return text_value((patent.custom_fields or {}).get(field_key))
     if field_key in SYSTEM_FIELD_KEYS:
@@ -1147,6 +1150,9 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                 created = False
                 provisional_title = False
                 row_field_errors: list[dict] = []
+                from app.services.publication_version_service import seed_versions, save_document
+                if patent is not None:
+                    patent.publication_versions = seed_versions(patent)
                 if patent is None:
                     provisional_title = not bool(data.get("title"))
                     create_data: dict[str, Any] = {
@@ -1463,6 +1469,10 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
                     "grant": data.get("grant_number")}, data.get("country")),
                     source_system=config.get("source_system") or "import", source_timestamp=utc_now_naive())
                 source.patent_id = patent.id
+                version_values = {key: value for key, value in data.items()
+                    if key not in parse_errors and any(item.canonical_field_key == key and
+                        (item.final_decision or actions.get(item.id)) not in {"ignore", "quarantine"} for item in items)}
+                save_document(patent, version_values, number=publication, source="import", db=db, batch_id=batch.id)
                 if patent.id not in target_membership_patent_ids:
                     db.add(PatentDatabaseMembership(
                         patent_id=patent.id,
@@ -1549,6 +1559,15 @@ def apply_batch(db: Session, batch_id: int, *, applied_by: str = "local-user") -
 
 
 def restore_value(patent: Patent, field_key: str, value: str | None) -> None:
+    if field_key.startswith("publication_versions."):
+        versions = dict(patent.publication_versions or {})
+        number = field_key.split(".", 1)[1]
+        if value is None:
+            versions.pop(number, None)
+        else:
+            versions[number] = json.loads(value)
+        patent.publication_versions = versions
+        return
     if field_key in IMPORT_IMAGE_FIELDS:
         custom = dict(patent.custom_fields or {})
         if value is None:

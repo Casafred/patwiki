@@ -5,7 +5,7 @@ P0-13：新增 /databases/{id}/master-view 端点，获取或创建部门总表�
 """
 from typing import Literal, Optional
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -39,6 +39,27 @@ class DatabaseUpdateRequest(BaseModel):
 
 class SetOwnerRequest(BaseModel):
     user_id: int
+
+
+class BrowsingConfig(BaseModel):
+    application_mode: Literal["merged", "separate"] = "merged"
+    preferred_version: Literal["grant", "publication"] = "grant"
+    family_representative: bool = False
+    country_order: list[str] = Field(default_factory=lambda: ["CN", "US", "EP", "JP", "DE", "CA", "AU"], max_length=100)
+    representative_date: Literal["earliest", "latest"] = "latest"
+
+
+@router.put("/{database_id}/browsing-config")
+def save_browsing_config(database_id: int, req: BrowsingConfig, db: Session = Depends(get_db)):
+    database = DatabaseService.get_database(db, database_id)
+    if not database:
+        raise NotFoundException("数据库不存在")
+    countries = list(dict.fromkeys(country.strip().upper() for country in req.country_order))
+    if any(len(country) != 2 or not country.isalpha() or not country.isascii() for country in countries):
+        raise BadRequestException("国家/地区代码须为两个英文字母")
+    database.browsing_config = {**req.model_dump(), "country_order": countries}
+    db.commit()
+    return DatabaseService.to_dict(database)
 
 
 @router.get("")

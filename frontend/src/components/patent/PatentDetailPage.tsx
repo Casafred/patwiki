@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   patentService as patentApi,
   productService as productApi,
@@ -71,6 +72,8 @@ function toHistoryInput(data: Patent): DailyHistoryInput {
 }
 
 export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, onOpenSidebar }: PatentDetailPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const publication = searchParams.get('publication') || undefined
   const [patent, setPatent] = useState<Patent | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -100,7 +103,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
   const loadPatent = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await patentApi.get(patentId)
+      const data = await patentApi.get(patentId, publication)
       setPatent(data)
       setFormData(data)
     } catch (e) {
@@ -109,7 +112,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
     } finally {
       setLoading(false)
     }
-  }, [patentId])
+  }, [patentId, publication])
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true)
@@ -196,6 +199,7 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
     setSaving(true)
     try {
       const updates: PatentEditData = { ...formData }
+      updates.document_number = patent.document_number
       // 移除只读字段
       delete updates.id
       delete updates.created_at
@@ -410,6 +414,10 @@ export default function PatentDetailPage({ patentId, onBack, onPatentNavigate, o
       </div>
 
       {/* Tab 导航 */}
+      {patent.publication_versions && Object.keys(patent.publication_versions).length > 0 && <div className="detail-tabs" role="tablist" aria-label="公开与授权版本">
+        {Object.entries(patent.publication_versions).map(([number, version]) => <button key={number} className={`detail-tab ${patent.document_number === number ? 'active' : ''}`} role="tab" aria-selected={patent.document_number === number} disabled={editing} onClick={() => { const next = new URLSearchParams(searchParams); next.set('publication', number); setSearchParams(next, { replace: true }) }}>{version.kind === 'grant' ? '授权' : '公开'} · {number}</button>)}
+      </div>}
+      {patent.version_data_available === false && <div className="workspace-error">此文献仅保留号码，尚无可恢复的版本著录信息。</div>}
       <div className="detail-tabs" role="tablist" aria-label="专利详情分区">
         {tabs.map(tab => (
           <button

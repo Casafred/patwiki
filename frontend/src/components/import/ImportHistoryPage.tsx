@@ -39,6 +39,8 @@ export default function ImportHistoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expandedBatchIds, setExpandedBatchIds] = useState<Set<number>>(new Set())
+  const [batchRecords, setBatchRecords] = useState<Record<number, Awaited<ReturnType<typeof importApi.records>>>>({})
+  const [recordsLoading, setRecordsLoading] = useState<number | null>(null)
   const [reviewBatchId, setReviewBatchId] = useState<number | null>(null)
   const [reviewChanges, setReviewChanges] = useState<ImportChangeReview[]>([])
   const [reviewTotal, setReviewTotal] = useState(0)
@@ -79,12 +81,22 @@ export default function ImportHistoryPage() {
   const currentDatabaseName = databases.find(database => database.id === currentDatabaseId)?.name
 
   const toggleBatch = (batchId: number) => {
+    if (!expandedBatchIds.has(batchId)) void loadRecords(batchId)
     setExpandedBatchIds(current => {
       const next = new Set(current)
       if (next.has(batchId)) next.delete(batchId)
       else next.add(batchId)
       return next
     })
+  }
+
+  const loadRecords = async (batchId: number, offset = 0) => {
+    setRecordsLoading(batchId)
+    try {
+      const result = await importApi.records(batchId, offset)
+      setBatchRecords(current => ({ ...current, [batchId]: { ...result, items: offset ? [...(current[batchId]?.items || []), ...result.items] : result.items } }))
+    } catch (cause) { setError(getErrorMessage(cause, '专利清单加载失败')) }
+    finally { setRecordsLoading(null) }
   }
 
   const openReview = async (batchId: number) => {
@@ -249,6 +261,19 @@ export default function ImportHistoryPage() {
                              <div><span>错误明细</span><strong>{formatCount(batch.error_count)} 条</strong></div>
                              <div><span>文件指纹</span><strong>{batch.file_hash ? batch.file_hash.slice(0, 12) : '未记录'}</strong></div>
                              <div><span>回撤状态</span><strong>{isSyncBatch ? '由同步冲突和审计记录追踪' : statusKey === 'rolled_back' ? '已回撤' : '可在导入结果中回撤'}</strong></div>
+                           </div>
+                           <strong>涉及专利（{batchRecords[batch.id]?.total ?? '-'} 条）</strong>
+                           <div style={{ maxHeight: 320, overflow: 'auto', marginTop: 8, marginBottom: 14 }}>
+                             <table className="data-grid"><thead><tr><th>来源行</th><th>公开号 / 授权号</th><th>申请号</th><th>名称</th><th>处理结果</th></tr></thead>
+                               <tbody>{batchRecords[batch.id]?.items.map((item, index) => <tr key={`${item.source_row}-${index}`}>
+                                 <td>{item.source_row ?? '-'}</td>
+                                 <td>{item.patent_id ? <a href={`${databaseId ? `/db/${databaseId}` : ''}/patents/${item.patent_id}?publication=${encodeURIComponent(item.publication_number || '')}`}>{item.publication_number || `Wiki #${item.patent_id}`}</a> : item.publication_number || '-'}</td>
+                                 <td>{item.application_number || '-'}</td><td>{item.title || '-'}</td><td title={item.reason}>{item.status}</td>
+                               </tr>)}</tbody>
+                             </table>
+                             {recordsLoading === batch.id && <div>加载中...</div>}
+                             {batchRecords[batch.id]?.total === 0 && <div>此批次没有可追溯的专利记录。</div>}
+                             {batchRecords[batch.id] && batchRecords[batch.id].items.length < batchRecords[batch.id].total && <button className="btn btn-secondary" disabled={recordsLoading === batch.id} onClick={() => void loadRecords(batch.id, batchRecords[batch.id].items.length)}>加载更多</button>}
                            </div>
                            {isSyncBatch && statusKey === 'review_required' && <div style={{ marginTop: 12, padding: '9px 11px', borderLeft: '3px solid #d97706', background: '#fffbeb', color: '#78350f', fontSize: 12 }}>
                              仍有字段冲突待处理，请到“设置 → 部门协同与数据同步”查看同步包并完成决策。

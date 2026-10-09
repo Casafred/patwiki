@@ -242,6 +242,14 @@ class PatentService:
     @staticmethod
     def restore_history(db: Session, patent: Patent, history: PatentHistory) -> None:
         field_key = history.field_key
+        if field_key.startswith("publication_versions."):
+            from app.services.import_review_service import restore_value, current_value
+            old = current_value(patent, field_key)
+            restore_value(patent, field_key, history.old_value)
+            db.add(PatentHistory(patent_id=patent.id, field_key=field_key,
+                field_display_name=history.field_display_name, old_value=old,
+                new_value=history.old_value, source="rollback", changed_by="local-user"))
+            return
         value = PatentService._history_value_for_field(field_key, history.old_value)
         if field_key.startswith("custom_fields."):
             key = field_key.split(".", 1)[1]
@@ -329,7 +337,18 @@ class PatentService:
         family_country: Optional[str] = None,
         family_sort_by: Optional[str] = None,
         family_sort_order: str = "asc",
+        expanded_families: Optional[list[int]] = None,
+        apply_browsing: bool = True,
     ) -> tuple[list[Patent], int]:
+        from app.services.publication_version_service import DOCUMENT_FIELDS
+        document_filters = {}
+        database = db.get(PatentDatabase, database_id) if database_id is not None else None
+        browsing = (database.browsing_config or {}) if database else {}
+        use_browsing = apply_browsing and (bool(browsing) or db.query(Patent.id).filter(
+            Patent.publication_versions.cast(String).notin_(["{}", "null"])).first() is not None)
+        if use_browsing and filters:
+            document_filters = {key: value for key, value in filters.items() if key in DOCUMENT_FIELDS}
+            filters = {key: value for key, value in filters.items() if key not in DOCUMENT_FIELDS}
         query = db.query(Patent).options(
             joinedload(Patent.tags),
             joinedload(Patent.projects),
@@ -360,6 +379,8 @@ class PatentService:
                 Patent.ai_fields.cast(String).ilike(json_search_term),
                 Patent.projects.any(Project.name.ilike(search_term)),
                 Patent.tags.any(Tag.name.ilike(search_term)),
+                Patent.publication_versions.cast(String).ilike(search_term),
+                Patent.publication_versions.cast(String).ilike(json_search_term),
             ])
             query = query.filter(or_(*search_expressions))
 
@@ -565,7 +586,8 @@ class PatentService:
                 Patent.id.asc(),
             )
 
-        query = query.offset((page - 1) * page_size).limit(page_size)
+        if not use_browsing:
+            query = query.offset((page - 1) * page_size).limit(page_size)
         patents = query.all()
 
         # 每条记录都来自全局 Wiki 主表；把跨库归属作为只读投影返回，
@@ -633,6 +655,17 @@ class PatentService:
                 # family_key 是稳定的来源族标识，family_id 仍只作为内部外键。
                 p.family_key = p.family.family_id if p.family is not None else None
 
+        if use_browsing:
+            from app.services.publication_version_service import present_patents, matches_document_filters
+            patents = present_patents(patents, browsing, group_by_family=group_by_family,
+                                      expanded_families=expanded_families or [])
+            if document_filters:
+                patents = [patent for patent in patents if matches_document_filters(patent, document_filters)]
+            if sort_by in DOCUMENT_FIELDS and not group_by_family:
+                patents.sort(key=lambda patent: (getattr(patent, sort_by, None) is None,
+                    str(getattr(getattr(patent, sort_by, None), "value", getattr(patent, sort_by, None)) or "")), reverse=sort_order == "desc")
+            total = len(patents)
+            patents = patents[(page - 1) * page_size:page * page_size]
         return patents, total
 
     @staticmethod
@@ -683,6 +716,8 @@ class PatentService:
                 db.add(PatentDatabaseMembership(patent_id=patent.id, database_id=database_id))
         from app.services.patent_identity_service import ensure_patent_identifiers
         ensure_patent_identifiers(db, patent, source_system="manual")
+        from app.services.publication_version_service import save_document
+        save_document(patent, data, source="manual", db=db)
         from app.services.semantic_index_service import SemanticIndexService
         SemanticIndexService.enqueue_patent(db, patent.id, "record_created")
         db.commit()
@@ -725,6 +760,20 @@ class PatentService:
             update_data = dict(patent_in)
         else:
             update_data = patent_in.model_dump(exclude_unset=True)
+
+        from app.services.publication_version_service import seed_versions
+        patent.publication_versions = seed_versions(patent)
+        document_number = update_data.pop("document_number", None)
+        if document_number:
+            from app.services.publication_version_service import DOCUMENT_FIELDS, save_document
+            from app.services.patent_identity_service import normalize_publication_number
+            document_number = normalize_publication_number(document_number)
+            if document_number not in patent.publication_versions:
+                raise BadRequestException("文献版本不存在")
+            save_document(patent, update_data, number=document_number, source=source, db=db,
+                          batch_id=import_batch_id)
+            if document_number != normalize_publication_number(patent.publication_number):
+                update_data = {key: value for key, value in update_data.items() if key not in DOCUMENT_FIELDS}
 
         if update_data.get("publication_number"):
             from app.services.patent_identity_service import normalize_publication_number
@@ -836,6 +885,9 @@ class PatentService:
 
         from app.services.patent_identity_service import ensure_patent_identifiers
         ensure_patent_identifiers(db, patent, source_system=source)
+        from app.services.publication_version_service import save_document
+        save_document(patent, update_data, number=update_data.get("publication_number") or patent.publication_number,
+                      source=source, db=db, batch_id=import_batch_id)
         db.add(patent)
         # 批量插入历史记录
         for h in history_entries:

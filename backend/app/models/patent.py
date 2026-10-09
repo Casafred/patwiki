@@ -58,6 +58,7 @@ class Patent(Base):
     application_number = Column(String(100), index=True)
     publication_number = Column(String(100), index=True)
     grant_number = Column(String(100))
+    publication_versions = Column(JSON, default=dict)
     title = Column(Text, nullable=False)
     abstract = Column(Text)
     claims = Column(Text)

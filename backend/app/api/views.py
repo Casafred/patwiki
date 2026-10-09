@@ -233,6 +233,7 @@ def list_view_patents(
     sort_by: Optional[str] = Query(None),
     sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
     group_by_family: bool = Query(False, description="按同族聚拢当前视图中的专利"),
+    expanded_families: Optional[str] = None,
     family_country: Optional[str] = Query(None),
     family_sort_by: Optional[str] = Query(None),
     family_sort_order: Optional[str] = Query("asc"),
@@ -255,6 +256,7 @@ def list_view_patents(
         db, view, page=page, page_size=page_size, extra_filters=ef,
         search=search, sort_by=sort_by, sort_order=sort_order,
         group_by_family=group_by_family,
+        expanded_families=[int(value) for value in (expanded_families or "").split(",") if value.isdigit()],
         family_country=family_country, family_sort_by=family_sort_by, family_sort_order=family_sort_order,
         order_by_view_grouping=order_by_view_grouping,
     )

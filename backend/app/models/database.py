@@ -24,6 +24,7 @@ class PatentDatabase(Base):
     is_default = Column(Boolean, default=False)
     kind = Column(String(30), nullable=False, default="personal", index=True)
     sync_provenance = Column(JSON, nullable=False, default=dict)
+    browsing_config = Column(JSON, nullable=False, default=dict)
     is_archived = Column(Boolean, default=False)
     patent_count = Column(Integer, default=0)
     sort_order = Column(Integer, default=0)

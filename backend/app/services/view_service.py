@@ -417,6 +417,7 @@ class ViewService:
         family_country: Optional[str] = None,
         family_sort_by: Optional[str] = None,
         family_sort_order: str = "asc",
+        expanded_families: Optional[list[int]] = None,
     ) -> tuple[list[Patent], int]:
         """获取视图中的专利列表。
 
@@ -461,6 +462,7 @@ class ViewService:
             sort_by=sort_by,
             sort_order=sort_order,
             group_by_family=group_by_family,
+            expanded_families=expanded_families,
             family_country=family_country, family_sort_by=family_sort_by, family_sort_order=family_sort_order,
             group_order_fields=group_order_fields,
         )
@@ -1508,6 +1510,11 @@ def _patent_to_dict(patent: Patent) -> dict:
     """
     return {
         "id": patent.id,
+        "publication_versions": patent.publication_versions or {},
+        "document_number": getattr(patent, "document_number", None),
+        "document_kind": getattr(patent, "document_kind", None),
+        "row_key": getattr(patent, "row_key", None),
+        "version_data_available": getattr(patent, "version_data_available", True),
         "application_number": patent.application_number,
         "publication_number": patent.publication_number,
         "grant_number": patent.grant_number,

@@ -28,6 +28,7 @@ from app.models import (
     PatentFamily,
     PatentHistory,
     PatentIdentifier,
+    PatentDatabaseMembership,
 )
 from app.core.exceptions import NotFoundException
 from app.core.exceptions import BadRequestException
@@ -64,6 +65,7 @@ def list_patents(
     custom_filters: Optional[str] = Query(None, description="JSON string of custom field filters"),
     filters: Optional[str] = Query(None, description="JSON string of unified field filters, supports {field: {contains: 'xxx'}, field2: {eq: 'yyy'}}"),
     group_by_family: bool = Query(False, description="同族聚拢模式：同族专利排在一起，附加 family_size"),
+    expanded_families: Optional[str] = None,
     family_country: Optional[str] = Query(None, description="同族筛选：族内至少包含该国家/地区"),
     family_sort_by: Optional[str] = Query(None, description="同族排序：count/priority_date/applicant/publication_date"),
     family_sort_order: Optional[str] = Query("asc", description="同族排序方向"),
@@ -104,6 +106,7 @@ def list_patents(
         custom_filters=cf,
         filters=uf,
         group_by_family=group_by_family,
+        expanded_families=[int(value) for value in (expanded_families or "").split(",") if value.isdigit()],
         family_country=family_country,
         family_sort_by=family_sort_by,
         family_sort_order=family_sort_order,
@@ -265,11 +268,18 @@ def replace_patent_projects(
 
 
 @router.get("/{patent_id}", response_model=Patent)
-def get_patent(patent_id: int, db: Session = Depends(get_db)):
+def get_patent(patent_id: int, publication: Optional[str] = None, db: Session = Depends(get_db)):
     patent = PatentService.get_patent(db, patent_id)
     if not patent:
         raise NotFoundException("Patent not found")
-    return patent
+    from app.services.publication_version_service import seed_versions, project_document
+    versions = seed_versions(patent)
+    if publication:
+        number = normalize_publication_number(publication)
+        if number not in versions:
+            raise NotFoundException("文献版本不存在")
+        return project_document(patent, number, versions)
+    return project_document(patent, next(iter(versions)), versions) if versions else patent
 
 
 @router.get("/{patent_id}/collaboration-states")

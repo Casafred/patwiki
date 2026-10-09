@@ -23,6 +23,7 @@ import type {
   SyncConnector, SyncUpdateBatch,
   SemanticSearchMode,
   AttachmentMeta,
+  BrowsingConfig,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import {
@@ -620,6 +621,22 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       ? queryDatabaseId
       : currentDatabaseId
   const activeView = views.find(view => view.id === viewId && view.database_id === activeDatabaseId)
+  const browsingConfig: BrowsingConfig = { application_mode: 'merged', preferred_version: 'grant', family_representative: false, country_order: ['CN', 'US', 'EP', 'JP', 'DE', 'CA', 'AU'], representative_date: 'latest', ...databases.find(database => database.id === activeDatabaseId)?.browsing_config }
+  const browsingConfigKey = JSON.stringify(browsingConfig)
+  const [expandedFamilies, setExpandedFamilies] = useState<number[]>([])
+  const [browsingBusy, setBrowsingBusy] = useState(false)
+  const saveBrowsingConfig = async (changes: Partial<BrowsingConfig>) => {
+    if (!activeDatabaseId) return
+    setBrowsingBusy(true)
+    try {
+      const database = await databaseApi.browsingConfig(activeDatabaseId, { ...browsingConfig, ...changes })
+      setDatabases(databases.map(item => item.id === database.id ? database : item))
+      setExpandedFamilies([])
+      setPage(1)
+    } catch (cause) { window.alert(getErrorMessage(cause, '浏览设置保存失败')) }
+    finally { setBrowsingBusy(false) }
+  }
+  const toggleRepresentativeFamily = (id: number) => setExpandedFamilies(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
   const [page, setPage] = useState(() => readPageParam(searchParams))
   const [pageSize] = useState(50)
   const [tableViewMode, setTableViewMode] = useState<TableViewMode>(() => readTableViewMode())
@@ -645,8 +662,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [familySortOrder, setFamilySortOrder] = useState<SortOrder>(() => searchParams.get('family_order') === 'desc' ? 'desc' : 'asc')
   const [fields, setFields] = useState<FieldMeta[]>([])
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
-  const [undoStack, setUndoStack] = useState<Array<{ patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
-  const [redoStack, setRedoStack] = useState<Array<{ patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
+  const [undoStack, setUndoStack] = useState<Array<{ patentId: number; documentNumber?: string; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
+  const [redoStack, setRedoStack] = useState<Array<{ patentId: number; documentNumber?: string; fieldKey: string; before: JsonValue; after: JsonValue }>>([])
   const [columnUndo, setColumnUndo] = useState<{ viewId: number | null; beforeConfig: ViewColumnConfig[] | null; afterConfig: ViewColumnConfig[] | null; beforeFields: FieldMeta[]; afterFields: FieldMeta[] } | null>(null)
   const [columnRedo, setColumnRedo] = useState<{ viewId: number | null; beforeConfig: ViewColumnConfig[] | null; afterConfig: ViewColumnConfig[] | null; beforeFields: FieldMeta[]; afterFields: FieldMeta[] } | null>(null)
   const [activeHeaderMenu, setActiveHeaderMenu] = useState<string | null>(null)
@@ -658,7 +675,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [headerFilterListItems, setHeaderFilterListItems] = useState<{ value: string; raw_value: JsonValue; count: number }[]>([])
   const [headerFilterListSearch, setHeaderFilterListSearch] = useState('')
   const [headerFilterListSelected, setHeaderFilterListSelected] = useState<Set<string>>(new Set())
-  const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string } | null>(null)
+  const [editingCell, setEditingCell] = useState<{ patentId: number; fieldKey: string; documentNumber?: string } | null>(null)
   const [resizing, setResizing] = useState<{ fieldKey: string; startX: number; startWidth: number } | null>(null)
   const [showFieldConfig, setShowFieldConfig] = useState(false)
   const [showDetailFieldConfig, setShowDetailFieldConfig] = useState(false)
@@ -795,6 +812,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     familySortBy,
     familySortOrder,
     groupByFamily,
+    browsingConfigKey,
+    expandedFamilies,
     mode: tableViewMode,
     page: tableViewMode === 'continuous' ? null : page,
   })}`
@@ -916,10 +935,16 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     return () => document.removeEventListener('keydown', handleLibraryShortcut)
   }, [scrollLibraryTo])
 
-  const openPatent = useCallback((patentId: number) => {
+  const openPatent = useCallback((patentId: number, number?: string) => {
     saveTablePosition()
+    if (number) {
+      const next = new URLSearchParams(location.search)
+      next.set('publication', number)
+      navigate(`${activeDatabaseId ? `/db/${activeDatabaseId}` : ''}/patents/${patentId}?${next}`)
+      return
+    }
     onPatentClick(patentId)
-  }, [onPatentClick, saveTablePosition])
+  }, [onPatentClick, saveTablePosition, activeDatabaseId, navigate, location.search])
 
   useEffect(() => {
     // Sidebar navigation unmounts this page. Persist the last viewport so
@@ -1102,13 +1127,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         })
         return
       }
-      const incomingById = new Map(items.map(item => [item.id, item]))
+      const incomingById = new Map(items.map(item => [item.row_key || String(item.id), item]))
       // A refresh after an edit must not reorder the visible window when the
       // edited value is also the active sort key. Replace rows in place and
       // leave the window boundaries unchanged, as a spreadsheet would.
       const merged = preserveVisible
-        ? patentsRef.current.map(item => incomingById.get(item.id) || item)
-        : Array.from(new Map([...patentsRef.current, ...items].map(item => [item.id, item])).values())
+        ? patentsRef.current.map(item => incomingById.get(item.row_key || String(item.id)) || item)
+        : Array.from(new Map([...patentsRef.current, ...items].map(item => [item.row_key || String(item.id), item])).values())
       patentsRef.current = merged
       setPatents(merged, total)
       saveTableDataSnapshot(tableScopeKey, {
@@ -1193,6 +1218,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             setCollapsedGroupKeys(new Set())
           }
           const result = await viewApi.listPatents(viewId, {
+            expanded_families: expandedFamilies.join(','),
             page: effectivePage,
             page_size: requestedPageSize,
             search: searchText || undefined,
@@ -1215,6 +1241,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       }
 
       const params: JsonObject = {
+        expanded_families: expandedFamilies.join(','),
         page: effectivePage,
         page_size: requestedPageSize,
         sort_by: sortField || undefined,
@@ -1252,7 +1279,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     } finally {
       if (myRequestId === loadPatentsRequestId.current) setLoading(false)
     }
-  }, [page, pageSize, searchText, searchMode, currentProductId, activeDatabaseId, isGlobalMasterTable, sortField, sortOrder, filterValues, groupByFamily, familyCountry, familySortBy, familySortOrder, tableViewMode, viewId, tableScopeKey, setPatents, setLoading])
+  }, [page, pageSize, searchText, searchMode, currentProductId, activeDatabaseId, isGlobalMasterTable, sortField, sortOrder, filterValues, groupByFamily, familyCountry, familySortBy, familySortOrder, tableViewMode, viewId, tableScopeKey, setPatents, setLoading, expandedFamilies, browsingConfigKey])
 
   const loadNextContinuousPage = useCallback(() => {
     if (tableViewMode !== 'continuous' || continuousLoadingRef.current || !continuousHasMoreRef.current) return
@@ -1884,17 +1911,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setActiveHeaderMenu(null)
   }
 
-  const handleCellClick = (patentId: number, fieldKey: string, e: React.MouseEvent) => {
+  const handleCellClick = (patentId: number, fieldKey: string, e: React.MouseEvent, documentNumber?: string) => {
     if ((e.target as HTMLElement).closest('.cell-action-btn')) return
     const field = fields.find(f => f.key === fieldKey)
     if (!field?.editable || field.field_type === 'lookup' || field.field_type === 'rollup') {
-      openPatent(patentId)
+      openPatent(patentId, documentNumber)
       return
     }
     if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'SELECT') {
       return
     }
-    setEditingCell({ patentId, fieldKey })
+    setEditingCell({ patentId, fieldKey, documentNumber })
   }
 
   const handlePatentReferenceClick = useCallback(async (publicationNumber: string) => {
@@ -1910,11 +1937,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     }
   }, [openPatent])
 
-  const applyLocalCellValue = (patentId: number, fieldKey: string, value: JsonValue) => {
+  const applyLocalCellValue = (patentId: number, fieldKey: string, value: JsonValue, documentNumber?: string) => {
     const fieldMeta = fields.find(field => field.key === fieldKey)
     const isCustomField = fieldKey.startsWith('custom_fields.') || fieldMeta?.is_system === false
     const customKey = fieldKey.startsWith('custom_fields.') ? fieldKey.slice('custom_fields.'.length) : fieldKey
-    const nextPatents = patentsRef.current.map(item => item.id === patentId
+    const nextPatents = patentsRef.current.map(item => item.id === patentId && (!documentNumber || item.document_number === documentNumber)
       ? (isCustomField
         ? { ...item, custom_fields: { ...(item.custom_fields || {}), [customKey]: value } }
         : { ...item, [fieldKey]: value } as Patent)
@@ -1923,8 +1950,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setPatents(nextPatents, totalPatentsRef.current)
   }
 
-  const handleCellSave = async (patentId: number, fieldKey: string, value: JsonValue) => {
-    const before = getFieldValue(patents.find(patent => patent.id === patentId) || ({} as Patent), fieldKey)
+  const handleCellSave = async (patentId: number, fieldKey: string, value: JsonValue, documentNumber?: string) => {
+    const before = getFieldValue(patents.find(patent => patent.id === patentId && (!documentNumber || patent.document_number === documentNumber)) || ({} as Patent), fieldKey)
     if (JSON.stringify(before) === JSON.stringify(value)) {
       setEditingCell(null)
       return
@@ -1933,15 +1960,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     const beforeIsEmpty = before === null || before === undefined || before === ''
     if (!beforeIsEmpty && !window.confirm('确认覆盖此单元格的现有内容并保存吗？')) return
     try {
-      if (viewId !== null) {
+      if (documentNumber && fields.find(field => field.key === fieldKey)?.is_system) {
+        await patentApi.update(patentId, { document_number: documentNumber, [fieldKey]: value } as Partial<Patent>)
+      } else if (viewId !== null) {
         await viewApi.updateSharedField(viewId, patentId, fieldKey, value)
       } else {
         await patentApi.updateCell(patentId, fieldKey, value)
       }
       setEditingCell(null)
-      setUndoStack(prev => [...prev.slice(-49), { patentId, fieldKey, before, after: value }])
+      setUndoStack(prev => [...prev.slice(-49), { patentId, documentNumber, fieldKey, before, after: value }])
       setRedoStack([])
-      applyLocalCellValue(patentId, fieldKey, value)
+      applyLocalCellValue(patentId, fieldKey, value, documentNumber)
     } catch (error: unknown) {
       alert('保存失败: ' + getErrorMessage(error))
     }
@@ -2069,8 +2098,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setPage(1)
   }
 
-  const applyEditCommand = async (command: { patentId: number; fieldKey: string; before: JsonValue; after: JsonValue }, value: JsonValue) => {
-    if (viewId !== null) await viewApi.updateSharedField(viewId, command.patentId, command.fieldKey, value)
+  const applyEditCommand = async (command: { patentId: number; documentNumber?: string; fieldKey: string; before: JsonValue; after: JsonValue }, value: JsonValue) => {
+    if (command.documentNumber && fields.find(field => field.key === command.fieldKey)?.is_system) await patentApi.update(command.patentId, { document_number: command.documentNumber, [command.fieldKey]: value } as Partial<Patent>)
+    else if (viewId !== null) await viewApi.updateSharedField(viewId, command.patentId, command.fieldKey, value)
     else await patentApi.updateCell(command.patentId, command.fieldKey, value)
   }
 
@@ -2096,7 +2126,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       await applyEditCommand(command, command.before)
       setUndoStack(prev => prev.slice(0, -1))
       setRedoStack(prev => [...prev, command])
-      applyLocalCellValue(command.patentId, command.fieldKey, command.before)
+      applyLocalCellValue(command.patentId, command.fieldKey, command.before, command.documentNumber)
     } catch (error: unknown) { alert('撤回失败: ' + getErrorMessage(error)) }
   }
 
@@ -2122,7 +2152,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       await applyEditCommand(command, command.after)
       setRedoStack(prev => prev.slice(0, -1))
       setUndoStack(prev => [...prev, command])
-      applyLocalCellValue(command.patentId, command.fieldKey, command.after)
+      applyLocalCellValue(command.patentId, command.fieldKey, command.after, command.documentNumber)
     } catch (error: unknown) { alert('重做失败: ' + getErrorMessage(error)) }
   }
 
@@ -3064,12 +3094,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       )
     }
 
-    return <CellEditor field={field} value={value} onSave={v => void handleCellSave(patent.id, field.key, v)} onCancel={cancel} />
+    return <CellEditor field={field} value={value} onSave={v => void handleCellSave(patent.id, field.key, v, patent.document_number)} onCancel={cancel} />
   }
 
   const renderCellContent = (patent: Patent, field: FieldMeta) => {
     const value = getFieldValue(patent, field.key)
-    const isEditing = editingCell?.patentId === patent.id && editingCell?.fieldKey === field.key
+    const isEditing = editingCell?.patentId === patent.id && editingCell?.fieldKey === field.key && editingCell.documentNumber === patent.document_number
 
     if (isEditing) {
       return renderCellEditor(patent, field, value)
@@ -3203,7 +3233,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       return (
         <div>
           <div style={{ fontWeight: 500, color: '#2563eb', cursor: 'pointer' }}
-           onClick={(e) => { e.stopPropagation(); openPatent(patent.id) }}
+           onClick={(e) => { e.stopPropagation(); openPatent(patent.id, patent.document_number) }}
                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
           >
@@ -3230,7 +3260,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       return (
         <span
           style={{ fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', color: '#2563eb' }}
-           onClick={(e) => { e.stopPropagation(); openPatent(patent.id) }}
+           onClick={(e) => { e.stopPropagation(); openPatent(patent.id, patent.document_number) }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
         >
@@ -3363,6 +3393,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </ToolbarMenu>
             )}
             <div className="datagrid-view-actions" aria-label="常用表格工具">
+              <ToolbarMenu label="申请版本" icon="file" title="当前库的申请版本显示设置">
+                {() => <div className="family-filter-panel">
+                  <label>显示模式<select className="form-input" value={browsingConfig.application_mode} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ application_mode: event.target.value as BrowsingConfig['application_mode'] })}><option value="merged">按申请号合并</option><option value="separate">公开、授权分别显示</option></select></label>
+                  <label>合并优先版本<select className="form-input" value={browsingConfig.preferred_version} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ preferred_version: event.target.value as BrowsingConfig['preferred_version'] })}><option value="grant">授权版本</option><option value="publication">公开版本</option></select></label>
+                </div>}
+              </ToolbarMenu>
               <button type="button" className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'}`} onClick={() => void handleFamilyGrouping()} title="按同族聚拢或恢复原始导入顺序">
                 <Icon name="table" size={14} /> 同族聚拢{groupByFamily ? '已开启' : '已关闭'}
               </button>
@@ -3385,6 +3421,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     <option value="applicant">申请人</option>
                     <option value="publication_date">最早公开日</option>
                   </select></label>
+                  <label><input type="checkbox" checked={browsingConfig.family_representative} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ family_representative: event.target.checked })} /> 每族只显示代表</label>
+                  {browsingConfig.family_representative && <>
+                    <label>代表日期<select className="form-input" value={browsingConfig.representative_date} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ representative_date: event.target.value as BrowsingConfig['representative_date'] })}><option value="latest">公开日最晚</option><option value="earliest">公开日最早</option></select></label>
+                    <label>国家优先级<input key={browsingConfig.country_order.join(',')} className="form-input" defaultValue={browsingConfig.country_order.join(' > ')} disabled={browsingBusy} onBlur={event => { const list = event.target.value.split(/[>,，、\s]+/).filter(Boolean); if (list.join(',') !== browsingConfig.country_order.join(',')) void saveBrowsingConfig({ country_order: list }) }} /></label>
+                  </>}
+                  <label>申请号显示<select className="form-input" value={browsingConfig.application_mode} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ application_mode: event.target.value as BrowsingConfig['application_mode'] })}><option value="merged">合并公开/授权</option><option value="separate">公开、授权分开</option></select></label>
+                  {browsingConfig.application_mode === 'merged' && <label>合并版本<select className="form-input" value={browsingConfig.preferred_version} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ preferred_version: event.target.value as BrowsingConfig['preferred_version'] })}><option value="grant">优先授权版本</option><option value="publication">优先公开版本</option></select></label>}
                   <label>排序方向<select className="form-input" value={familySortOrder} disabled={!familySortBy} onChange={event => { setFamilySortOrder(event.target.value as SortOrder); setPage(1) }} aria-label="同族排序方向">
                     <option value="asc">升序</option>
                     <option value="desc">降序</option>
@@ -3574,7 +3617,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               const isFamilyCollapsed = !!familyKey && collapsedFamilyKeys.has(familyKey)
               if (familyKey && isFamilyCollapsed && !isFamilyStart) return null
               return (
-                <Fragment key={patent.id}>
+                <Fragment key={patent.row_key || patent.id}>
                   {isFamilyStart && (
                     <div
                       className="patent-detail-browser-family-header"
@@ -3588,15 +3631,16 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                       <span className="family-group-toggle">{isFamilyCollapsed ? '›' : '⌄'}</span>
                       <strong>{patent.family_key || `同族 ${patent.family_id}`}</strong>
                       <span className="family-group-count">{patent.family_size || 1} 件独立专利</span>
+                      {browsingConfig.family_representative && patent.family_id && <button className="btn btn-sm btn-secondary" onClick={event => { event.stopPropagation(); toggleRepresentativeFamily(patent.family_id!) }}>{expandedFamilies.includes(patent.family_id) ? '收起同族' : '展开同族'}</button>}
                     </div>
                   )}
-                  <article className="patent-detail-browser-row" key={patent.id}>
+                  <article className="patent-detail-browser-row" key={patent.row_key || patent.id}>
                     <div className="patent-detail-browser-heading">
                       <label className="patent-detail-browser-select" onClick={event => event.stopPropagation()}>
                         <input type="checkbox" checked={selectedIds.includes(patent.id)} onChange={() => toggleSelect(patent.id)} aria-label={`选择第 ${(page - 1) * pageSize + rowIdx + 1} 条专利`} />
                         <span>{(page - 1) * pageSize + rowIdx + 1}</span>
                       </label>
-                      <button type="button" className="patent-detail-browser-title" onClick={() => openPatent(patent.id)}>
+                      <button type="button" className="patent-detail-browser-title" onClick={() => openPatent(patent.id, patent.document_number)}>
                         {patent.title || patent.publication_number || `专利 #${patent.id}`}
                       </button>
                       <span className="patent-detail-browser-meta">
@@ -3975,7 +4019,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                 const isFamilyStart = groupByFamily && !!p.family_id && familyFirstIds.has(p.id)
                 const isFamilyRowCollapsed = !!familyKey && collapsedFamilyKeys.has(familyKey)
                 return (
-                <Fragment key={p.id}>
+                <Fragment key={p.row_key || p.id}>
                 {groupHeaders.map(groupHeader => (
                   <tr
                     key={groupHeader.id}
@@ -4009,13 +4053,14 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                         <span className="family-group-toggle">{familyKey && collapsedFamilyKeys.has(familyKey) ? '›' : '⌄'}</span>
                         <strong>{p.family_key || `同族 ${p.family_id}`}</strong>
                         <span className="family-group-count">{p.family_size || 1} 件独立专利</span>
+                        {browsingConfig.family_representative && p.family_id && <button className="btn btn-sm btn-secondary" onClick={event => { event.stopPropagation(); toggleRepresentativeFamily(p.family_id!) }}>{expandedFamilies.includes(p.family_id) ? '收起同族' : '展开同族'}</button>}
                       </div>
                     </td>
                   </tr>
                 )}
                 {!isGroupRowCollapsed && !isFamilyRowCollapsed && (
                 <tr
-                  key={p.id}
+                  key={p.row_key || p.id}
                   className={`${selectedIds.includes(p.id) ? 'row-selected ' : ''}${rowHeightLimit === 'auto' ? '' : 'row-height-capped'}${activeCell?.patentId === p.id ? ' crosshair-row' : ''}`}
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest('input') ||
@@ -4023,7 +4068,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                         (e.target as HTMLElement).closest('textarea') ||
                         (e.target as HTMLElement).closest('button') ||
                         (e.target as HTMLElement).closest('.cell-action-btn')) return
-                    openPatent(p.id)
+                    openPatent(p.id, p.document_number)
                   }}
                   onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id })}
                   style={{
@@ -4131,7 +4176,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                       }}
                       onDoubleClick={(e) => {
                         e.stopPropagation()
-                        handleCellClick(p.id, field.key, e)
+                        handleCellClick(p.id, field.key, e, p.document_number)
                       }}
                       onContextMenu={(e) => handleContextMenu(e, 'row', { patentId: p.id, fieldKey: field.key })}
                     >

@@ -42,6 +42,7 @@ export const databaseApi = {
 
   update: (id: number, data: Partial<PatentDatabase>): Promise<PatentDatabase> =>
     api.put(`/databases/${id}`, data),
+  browsingConfig: (id: number, data: NonNullable<PatentDatabase['browsing_config']>): Promise<PatentDatabase> => api.put(`/databases/${id}/browsing-config`, data),
 
   archive: (id: number): Promise<PatentDatabase> =>
     api.post(`/databases/${id}/archive`),
@@ -131,6 +132,7 @@ export const viewApi = {
     api.delete(`/views/${viewId}/patents`, { data: { patent_ids: patentIds } }),
 
   listPatents: (viewId: number, params: {
+    expanded_families?: string
     page?: number
     page_size?: number
     search?: string
@@ -402,7 +404,7 @@ export const patentApi = {
   list: (params: JsonObject = {}): Promise<PatentListResponse> =>
     api.get('/patents', { params }),
 
-  get: (id: number): Promise<Patent> => api.get(`/patents/${id}`),
+  get: (id: number, publication?: string): Promise<Patent> => api.get(`/patents/${id}`, { params: { publication } }),
   resolvePublicationNumber: (publicationNumber: string): Promise<{
     found: boolean
     publication_number: string
@@ -593,6 +595,7 @@ export const importApi = {
     api.get('/import/batches', { params }),
 
   getBatch: (id: number): Promise<ImportBatch> => api.get(`/import/batches/${id}`),
+  records: (id: number, offset = 0): Promise<{ items: Array<{ source_row?: number; patent_id?: number | null; title?: string; status: string; reason?: string; publication_number?: string; application_number?: string; numbers: Record<string, string> }>; total: number }> => api.get(`/import/batches/${id}/records`, { params: { offset, limit: 100 } }),
   resumeBatch: (id: number): Promise<{ import_id: string }> => api.post(`/import/batches/${id}/resume`),
   getChanges: (id: number, onlyDifferences = false, offset = 0, limit = 2000, onlyConflicts = false): Promise<{ batch_id: number; status: string; total: number; offset: number; limit: number; items: ImportChangeReview[] }> =>
     api.get(`/import/batches/${id}/changes`, { params: { only_differences: onlyDifferences, only_conflicts: onlyConflicts, offset, limit } }),

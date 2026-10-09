@@ -517,6 +517,7 @@ class DatabaseService:
             "icon": database.icon,
             "is_default": database.is_default,
             "kind": database.kind or "personal",
+            "browsing_config": database.browsing_config or {},
             "is_archived": database.is_archived,
             "patent_count": database.patent_count,
             "sort_order": database.sort_order,
