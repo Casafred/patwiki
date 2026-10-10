@@ -543,6 +543,13 @@ export const tagGroupApi = {
   delete: (id: number): Promise<{ success: boolean }> => api.delete(`/tag-groups/${id}`),
 }
 
+export const classificationApi = {
+  apply: (patentIds: number[], tagIds: number[], groupId: number, mode: 'add' | 'remove' | 'replace'):
+    Promise<{ success: boolean; updated_count: number }> => api.post('/classifications/apply', { patent_ids: patentIds, tag_ids: tagIds, group_id: groupId, mode }),
+  export: (groupIds: number[]): Promise<JsonObject> => api.post('/classifications/export', { group_ids: groupIds }),
+  import: (config: JsonObject): Promise<{ success: boolean; imported_systems: number }> => api.post('/classifications/import', config),
+}
+
 export const customFieldApi = {
   list: (params: JsonObject = {}): Promise<CustomField[]> => api.get('/custom-fields', { params }),
   create: (data: Partial<CustomField>): Promise<CustomField> => api.post('/custom-fields', data),
@@ -796,6 +803,8 @@ export const aiApi = {
 }
 
 export const exportApi = {
+  replenishment: (databaseId?: number | null): Promise<Blob> =>
+    api.post('/export/replenishment', { database_id: databaseId ?? null }, { responseType: 'blob' }),
   exportPatents: (params: JsonObject = {}): Promise<Blob> =>
     api.get('/export', { params, responseType: 'blob' }),
   excel: (payload: JsonObject): Promise<Blob> =>

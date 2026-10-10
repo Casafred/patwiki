@@ -110,6 +110,9 @@ class ExportService:
 
     @staticmethod
     def _field_value(patent: Patent, field_key: str) -> Any:
+        if field_key.startswith("taxonomy_"):
+            group_id = int(field_key.removeprefix("taxonomy_"))
+            return [str(tag.id) for tag in patent.tags if tag.group_id == group_id]
         # These canonical keys also exist as SQLAlchemy relationship attributes
         # on Patent. Export must use the raw source projection, not Citation rows.
         if field_key in RELATION_FIELD_KEYS:
@@ -141,7 +144,7 @@ class ExportService:
             return ""
         labels = meta.get("option_labels") or {}
         if isinstance(value, list):
-            return ", ".join(str(labels.get(item, item)) for item in value)
+            return ", ".join(str(labels.get(str(item), labels.get(item, item))) for item in value)
         if meta.get("key") == "has_risk":
             return "是" if value else "否"
         return labels.get(value, value)

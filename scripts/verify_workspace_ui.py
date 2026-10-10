@@ -13,6 +13,7 @@ def run():
     output.mkdir(exist_ok=True)
     errors = []
     requests = []
+    database = {"id": 1, "name": "Regression library", "is_default": True, "patent_count": 123, "browsing_config": {"application_mode": "merged", "preferred_version": "grant", "family_representative": False, "country_order": ["CN", "US"], "representative_date": "latest"}}
 
     def respond(route):
         url = urlparse(route.request.url)
@@ -22,7 +23,10 @@ def run():
         path = url.path.removeprefix("/api")
         data = []
         if path == "/databases":
-            data = [{"id": 1, "name": "Regression library", "is_default": True, "patent_count": 123}]
+            data = [database]
+        elif path == "/databases/1/browsing-config":
+            database["browsing_config"] = route.request.post_data_json
+            data = database
         elif path == "/fields":
             data = [{"key": "title", "label": "Title", "field_type": "text", "is_system": True}]
         elif path.endswith("/views"):
@@ -32,7 +36,9 @@ def run():
             page = int(params.get("page", [1])[0])
             size = int(params.get("page_size", [50])[0])
             requests.append((page, size, params))
-            data = {"items": [{"id": i, "title": f"Patent {i}", "application_number": f"CN{i}", "custom_fields": {}, "tags": [], "projects": []} for i in range((page - 1) * size + 1, min(page * size, 123) + 1)], "total": 123, "page": page, "page_size": size}
+            config = database["browsing_config"]
+            total = 41 if config["family_representative"] and params.get("group_by_family") == ["true"] else 246 if config["application_mode"] == "separate" else 123
+            data = {"items": [{"id": i, "title": f"Patent {i}", "application_number": f"CN{i}", "custom_fields": {}, "tags": [], "projects": []} for i in range((page - 1) * size + 1, min(page * size, total) + 1)], "total": total, "page": page, "page_size": size}
         elif path.startswith("/semantic-search"):
             data = {"items": []}
             if path.endswith("/providers"):
@@ -81,8 +87,26 @@ def run():
             page.get_by_role("button", name="滚动到库顶部", exact=True).click()
             page.wait_for_function("!location.search.includes('page=3')")
             expect(page.get_by_role("button", name="滚动到库顶部", exact=True)).to_be_disabled()
-        if page.get_by_role("button", name="同族聚拢已关闭", exact=False).count():
-            page.get_by_role("button", name="同族聚拢已关闭", exact=False).click()
+        page.locator(".datagrid-result-count-trigger").click()
+        page.get_by_role("combobox", name="申请号显示", exact=True).select_option("separate")
+        expect(page.locator(".datagrid-result-count-trigger")).to_contain_text("246")
+        page.get_by_role("combobox", name="申请号显示", exact=True).select_option("merged")
+        expect(page.locator(".datagrid-result-count-trigger")).to_contain_text("123")
+        page.get_by_role("checkbox", name="同族聚拢", exact=True).uncheck()
+        page.get_by_role("checkbox", name="按国家顺序合并同族", exact=True).check()
+        expect(page.locator(".datagrid-result-count-trigger")).to_contain_text("41")
+        expect(page.get_by_role("checkbox", name="同族聚拢", exact=True)).to_be_checked()
+        expect(page.get_by_role("textbox", name="国家优先级", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="申请版本", exact=False)).to_have_count(0)
+        page.screenshot(path=str(output / "result-merge-desktop.png"), full_page=True)
+        page.set_viewport_size({"width": 390, "height": 844})
+        expect(page.get_by_role("combobox", name="申请号显示", exact=True)).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "merge menu mobile overflow"
+        page.screenshot(path=str(output / "result-merge-mobile.png"), full_page=True)
+        page.set_viewport_size({"width": 1440, "height": 1000})
+        page.get_by_role("checkbox", name="按国家顺序合并同族", exact=True).uncheck()
+        expect(page.locator(".datagrid-result-count-trigger")).to_contain_text("123")
+        page.locator(".datagrid-result-count-trigger").click()
         page.get_by_role("button", name="同族条件", exact=False).click()
         page.get_by_role("textbox", name="按族内国家筛选", exact=True).fill("CN")
         page.get_by_role("combobox", name="同族排序指标", exact=True).select_option("count")
@@ -99,7 +123,7 @@ def run():
         page.screenshot(path=str(output / "member-config-desktop.png"), full_page=True)
         assert not errors, errors
         browser.close()
-    print("PASS: model configuration, responsive layout, extraction tabs, global first/last jumps in both modes, sample download")
+    print("PASS: model configuration, responsive layout, extraction tabs, first/last jumps, result merge menu and counts, family filters, sample download")
 
 
 if __name__ == "__main__":

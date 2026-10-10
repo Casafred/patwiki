@@ -6122,8 +6122,29 @@ body {
 .datagrid-toolbar-count {
   color: var(--ink-500);
   font-size: 11px;
-  white-space: nowrap;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
 }
+
+.datagrid-result-count-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--teal-700);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.datagrid-result-count-trigger:hover { background: #eefaf7; }
+.datagrid-result-count-trigger:focus-visible { outline: 2px solid var(--teal-700); outline-offset: 2px; }
+.family-filter-panel .family-filter-toggle { display: flex; align-items: center; gap: 8px; }
 
 .datagrid-toolbar-body {
   display: flex;
@@ -6944,6 +6965,7 @@ body {
 .mcp-run-records { display: grid; gap: 6px; max-height: 360px; overflow: auto; }
 .mcp-run-record { padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; font-size: 11px; }
 .mcp-run-record-head { display: flex; flex-wrap: wrap; gap: 8px; color: #475569; }
+.mcp-run-record-head > * { min-width: 0; overflow-wrap: anywhere; }
 .mcp-run-record pre { margin: 7px 0 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #334155; font-size: 10px; }
 @media (max-width: 680px) { .semantic-provider-form, .mcp-run-detail-grid { grid-template-columns: 1fr; } }
 .mcp-tab-hint { color: #64748b; font-size: 12px; }
@@ -7095,9 +7117,33 @@ body {
 
 .mcp-runs-layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+}
+.classification-manager, .classification-bulk, .classification-picker { display: grid; gap: 12px; min-width: 0; }
+.classification-system-bar { display: flex; flex-wrap: wrap; gap: 8px; }
+.classification-system-bar .form-input { flex: 1 1 180px; min-width: 0; }
+.classification-node-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding-block: 12px; border-block: 1px solid #e2e8f0; }
+.classification-node-form label { display: grid; gap: 5px; min-width: 0; font-size: 12px; }
+.classification-node-form .form-input { width: 100%; min-width: 0; }
+.classification-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.classification-actions label, .classification-export-options label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.classification-node-list, .classification-options { max-height: 300px; overflow: auto; }
+.classification-node-list > div { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+.classification-node-list > div > span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.classification-options > label { display: flex; align-items: center; gap: 8px; padding: 8px; cursor: pointer; font-size: 12px; overflow-wrap: anywhere; }
+.classification-swatch { flex: 0 0 10px; width: 10px; height: 10px; border-radius: 2px; }
+.classification-transfer { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
+.classification-export-options { display: flex; flex-wrap: wrap; gap: 10px; }
+.classification-cell-editor { width: 320px; max-width: 100%; min-width: 180px; display: grid; gap: 8px; padding: 8px; background: #fff; }
+.classification-cell-value { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .classification-node-form { grid-template-columns: minmax(0, 1fr); } }
+.mcp-runs-layout > .mcp-panel, .mcp-run-list, .mcp-run-row-wrap, .mcp-run-details { min-width: 0; max-width: 100%; }
+.mcp-run-row > * { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .mcp-run-row { grid-template-columns: 70px repeat(2, 48px) minmax(0, 1fr) 32px; gap: 4px; }
+  .mcp-run-row span:nth-child(4) { display: none; }
 }
 .mcp-run-list { display: grid; gap: 2px; }
 .mcp-run-row-wrap { border-top: 1px solid #f1f5f9; }
@@ -7167,7 +7213,7 @@ body {
   .mcp-form-grid { grid-template-columns: 1fr; }
   .mcp-observation-diff { grid-template-columns: 1fr; }
   .mcp-observation-arrow { justify-self: center; transform: rotate(90deg); }
-  .mcp-run-row { grid-template-columns: 74px 60px 60px minmax(0, 1fr) 40px; }
+  .mcp-run-row { grid-template-columns: 64px 44px 44px minmax(0, 1fr) 32px; gap: 4px; }
   .mcp-run-row span:nth-child(4) { display: none; }
   .mcp-field-selection-toolbar { align-items: flex-start; flex-direction: column; }
   .mcp-field-preset-controls { width: 100%; }

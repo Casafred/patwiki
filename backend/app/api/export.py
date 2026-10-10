@@ -48,6 +48,10 @@ class ExportTemplateRequest(BaseModel):
     view_id: Optional[int] = None
 
 
+class ReplenishmentRequest(BaseModel):
+    database_id: Optional[int] = Field(default=None, gt=0)
+
+
 def _template_to_dict(template: PatentExportTemplate) -> dict[str, Any]:
     field_keys = template.field_keys or []
     view = template.view
@@ -87,6 +91,16 @@ def export_excel(body: ExportRequest, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise BadRequestException(str(exc)) from exc
     return _stream(data, "patwiki_export.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@router.post("/export/replenishment")
+def export_replenishment(body: ReplenishmentRequest, db: Session = Depends(get_db)):
+    from app.services.replenishment_service import ReplenishmentService
+    try:
+        data = ReplenishmentService.export_excel(db, body.database_id)
+    except ValueError as exc:
+        raise BadRequestException(str(exc)) from exc
+    return _stream(data, "patwiki_replenishment.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @router.post("/export/csv")

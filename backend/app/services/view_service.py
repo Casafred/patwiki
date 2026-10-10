@@ -1222,6 +1222,17 @@ class ViewService:
             raise ValueError(f"专利 {patent_id} 不存在")
 
         # 构造 update_data
+        if field_key.startswith("taxonomy_"):
+            from app.services.tag_service import apply_classification
+            from app.core.exceptions import BadRequestException
+            try:
+                group_id = int(field_key.removeprefix("taxonomy_"))
+                tag_ids = [int(item) for item in (value or [])]
+            except (ValueError, TypeError) as exc:
+                raise BadRequestException("分类字段值必须是标签 ID 数组") from exc
+            apply_classification(db, [patent_id], tag_ids, "replace", group_id,
+                                 changed_by=changed_by, source_view_id=view.id, source_view_name=view.name)
+            return patent
         if field_key.startswith("custom_fields."):
             cf_key = field_key[len("custom_fields."):]
             update_data = {"custom_fields": {cf_key: value}}
@@ -1558,7 +1569,8 @@ def _patent_to_dict(patent: Patent) -> dict:
         "database_id": patent.database_id,
         "created_at": patent.created_at.isoformat() if patent.created_at else None,
         "updated_at": patent.updated_at.isoformat() if patent.updated_at else None,
-        "tags": [{"id": tag.id, "name": tag.name, "color": tag.color} for tag in (patent.tags or [])],
+        "tags": [{"id": tag.id, "name": tag.name, "color": tag.color, "group_id": tag.group_id,
+                  "parent_id": tag.parent_id, "product_id": tag.product_id} for tag in (patent.tags or [])],
         "projects": [{"id": project.id, "name": project.name} for project in (patent.projects or [])],
         # 同族聚拢字段：视图查询走的是本序列化函数，必须与大表直查保持一致，
         # 否则前端在视图路径下拿不到 family_id/family_size，磁吸聚拢会消失。

@@ -10,11 +10,12 @@ import {
   viewService as viewApi,
   relationService as linkApi,
   searchService as searchApi,
-  tagService as tagApi,
   syncService as syncApi,
   semanticSearchService,
 } from '../../services'
-import { databaseApi, tagApi as tagManagementApi } from '../../api'
+import { databaseApi, exportApi, tagApi as tagManagementApi, classificationApi } from '../../api'
+import { save as saveDesktopFile } from '@tauri-apps/plugin-dialog'
+import { writeFile as writeDesktopFile } from '@tauri-apps/plugin-fs'
 import { useAppStore } from '../../store'
 import type {
   Patent, FieldMeta, CustomField, AITask, PatentView, ViewGroup,
@@ -53,6 +54,8 @@ import StatsPage from './StatsPage'
 import ViewSwitcher from '../views/ViewSwitcher'
 import DailyHistoryDialog from './DailyHistoryDialog'
 import McpFieldSelection from '../settings/McpFieldSelection'
+import { BulkClassification, ClassificationCell, ClassificationManager } from './ClassificationControls'
+import { tagPath } from '../../lib/classifications'
 
 interface PatentListPageProps {
   onPatentClick: (id: number) => void
@@ -579,7 +582,7 @@ function ToolbarMenu({
 export default function PatentListPage({ onPatentClick, viewId = null, onOpenImport, onOpenSidebar }: PatentListPageProps) {
   const [viewSidebarOpen, setViewSidebarOpen] = useState(false)
   const {
-    patents, totalPatents, currentProductId, currentDatabaseId, loading, databases, products,
+    patents, totalPatents, currentProductId: storedProductId, currentDatabaseId, loading, databases, products,
     setPatents, setLoading, selectedIds, toggleSelect, clearSelection, setSelectedIds,
     groupByFamily, setGroupByFamily, views, setViews, setCurrentProductId,
     dataVersion, setDatabases,
@@ -612,6 +615,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const searchParamsString = searchParams.toString()
+  const urlProductId = Number(searchParams.get('product'))
+  const currentProductId = Number.isInteger(urlProductId) && urlProductId > 0 ? urlProductId : null
   const isGlobalMasterTable = location.pathname === '/patents' && !searchParams.has('db')
   const routeDatabaseId = Number(location.pathname.match(/^\/db\/(\d+)(?:\/|$)/)?.[1])
   const queryDatabaseId = Number(searchParams.get('db'))
@@ -731,10 +736,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [bulkFieldValue, setBulkFieldValue] = useState('')
   // 批量打标签
   const [tagsList, setTagsList] = useState<Tag[]>([])
-  const [bulkTagIds, setBulkTagIds] = useState<number[]>([])
-  const [bulkTagMode, setBulkTagMode] = useState<'add' | 'remove' | 'replace'>('add')
-  const [bulkTagLoading, setBulkTagLoading] = useState(false)
-  const [bulkCategoryTag, setBulkCategoryTag] = useState('')
+  const [showClassifications, setShowClassifications] = useState(false)
   const [filterValues, setFilterValues] = useState<FilterState>(() => readFilterParam(searchParams))
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [relationData, setRelationData] = useState<Record<string, Record<number, RelationCellData>>>({})
@@ -768,6 +770,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [showGroupConfig, setShowGroupConfig] = useState(false)
   const [showConditionalConfig, setShowConditionalConfig] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
+  const [replenishmentExporting, setReplenishmentExporting] = useState(false)
   const [showDailyHistory, setShowDailyHistory] = useState(false)
   // 订阅本机当日记录，用于入口按钮上的数量提示。
   const dailyHistoryRecords = useDailyHistory()
@@ -1356,10 +1359,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   // Browser back/forward rehydrates list state from the URL.
   useEffect(() => {
     const params = new URLSearchParams(searchParamsString)
-    const urlProductId = Number(params.get('product'))
-    if (params.has('product') && Number.isInteger(urlProductId) && urlProductId > 0 && urlProductId !== currentProductId) {
-      setCurrentProductId(urlProductId)
-    }
+    if (storedProductId !== currentProductId) setCurrentProductId(currentProductId)
     const urlFamily = params.get('family') === '1'
     // 仅在 URL 明确携带开关时覆盖本地持久化偏好；切库/切视图的 URL
     // 短暂缺少 family 参数时不能把用户已开启的同族聚拢重置掉。
@@ -1377,7 +1377,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setFamilySortBy(familySort === 'count' || familySort === 'priority_date' || familySort === 'applicant' || familySort === 'publication_date' ? familySort : '')
     setFamilySortOrder(params.get('family_order') === 'desc' ? 'desc' : 'asc')
     setFilterValues(readFilterParam(params))
-  }, [currentProductId, searchParamsString, setCurrentProductId, setGroupByFamily])
+  }, [currentProductId, storedProductId, searchParamsString, setCurrentProductId, setGroupByFamily])
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams)
@@ -1446,15 +1446,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     }
   }, [dataVersion, loadCustomFields, loadFields])
 
-  // 打开批量打标签弹窗时加载标签列表
   useEffect(() => {
-    if (!showBulkTag) return
-    if (tagsList.length > 0) return
-    // Loading state begins an asynchronous request and is intentionally local to this effect.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBulkTagLoading(true)
-    tagApi.list().then(setTagsList).catch(console.error).finally(() => setBulkTagLoading(false))
-  }, [showBulkTag, tagsList.length])
+    void tagManagementApi.list().then(setTagsList).catch(console.error)
+  }, [dataVersion])
 
   useEffect(() => {
     if (fields.length > 0) {
@@ -1704,6 +1698,31 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   const handleExport = () => setShowExportDialog(true)
+
+  const handleReplenishment = async () => {
+    if (replenishmentExporting) return
+    setReplenishmentExporting(true)
+    try {
+      const blob = await exportApi.replenishment(isGlobalMasterTable ? null : activeDatabaseId)
+      const filename = `patwiki_replenishment_${new Date().toISOString().slice(0, 10)}.xlsx`
+      if ('__TAURI_INTERNALS__' in window) {
+        const path = await saveDesktopFile({ defaultPath: filename, filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }] })
+        if (path) await writeDesktopFile(path, new Uint8Array(await blob.arrayBuffer()))
+      } else {
+        const url = URL.createObjectURL(blob)
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = filename
+        document.body.appendChild(anchor)
+        anchor.click()
+        window.setTimeout(() => { URL.revokeObjectURL(url); anchor.remove() }, 2000)
+      }
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, '补库清单导出失败'))
+    } finally {
+      setReplenishmentExporting(false)
+    }
+  }
 
   // 当日记录里保存的是浏览时的详情页地址，直接跳回可还原当时的库 / 视图上下文。
   const openDailyHistoryRecord = (record: DailyHistoryRecord) => {
@@ -2090,6 +2109,10 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   }
 
   const handleClearAllFilters = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('product')
+    setSearchParams(next, { replace: true })
+    setCurrentProductId(null)
     setFilterValues({})
     setSearchText('')
     setSearchInputText('')
@@ -2822,33 +2845,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     }
   }
 
-  const handleBulkTagSave = async () => {
-    let tagIds = bulkTagIds
-    if (bulkCategoryTag) {
-      const existing = tagsList.find(tag => tag.name === bulkCategoryTag)
-      const categoryTag = existing || await tagManagementApi.create({ name: bulkCategoryTag, color: '#0f766e' })
-      if (!existing) setTagsList(current => [...current, categoryTag])
-      tagIds = [...new Set([...tagIds, categoryTag.id])]
-    }
-    if (tagIds.length === 0) {
-      alert('请至少选择一个标签')
-      return
-    }
-    try {
-      const result = await patentApi.bulkTag(selectedIds, tagIds, bulkTagMode)
-      const actionText = bulkTagMode === 'add' ? '添加' : bulkTagMode === 'remove' ? '移除' : '替换'
-      alert(`已为 ${result.updated_count} 条专利${actionText}标签`)
-      setShowBulkTag(false)
-      setBulkTagIds([])
-      setBulkTagMode('add')
-      setBulkCategoryTag('')
-      clearSelection()
-      loadPatents()
-    } catch (error: unknown) {
-      alert('批量打标签失败: ' + getErrorMessage(error))
-    }
-  }
-
   const handleBulkRollbackBefore = async () => {
     const input = window.prompt('请输入回滚时间（例如 2026-09-23T12:00）')
     if (!input || !selectedIds.length) return
@@ -2870,10 +2866,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
   const requestDeleteColumnByKey = (fieldKey: string) => setPendingColumnDelete(fieldKey)
 
-  const toggleBulkTagId = (tagId: number) => {
-    setBulkTagIds(prev => prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId])
-  }
-
   const handlePageJump = () => {
     const p = parseInt(pageInputValue)
     if (!isNaN(p) && p >= 1 && p <= totalPages) {
@@ -2886,6 +2878,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const getFieldValue = (patent: Patent, fieldKey: string): JsonValue => {
     const field = fields.find(f => f.key === fieldKey)
     if (!field) return null
+    if (field.field_type === 'taxonomy') return (patent.tags || []).filter(tag => tag.group_id === field.taxonomy_group_id).map(tag => tag.id)
     // 关系原始列是系统注册字段，但实际值保存在 custom_fields，
     // 以保留来源单元格而不把关系实体 ID 写进 Patent 主表。
     if (['family_members', 'cited_patents', 'citing_patents'].includes(fieldKey)) {
@@ -3023,7 +3016,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         const configuredColumn = configByKey.get(field.key)
         return configuredColumn?.visible === true || (
           configuredColumn === undefined
-          && ['family_members', 'cited_patents', 'citing_patents', 'original_links'].includes(field.key)
+          && (field.field_type === 'taxonomy' || ['family_members', 'cited_patents', 'citing_patents', 'original_links'].includes(field.key))
           && field.visible !== false
         )
       })
@@ -3043,7 +3036,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const allSelected = patents.length > 0 && patents.every(patent => selectedIds.includes(patent.id))
   const someSelected = patents.some(patent => selectedIds.includes(patent.id))
   const allLibrarySelected = totalPatents > 0 && selectedIds.length >= totalPatents
-  const hasActiveFilters = Object.values(filterValues).some(filterConditionHasValue) || !!searchText
+  const hasActiveFilters = Object.values(filterValues).some(filterConditionHasValue) || !!searchText || !!currentProductId
 
   useEffect(() => {
     // Put the cursor on the first usable cell after the first data load. Keep
@@ -3102,7 +3095,17 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     const isEditing = editingCell?.patentId === patent.id && editingCell?.fieldKey === field.key && editingCell.documentNumber === patent.document_number
 
     if (isEditing) {
+      if (field.field_type === 'taxonomy') {
+        const groupTags = tagsList.filter(tag => tag.group_id === field.taxonomy_group_id)
+        const selected = groupTags.filter(tag => patent.tags?.some(item => item.id === tag.id)).map(tag => tag.id)
+        return <ClassificationCell tags={groupTags} selected={selected} onCancel={() => setEditingCell(null)} onSave={async ids => { await classificationApi.apply([patent.id], ids, field.taxonomy_group_id || 0, 'replace'); setEditingCell(null); await loadPatents() }} />
+      }
       return renderCellEditor(patent, field, value)
+    }
+
+    if (field.field_type === 'taxonomy') {
+      const taxonomyTags = tagsList.filter(tag => tag.group_id === field.taxonomy_group_id && patent.tags?.some(item => item.id === tag.id))
+      return taxonomyTags.length ? <span className="classification-cell-value">{taxonomyTags.map((tag, index) => <span key={tag.id}>{index > 0 && '、'}{tag.product_id ? <a href={`/management?product=${tag.product_id}`} onClick={event => event.stopPropagation()}>{tagPath(tag, tagsList)}</a> : tagPath(tag, tagsList)}</span>)}</span> : <span style={{ color: '#94a3b8' }}>-</span>
     }
 
     if (field.key === 'original_links' && Array.isArray(value)) {
@@ -3180,7 +3183,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {links.map(link => (
             <span key={link.id} style={{ display: 'inline-block', padding: '2px 6px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', fontSize: 12 }}>
-              <PatentReferenceText value={link.label} onOpen={(number) => void handlePatentReferenceClick(number)} />
+              {link.target_table === 'products' ? <a href={`/management?product=${link.target_record_id}`} onClick={event => event.stopPropagation()}>{link.label}</a> : <PatentReferenceText value={link.label} onOpen={(number) => void handlePatentReferenceClick(number)} />}
             </span>
           ))}
         </div>
@@ -3199,7 +3202,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
 
     if (field.key === 'product_id') {
       const product = products.find(item => item.id === patent.product_id)
-      return <span style={{ color: product ? '#334155' : '#94a3b8' }}><PatentReferenceText value={product?.name || (patent.product_id ? `产品 #${patent.product_id}` : '-')} onOpen={(number) => void handlePatentReferenceClick(number)} /></span>
+      return product ? <a href={`/management?product=${product.id}`} onClick={event => event.stopPropagation()}>{product.name}</a> : <span style={{ color: '#94a3b8' }}>-</span>
     }
 
     if (field.key === 'projects') {
@@ -3319,9 +3322,29 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#111827' }}>
             {activeView?.name || '专利列表'}
           </h2>
-          <span className="datagrid-toolbar-count">
-            共 {totalPatents} 件{currentProductId ? ' · 当前产品筛选中' : ''}
-          </span>
+          <div className="datagrid-toolbar-count">
+            共 <ToolbarMenu
+              label={loading || browsingBusy ? '更新中…' : totalPatents}
+              triggerClassName="datagrid-result-count-trigger"
+              title="结果显示与同族合并设置"
+            >
+              {() => <div className="family-filter-panel">
+                <label>申请号显示<select className="form-input" aria-label="申请号显示" value={browsingConfig.application_mode} disabled={browsingBusy || !activeDatabaseId || isGlobalMasterTable} onChange={event => void saveBrowsingConfig({ application_mode: event.target.value as BrowsingConfig['application_mode'] })}><option value="merged">合并公开/授权</option><option value="separate">公开、授权分别显示</option></select></label>
+                {browsingConfig.application_mode === 'merged' && <label>合并优先版本<select className="form-input" aria-label="合并优先版本" value={browsingConfig.preferred_version} disabled={browsingBusy || !activeDatabaseId || isGlobalMasterTable} onChange={event => void saveBrowsingConfig({ preferred_version: event.target.value as BrowsingConfig['preferred_version'] })}><option value="grant">优先授权版本</option><option value="publication">优先公开版本</option></select></label>}
+                <label className="family-filter-toggle"><input type="checkbox" checked={groupByFamily} onChange={() => void handleFamilyGrouping()} /> 同族聚拢</label>
+                <label className="family-filter-toggle"><input type="checkbox" checked={groupByFamily && browsingConfig.family_representative} disabled={browsingBusy || !activeDatabaseId || isGlobalMasterTable} onChange={event => {
+                  if (event.target.checked && !groupByFamily) void handleFamilyGrouping()
+                  void saveBrowsingConfig({ family_representative: event.target.checked })
+                }} /> 按国家顺序合并同族</label>
+                {groupByFamily && browsingConfig.family_representative && <>
+                  <label>国家优先级<input key={browsingConfig.country_order.join(',')} className="form-input" aria-label="国家优先级" defaultValue={browsingConfig.country_order.join(' > ')} disabled={browsingBusy} onBlur={event => { const list = event.target.value.split(/[>,，、\s]+/).filter(Boolean); if (list.join(',') !== browsingConfig.country_order.join(',')) void saveBrowsingConfig({ country_order: list }) }} /></label>
+                  <label>代表日期<select className="form-input" aria-label="代表日期" value={browsingConfig.representative_date} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ representative_date: event.target.value as BrowsingConfig['representative_date'] })}><option value="latest">公开日最晚</option><option value="earliest">公开日最早</option></select></label>
+                </>}
+              </div>}
+            </ToolbarMenu> 条
+            {!isGlobalMasterTable && activeDatabaseId && <span className="datagrid-result-rule"> · {browsingConfig.application_mode === 'merged' ? '公开/授权合并' : '公开/授权分开'}{groupByFamily && browsingConfig.family_representative ? ' · 同族代表' : ''}</span>}
+            {currentProductId ? ' · 当前产品筛选中' : ''}
+          </div>
         </div>
         <div className="datagrid-toolbar-body">
           <div className="datagrid-search-row">
@@ -3393,15 +3416,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
               </ToolbarMenu>
             )}
             <div className="datagrid-view-actions" aria-label="常用表格工具">
-              <ToolbarMenu label="申请版本" icon="file" title="当前库的申请版本显示设置">
-                {() => <div className="family-filter-panel">
-                  <label>显示模式<select className="form-input" value={browsingConfig.application_mode} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ application_mode: event.target.value as BrowsingConfig['application_mode'] })}><option value="merged">按申请号合并</option><option value="separate">公开、授权分别显示</option></select></label>
-                  <label>合并优先版本<select className="form-input" value={browsingConfig.preferred_version} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ preferred_version: event.target.value as BrowsingConfig['preferred_version'] })}><option value="grant">授权版本</option><option value="publication">公开版本</option></select></label>
-                </div>}
-              </ToolbarMenu>
-              <button type="button" className={`btn btn-sm ${groupByFamily ? 'btn-primary' : 'btn-secondary'}`} onClick={() => void handleFamilyGrouping()} title="按同族聚拢或恢复原始导入顺序">
-                <Icon name="table" size={14} /> 同族聚拢{groupByFamily ? '已开启' : '已关闭'}
-              </button>
               {groupByFamily && (
                 <ToolbarMenu label={`同族条件${familyCountry || familySortBy ? ' · 已设置' : ''}`} icon="filter" title="同族国家与排序条件">
                   {() => <div className="family-filter-panel">
@@ -3421,13 +3435,6 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     <option value="applicant">申请人</option>
                     <option value="publication_date">最早公开日</option>
                   </select></label>
-                  <label><input type="checkbox" checked={browsingConfig.family_representative} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ family_representative: event.target.checked })} /> 每族只显示代表</label>
-                  {browsingConfig.family_representative && <>
-                    <label>代表日期<select className="form-input" value={browsingConfig.representative_date} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ representative_date: event.target.value as BrowsingConfig['representative_date'] })}><option value="latest">公开日最晚</option><option value="earliest">公开日最早</option></select></label>
-                    <label>国家优先级<input key={browsingConfig.country_order.join(',')} className="form-input" defaultValue={browsingConfig.country_order.join(' > ')} disabled={browsingBusy} onBlur={event => { const list = event.target.value.split(/[>,，、\s]+/).filter(Boolean); if (list.join(',') !== browsingConfig.country_order.join(',')) void saveBrowsingConfig({ country_order: list }) }} /></label>
-                  </>}
-                  <label>申请号显示<select className="form-input" value={browsingConfig.application_mode} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ application_mode: event.target.value as BrowsingConfig['application_mode'] })}><option value="merged">合并公开/授权</option><option value="separate">公开、授权分开</option></select></label>
-                  {browsingConfig.application_mode === 'merged' && <label>合并版本<select className="form-input" value={browsingConfig.preferred_version} disabled={browsingBusy} onChange={event => void saveBrowsingConfig({ preferred_version: event.target.value as BrowsingConfig['preferred_version'] })}><option value="grant">优先授权版本</option><option value="publication">优先公开版本</option></select></label>}
                   <label>排序方向<select className="form-input" value={familySortOrder} disabled={!familySortBy} onChange={event => { setFamilySortOrder(event.target.value as SortOrder); setPage(1) }} aria-label="同族排序方向">
                     <option value="asc">升序</option>
                     <option value="desc">降序</option>
@@ -3436,6 +3443,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                   </div>}
                 </ToolbarMenu>
               )}
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowClassifications(true)}><Icon name="tag" size={14} /> 分类系统</button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowFieldConfig(true)} title="管理显示字段、顺序和冻结列"><Icon name="columns" size={14} /> 列管理</button>
               <button
                 type="button"
@@ -3536,6 +3544,9 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
             </div>
             <span className="selection-divider" aria-hidden="true" />
             <div className="selection-group" aria-label="批量编辑与更新">
+              <button className="btn btn-xs btn-secondary" disabled={replenishmentExporting} onClick={() => void handleReplenishment()} title="导出当前库全部专利及其同族中缺失主要系统字段的公开号清单">
+                <Icon name="download" size={13} /> {replenishmentExporting ? '正在导出…' : '一键补库'}
+              </button>
               <button className="btn btn-xs btn-primary" onClick={() => navigate(`${activeDatabaseId ? `/db/${activeDatabaseId}` : ''}/external-sync?mode=publication&patent_ids=${selectedIds.join(',')}`)} title="把选中的专利公开号带入 MCP 跟踪确认"><Icon name="refresh" size={13} /> 加入 MCP 跟踪</button>
               <button className="btn btn-xs btn-secondary" onClick={() => { setAddToViewId(null); setShowAddToView(true) }} title="把选中的专利加入一个或多个业务视图">
                 <Icon name="table" size={13} /> 加入业务视图
@@ -4551,86 +4562,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         </Modal>
       )}
 
-      {showBulkTag && (
-        <Modal title={`批量打标签 ${selectedIds.length} 条专利`} onClose={() => setShowBulkTag(false)} width={480}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>操作模式</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {(['add', 'replace', 'remove'] as const).map(m => (
-                  <button
-                    key={m}
-                    className={`btn ${bulkTagMode === m ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: 12, padding: '4px 12px' }}
-                    onClick={() => setBulkTagMode(m)}
-                  >
-                    {m === 'add' ? '追加标签' : m === 'replace' ? '替换全部' : '移除标签'}
-                  </button>
-                ))}
-              </div>
-              <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>
-                {bulkTagMode === 'add' && '把选中的标签追加到每条专利（保留原有标签）'}
-                {bulkTagMode === 'replace' && '用选中的标签替换每条专利的全部标签'}
-                {bulkTagMode === 'remove' && '从每条专利中移除选中的标签'}
-              </p>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>快速使用产品品类作为标签</label>
-              <select className="form-input" value={bulkCategoryTag} onChange={event => setBulkCategoryTag(event.target.value)}>
-                <option value="">不添加产品品类标签</option>
-                {Array.from(new Set(products.flatMap(product => [product.name, product.category]).filter(Boolean))).map(category => <option key={category} value={category}>{category}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                选择标签 {bulkTagLoading && '（加载中...）'}
-              </label>
-              {tagsList.length === 0 && !bulkTagLoading ? (
-                <p style={{ fontSize: 12, color: '#9ca3af' }}>
-                  暂无标签。请先在「管理」页面创建标签。
-                </p>
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 240, overflowY: 'auto', padding: 4, border: '1px solid #e5e7eb', borderRadius: 6 }}>
-                  {tagsList.map(t => {
-                    const selected = bulkTagIds.includes(t.id)
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => toggleBulkTagId(t.id)}
-                        style={{
-                          fontSize: 12, padding: '4px 10px', cursor: 'pointer',
-                          border: selected ? '1px solid #3b82f6' : '1px solid #d1d5db',
-                          borderRadius: 14, background: selected ? '#eff6ff' : '#fff',
-                          color: selected ? '#1d4ed8' : '#374151',
-                        }}
-                      >
-                        {t.color && (
-                          <span style={{
-                            display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-                            background: t.color, marginRight: 4, verticalAlign: 'middle',
-                          }} />
-                        )}
-                        {t.name}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-            {bulkTagIds.length > 0 && (
-              <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-                已选 {bulkTagIds.length} 个标签
-              </p>
-            )}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary" onClick={() => setShowBulkTag(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleBulkTagSave} disabled={bulkTagIds.length === 0 && !bulkCategoryTag}>
-                确认
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      {showBulkTag && <Modal title={`批量打标 ${selectedIds.length} 条专利`} onClose={() => setShowBulkTag(false)} width={560}>
+        <BulkClassification patentIds={selectedIds} onManage={() => { setShowBulkTag(false); setShowClassifications(true) }} onDone={() => { setShowBulkTag(false); clearSelection(); void loadPatents() }} />
+      </Modal>}
+      {showClassifications && <Modal title="分类系统" onClose={() => setShowClassifications(false)} width={850}>
+        <ClassificationManager onChanged={() => { void tagManagementApi.list().then(setTagsList); void loadFields(true); useAppStore.getState().bumpDataVersion() }} />
+      </Modal>}
 
       {showQuickAnalyze && (
         <AIQuickAnalyzeModal

@@ -244,7 +244,7 @@ function WorkspaceApp() {
       return
     }
     if (defaultDatabase && currentDatabaseId === null) setCurrentDatabaseId(defaultDatabase.id)
-    if (defaultDatabase && location.pathname === '/patents' && !new URLSearchParams(location.search).has('db')) {
+    if (defaultDatabase && location.pathname === '/patents' && !new URLSearchParams(location.search).has('db') && !new URLSearchParams(location.search).has('product')) {
       navigate(`/db/${defaultDatabase.id}/patents${location.search}`, { replace: true })
     }
   }, [currentDatabaseId, databases, initializing, location.pathname, location.search, navigate, requestedDatabaseId, setCurrentDatabaseId, setCurrentViewId])

@@ -66,12 +66,14 @@ def field_versions(patent_id: int, field_key: str, db: Session = Depends(get_db)
     if not patent or patent.deleted_at:
         raise NotFoundException("Patent not found")
     field = require_field(db, field_key)
-    history_key = field_key if field_key in SYSTEM_FIELD_KEYS else f"custom_fields.{field_key}"
+    history_key = field_key if field_key in SYSTEM_FIELD_KEYS or field.get("field_type") == "taxonomy" else f"custom_fields.{field_key}"
     history = db.query(PatentHistory).filter_by(patent_id=patent_id, field_key=history_key).order_by(PatentHistory.id.desc()).all()
     candidates = db.query(FieldObservation, ImportBatch).join(ImportBatch, ImportBatch.id == FieldObservation.import_batch_id).filter(
         FieldObservation.patent_id == patent_id, FieldObservation.canonical_field_key == field_key,
     ).order_by(FieldObservation.id.desc()).all()
     current = getattr(patent, field_key, None) if field_key in SYSTEM_FIELD_KEYS else (patent.custom_fields or {}).get(field_key)
+    if field.get("field_type") == "taxonomy":
+        current = sorted(tag.id for tag in patent.tags if tag.group_id == field["taxonomy_group_id"])
     audits = db.query(ImportFieldGovernanceAudit).filter(
         ImportFieldGovernanceAudit.patent_id == patent_id,
         ImportFieldGovernanceAudit.field_key.in_([field_key, history_key]),
@@ -237,6 +239,16 @@ def update_cell(
     if field_key in RELATION_FIELD_KEYS:
         raise BadRequestException("同族/引用原始列是导入来源投影，请在关系面板维护结构化关系")
 
+    if field_key.startswith("taxonomy_"):
+        from app.services.tag_service import apply_classification
+        try:
+            group_id = int(field_key.removeprefix("taxonomy_"))
+            tag_ids = [int(value) for value in (req.value if isinstance(req.value, list) else [req.value]) if str(value).strip()]
+        except (TypeError, ValueError) as exc:
+            raise BadRequestException("分类字段值必须是标签 ID 数组") from exc
+        apply_classification(db, [patent.id], tag_ids, "replace", group_id)
+        return field_versions(patent_id, field_key, db)
+
     history_entry = None
     if field_key in SYSTEM_FIELD_KEYS:
         if field_key in ("id", "created_at", "updated_at"):
@@ -267,6 +279,9 @@ def update_cell(
                 source="manual",
             )
         setattr(patent, field_key, value)
+        if field_key == "product_id":
+            from app.services.tag_service import sync_product_tags
+            sync_product_tags(db, patent)
     else:
         custom_field = db.query(CustomField).filter(CustomField.key == field_key).first()
         if custom_field and custom_field.field_type == CustomFieldType.FORMULA:

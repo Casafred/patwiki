@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-10-09.1"
+CURRENT_MIGRATION_VERSION = "2026-10-10.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -77,6 +77,9 @@ def _unique_index(table: str, name: str, column: str) -> SchemaOperation:
 # tables and model-defined indexes are handled by Base.metadata.create_all;
 # these entries cover columns/indexes that create_all cannot add to an old DB.
 SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
+    _column("tags", "parent_id", "ALTER TABLE tags ADD COLUMN parent_id INTEGER REFERENCES tags(id) ON DELETE RESTRICT"),
+    _column("tags", "product_id", "ALTER TABLE tags ADD COLUMN product_id INTEGER REFERENCES products(id) ON DELETE SET NULL"),
+    _column("tag_groups", "kind", "ALTER TABLE tag_groups ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'classification'"),
     _column("patents", "publication_versions", "ALTER TABLE patents ADD COLUMN publication_versions JSON"),
     _column("patent_databases", "browsing_config", "ALTER TABLE patent_databases ADD COLUMN browsing_config JSON"),
     _column("collaboration_sync_conflicts", "final_value", "ALTER TABLE collaboration_sync_conflicts ADD COLUMN final_value JSON"),
@@ -540,6 +543,18 @@ def run_pending_migrations(
                 "SELECT id, view_id FROM patents WHERE view_id IS NOT NULL"
             ))
         _backfill_collaboration_uids(bind)
+        with Session(bind) as tag_db:
+            from app.services.tag_service import ensure_product_tags
+            ensure_product_tags(tag_db)
+            from app.models import Patent, Tag
+            product_tags = {tag.product_id: tag for tag in tag_db.query(Tag).filter(Tag.product_id.isnot(None)).all()}
+            for patent in tag_db.query(Patent).filter(Patent.product_id.isnot(None)).all():
+                tag = product_tags.get(patent.product_id)
+                if tag and tag not in patent.tags:
+                    patent.tags.append(tag)
+            from app.services.tag_service import migrate_ungrouped_tags
+            migrate_ungrouped_tags(tag_db)
+            tag_db.commit()
         integrity_after = _integrity_check(bind)
         counts_after = _table_counts(bind)
 

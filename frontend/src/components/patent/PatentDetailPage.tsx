@@ -25,6 +25,8 @@ import type {
   AttachmentMeta,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
+import { tagPath } from '../../lib/classifications'
+import { ClassificationPicker } from './ClassificationControls'
 import { patentText } from '../../lib/patentText'
 import { formatApiDate, formatApiDateTime, formatApiTime } from '../../lib/date'
 import { recordBrowse, recordEdit, type DailyHistoryInput } from '../../lib/dailyHistory'
@@ -924,7 +926,7 @@ function BasicInfoTab({ patent, formData, editing, updateField, products }: {
             <option value="">未关联</option>
             {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-        ) : <div className="field-value">{products.find(p => p.id === patent.product_id)?.name || '-'}</div>}
+        ) : <div className="field-value">{patent.product_id ? <a href={`/management?product=${patent.product_id}`}>{products.find(p => p.id === patent.product_id)?.name || '-'}</a> : '-'}</div>}
       </Field>
 
       <div className="detail-group-heading">技术摘要</div>
@@ -1477,34 +1479,7 @@ function RelationsTab({ patent, formData, tags, editing, updateField, onPatentNa
     <div className="detail-grid">
       <Field label="标签" full>
         {editing ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {tags.map(tag => {
-              const selected = currentTagIds.includes(tag.id)
-              return (
-                <label key={tag.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 4,
-                  padding: '4px 10px', borderRadius: 16, fontSize: 13,
-                  background: selected ? '#dbeafe' : '#f1f5f9',
-                  cursor: 'pointer',
-                  border: `1px solid ${selected ? '#93c5fd' : '#e2e8f0'}`,
-                }}>
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={e => {
-                      const next = e.target.checked
-                        ? [...currentTagIds, tag.id]
-                        : currentTagIds.filter((id: number) => id !== tag.id)
-                      updateField('tag_ids', next)
-                    }}
-                    style={{ marginRight: 4 }}
-                  />
-                  <span style={{ color: tag.color || '#475569' }}>●</span>
-                  {tag.name}
-                </label>
-              )
-            })}
-          </div>
+          <ClassificationPicker tags={tags} selected={currentTagIds} onChange={ids => updateField('tag_ids', ids)} />
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {patentTags.length === 0 ? <span style={{ color: '#94a3b8' }}>-</span> :
@@ -1513,7 +1488,7 @@ function RelationsTab({ patent, formData, tags, editing, updateField, onPatentNa
                   padding: '3px 10px', borderRadius: 16, fontSize: 12,
                   background: '#f1f5f9', color: tag.color || '#475569',
                 }}>
-                  ● {tag.name}
+                  {tag.product_id ? <a href={`/management?product=${tag.product_id}`}>{tagPath(tag, tags)}</a> : tagPath(tag, tags)}
                 </span>
               ))
             }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useAppStore } from '../../store'
 import {
   departmentApi,
   personApi,
@@ -7,8 +8,6 @@ import {
   productLineApi,
   sharingApi,
   projectApi,
-  tagApi,
-  tagGroupApi,
 } from '../../api'
 import type {
   Department,
@@ -17,18 +16,15 @@ import type {
   ProductLine,
   User,
   Project,
-  Tag,
-  TagGroup,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
 import BrandLogo from '../common/BrandLogo'
 import BrandWordmark from '../common/BrandWordmark'
-type ManagementTab = 'products' | 'projects' | 'tags' | 'organization' | 'product-lines'
+type ManagementTab = 'products' | 'projects' | 'organization' | 'product-lines'
 
 const tabs: Array<{ key: ManagementTab; label: string }> = [
   { key: 'products', label: '产品' },
   { key: 'projects', label: '项目' },
-  { key: 'tags', label: '标签' },
   { key: 'organization', label: '部门与人员' },
   { key: 'product-lines', label: '产品线' },
 ]
@@ -196,19 +192,6 @@ interface ProjectForm {
   description: string
 }
 
-interface TagForm {
-  name: string
-  group_id: string
-  color: string
-  description: string
-}
-
-interface TagGroupForm {
-  name: string
-  color: string
-  description: string
-}
-
 interface DepartmentForm {
   name: string
   code: string
@@ -235,8 +218,6 @@ interface ProductLineForm {
 
 const emptyProduct: ProductForm = { name: '', code: '', product_line_id: '', owner_id: '', owner_user_id: '', category: '', description: '', is_active: true }
 const emptyProject: ProjectForm = { name: '', project_no: '', product_id: '', product_category: '', product_line_ids: [], project_level: '', project_type: '', brands: '', project_manager: '', research_owner: '', shipping_regions: '', current_stage: '', product_model: '', module: '', status: 'in_progress', start_date: '', end_date: '', description: '' }
-const emptyTag: TagForm = { name: '', group_id: '', color: '#3b82f6', description: '' }
-const emptyTagGroup: TagGroupForm = { name: '', color: '#64748b', description: '' }
 const emptyDepartment: DepartmentForm = { name: '', code: '', department_type: 'other', parent_id: '', description: '' }
 const emptyPerson: PersonForm = { name: '', email: '', department_id: '', role: '', notes: '', is_active: true }
 const emptyProductLine: ProductLineForm = { name: '', code: '', department_id: '', description: '' }
@@ -247,14 +228,15 @@ function optionalNumber(value: string): number | undefined {
 
 export default function ManagementPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const { setCurrentProductId, setCurrentViewId } = useAppStore()
+  const requestedProductId = Number(searchParams.get('product'))
   const [tab, setTab] = useState<ManagementTab>('products')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [products, setProducts] = useState<Product[]>([])
   const [projects, setProjects] = useState<Project[]>([])
-  const [tags, setTags] = useState<Tag[]>([])
-  const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [people, setPeople] = useState<Person[]>([])
   const [accounts, setAccounts] = useState<User[]>([])
@@ -264,10 +246,6 @@ export default function ManagementPage() {
   const [productForm, setProductForm] = useState<ProductForm>(emptyProduct)
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null)
   const [projectForm, setProjectForm] = useState<ProjectForm>(emptyProject)
-  const [editingTagId, setEditingTagId] = useState<number | null>(null)
-  const [tagForm, setTagForm] = useState<TagForm>(emptyTag)
-  const [editingTagGroupId, setEditingTagGroupId] = useState<number | null>(null)
-  const [tagGroupForm, setTagGroupForm] = useState<TagGroupForm>(emptyTagGroup)
   const [editingDepartmentId, setEditingDepartmentId] = useState<number | null>(null)
   const [departmentForm, setDepartmentForm] = useState<DepartmentForm>(emptyDepartment)
   const [editingPersonId, setEditingPersonId] = useState<number | null>(null)
@@ -281,8 +259,6 @@ export default function ManagementPage() {
   const [productLineFilter, setProductLineFilter] = useState('')
   const [productStatusFilter, setProductStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [showProjectForm, setShowProjectForm] = useState(false)
-  const [showTagForm, setShowTagForm] = useState(false)
-  const [showTagGroupForm, setShowTagGroupForm] = useState(false)
   const [showDepartmentForm, setShowDepartmentForm] = useState(false)
   const [showPersonForm, setShowPersonForm] = useState(false)
   const [showProductLineForm, setShowProductLineForm] = useState(false)
@@ -291,14 +267,12 @@ export default function ManagementPage() {
     setLoading(true)
     setError('')
     try {
-      const [loadedProducts, loadedProjects, loadedTags, loadedGroups, loadedDepartments, loadedPeople, loadedLines, loadedUsers] = await Promise.all([
-        productApi.list(), projectApi.list(), tagApi.list(), tagGroupApi.list(),
+      const [loadedProducts, loadedProjects, loadedDepartments, loadedPeople, loadedLines, loadedUsers] = await Promise.all([
+        productApi.list(), projectApi.list(),
         departmentApi.list(), personApi.list(), productLineApi.list(), sharingApi.listUsers(),
       ])
       setProducts(loadedProducts)
       setProjects(loadedProjects)
-      setTags(loadedTags)
-      setTagGroups(loadedGroups)
       setDepartments(loadedDepartments)
       setPeople(loadedPeople)
       setProductLines(loadedLines)
@@ -314,7 +288,6 @@ export default function ManagementPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void loadData() }, [loadData])
 
-  const groupNameById = useMemo(() => new Map(tagGroups.map(group => [group.id, group.name])), [tagGroups])
   const departmentNameById = useMemo(() => new Map(departments.map(department => [department.id, department.name])), [departments])
   const productLineNameById = useMemo(() => new Map(productLines.map(line => [line.id, line.name])), [productLines])
   const productNameById = useMemo(() => new Map(products.map(product => [product.id, product.name])), [products])
@@ -329,20 +302,18 @@ export default function ManagementPage() {
     const matchesText = !needle || [product.name, product.code, product.category, product.description].some(value => String(value || '').toLowerCase().includes(needle))
     const matchesLine = !productLineFilter || String(product.product_line_id || '') === productLineFilter
     const matchesStatus = productStatusFilter === 'all' || (productStatusFilter === 'active' ? product.is_active !== false : product.is_active === false)
-    return matchesText && matchesLine && matchesStatus
-  }), [products, productSearch, productLineFilter, productStatusFilter])
+    return matchesText && matchesLine && matchesStatus && (!requestedProductId || product.id === requestedProductId)
+  }), [products, productSearch, productLineFilter, productStatusFilter, requestedProductId])
 
   const beginCreate = () => {
     setError('')
     setEditingProductId(null); setProductForm(emptyProduct)
     setEditingProjectId(null); setProjectForm(emptyProject)
-    setEditingTagId(null); setTagForm(emptyTag)
-    setEditingTagGroupId(null); setTagGroupForm(emptyTagGroup)
     setEditingDepartmentId(null); setDepartmentForm(emptyDepartment)
     setEditingPersonId(null); setPersonForm(emptyPerson)
     setEditingProductLineId(null); setProductLineForm(emptyProductLine)
-    setShowProductForm(false); setShowProjectForm(false); setShowTagForm(false)
-    setShowTagGroupForm(false); setShowDepartmentForm(false); setShowPersonForm(false)
+    setShowProductForm(false); setShowProjectForm(false)
+    setShowDepartmentForm(false); setShowPersonForm(false)
     setShowProductLineForm(false)
   }
 
@@ -398,28 +369,6 @@ export default function ManagementPage() {
       const result = editingProjectId ? await projectApi.update(editingProjectId, payload) : await projectApi.create(payload)
       setProjects(current => editingProjectId ? current.map(item => item.id === result.id ? result : item) : [...current, result])
       setEditingProjectId(null); setProjectForm(emptyProject); setShowProjectForm(false)
-    } catch (actionError: unknown) { fail(actionError) } finally { setSaving(false) }
-  }
-
-  const saveTag = async () => {
-    if (!tagForm.name.trim()) { setError('标签名称不能为空'); return }
-    setSaving(true); setError('')
-    try {
-      const payload = { name: tagForm.name.trim(), group_id: optionalNumber(tagForm.group_id), color: tagForm.color || undefined, description: tagForm.description.trim() || undefined }
-      const result = editingTagId ? await tagApi.update(editingTagId, payload) : await tagApi.create(payload)
-      setTags(current => editingTagId ? current.map(item => item.id === result.id ? result : item) : [...current, result])
-      setEditingTagId(null); setTagForm(emptyTag); setShowTagForm(false)
-    } catch (actionError: unknown) { fail(actionError) } finally { setSaving(false) }
-  }
-
-  const saveTagGroup = async () => {
-    if (!tagGroupForm.name.trim()) { setError('标签组名称不能为空'); return }
-    setSaving(true); setError('')
-    try {
-      const payload = { name: tagGroupForm.name.trim(), color: tagGroupForm.color || undefined, description: tagGroupForm.description.trim() || undefined }
-      const result = editingTagGroupId ? await tagGroupApi.update(editingTagGroupId, payload) : await tagGroupApi.create(payload)
-      setTagGroups(current => editingTagGroupId ? current.map(item => item.id === result.id ? result : item) : [...current, result])
-      setEditingTagGroupId(null); setTagGroupForm(emptyTagGroup); setShowTagGroupForm(false)
     } catch (actionError: unknown) { fail(actionError) } finally { setSaving(false) }
   }
 
@@ -493,6 +442,7 @@ export default function ManagementPage() {
         </div>
       )}
       <div className="management-product-tools">
+        {!!requestedProductId && <button className="btn btn-secondary" onClick={() => navigate('/management')}>全部产品</button>}
         <div className="management-search"><span>⌕</span><input value={productSearch} onChange={event => setProductSearch(event.target.value)} placeholder="搜索产品名称、编码或分类" /></div>
         <select className="form-input" value={productLineFilter} onChange={event => setProductLineFilter(event.target.value)}><option value="">全部产品线</option>{productLines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}</select>
         <div className="management-segmented">{([['all', '全部'], ['active', '启用'], ['inactive', '停用']] as const).map(([value, label]) => <button key={value} className={productStatusFilter === value ? 'active' : ''} onClick={() => setProductStatusFilter(value)}>{label}</button>)}</div>
@@ -505,7 +455,7 @@ export default function ManagementPage() {
           <div className="management-product-tags"><span>{productLineNameById.get(product.product_line_id ?? 0) || '未关联产品线'}</span>{product.category && <span>{product.category}</span>}</div>
           <p>{product.description || '暂无产品描述，编辑后可补充业务定位。'}</p>
           <div className="management-product-stats"><div><strong>{product.patent_count ?? 0}</strong><span>关联专利</span></div><div><strong>{owner || '—'}</strong><span>负责人</span></div></div>
-          <div className="management-product-actions"><button className="btn btn-secondary" onClick={() => navigate(`/patents?product=${product.id}`)}>查看关联专利</button><RowActions onEdit={() => { setEditingProductId(product.id); setProductForm({ name: product.name, code: product.code || '', product_line_id: product.product_line_id ? String(product.product_line_id) : '', owner_id: product.owner_id ? String(product.owner_id) : '', owner_user_id: product.owner_user_id ? String(product.owner_user_id) : '', category: product.category || '', description: product.description || '', is_active: product.is_active !== false }); setShowProductForm(true) }} onDelete={() => void remove(`产品“${product.name}”`, () => productApi.delete(product.id), () => setProducts(current => current.filter(item => item.id !== product.id)))} /></div>
+          <div className="management-product-actions"><button className="btn btn-secondary" onClick={() => { setCurrentProductId(product.id); setCurrentViewId(null); navigate(`/patents?product=${product.id}`) }}>查看关联专利</button><RowActions onEdit={() => { setEditingProductId(product.id); setProductForm({ name: product.name, code: product.code || '', product_line_id: product.product_line_id ? String(product.product_line_id) : '', owner_id: product.owner_id ? String(product.owner_id) : '', owner_user_id: product.owner_user_id ? String(product.owner_user_id) : '', category: product.category || '', description: product.description || '', is_active: product.is_active !== false }); setShowProductForm(true) }} onDelete={() => void remove(`产品“${product.name}”`, () => productApi.delete(product.id), () => setProducts(current => current.filter(item => item.id !== product.id)))} /></div>
         </article>
       })}</div> : <EmptyState text={products.length ? '没有符合筛选条件的产品' : '暂无产品'} />}
     </>
@@ -543,16 +493,6 @@ export default function ManagementPage() {
     </>
   )
 
-  const renderTags = () => (
-    <>
-      <ManagementHeader title="标签与标签组" description="用标签沉淀业务分类，并通过标签组保持筛选和分析口径一致。" onCreate={() => { beginCreate(); setShowTagForm(true) }} createLabel="新增标签" />
-      <div className="management-split">
-        <section><div className="management-section-title"><strong>标签</strong><button className="btn btn-secondary" onClick={() => { beginCreate(); setShowTagForm(true) }}>新增标签</button></div>{(showTagForm || editingTagId !== null) && <div className="management-form compact"><div className="management-form-grid"><FormField label="名称"><input className="form-input" style={inputStyle} value={tagForm.name} onChange={e => setTagForm({ ...tagForm, name: e.target.value })} /></FormField><FormField label="标签组"><select className="form-input" style={inputStyle} value={tagForm.group_id} onChange={e => setTagForm({ ...tagForm, group_id: e.target.value })}><option value="">未分组</option>{tagGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></FormField><FormField label="颜色"><input className="form-input" style={inputStyle} type="color" value={tagForm.color} onChange={e => setTagForm({ ...tagForm, color: e.target.value })} /></FormField></div><div className="management-form-actions"><button className="btn btn-primary" disabled={saving} onClick={() => void saveTag()}>{editingTagId ? '保存修改' : '创建标签'}</button><button className="btn btn-secondary" onClick={() => { setEditingTagId(null); setTagForm(emptyTag); setShowTagForm(false) }}>取消</button></div></div>}<TableShell><TableHead><Th>名称</Th><Th>分组</Th><Th>颜色</Th><Th>操作</Th></TableHead><tbody>{tags.map(tag => <tr key={tag.id}><Td><strong>{tag.name}</strong></Td><Td>{groupNameById.get(tag.group_id ?? 0) || '-'}</Td><Td><span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: 3, background: tag.color || '#94a3b8', verticalAlign: 'middle' }} /></Td><Td><RowActions onEdit={() => { setEditingTagId(tag.id); setTagForm({ name: tag.name, group_id: tag.group_id ? String(tag.group_id) : '', color: tag.color || '#3b82f6', description: tag.description || '' }) }} onDelete={() => void remove(`标签“${tag.name}”`, () => tagApi.delete(tag.id), () => setTags(current => current.filter(item => item.id !== tag.id)))} /></Td></tr>)}</tbody></TableShell>{tags.length === 0 && <EmptyState text="暂无标签" />}</section>
-        <section><div className="management-section-title"><strong>标签组</strong><button className="btn btn-secondary" onClick={() => { beginCreate(); setShowTagGroupForm(true) }}>新增标签组</button></div>{(showTagGroupForm || editingTagGroupId !== null) && <div className="management-form compact"><div className="management-form-grid"><FormField label="名称"><input className="form-input" style={inputStyle} value={tagGroupForm.name} onChange={e => setTagGroupForm({ ...tagGroupForm, name: e.target.value })} /></FormField><FormField label="颜色"><input className="form-input" style={inputStyle} type="color" value={tagGroupForm.color} onChange={e => setTagGroupForm({ ...tagGroupForm, color: e.target.value })} /></FormField></div><div className="management-form-actions"><button className="btn btn-primary" disabled={saving} onClick={() => void saveTagGroup()}>{editingTagGroupId ? '保存修改' : '创建标签组'}</button><button className="btn btn-secondary" onClick={() => { setEditingTagGroupId(null); setTagGroupForm(emptyTagGroup); setShowTagGroupForm(false) }}>取消</button></div></div>}<TableShell><TableHead><Th>名称</Th><Th>标签数</Th><Th>操作</Th></TableHead><tbody>{tagGroups.map(group => <tr key={group.id}><Td><strong>{group.name}</strong></Td><Td>{group.tags?.length ?? tags.filter(tag => tag.group_id === group.id).length}</Td><Td><RowActions onEdit={() => { setEditingTagGroupId(group.id); setTagGroupForm({ name: group.name, color: group.color || '#64748b', description: group.description || '' }) }} onDelete={() => void remove(`标签组“${group.name}”`, () => tagGroupApi.delete(group.id), () => { setTagGroups(current => current.filter(item => item.id !== group.id)); setTags(current => current.map(tag => tag.group_id === group.id ? { ...tag, group_id: undefined } : tag)) })} /></Td></tr>)}</tbody></TableShell>{tagGroups.length === 0 && <EmptyState text="暂无标签组" />}</section>
-      </div>
-    </>
-  )
-
   const renderOrganization = () => (
     <>
       <ManagementHeader title="部门与人员" description="维护组织结构和人员归属，为负责人、权限和协作能力提供统一主体。" onCreate={() => { beginCreate(); setShowPersonForm(true) }} createLabel="新增人员" />
@@ -577,12 +517,11 @@ export default function ManagementPage() {
     <div className="management-page">
       <div className="management-brandline"><BrandWordmark width={190} decorative /><span>产品与项目管理</span></div>
       <div className="management-tabs" role="tablist" aria-label="管理资源">
-        {tabs.map(item => <button key={item.key} className={`management-tab ${tab === item.key ? 'active' : ''}`} onClick={() => { setTab(item.key); setError('') }}><span>{item.label}</span><small>{item.key === 'products' ? products.length : item.key === 'projects' ? projects.length : item.key === 'tags' ? tags.length : item.key === 'organization' ? people.length : productLines.length}</small></button>)}
+        {tabs.map(item => <button key={item.key} className={`management-tab ${tab === item.key ? 'active' : ''}`} onClick={() => { setTab(item.key); setError('') }}><span>{item.label}</span><small>{item.key === 'products' ? products.length : item.key === 'projects' ? projects.length : item.key === 'organization' ? people.length : productLines.length}</small></button>)}
       </div>
       {error && <div className="management-error">{error}</div>}
       {tab === 'products' && renderProducts()}
       {tab === 'projects' && renderProjects()}
-      {tab === 'tags' && renderTags()}
       {tab === 'organization' && renderOrganization()}
       {tab === 'product-lines' && renderProductLines()}
     </div>

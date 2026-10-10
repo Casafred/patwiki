@@ -23,6 +23,9 @@ from app.schemas.schemas import (
 from app.services.formula_engine import FormulaError
 from app.services.formula_service import FormulaService
 from app.core.exceptions import BadRequestException, NotFoundException
+from app.services.tag_service import ensure_product_tags, product_predicate, validate_tag
+from pydantic import BaseModel
+from typing import Any, Literal
 
 router = APIRouter(tags=["meta"])
 
@@ -46,18 +49,13 @@ def list_products(
         query = query.filter(Product.is_active == True)
     products = query.order_by(Product.name).all()
 
-    # 用一条聚合 SQL 一次性拿到所有 Product 的专利计数，避免 N+1
-    count_query = db.query(
-        Patent.product_id,
-        func.count(Patent.id).label("cnt"),
-    ).filter(Patent.product_id.isnot(None))
-    if database_id is not None:
-        from app.services.patent_database_scope import in_database
-        count_query = count_query.filter(in_database(database_id))
-    count_map = {pid: cnt for pid, cnt in count_query.group_by(Patent.product_id).all()}
-
+    # EXISTS keeps multiple association sources from duplicating patent counts.
     for p in products:
-        p.patent_count = count_map.get(p.id, 0)
+        count_query = db.query(func.count(Patent.id)).filter(product_predicate(p.id), Patent.deleted_at.is_(None), Patent.title != "待补全")
+        if database_id is not None:
+            from app.services.patent_database_scope import in_database
+            count_query = count_query.filter(in_database(database_id))
+        p.patent_count = count_query.scalar()
     return products
 
 
@@ -68,6 +66,8 @@ def create_product(product_in: ProductCreate, db: Session = Depends(get_db)):
         raise BadRequestException("产品负责人账号不存在或已停用")
     product = Product(**values)
     db.add(product)
+    db.flush()
+    ensure_product_tags(db)
     db.commit()
     db.refresh(product)
     return product
@@ -83,6 +83,8 @@ def update_product(product_id: int, product_in: ProductUpdate, db: Session = Dep
         raise BadRequestException("产品负责人账号不存在或已停用")
     for field, value in values.items():
         setattr(product, field, value)
+    db.flush()
+    ensure_product_tags(db)
     db.commit()
     db.refresh(product)
     return product
@@ -251,7 +253,9 @@ def list_tags(db: Session = Depends(get_db)):
 
 @router.post("/tags", response_model=TagSchema)
 def create_tag(tag_in: TagCreate, db: Session = Depends(get_db)):
-    tag = Tag(**tag_in.model_dump())
+    values = tag_in.model_dump()
+    validate_tag(db, values)
+    tag = Tag(**values)
     db.add(tag)
     db.commit()
     db.refresh(tag)
@@ -263,7 +267,12 @@ def update_tag(tag_id: int, tag_in: TagUpdate, db: Session = Depends(get_db)):
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
         raise NotFoundException("Tag not found")
-    for field, value in tag_in.model_dump(exclude_unset=True).items():
+    updates = tag_in.model_dump(exclude_unset=True)
+    values = {key: getattr(tag, key) for key in ("name", "group_id", "parent_id", "product_id")}
+    values.update(updates)
+    validate_tag(db, values, tag.id)
+    updates["name"] = values["name"]
+    for field, value in updates.items():
         setattr(tag, field, value)
     db.commit()
     db.refresh(tag)
@@ -275,6 +284,10 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
         raise NotFoundException("Tag not found")
+    if db.query(Tag.id).filter_by(parent_id=tag_id).first():
+        raise BadRequestException("请先删除或移动子分类")
+    if tag.product_id:
+        raise BadRequestException("产品关联节点请在产品管理中维护")
     db.delete(tag)
     db.commit()
     return {"success": True}
@@ -287,7 +300,10 @@ def list_tag_groups(db: Session = Depends(get_db)):
 
 @router.post("/tag-groups", response_model=TagGroupSchema)
 def create_tag_group(group_in: TagGroupCreate, db: Session = Depends(get_db)):
+    if not group_in.name.strip() or db.query(TagGroup).filter_by(name=group_in.name.strip()).first():
+        raise BadRequestException("分类系统名称为空或已存在")
     group = TagGroup(**group_in.model_dump())
+    group.name = group.name.strip()
     db.add(group)
     db.commit()
     db.refresh(group)
@@ -299,7 +315,14 @@ def update_tag_group(group_id: int, group_in: TagGroupUpdate, db: Session = Depe
     group = db.query(TagGroup).filter(TagGroup.id == group_id).first()
     if not group:
         raise NotFoundException("Tag group not found")
-    for field, value in group_in.model_dump(exclude_unset=True).items():
+    values = group_in.model_dump(exclude_unset=True)
+    if "name" in values:
+        values["name"] = values["name"].strip()
+        if not values["name"] or db.query(TagGroup).filter(TagGroup.name == values["name"], TagGroup.id != group_id).first():
+            raise BadRequestException("分类系统名称为空或已存在")
+    if "kind" in values and values["kind"] != group.kind and group.tags:
+        raise BadRequestException("已有节点的分类系统不能修改类型")
+    for field, value in values.items():
         setattr(group, field, value)
     db.commit()
     db.refresh(group)
@@ -311,9 +334,40 @@ def delete_tag_group(group_id: int, db: Session = Depends(get_db)):
     group = db.query(TagGroup).filter(TagGroup.id == group_id).first()
     if not group:
         raise NotFoundException("Tag group not found")
+    if group.kind == "product" or group.tags:
+        raise BadRequestException("产品分类系统或包含标签的系统不能删除")
     db.delete(group)
     db.commit()
     return {"success": True}
+
+
+class ClassificationApply(BaseModel):
+    patent_ids: list[int]
+    tag_ids: list[int]
+    group_id: int
+    mode: Literal["add", "remove", "replace"] = "add"
+
+
+class ClassificationExport(BaseModel):
+    group_ids: list[int]
+
+
+@router.post("/classifications/apply")
+def apply_classification(payload: ClassificationApply, db: Session = Depends(get_db)):
+    from app.services.tag_service import apply_classification
+    return apply_classification(db, payload.patent_ids, payload.tag_ids, payload.mode, payload.group_id)
+
+
+@router.post("/classifications/export")
+def export_classifications(payload: ClassificationExport, db: Session = Depends(get_db)):
+    from app.services.tag_service import export_config
+    return export_config(db, payload.group_ids)
+
+
+@router.post("/classifications/import")
+def import_classifications(payload: dict[str, Any], db: Session = Depends(get_db)):
+    from app.services.tag_service import import_config
+    return import_config(db, payload)
 
 
 @router.get("/custom-fields", response_model=list[CustomFieldSchema])

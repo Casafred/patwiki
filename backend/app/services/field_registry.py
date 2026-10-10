@@ -10,6 +10,7 @@ FieldMeta = dict[str, Any]
 # 关系列是正式的只读展示字段：导入时保留原始单元格，关系实体另行解析。
 # 这些键位于 Patent.custom_fields 中，避免把来源文本误当作关系 ID。
 RELATION_FIELD_KEYS = {"family_members", "cited_patents", "citing_patents"}
+TAXONOMY_FIELD_PREFIX = "taxonomy_"
 
 
 def temporary_import_field_key(source_field_name: str) -> str:
@@ -832,4 +833,5 @@ def get_all_fields_meta(db) -> list[FieldMeta]:
     if db is None:
         return FIELD_REGISTRY.list_fields(None)
     from app.services.field_policy_service import enrich_field_policies
-    return enrich_field_policies(db, [*FIELD_REGISTRY.list_fields(db), *get_pending_import_fields(db)])
+    from app.services.tag_service import classification_fields
+    return [*enrich_field_policies(db, [*FIELD_REGISTRY.list_fields(db), *get_pending_import_fields(db)]), *classification_fields(db)]

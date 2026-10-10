@@ -13,6 +13,7 @@ class TagGroup(Base):
     name = Column(String(100), unique=True, nullable=False)
     description = Column(Text)
     color = Column(String(20))
+    kind = Column(String(20), nullable=False, default="classification", server_default="classification")
     created_at = Column(DateTime, server_default=func.now())
 
     tags = relationship("Tag", back_populates="group")
@@ -24,6 +25,8 @@ class Tag(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     group_id = Column(Integer, ForeignKey("tag_groups.id"))
+    parent_id = Column(Integer, ForeignKey("tags.id", ondelete="RESTRICT"))
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"))
     color = Column(String(20))
     description = Column(Text)
     created_at = Column(DateTime, server_default=func.now())

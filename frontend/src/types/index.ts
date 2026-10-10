@@ -705,6 +705,8 @@ export interface Tag {
   id: number
   name: string
   group_id?: number
+  parent_id?: number | null
+  product_id?: number | null
   color?: string
   description?: string
   created_at: string
@@ -715,6 +717,7 @@ export interface TagGroup {
   name: string
   description?: string
   color?: string
+  kind?: 'classification' | 'product'
   tags?: Tag[]
 }
 
@@ -1229,7 +1232,8 @@ export interface AIFieldValue {
 export interface FieldMeta {
   key: string
   name: string
-  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'lookup' | 'rollup' | 'formula' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating' | 'attachment'
+  field_type: 'text' | 'longtext' | 'number' | 'date' | 'select' | 'multiselect' | 'boolean' | 'link' | 'lookup' | 'rollup' | 'formula' | 'textarea' | 'ai_field' | 'multi_select' | 'url' | 'rating' | 'attachment' | 'taxonomy'
+  taxonomy_group_id?: number
   group_name: string
   options?: string[] | null
   width?: number

@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -466,6 +466,8 @@ class RiskCase(BaseSchema):
 class TagBase(BaseSchema):
     name: str
     group_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    product_id: Optional[int] = None
     color: Optional[str] = None
     description: Optional[str] = None
 
@@ -477,6 +479,8 @@ class TagCreate(TagBase):
 class TagUpdate(BaseSchema):
     name: Optional[str] = None
     group_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    product_id: Optional[int] = None
     color: Optional[str] = None
     description: Optional[str] = None
 
@@ -490,6 +494,7 @@ class TagGroupBase(BaseSchema):
     name: str
     description: Optional[str] = None
     color: Optional[str] = None
+    kind: Literal["classification", "product"] = "classification"
 
 
 class TagGroupCreate(TagGroupBase):

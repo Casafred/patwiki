@@ -1,4 +1,5 @@
 import unittest
+from datetime import date, datetime
 from io import BytesIO
 
 from fastapi import FastAPI
@@ -143,6 +144,71 @@ class ExportApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b"\xef\xbb\xbf"))
         self.assertIn("标题", response.content.decode("utf-8-sig"))
+
+    def test_replenishment_includes_missing_family_and_document_versions_read_only(self):
+        from app.models import PatentFamily
+        from app.services.replenishment_service import ReplenishmentService
+
+        family = PatentFamily(family_id="REPLENISH_TEST")
+        other = PatentDatabase(name="其他库", code="OTHER_REPLENISH")
+        self.db.add_all([family, other])
+        self.db.flush()
+        complete = {key: "完整信息" for key in ReplenishmentService.MAIN_FIELDS}
+        complete.update(legal_status="granted", patent_type="invention", country="CN",
+                        filing_date=date(2020, 1, 1), publication_date=date(2021, 1, 1))
+        self.db.add_all([
+            Patent(**complete, publication_number="CN111111111A", database_id=self.database_id,
+                   family_id=family.id, custom_fields={"family_members": "US222222222A1; US222222222A1; garbage; CN202012345678.9"},
+                   publication_versions={
+                       "CN111111111A": {"kind": "publication", "fields": {
+                           **complete, "filing_date": "2020-01-01", "publication_date": "2021-01-01"}},
+                       "CN111111111B": {"kind": "grant", "data_available": False, "fields": {"title": "不能算完整"}},
+                   }),
+            Patent(title="待补全", publication_number="JP03333333A", database_id=self.database_id),
+            Patent(**{**complete, "application_number": "EP2020123456"},
+                   publication_number="EP444444444A1", database_id=other.id, family_id=family.id),
+            Patent(title="无关库", publication_number="US555555555A1", database_id=other.id),
+            Patent(title="已删除", publication_number="CN666666666A", database_id=self.database_id,
+                   deleted_at=datetime(2025, 1, 1)),
+        ])
+        self.db.commit()
+        count_before = self.db.query(Patent).count()
+        response = self.client.post("/export/replenishment", json={"database_id": self.database_id})
+        self.assertEqual(response.status_code, 200, response.text if response.status_code != 200 else "")
+        sheet = load_workbook(BytesIO(response.content))["补库清单"]
+        rows = list(sheet.iter_rows(values_only=True))
+        headers = rows[0]
+        by_number = {row[0]: dict(zip(headers, row)) for row in rows[1:]}
+        self.assertEqual(set(by_number), {"CN111111111B", "JP3333333A", "EP444444444A1", "US222222222A1"})
+        for number in by_number:
+            self.assertEqual(by_number[number]["标题"], "缺失")
+        self.assertEqual(sheet.freeze_panes, "A2")
+        self.assertEqual(sheet.auto_filter.ref, sheet.dimensions)
+        self.assertEqual(self.db.query(Patent).count(), count_before)
+
+    def test_replenishment_reports_only_missing_fields_and_respects_membership(self):
+        from app.models.database_membership import PatentDatabaseMembership
+        other = PatentDatabase(name="来源库", code="REPLENISH_SOURCE")
+        self.db.add(other)
+        self.db.flush()
+        patent = Patent(title="已知标题", publication_number="CN777777777A", database_id=other.id,
+                        applicant="  ", legal_status="unknown")
+        self.db.add(patent)
+        self.db.flush()
+        self.db.add(PatentDatabaseMembership(patent_id=patent.id, database_id=self.database_id))
+        self.db.commit()
+        response = self.client.post("/export/replenishment", json={"database_id": self.database_id})
+        self.assertEqual(response.status_code, 200)
+        rows = list(load_workbook(BytesIO(response.content))["补库清单"].iter_rows(values_only=True))
+        row = dict(zip(rows[0], rows[1]))
+        self.assertEqual(row["公开号"], "CN777777777A")
+        self.assertIsNone(row["标题"])
+        self.assertEqual(row["申请人"], "缺失")
+        self.assertEqual(row["法律状态"], "缺失")
+
+    def test_replenishment_rejects_invalid_database_and_empty_inventory(self):
+        self.assertEqual(self.client.post("/export/replenishment", json={"database_id": 999999}).status_code, 400)
+        self.assertEqual(self.client.post("/export/replenishment", json={"database_id": self.database_id}).status_code, 400)
 
 
 if __name__ == "__main__":

@@ -400,14 +400,15 @@ class PatentService:
             query = query.filter(Patent.id.in_(normalized_ids)) if normalized_ids else query.filter(False)
 
         if product_id:
-            query = query.filter(Patent.product_id == product_id)
+            from app.services.tag_service import product_predicate
+            query = query.filter(product_predicate(product_id))
 
         if project_id:
             query = query.join(patent_project).filter(patent_project.c.project_id == project_id)
 
         if tag_ids:
             for tag_id in tag_ids:
-                query = query.join(patent_tag).filter(patent_tag.c.tag_id == tag_id)
+                query = query.filter(Patent.tags.any(Tag.id == tag_id))
 
         if legal_status:
             query = query.filter(Patent.legal_status == legal_status)
@@ -705,6 +706,9 @@ class PatentService:
         db.flush()
         from app.services.publication_governance_service import classify_patent
         classify_patent(db, patent)
+        if patent.product_id:
+            from app.services.tag_service import sync_product_tags
+            sync_product_tags(db, patent)
         # Every canonical patent is visible in the default master database;
         # retain the originating database as an additional membership.
         default_database = db.query(PatentDatabase).filter(PatentDatabase.is_default == True).first()
@@ -874,7 +878,14 @@ class PatentService:
 
         if tag_ids is not None:
             tags = db.query(Tag).filter(Tag.id.in_(tag_ids)).all()
+            if len(tags) != len(set(tag_ids)):
+                raise BadRequestException("标签不存在")
             patent.tags = tags
+            from app.services.tag_service import sync_product_tags
+            sync_product_tags(db, patent, from_tags="product_id" not in changed_fields)
+        elif "product_id" in changed_fields:
+            from app.services.tag_service import sync_product_tags
+            sync_product_tags(db, patent)
 
         if "publication_number" in changed_fields or "application_number" in changed_fields:
             from app.services.publication_governance_service import classify_patent
@@ -1143,6 +1154,8 @@ class PatentService:
             if old_tag_ids == new_tag_ids:
                 continue
             patent.tags = list(new_tags)
+            from app.services.tag_service import sync_product_tags
+            sync_product_tags(db, patent, from_tags=True)
             db.add(patent)
             db.add(PatentHistory(
                 patent_id=patent.id,
@@ -1544,12 +1557,14 @@ class PatentService:
 
     @staticmethod
     def get_stats(db: Session, database_id: Optional[int] = None, product_id: Optional[int] = None, patent_ids: Optional[list[int]] = None) -> dict:
+        from app.services.tag_service import product_predicate
         # 基础过滤条件：按库 / 产品过滤
         def _apply_filter(q):
             if database_id is not None:
                 q = q.filter(in_database(database_id))
             if product_id is not None:
-                q = q.filter(Patent.product_id == product_id)
+                from app.services.tag_service import product_predicate
+                q = q.filter(product_predicate(product_id))
             if patent_ids is not None:
                 q = q.filter(Patent.id.in_(patent_ids)) if patent_ids else q.filter(False)
             return q
@@ -1570,11 +1585,9 @@ class PatentService:
 
         # 按产品分布：需要 join Product，但产品过滤时不需要重复
         if product_id is None:
-            products_q = db.query(
-                Product.id,
-                Product.name,
-                func.count(Patent.id).label("count"),
-            ).outerjoin(Patent, Patent.product_id == Product.id)
+            products_q = db.query(Product.id, Product.name, func.count(func.distinct(Patent.id)).label("count")).outerjoin(
+                Patent, product_predicate(Product.id)
+            ).filter(Patent.deleted_at.is_(None))
             if database_id is not None:
                 products_q = products_q.filter(or_(in_database(database_id), Patent.id.is_(None)))
             if patent_ids is not None:
