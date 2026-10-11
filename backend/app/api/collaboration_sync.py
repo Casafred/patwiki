@@ -39,6 +39,7 @@ from app.services.collaboration_sync_service import (
     publish_aggregation_batch,
     process_package_stream,
     shared_package_sources, apply_shared_library,
+    list_field_observations,
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
@@ -623,6 +624,20 @@ def import_department_publication(package_uid: str, request: DepartmentPublicati
 @router.get("/packages")
 def get_packages(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return {"items": list_packages(db, user.id)}
+
+
+@router.post("/packages/{package_uid}/ack")
+def acknowledge_sync_package(package_uid: str, request: dict,
+                              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_sync_service import acknowledge_package
+    return acknowledge_package(db, user.id, package_uid, success=bool(request.get("success", True)),
+                               error=request.get("error"))
+
+
+@router.get("/field-observations")
+def get_field_observations(entity_uid: str | None = None, field_key: str | None = None,
+                           limit: int = 200, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return {"items": list_field_observations(db, user.id, entity_uid=entity_uid, field_key=field_key, limit=limit)}
 
 
 @router.get("/conflicts")

@@ -6,6 +6,7 @@ SQLite database and it never contains local connector credentials.
 """
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -219,6 +220,9 @@ class SyncPackage(Base):
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     applied_at = Column(DateTime, nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
 
 
 class SyncAggregationBatch(Base):
@@ -367,6 +371,40 @@ class SyncChange(Base):
     remote_value = Column(JSON, nullable=True)
     operation = Column(String(30), nullable=False, default="upsert")
     created_at = Column(DateTime, server_default=func.now())
+
+
+class SyncFieldObservation(Base):
+    """A submitted field fact kept even when it does not replace the projection.
+
+    Department aggregation is additive: two contributors may submit different
+    values for the same patent field.  The canonical Patent column remains a
+    convenient projection, while this table preserves every source value.
+    """
+    __tablename__ = "collaboration_sync_field_observations"
+    __table_args__ = (
+        Index("ix_collab_observation_entity_field", "entity_uid", "field_key"),
+        Index("ix_collab_observation_received", "received_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    observation_uid = Column(String(80), unique=True, nullable=False, index=True)
+    package_id = Column(Integer, ForeignKey("collaboration_sync_packages.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_uid = Column(String(100), nullable=False, index=True)
+    entity_type = Column(String(50), nullable=False, default="patent")
+    field_key = Column(String(200), nullable=False, index=True)
+    value_json = Column(JSON, nullable=True)
+    previous_value_json = Column(JSON, nullable=True)
+    operation = Column(String(30), nullable=False, default="set")
+    source_user_uid = Column(String(100), nullable=True, index=True)
+    source_username = Column(String(100), nullable=True)
+    source_database_uid = Column(String(100), nullable=True, index=True)
+    source_view_id = Column(Integer, nullable=True)
+    source_view_name = Column(String(200), nullable=True)
+    changed_at = Column(DateTime, nullable=True, index=True)
+    received_at = Column(DateTime, server_default=func.now(), nullable=False)
+    base_version = Column(Integer, nullable=True)
+    status = Column(String(30), nullable=False, default="accepted")
+    package = relationship("SyncPackage")
 
 
 class SyncConflict(Base):

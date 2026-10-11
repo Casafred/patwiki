@@ -137,6 +137,7 @@ class AggregationBatchCreateRequest(RequestModel):
 class AggregationBatchSubmitRequest(RequestModel):
     edit_password: str | None = Field(default=None, min_length=10, max_length=200)
     decisions: list[SyncConflictDecision] = Field(default_factory=list, max_length=20000)
+    accept_all_observations: bool = True
 
 
 class AggregationPublishRequest(RequestModel):

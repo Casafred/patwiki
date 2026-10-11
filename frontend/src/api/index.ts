@@ -942,6 +942,7 @@ export const collaborationSyncApi = {
   revokeGrant: (grantUid: string): Promise<{ success: boolean }> => api.delete(`/collaboration-sync/permissions/library-grants/${encodeURIComponent(grantUid)}`),
   previewExport: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number; mode?: 'full' | 'delta' }): Promise<{ count: number; fields: string[]; estimated_bytes?: number | null }> => api.post('/collaboration-sync/packages/preview-export', data),
   exportPackage: (data: { database_ids: number[]; patent_ids?: number[]; product_ids?: number[]; fields: string[]; recipient_names: string[]; password: string; expires_days?: number; mode?: 'full' | 'delta' }): Promise<{ package_uid: string; path: string; count: number; file_hash: string }> => api.post('/collaboration-sync/packages/export', data),
+  acknowledgePackage: (packageUid: string, data: { success: boolean; error?: string }): Promise<{ package_uid: string; status: string; attempt_count: number }> => api.post(`/collaboration-sync/packages/${packageUid}/ack`, data),
   createAggregationBatch: (data: { name: string; target_database_id: number; package_uids?: string[] }): Promise<Record<string, unknown>> => api.post('/collaboration-sync/aggregation-batches', data),
   packageSources: (packageUid: string): Promise<{ items: Array<{ database_uid: string; name: string }> }> => api.get(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/sources`),
   applySharedLibrary: (packageUid: string, sourceDatabaseUid: string): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/shared-library`, { source_database_uid: sourceDatabaseUid }),
@@ -958,7 +959,7 @@ export const collaborationSyncApi = {
     return api.post('/collaboration-sync/accounts/provision/file', data)
   },
   previewAggregationBatch: (batchUid: string): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/preview`, {}),
-  submitAggregationBatch: (batchUid: string, data: { edit_password?: string; decisions?: Array<{ entity_uid: string; field_key: string; package_uid?: string; choice: 'local' | 'remote' | 'manual' | 'merge'; value?: unknown; reason?: string }> }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/submit`, data),
+  submitAggregationBatch: (batchUid: string, data: { edit_password?: string; accept_all_observations?: boolean; decisions?: Array<{ entity_uid: string; field_key: string; package_uid?: string; choice: 'local' | 'remote' | 'manual' | 'merge'; value?: unknown; reason?: string }> }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/submit`, data),
   publishAggregationBatch: (batchUid: string, data: { recipient_names: string[]; password: string; fields?: string[]; expires_days?: number }): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/aggregation-batches/${encodeURIComponent(batchUid)}/publish`, data),
   inspect: (file: File, password: string): Promise<{ count: number; sample: unknown[]; manifest: Record<string, unknown> }> => {
     const body = new FormData(); body.append('file', file); body.append('password', password)
@@ -969,6 +970,7 @@ export const collaborationSyncApi = {
     return api.post('/collaboration-sync/packages/import', body)
   },
   listPackages: (): Promise<{ items: CollaborationPackage[] }> => api.get('/collaboration-sync/packages'),
+  fieldObservations: (params?: { entity_uid?: string; field_key?: string; limit?: number }): Promise<{ items: Array<Record<string, unknown>> }> => api.get('/collaboration-sync/field-observations', { params }),
   listGovernanceConflicts: (params: { database_id?: number; status?: 'pending' | 'resolved'; q?: string; field_key?: string; offset?: number; limit?: number }): Promise<{ items: SyncGovernanceConflict[]; total: number; status: string }> =>
     api.get('/collaboration-sync/conflicts', { params }),
   records: (packageUid: string): Promise<{ items: unknown[] }> => api.get(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/records`),

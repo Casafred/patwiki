@@ -28,7 +28,7 @@ from app.models.system import MigrationIssue, MigrationRun
 from app.core.time import utc_now_naive
 
 
-CURRENT_MIGRATION_VERSION = "2026-10-10.1"
+CURRENT_MIGRATION_VERSION = "2026-10-11.1"
 KEY_TABLES = (
     "patents",
     "patent_identifiers",
@@ -93,6 +93,9 @@ SCHEMA_OPERATIONS: tuple[SchemaOperation, ...] = (
     _column("collaboration_sync_tombstones", "scope_json", "ALTER TABLE collaboration_sync_tombstones ADD COLUMN scope_json JSON"),
     _column("collaboration_sync_entity_field_states", "accepted_package_uid", "ALTER TABLE collaboration_sync_entity_field_states ADD COLUMN accepted_package_uid VARCHAR(80)"),
     _column("collaboration_sync_entity_field_states", "source_exported_at", "ALTER TABLE collaboration_sync_entity_field_states ADD COLUMN source_exported_at DATETIME"),
+    _column("collaboration_sync_packages", "acknowledged_at", "ALTER TABLE collaboration_sync_packages ADD COLUMN acknowledged_at DATETIME"),
+    _column("collaboration_sync_packages", "attempt_count", "ALTER TABLE collaboration_sync_packages ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"),
+    _column("collaboration_sync_packages", "last_error", "ALTER TABLE collaboration_sync_packages ADD COLUMN last_error TEXT"),
     _column("patent_histories", "change_uid", "ALTER TABLE patent_histories ADD COLUMN change_uid VARCHAR(80)"),
     _column("patent_histories", "actor_uid", "ALTER TABLE patent_histories ADD COLUMN actor_uid VARCHAR(100)"),
     _unique_index("patent_histories", "ix_patent_histories_change_uid", "change_uid"),
@@ -361,11 +364,13 @@ def _backup_database(bind: Engine, backup_dir: Path, version: str) -> Path | Non
     backup_path = backup_dir / f"patwiki-migration-{version}-{stamp}.db"
     bind.dispose()
     source = sqlite3.connect(str(source_path))
-    target = sqlite3.connect(str(backup_path))
     try:
-        source.backup(target)
+        # A compact, consistent snapshot excludes unused freelist pages.
+        source.execute("VACUUM INTO ?", (str(backup_path),))
+    except Exception:
+        backup_path.unlink(missing_ok=True)
+        raise
     finally:
-        target.close()
         source.close()
     return backup_path
 

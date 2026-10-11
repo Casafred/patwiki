@@ -20,7 +20,7 @@ from app.models import DatabaseMembership, ImportBatch, ImportBatchStatus, Legal
 from app.services.patent_identity_service import ensure_patent_identifiers
 from app.models.collaboration_sync import (
     CollaborationCredential, PermissionGrant, SyncConflict, SyncEntityFieldState,
-    SyncAggregationBatch, SyncChange, SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice, SyncTombstone, SyncFieldOverlay,
+    SyncAggregationBatch, SyncChange, SyncFieldObservation, SyncPackage, SyncPackageMember, SyncPackageRecord, SyncUidMapping, SyncWorkspace, TrustedSyncDevice, SyncTombstone, SyncFieldOverlay,
 )
 from app.services.collaboration_identity_service import PASSWORDS, audit, roles, uid, workspace_dir
 from app.services.collaboration_package_codec import MAX_BYTES, MAX_RECORDS, decode, decode_stream, encode_to, file_hash
@@ -271,6 +271,9 @@ def _record_batch(db: Session, user_id: int, request, fields: list[str], databas
                 "change_uid": change.change_uid, "field_key": change.field_key,
                 "old_value": change.old_value, "new_value": change.new_value,
                 "changed_by": change.changed_by, "actor_uid": change.actor_uid,
+                "source_view_id": change.source_view_id,
+                "source_view_name": change.source_view_name,
+                "source_table_title": change.source_table_title,
                 "source": change.source, "created_at": _value(change.created_at),
             })
     records = []
@@ -964,6 +967,14 @@ def _source_exported_at(package: SyncPackage) -> datetime | None:
         raise HTTPException(400, "同步包导出时间格式无效")
 
 
+def _parse_datetime(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
+    except (TypeError, ValueError):
+        return None
 def _save_uid_mapping(db: Session, package: SyncPackage, row: SyncPackageRecord, patent: Patent) -> None:
     origin = package.manifest_json["origin_node_uid"]
     mapping = db.query(SyncUidMapping).filter_by(origin_node_uid=origin, remote_uid=row.entity_uid).first()
@@ -976,14 +987,54 @@ def _save_uid_mapping(db: Session, package: SyncPackage, row: SyncPackageRecord,
 
 
 def _save_remote_changes(db: Session, package: SyncPackage, row: SyncPackageRecord) -> None:
-    for change in (row.field_provenance or {}).get("changes", []):
+    changes = (row.field_provenance or {}).get("changes", [])
+    source = package.manifest_json.get("created_by", {}) if package.manifest_json else {}
+    source_databases = (row.scope_json or {}).get("database_uids") or []
+    source_database_uid = source_databases[0] if len(source_databases) == 1 else None
+    for change in changes:
         change_uid = change.get("change_uid")
         if not change_uid or db.query(SyncChange).filter_by(change_uid=change_uid).first():
+            pass
+        else:
+            db.add(SyncChange(change_uid=change_uid, package_id=package.id, entity_uid=row.entity_uid,
+                              entity_type=row.entity_type, field_key=change.get("field_key"),
+                              base_value=change.get("old_value"), remote_value=change.get("new_value"),
+                              operation="upsert"))
+        field_key = change.get("field_key")
+        if not field_key:
             continue
-        db.add(SyncChange(change_uid=change_uid, package_id=package.id, entity_uid=row.entity_uid,
-                          entity_type=row.entity_type, field_key=change.get("field_key"),
-                          base_value=change.get("old_value"), remote_value=change.get("new_value"),
-                          operation="upsert"))
+        observation_uid = "obs_" + hashlib.sha256(
+            f"{package.package_uid}:{row.entity_uid}:{field_key}:{change_uid or change.get('created_at') or ''}".encode()
+        ).hexdigest()[:32]
+        if db.query(SyncFieldObservation).filter_by(observation_uid=observation_uid).first():
+            continue
+        db.add(SyncFieldObservation(
+            observation_uid=observation_uid, package_id=package.id,
+            entity_uid=row.entity_uid, entity_type=row.entity_type,
+            field_key=field_key, value_json=change.get("new_value"),
+            previous_value_json=change.get("old_value"), operation="set",
+            source_user_uid=source.get("user_uid"), source_username=change.get("changed_by") or source.get("username"),
+            source_database_uid=source_database_uid,
+            source_view_id=change.get("source_view_id"), source_view_name=change.get("source_view_name"),
+            changed_at=_parse_datetime(change.get("created_at")),
+            base_version=row.record_version, status="accepted"))
+    # A package may contain the current projection without a complete history.
+    # Retain it as an additive fact as well, so no contributor's value vanishes.
+    known_fields = {item.get("field_key") for item in changes}
+    for field_key, value in (row.payload_json or {}).items():
+        if field_key in known_fields or field_key in {"custom_fields", "attachments", "patent_figures"}:
+            continue
+        observation_uid = "obs_" + hashlib.sha256(
+            f"{package.package_uid}:{row.entity_uid}:{field_key}:projection".encode()
+        ).hexdigest()[:32]
+        if not db.query(SyncFieldObservation).filter_by(observation_uid=observation_uid).first():
+            db.add(SyncFieldObservation(
+                observation_uid=observation_uid, package_id=package.id,
+                entity_uid=row.entity_uid, entity_type=row.entity_type,
+                field_key=field_key, value_json=value, operation="set",
+                source_user_uid=source.get("user_uid"), source_username=source.get("username"),
+                source_database_uid=source_database_uid, base_version=row.record_version,
+                status="accepted"))
 
 
 def patent_edit_states(db: Session, patent_id: int, user_id: int | None = None) -> list[dict]:
@@ -1771,8 +1822,29 @@ def list_packages(db: Session, user_id: int) -> list[dict]:
                        "file_hash": row.file_hash, "count": manifest.get("count", 0),
                        "path": row.path, "created_at": row.created_at.isoformat() if row.created_at else None,
                        "signature_status": signature_status,
-                       "signer_fingerprint": manifest.get("signer_fingerprint")})
+                       "signer_fingerprint": manifest.get("signer_fingerprint"),
+                       "acknowledged_at": _value(row.acknowledged_at),
+                       "attempt_count": row.attempt_count or 0,
+                       "last_error": row.last_error})
     return result
+
+
+def acknowledge_package(db: Session, user_id: int, package_uid: str, *, success: bool, error: str | None = None) -> dict:
+    """Persist a receiver acknowledgement so exports can be retried safely."""
+    package = db.query(SyncPackage).filter_by(package_uid=package_uid, direction="outbox").first()
+    if not package or (package.created_by != user_id and not roles(db, user_id) & PRIVILEGED):
+        raise HTTPException(404, "同步包不存在")
+    package.attempt_count = (package.attempt_count or 0) + 1
+    package.last_error = None if success else (error or "接收端报告失败")
+    if success:
+        package.status = "acknowledged"
+        package.acknowledged_at = utc_now_naive()
+    else:
+        package.status = "failed"
+    db.commit()
+    return {"package_uid": package_uid, "status": package.status,
+            "acknowledged_at": _value(package.acknowledged_at),
+            "attempt_count": package.attempt_count, "last_error": package.last_error}
 
 
 def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:
@@ -1781,6 +1853,27 @@ def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:
              "record_version": row.record_version, "scope": row.scope_json, "payload": row.payload_json,
              "field_provenance": row.field_provenance}
             for row in db.query(SyncPackageRecord).filter(SyncPackageRecord.package_id == package.id).limit(1000).all()]
+
+
+def list_field_observations(db: Session, user_id: int, *, entity_uid: str | None = None,
+                            field_key: str | None = None, limit: int = 200) -> list[dict]:
+    query = db.query(SyncFieldObservation).join(SyncPackage).filter(
+        (SyncPackage.created_by == user_id) | (SyncPackage.direction == "inbox")
+    )
+    if entity_uid:
+        query = query.filter(SyncFieldObservation.entity_uid == entity_uid)
+    if field_key:
+        query = query.filter(SyncFieldObservation.field_key == field_key)
+    rows = query.order_by(SyncFieldObservation.received_at.desc()).limit(min(limit, 1000)).all()
+    return [{
+        "observation_uid": row.observation_uid, "package_uid": row.package.package_uid if row.package else None,
+        "entity_uid": row.entity_uid, "field_key": row.field_key, "value": row.value_json,
+        "previous_value": row.previous_value_json, "operation": row.operation,
+        "source_user_uid": row.source_user_uid, "source_username": row.source_username,
+        "source_database_uid": row.source_database_uid, "source_view_id": row.source_view_id,
+        "source_view_name": row.source_view_name, "changed_at": _value(row.changed_at),
+        "received_at": _value(row.received_at), "status": row.status,
+    } for row in rows]
 
 
 def _batch_dict(batch: SyncAggregationBatch) -> dict:
@@ -1895,9 +1988,23 @@ def submit_aggregation_batch(db: Session, user_id: int, batch_uid: str, request)
             package._aggregation_conflicts = concurrent.get(package_uid, {})
             _, conflicts = _merge_plan(db, user_id, package, database, records, request.edit_password)
             conflict_keys = {(item["entity_uid"], item["field_key"]) for item in conflicts}
+            # Department aggregation is additive.  Every submitted member
+            # value is applied to the master projection; the observation table
+            # retains the complete source history for alternate values.
+            explicit = {(item.entity_uid, item.field_key): item for item in request.decisions
+                        if getattr(item, "package_uid", None) in {None, package_uid}}
+            additive_decisions = []
+            if getattr(request, "accept_all_observations", getattr(request, "accept_all", False)):
+                for conflict in conflicts:
+                    key = (conflict["entity_uid"], conflict["field_key"])
+                    additive_decisions.append(explicit.get(key) or type("AutoDecision", (), {
+                        "entity_uid": key[0], "field_key": key[1], "choice": "remote",
+                        "value": None, "reason": "部门增量自动纳入；完整来源事实已保留"})())
+            else:
+                additive_decisions = [item for item in request.decisions if (item.entity_uid, item.field_key) in conflict_keys
+                                      and getattr(item, "package_uid", None) in {None, package_uid}]
             apply_request = type("BatchApplyRequest", (), {"database_id": database.id, "edit_password": request.edit_password,
-                "decisions": [item for item in request.decisions if (item.entity_uid, item.field_key) in conflict_keys
-                    and getattr(item, "package_uid", None) in {None, package_uid}]})()
+                "decisions": additive_decisions})()
             results.append(apply_package(db, user_id, package_uid, apply_request, commit=False))
             del package._aggregation_conflicts
         batch.status = "submitted"

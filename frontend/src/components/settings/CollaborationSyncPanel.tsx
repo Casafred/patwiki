@@ -95,6 +95,7 @@ export default function CollaborationSyncPanel() {
   const [preview, setPreview] = useState<{ count: number; sample: unknown[]; manifest: Record<string, unknown> } | null>(null)
   const [selectedPackage, setSelectedPackage] = useState('')
   const [selectedRecords, setSelectedRecords] = useState<unknown[]>([])
+  const [observations, setObservations] = useState<Array<Record<string, unknown>>>([])
   const [sharedSources, setSharedSources] = useState<Array<{ database_uid: string; name: string }>>([])
   const [applyPackageUid, setApplyPackageUid] = useState('')
   const [applyDatabaseId, setApplyDatabaseId] = useState('')
@@ -142,6 +143,8 @@ export default function CollaborationSyncPanel() {
     if (!localStorage.getItem(TOKEN_KEY)) return
     const rows = await collaborationSyncApi.listPackages()
     setPackages(rows.items)
+    const facts = await collaborationSyncApi.fieldObservations({ limit: 200 })
+    setObservations(facts.items)
   }, [])
 
   const loadSetup = useCallback(async () => {
@@ -566,6 +569,11 @@ export default function CollaborationSyncPanel() {
           </>}
         </div>}
         {selectedPackage && <div style={{ marginTop: 8 }}><div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>{selectedPackage} · 最多显示 1000 条</div><pre style={{ maxHeight: 240, overflow: 'auto', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, padding: 10, fontSize: 10 }}>{JSON.stringify(selectedRecords, null, 2)}</pre></div>}
+        <div style={{ marginTop: 16, borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
+          <h4 style={{ fontSize: 13, margin: '0 0 6px' }}>字段来源观察（全部纳入）</h4>
+          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>同一专利同一字段的不同提交会并列保留；主表列是便于查询的当前投影。</div>
+          {observations.length === 0 ? <div style={{ fontSize: 12, color: '#94a3b8' }}>暂无字段观察记录</div> : <div style={{ maxHeight: 260, overflow: 'auto' }}>{observations.slice(0, 100).map(item => <div key={String(item.observation_uid)} style={{ borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><strong>{String(item.entity_uid)} · {String(item.field_key)}</strong><div style={{ overflowWrap: 'anywhere' }}>值：{JSON.stringify(item.value)} · 来源：{String(item.source_username || item.source_user_uid || '未知用户')} · 时间：{String(item.changed_at || item.received_at || '')}</div><div style={{ color: '#64748b' }}>库：{String(item.source_database_uid || '-')} · 视图：{String(item.source_view_name || item.source_view_id || '-')} · 包：{String(item.package_uid || '-')}</div></div>)}</div>}
+        </div>
       </div>
     </>}
     {message && <div role="status" style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 8, fontSize: 12, color: '#334155', overflowWrap: 'anywhere' }}>{message}{governanceTargetDatabaseId && <button style={{ ...buttonStyle, marginLeft: 8, background: '#eef8f5', borderColor: '#65aa98' }} onClick={() => navigate(`/db/${governanceTargetDatabaseId}/governance`)}>到数据治理处理冲突</button>}</div>}

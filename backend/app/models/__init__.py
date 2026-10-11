@@ -144,7 +144,7 @@ from app.models.collaboration_sync import (
     CollaborationCredential, CollaborationSession, TrustedSyncDevice,
     OrganizationUnit, UserRoleAssignment, UserResponsibility, CollaborationEdge,
     PermissionGrant, SyncWorkspace, SyncChannel, SyncPackage, SyncPackageMember,
-    SyncPackageRecord, SyncAggregationBatch, SyncCheckpoint, SyncEntityState, SyncChange, SyncConflict,
+    SyncPackageRecord, SyncAggregationBatch, SyncCheckpoint, SyncEntityState, SyncChange, SyncFieldObservation, SyncConflict,
     SyncEntityFieldState, SyncUidMapping, SyncTombstone, SyncAuditEvent,
 )
 
@@ -204,6 +204,6 @@ __all__ = [
     "CollaborationCredential", "CollaborationSession", "TrustedSyncDevice",
     "OrganizationUnit", "UserRoleAssignment", "UserResponsibility", "CollaborationEdge",
     "PermissionGrant", "SyncWorkspace", "SyncChannel", "SyncPackage", "SyncPackageMember",
-    "SyncPackageRecord", "SyncAggregationBatch", "SyncCheckpoint", "SyncEntityState", "SyncChange", "SyncConflict",
+    "SyncPackageRecord", "SyncAggregationBatch", "SyncCheckpoint", "SyncEntityState", "SyncChange", "SyncFieldObservation", "SyncConflict",
     "SyncEntityFieldState", "SyncUidMapping", "SyncTombstone", "SyncAuditEvent",
 ]

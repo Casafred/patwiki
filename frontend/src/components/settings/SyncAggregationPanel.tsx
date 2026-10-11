@@ -63,7 +63,7 @@ export default function SyncAggregationPanel({ databases, packages }: { database
       }
       return [{ entity_uid: item.entity_uid, field_key: item.field_key, package_uid: item.package_uid, choice, value, reason: reasons[key] }]
     })
-    return collaborationSyncApi.submitAggregationBatch(batchUid, { decisions: choices })
+    return collaborationSyncApi.submitAggregationBatch(batchUid, { accept_all_observations: true, decisions: choices })
   }
   return <section style={{ borderTop: '1px solid #d9e0e8', paddingTop: 16, marginTop: 16 }}>
     <h4>部门汇总与发布</h4>
@@ -84,7 +84,7 @@ export default function SyncAggregationPanel({ databases, packages }: { database
           {decisions[conflictKey(item)] === 'merge' && <textarea aria-label="融合后的最终值" value={manualValues[conflictKey(item)] || ''} placeholder="根据总库值与成员增量填写最终值" onChange={event => setManualValues(current => ({ ...current, [conflictKey(item)]: event.target.value }))} />}
           <input aria-label="处理理由" placeholder="处理理由" value={reasons[conflictKey(item)] || ''} onChange={event => setReasons(current => ({ ...current, [conflictKey(item)]: event.target.value }))} />
         </div>)}
-        <button disabled={busy || batch.status === 'published' || !batch.preview} onClick={() => void run(submit)}>提交汇总 / 保存冲突处理</button>
+        <button disabled={busy || batch.status === 'published' || !batch.preview} onClick={() => void run(submit)}>提交汇总 / 全部纳入来源观察</button>
         {batch.status === 'submitted' && <section style={{ borderTop: '1px solid #d9e0e8', paddingTop: 12 }}>
           <h5>统一更新专利</h5>
           <select aria-label="统一更新连接器" value={connectorId} onChange={event => setConnectorId(event.target.value)}><option value="">选择数据连接器</option>{connectors.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
