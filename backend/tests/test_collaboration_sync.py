@@ -71,7 +71,14 @@ class CollaborationSyncTest(unittest.TestCase):
                 preview = sync.process_package_stream(self.db, user.id, io.BytesIO(raw), "test-password-123", inspect=True)
                 self.assertEqual(len(preview["sample"]), 1)
                 self.assertEqual(self.db.query(SyncPackageRecord).count(), 1)
-                result = sync.process_package_stream(self.db, user.id, io.BytesIO(raw), "test-password-123")
+                inbox_file = root / "inbox" / f"{manifest['package_id']}.pwshare"
+                inbox_file.write_bytes(raw)
+                missing = sync.import_exchange_directory(self.db, user.id, {})
+                self.assertEqual(missing["results"][0]["status"], "password_required")
+                failed = sync.import_exchange_directory(self.db, user.id, {inbox_file.name: "wrong-password"})
+                self.assertEqual(failed["results"][0]["status"], "failed")
+                self.assertEqual(inbox_file.read_bytes(), raw)
+                result = sync.import_exchange_directory(self.db, user.id, {inbox_file.name: "test-password-123"})["results"][0]
                 self.assertEqual(result["status"], "imported")
                 self.assertEqual(self.db.query(SyncPackageRecord).count(), 2)
                 result = sync.process_package_stream(self.db, user.id, io.BytesIO(raw), "test-password-123")

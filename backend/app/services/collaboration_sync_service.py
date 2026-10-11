@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import sqlite3
 import base64
-import hashlib
 import gzip
 import json
 import hashlib
@@ -13,7 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import and_, or_
+from sqlalchemy import DateTime, and_, or_
 from sqlalchemy.orm import Session, load_only
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -540,7 +539,7 @@ async def read_upload(upload: UploadFile) -> bytes:
     return raw
 
 
-def process_package_stream(db: Session, user_id: int, source, password: str, *, inspect: bool = False) -> dict:
+def process_package_stream(db: Session, user_id: int, source, password: str, *, inspect: bool = False, inbox_path: Path | None = None) -> dict:
     """Validate before writing, then stream records into one atomic transaction."""
     source.seek(0, 2)
     if source.tell() > MAX_BYTES:
@@ -565,11 +564,14 @@ def process_package_stream(db: Session, user_id: int, source, password: str, *, 
         (SyncPackage.file_hash == checksum) & (SyncPackage.direction == "inbox"))).first()
     if existing:
         return {"package_uid": package_uid, "count": manifest["count"], "status": "already_processed"}
-    path = workspace_dir() / "inbox" / f"{package_uid}.pwshare"
+    path = inbox_path or workspace_dir() / "inbox" / f"{package_uid}.pwshare"
+    copied = False
     try:
-        source.seek(0)
-        with path.open("xb") as target:
-            shutil.copyfileobj(source, target, 256 * 1024)
+        if inbox_path is None:
+            source.seek(0)
+            with path.open("xb") as target:
+                copied = True
+                shutil.copyfileobj(source, target, 256 * 1024)
         package = SyncPackage(package_uid=package_uid, package_type=manifest["package_type"], direction="inbox",
             path=str(path), file_hash=checksum, created_by=user_id, status="imported", access="viewer",
             manifest_json=manifest, signature_status=manifest["signature_status"],
@@ -589,7 +591,8 @@ def process_package_stream(db: Session, user_id: int, source, password: str, *, 
         db.commit()
     except Exception:
         db.rollback()
-        path.unlink(missing_ok=True)
+        if copied:
+            path.unlink(missing_ok=True)
         raise
     return {"package_uid": package_uid, "count": manifest["count"], "status": "imported"}
 
@@ -1898,6 +1901,30 @@ def exchange_directory_status(db: Session, user_id: int) -> dict:
     return result
 
 
+def import_exchange_directory(db: Session, user_id: int, passwords: dict[str, str]) -> dict:
+    """Scan atomically placed inbox packages and import each with its password."""
+    root = workspace_dir() / "inbox"
+    results = []
+    for path in sorted(root.glob("*.pwshare"), key=lambda item: item.stat().st_mtime):
+        if path.name.endswith(".part"):
+            continue
+        password = passwords.get(path.name) or passwords.get(path.stem)
+        if not password:
+            results.append({"name": path.name, "status": "password_required"})
+            continue
+        try:
+            with path.open("rb") as stream:
+                result = process_package_stream(db, user_id, stream, password, inbox_path=path)
+            results.append({"name": path.name, **result})
+        except HTTPException as exc:
+            db.rollback()
+            results.append({"name": path.name, "status": "failed", "error": str(exc.detail)})
+        except Exception as exc:
+            db.rollback()
+            results.append({"name": path.name, "status": "failed", "error": str(exc)})
+    return {"scanned": len(results), "results": results}
+
+
 def storage_report(db: Session, user_id: int) -> dict:
     """Measure live SQLite storage and identify high-volume text tables."""
     if not roles(db, user_id) & PRIVILEGED:
@@ -1988,7 +2015,7 @@ def archive_lineage_data(db: Session, user_id: int, *, before: str | None = None
     return {"path": str(output), "manifest_path": str(manifest_path), "size": size, "sha256": digest, "counts": counts,
             "before": cutoff.isoformat() if cutoff else None,
             "deletion_performed": False,
-            "message": "已生成压缩归档；源数据未删除，验证归档后再执行清理。"}
+            "message": "已生成压缩归档；源数据保留用于同步和审计，校验后可用于恢复。"}
 
 
 def verify_lineage_archive(db: Session, user_id: int, archive_path: str) -> dict:
@@ -2018,14 +2045,42 @@ def cleanup_lineage_archive(db: Session, user_id: int, archive_path: str) -> dic
     report = verify_lineage_archive(db, user_id, archive_path)
     if not report["valid"] or not report.get("before"):
         raise HTTPException(409, "归档校验失败，或归档没有截止时间，不能清理源数据")
-    cutoff = _parse_datetime(report["before"])
-    deleted = {}
-    for model in (PatentHistory, ImportSourceRow, FieldObservation):
-        result = db.query(model).filter(model.created_at < cutoff).delete(synchronize_session=False)
-        deleted[model.__tablename__] = result
-    db.commit()
-    compact = compact_storage(db, user_id)
-    return {**report, "deletion_performed": True, "deleted": deleted, "compact": compact}
+    # Import evidence is referenced by governance decisions; local histories
+    # are the export journal. Never delete either based on a rolling date.
+    raise HTTPException(409, "历史与导入证据仍被同步和治理引用，暂不允许删除；请保留压缩归档及源数据")
+
+
+def restore_lineage_archive(db: Session, user_id: int, archive_path: str) -> dict:
+    report = verify_lineage_archive(db, user_id, archive_path)
+    if not report["valid"]:
+        raise HTTPException(409, "归档校验失败，不能恢复")
+    models = {model.__tablename__: model for model in (PatentHistory, ImportSourceRow, FieldObservation)}
+    restored = {}
+    try:
+        with gzip.open(report["path"], "rt", encoding="utf-8") as stream:
+            for line in stream:
+                item = json.loads(line)
+                model = models.get(item["table"])
+                if model is None:
+                    raise HTTPException(400, "归档包含不支持的表")
+                values = item["row"]
+                existing = db.get(model, values["id"])
+                if existing is not None:
+                    current = {col.name: _value(getattr(existing, col.name)) for col in model.__table__.columns}
+                    if current != values:
+                        raise HTTPException(409, f"记录 {model.__tablename__}:{values['id']} 已有不同内容，恢复已取消")
+                    continue
+                for col in model.__table__.columns:
+                    if isinstance(col.type, DateTime) and values.get(col.name):
+                        values[col.name] = datetime.fromisoformat(values[col.name])
+                db.add(model(**values))
+                db.flush()
+                restored[model.__tablename__] = restored.get(model.__tablename__, 0) + 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {**report, "restored": restored}
 
 
 def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:

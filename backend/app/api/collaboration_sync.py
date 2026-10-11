@@ -43,7 +43,9 @@ from app.services.collaboration_sync_service import (
     storage_report, compact_storage,
     archive_lineage_data,
     verify_lineage_archive, cleanup_lineage_archive,
+    restore_lineage_archive,
     current_department_snapshot,
+    import_exchange_directory,
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
@@ -644,6 +646,14 @@ def get_exchange_status(user: User = Depends(current_user), db: Session = Depend
     return exchange_directory_status(db, user.id)
 
 
+@router.post("/exchange/import")
+def import_exchange_packages(request: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    passwords = request.get("passwords", {})
+    if not isinstance(passwords, dict):
+        raise HTTPException(400, "passwords 必须是对象")
+    return import_exchange_directory(db, user.id, {str(key): str(value) for key, value in passwords.items()})
+
+
 @router.get("/storage/report")
 def get_storage_report(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return storage_report(db, user.id)
@@ -667,6 +677,11 @@ def verify_sync_lineage(request: dict, user: User = Depends(current_user), db: S
 @router.post("/storage/archive-lineage/cleanup")
 def cleanup_sync_lineage(request: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return cleanup_lineage_archive(db, user.id, str(request.get("path", "")))
+
+
+@router.post("/storage/archive-lineage/restore")
+def restore_sync_lineage(request: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return restore_lineage_archive(db, user.id, str(request.get("path", "")))
 
 
 @router.get("/departments/{database_id}/current-snapshot")
