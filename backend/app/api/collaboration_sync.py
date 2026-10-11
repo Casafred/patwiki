@@ -40,6 +40,7 @@ from app.services.collaboration_sync_service import (
     process_package_stream,
     shared_package_sources, apply_shared_library,
     list_field_observations,
+    storage_report, compact_storage,
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
@@ -638,6 +639,16 @@ def acknowledge_sync_package(package_uid: str, request: dict,
 def get_exchange_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
     from app.services.collaboration_sync_service import exchange_directory_status
     return exchange_directory_status(db, user.id)
+
+
+@router.get("/storage/report")
+def get_storage_report(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return storage_report(db, user.id)
+
+
+@router.post("/storage/compact")
+def compact_database_storage(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return compact_storage(db, user.id)
 
 
 @router.get("/field-observations")

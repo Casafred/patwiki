@@ -33,6 +33,7 @@ from app.services.patent_service import PatentService, _stringify_value
 from app.services.patent_database_scope import in_database
 from app.services.collaboration_library_field_service import PRIVATE_FIELDS, plan_library_fields, apply_library_fields
 from app.services.field_registry import get_all_fields_meta
+from app.config import settings
 
 EXPORT_FIELDS = frozenset({
     "application_number", "publication_number", "grant_number", "title", "abstract", "claims",
@@ -1887,6 +1888,62 @@ def exchange_directory_status(db: Session, user_id: int) -> dict:
                 "file_hash": package.file_hash if package else None,
             })
     return result
+
+
+def storage_report(db: Session, user_id: int) -> dict:
+    """Measure live SQLite storage and identify high-volume text tables."""
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以查看存储报告")
+    path = Path(db.get_bind().url.database or settings.DATABASE_PATH)
+    if not path.exists():
+        raise HTTPException(404, "数据库文件不存在")
+    conn = sqlite3.connect(str(path))
+    try:
+        tables = []
+        for (name,) in conn.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'"):
+            cols = [row[1] for row in conn.execute(f'pragma table_info("{name.replace(chr(34), chr(34)*2)}")')]
+            total = 0
+            count = conn.execute(f'select count(*) from "{name.replace(chr(34), chr(34)*2)}"').fetchone()[0]
+            for col in cols:
+                try:
+                    total += int(conn.execute(
+                        f'select coalesce(sum(length("{col.replace(chr(34), chr(34)*2)}")),0) from "{name.replace(chr(34), chr(34)*2)}"'
+                    ).fetchone()[0] or 0)
+                except sqlite3.Error:
+                    continue
+            tables.append({"table": name, "rows": count, "text_bytes": total})
+        tables.sort(key=lambda row: row["text_bytes"], reverse=True)
+        return {"database": str(path), "bytes": path.stat().st_size,
+                "page_count": conn.execute("pragma page_count").fetchone()[0],
+                "page_size": conn.execute("pragma page_size").fetchone()[0],
+                "freelist_count": conn.execute("pragma freelist_count").fetchone()[0],
+                "tables": tables[:30],
+                "recommendations": [
+                    "保留专利主表和当前投影；历史、原始导入行和全文索引应设置归档策略。",
+                    "附件二进制继续放在文件目录，不写入 SQLite。",
+                    "删除或归档后执行 VACUUM 回收空闲页；VACUUM 不会压缩仍在使用的文本。",
+                ]}
+    finally:
+        conn.close()
+
+
+def compact_storage(db: Session, user_id: int) -> dict:
+    """Reclaim unused SQLite pages without deleting business records."""
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以执行数据库压缩")
+    db.commit()
+    path = Path(db.get_bind().url.database or settings.DATABASE_PATH)
+    before = path.stat().st_size
+    db.get_bind().dispose()
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("VACUUM")
+        conn.execute("ANALYZE")
+    finally:
+        conn.close()
+    after = path.stat().st_size
+    return {"database": str(path), "before_bytes": before, "after_bytes": after,
+            "reclaimed_bytes": max(0, before - after)}
 
 
 def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:
