@@ -1520,6 +1520,10 @@ def apply_package(db: Session, user_id: int, package_uid: str, request, *, commi
                 _save_baseline(db, origin_node_uid, row, field_key, remote_value, row.record_version, package)
         package.status = "partially_applied" if pending else "applied"
         package.applied_at = utc_now_naive()
+        if package.direction == "inbox" and not pending:
+            package.acknowledged_at = utc_now_naive()
+            package.attempt_count = (package.attempt_count or 0) + 1
+            package.last_error = None
         manifest = dict(package.manifest_json or {})
         if source_database_uid:
             source_results = dict(manifest.get("shared_source_results") or {})
@@ -2210,10 +2214,30 @@ def publish_aggregation_batch(db: Session, user_id: int, batch_uid: str, request
         "external_update_results": (batch.preview_json or {}).get("external_update_results", {}),
     })()
     result = export_package(db, user_id, export_request)
+    snapshot_root = workspace_dir() / "snapshots" / "department" / str(batch.target_database_id)
+    snapshot_root.mkdir(parents=True, exist_ok=True)
+    snapshot = snapshot_root / f"{result['package_uid']}.json"
+    snapshot.write_text(json.dumps({"package_uid": result["package_uid"], "batch_uid": batch.batch_uid,
+        "database_id": batch.target_database_id, "file_hash": result["file_hash"],
+        "created_at": utc_now_naive().isoformat()}, ensure_ascii=False, indent=2), encoding="utf-8")
+    current = snapshot_root / "CURRENT.json"
+    temp = snapshot_root / ".CURRENT.json.tmp"
+    temp.write_text(json.dumps({"package_uid": result["package_uid"], "snapshot": snapshot.name,
+        "file_hash": result["file_hash"], "updated_at": utc_now_naive().isoformat()}, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.replace(current)
     batch.publication_package_uid = result["package_uid"]
     batch.status = "published"
     db.commit()
-    return {**_batch_dict(batch), "publication": result}
+    return {**_batch_dict(batch), "publication": result, "current_snapshot": str(current)}
+
+
+def current_department_snapshot(db: Session, user_id: int, database_id: int) -> dict:
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以查看部门快照")
+    current = workspace_dir() / "snapshots" / "department" / str(database_id) / "CURRENT.json"
+    if not current.is_file():
+        raise HTTPException(404, "部门总库尚未发布快照")
+    return json.loads(current.read_text(encoding="utf-8"))
 
 
 def export_path(db: Session, user_id: int, package_uid: str) -> Path:
