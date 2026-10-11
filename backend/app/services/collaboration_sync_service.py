@@ -4,6 +4,8 @@ from __future__ import annotations
 import sqlite3
 import base64
 import hashlib
+import gzip
+import json
 import shutil
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -17,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app.core.time import utc_now_naive
 from app.models import Attachment, DatabaseMembership, ImportBatch, ImportBatchStatus, LegalStatus, Patent, PatentDatabase, PatentDatabaseMembership, PatentHistory, PatentType, Product, RiskLevel, User
+from app.models.governance import FieldObservation, ImportSourceRow
 from app.services.patent_identity_service import ensure_patent_identifiers
 from app.models.collaboration_sync import (
     CollaborationCredential, PermissionGrant, SyncConflict, SyncEntityFieldState,
@@ -1944,6 +1947,39 @@ def compact_storage(db: Session, user_id: int) -> dict:
     after = path.stat().st_size
     return {"database": str(path), "before_bytes": before, "after_bytes": after,
             "reclaimed_bytes": max(0, before - after)}
+
+
+def archive_lineage_data(db: Session, user_id: int, *, before: str | None = None) -> dict:
+    """Write immutable compressed lineage archives without deleting source rows."""
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以归档历史数据")
+    cutoff = None
+    if before:
+        cutoff = _parse_datetime(before)
+        if cutoff is None:
+            raise HTTPException(400, "归档截止时间格式无效")
+    root = workspace_dir() / "snapshots" / "lineage"
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = utc_now_naive().strftime("%Y%m%dT%H%M%SZ")
+    output = root / f"lineage-{stamp}.jsonl.gz"
+    tables = [PatentHistory, ImportSourceRow, FieldObservation]
+    counts = {}
+    with gzip.open(output, "wt", encoding="utf-8") as stream:
+        for model in tables:
+            query = db.query(model)
+            if cutoff is not None and hasattr(model, "created_at"):
+                query = query.filter(model.created_at < cutoff)
+            count = 0
+            for row in query.yield_per(500):
+                values = {column.name: getattr(row, column.name) for column in model.__table__.columns}
+                stream.write(json.dumps({"table": model.__tablename__, "row": values}, ensure_ascii=False, default=_value) + "\n")
+                count += 1
+            counts[model.__tablename__] = count
+    size = output.stat().st_size
+    return {"path": str(output), "size": size, "counts": counts,
+            "before": cutoff.isoformat() if cutoff else None,
+            "deletion_performed": False,
+            "message": "已生成压缩归档；源数据未删除，验证归档后再执行清理。"}
 
 
 def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:

@@ -96,6 +96,7 @@ export default function CollaborationSyncPanel() {
   const [selectedPackage, setSelectedPackage] = useState('')
   const [selectedRecords, setSelectedRecords] = useState<unknown[]>([])
   const [observations, setObservations] = useState<Array<Record<string, unknown>>>([])
+  const [storageReport, setStorageReport] = useState<Record<string, unknown> | null>(null)
   const [sharedSources, setSharedSources] = useState<Array<{ database_uid: string; name: string }>>([])
   const [applyPackageUid, setApplyPackageUid] = useState('')
   const [applyDatabaseId, setApplyDatabaseId] = useState('')
@@ -575,6 +576,16 @@ export default function CollaborationSyncPanel() {
           {observations.length === 0 ? <div style={{ fontSize: 12, color: '#94a3b8' }}>暂无字段观察记录</div> : <div style={{ maxHeight: 260, overflow: 'auto' }}>{observations.slice(0, 100).map(item => <div key={String(item.observation_uid)} style={{ borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><strong>{String(item.entity_uid)} · {String(item.field_key)}</strong><div style={{ overflowWrap: 'anywhere' }}>值：{JSON.stringify(item.value)} · 来源：{String(item.source_username || item.source_user_uid || '未知用户')} · 时间：{String(item.changed_at || item.received_at || '')}</div><div style={{ color: '#64748b' }}>库：{String(item.source_database_uid || '-')} · 视图：{String(item.source_view_name || item.source_view_id || '-')} · 包：{String(item.package_uid || '-')}</div></div>)}</div>}
         </div>
       </div>
+      {isAdmin && <div style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 12 }}>
+        <h4 style={{ fontSize: 13, margin: '0 0 6px' }}>同步存储维护</h4>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button style={buttonStyle} disabled={busy} onClick={() => void collaborationSyncApi.storageReport().then(setStorageReport).catch(error => setMessage(getErrorMessage(error)))}>查看存储占用</button>
+          <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.compactStorage().then(result => { setMessage(`数据库压缩完成，回收 ${result.reclaimed_bytes} 字节`); return collaborationSyncApi.storageReport() }).then(setStorageReport).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>压缩数据库空闲页</button>
+          <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.archiveLineage().then(result => setMessage(`已生成归档：${String(result.path)}`)).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>生成历史压缩归档</button>
+          <button style={buttonStyle} disabled={busy} onClick={() => void collaborationSyncApi.exchangeStatus().then(result => setMessage(`交换目录：收到 ${result.inbox.length} 个，待发 ${result.outbox.length} 个`)).catch(error => setMessage(getErrorMessage(error)))}>刷新交换目录</button>
+        </div>
+        {storageReport && <div style={{ marginTop: 8, fontSize: 11, color: '#475569' }}>数据库：{String(storageReport.bytes)} 字节 · 页数：{String(storageReport.page_count)} · 空闲页：{String(storageReport.freelist_count)}<pre style={{ maxHeight: 150, overflow: 'auto', background: '#f8fafc', padding: 8 }}>{JSON.stringify((storageReport.tables as unknown[])?.slice(0, 8), null, 2)}</pre></div>}
+      </div>}
     </>}
     {message && <div role="status" style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 8, fontSize: 12, color: '#334155', overflowWrap: 'anywhere' }}>{message}{governanceTargetDatabaseId && <button style={{ ...buttonStyle, marginLeft: 8, background: '#eef8f5', borderColor: '#65aa98' }} onClick={() => navigate(`/db/${governanceTargetDatabaseId}/governance`)}>到数据治理处理冲突</button>}</div>}
   </section>

@@ -946,6 +946,7 @@ export const collaborationSyncApi = {
   exchangeStatus: (): Promise<{ inbox: Array<Record<string, unknown>>; outbox: Array<Record<string, unknown>> }> => api.get('/collaboration-sync/exchange/status'),
   storageReport: (): Promise<Record<string, unknown>> => api.get('/collaboration-sync/storage/report'),
   compactStorage: (): Promise<{ before_bytes: number; after_bytes: number; reclaimed_bytes: number }> => api.post('/collaboration-sync/storage/compact'),
+  archiveLineage: (before?: string): Promise<Record<string, unknown>> => api.post('/collaboration-sync/storage/archive-lineage', undefined, { params: { before } }),
   createAggregationBatch: (data: { name: string; target_database_id: number; package_uids?: string[] }): Promise<Record<string, unknown>> => api.post('/collaboration-sync/aggregation-batches', data),
   packageSources: (packageUid: string): Promise<{ items: Array<{ database_uid: string; name: string }> }> => api.get(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/sources`),
   applySharedLibrary: (packageUid: string, sourceDatabaseUid: string): Promise<Record<string, unknown>> => api.post(`/collaboration-sync/packages/${encodeURIComponent(packageUid)}/shared-library`, { source_database_uid: sourceDatabaseUid }),

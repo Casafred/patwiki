@@ -41,6 +41,7 @@ from app.services.collaboration_sync_service import (
     shared_package_sources, apply_shared_library,
     list_field_observations,
     storage_report, compact_storage,
+    archive_lineage_data,
 )
 
 router = APIRouter(prefix="/collaboration-sync", tags=["collaboration-sync"])
@@ -649,6 +650,11 @@ def get_storage_report(user: User = Depends(current_user), db: Session = Depends
 @router.post("/storage/compact")
 def compact_database_storage(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return compact_storage(db, user.id)
+
+
+@router.post("/storage/archive-lineage")
+def archive_sync_lineage(before: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return archive_lineage_data(db, user.id, before=before)
 
 
 @router.get("/field-observations")
