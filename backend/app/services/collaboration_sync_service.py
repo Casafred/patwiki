@@ -495,16 +495,19 @@ def export_package(db: Session, user_id: int, request) -> dict:
     permissions = {"access": "viewer", "recipients": recipients, "fields": fields,
                    "can_edit": False, "can_redistribute": False}
     path = workspace_dir() / "outbox" / f"{package_uid}.pwshare"
+    partial_path = path.with_suffix(".pwshare.part")
     try:
-        with path.open("xb") as stream:
+        with partial_path.open("xb") as stream:
             encode_to(stream, manifest, permissions, iter(records), request.password, signing_identity["private_key"])
-        if path.stat().st_size > MAX_BYTES:
+        if partial_path.stat().st_size > MAX_BYTES:
             raise HTTPException(413, "同步包过大，请缩小范围")
         digest = hashlib.sha256()
-        with path.open("rb") as stream:
+        with partial_path.open("rb") as stream:
             for chunk in iter(lambda: stream.read(256 * 1024), b""):
                 digest.update(chunk)
+        partial_path.replace(path)
     except Exception:
+        partial_path.unlink(missing_ok=True)
         path.unlink(missing_ok=True)
         raise
     package = SyncPackage(package_uid=package_uid, package_type=manifest["package_type"], direction="outbox",

@@ -99,6 +99,9 @@ export default function CollaborationSyncPanel() {
   const [storageReport, setStorageReport] = useState<Record<string, unknown> | null>(null)
   const [archivePath, setArchivePath] = useState('')
   const [archiveVerified, setArchiveVerified] = useState(false)
+  const [exchangeFiles, setExchangeFiles] = useState<Array<Record<string, unknown>>>([])
+  const [exchangePasswords, setExchangePasswords] = useState<Record<string, string>>({})
+  const [exchangeResults, setExchangeResults] = useState<Array<Record<string, unknown>>>([])
   const [sharedSources, setSharedSources] = useState<Array<{ database_uid: string; name: string }>>([])
   const [applyPackageUid, setApplyPackageUid] = useState('')
   const [applyDatabaseId, setApplyDatabaseId] = useState('')
@@ -585,8 +588,20 @@ export default function CollaborationSyncPanel() {
           <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.compactStorage().then(result => { setMessage(`数据库压缩完成，回收 ${result.reclaimed_bytes} 字节`); return collaborationSyncApi.storageReport() }).then(setStorageReport).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>压缩数据库空闲页</button>
           <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.archiveLineage(new Date().toISOString()).then(result => { setArchivePath(String(result.path)); setArchiveVerified(false); setMessage(`已生成归档：${String(result.path)}`) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>生成历史压缩归档</button>
           {archivePath && <><button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.verifyArchive(archivePath).then(result => { setArchiveVerified(Boolean(result.valid)); setMessage(result.valid ? '归档校验通过，可用于恢复' : '归档校验失败') }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>校验归档</button><button style={buttonStyle} disabled={busy || !archiveVerified} onClick={() => { setBusy(true); void collaborationSyncApi.restoreArchive(archivePath).then(result => setMessage(`归档恢复完成：${JSON.stringify(result.restored || {})}`)).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>恢复归档</button></>}
-          <button style={buttonStyle} disabled={busy} onClick={() => void collaborationSyncApi.exchangeStatus().then(result => setMessage(`交换目录：收到 ${result.inbox.length} 个，待发 ${result.outbox.length} 个`)).catch(error => setMessage(getErrorMessage(error)))}>刷新交换目录</button>
+          <button style={buttonStyle} disabled={busy} onClick={() => void collaborationSyncApi.exchangeStatus().then(result => { setExchangeFiles(result.inbox); setMessage(`交换目录：收到 ${result.inbox.length} 个，待发 ${result.outbox.length} 个`) }).catch(error => setMessage(getErrorMessage(error)))}>刷新交换目录</button>
         </div>
+        <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <input style={{ ...inputStyle, flex: '1 1 260px' }} aria-label="历史归档路径" placeholder="历史归档 .jsonl.gz 完整路径" value={archivePath} onChange={event => { setArchivePath(event.target.value); setArchiveVerified(false) }} />
+        </div>
+        {exchangeFiles.length > 0 && <div style={{ marginTop: 12 }}>
+          <h4 style={{ fontSize: 13, margin: '0 0 6px' }}>交换目录收件箱</h4>
+          {exchangeFiles.map(file => { const name = String(file.name); const result = exchangeResults.find(item => item.name === name); return <div key={name} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, borderTop: '1px solid #e2e8f0', padding: '8px 0' }}>
+            <span style={{ flex: '1 1 240px', overflowWrap: 'anywhere', fontSize: 12 }}>{name} · {String(file.size)} 字节 · {String(result?.status || file.status)}</span>
+            <input type="password" style={inputStyle} aria-label={`${name} 的解密密码`} autoComplete="off" value={exchangePasswords[name] || ''} onChange={event => setExchangePasswords(current => ({ ...current, [name]: event.target.value }))} />
+            {Boolean(result?.error) && <span role="alert" style={{ flexBasis: '100%', color: '#b91c1c', overflowWrap: 'anywhere', fontSize: 12 }}>{String(result?.error)}</span>}
+          </div> })}
+          <button style={buttonStyle} disabled={busy || !Object.values(exchangePasswords).some(Boolean)} onClick={() => { setBusy(true); void collaborationSyncApi.importExchange(exchangePasswords).then(async result => { setExchangeResults((result.results as Array<Record<string, unknown>>) || []); setExchangePasswords({}); await loadPackages(); const status = await collaborationSyncApi.exchangeStatus(); setExchangeFiles(status.inbox); setMessage(`收件箱处理完成，共扫描 ${String(result.scanned)} 个文件`) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>导入 / 重试收件箱</button>
+        </div>}
         {storageReport && <div style={{ marginTop: 8, fontSize: 11, color: '#475569' }}>数据库：{String(storageReport.bytes)} 字节 · 页数：{String(storageReport.page_count)} · 空闲页：{String(storageReport.freelist_count)}<pre style={{ maxHeight: 150, overflow: 'auto', background: '#f8fafc', padding: 8 }}>{JSON.stringify((storageReport.tables as unknown[])?.slice(0, 8), null, 2)}</pre></div>}
       </div>}
     </>}
