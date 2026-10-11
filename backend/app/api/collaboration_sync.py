@@ -634,6 +634,12 @@ def acknowledge_sync_package(package_uid: str, request: dict,
                                error=request.get("error"))
 
 
+@router.get("/exchange/status")
+def get_exchange_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.collaboration_sync_service import exchange_directory_status
+    return exchange_directory_status(db, user.id)
+
+
 @router.get("/field-observations")
 def get_field_observations(entity_uid: str | None = None, field_key: str | None = None,
                            limit: int = 200, user: User = Depends(current_user), db: Session = Depends(get_db)):

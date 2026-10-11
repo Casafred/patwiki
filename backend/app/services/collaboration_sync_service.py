@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app.core.time import utc_now_naive
-from app.models import DatabaseMembership, ImportBatch, ImportBatchStatus, LegalStatus, Patent, PatentDatabase, PatentDatabaseMembership, PatentHistory, PatentType, Product, RiskLevel, User
+from app.models import Attachment, DatabaseMembership, ImportBatch, ImportBatchStatus, LegalStatus, Patent, PatentDatabase, PatentDatabaseMembership, PatentHistory, PatentType, Product, RiskLevel, User
 from app.services.patent_identity_service import ensure_patent_identifiers
 from app.models.collaboration_sync import (
     CollaborationCredential, PermissionGrant, SyncConflict, SyncEntityFieldState,
@@ -307,13 +307,23 @@ def _record_batch(db: Session, user_id: int, request, fields: list[str], databas
                 key: value for key, value in payload["custom_fields"].items()
                 if key not in {"attachments", "patent_figures"}
             }
+        attachment_rows = db.query(Attachment).filter(
+            Attachment.patent_id == patent.id, Attachment.deleted_at.is_(None)
+        ).order_by(Attachment.id).all()
+        attachment_manifest = [{
+            "filename": item.filename, "field_key": item.field_key,
+            "file_size": item.file_size, "mime_type": item.mime_type,
+            "sha256": item.sha256, "uploaded_by": item.uploaded_by,
+            "uploaded_at": _value(item.uploaded_at), "source_url": item.source_url,
+        } for item in attachment_rows]
         records.append({"entity_type": "patent", "entity_uid": patent.entity_uid,
                         "record_version": patent.record_version or 1,
                         "origin_node_uid": patent.origin_node_uid,
                         "updated_at": _value(patent.updated_at),
                         "scope": {"database_uids": sorted(scopes),
                                   "product": {"code": product.code, "name": product.name} if product else None},
-                        "payload": payload, "field_provenance": {"changes": history_by_patent.get(patent.id, []), "library_values": library_values}})
+                        "payload": payload, "field_provenance": {"changes": history_by_patent.get(patent.id, []),
+                            "library_values": library_values, "attachment_manifest": attachment_manifest}})
     selected_database_ids = {database.id for database in databases}
     tombstones = db.query(SyncTombstone).filter(SyncTombstone.entity_type == "patent").yield_per(250) if include_tombstones else []
     for tombstone in tombstones:
@@ -891,7 +901,16 @@ def _merge_plan(db: Session, user_id: int, package: SyncPackage, database: Paten
             record_plan["updates"] = dict(payload)
             plans.append(record_plan)
             continue
+        explicit_clear_fields = {
+            item.get("field_key") for item in (row.field_provenance or {}).get("changes", [])
+            if item.get("operation") == "clear"
+        }
         for field_key, remote_value in payload.items():
+            # Empty projection values are informational. They never erase a
+            # populated master value unless the source emitted an explicit
+            # clear operation in its provenance.
+            if remote_value is None and field_key not in explicit_clear_fields:
+                continue
             baseline = baselines.get((row.entity_uid, field_key))
             exported_at = _source_exported_at(package)
             if baseline and baseline.source_exported_at and exported_at and exported_at < baseline.source_exported_at:
@@ -1845,6 +1864,29 @@ def acknowledge_package(db: Session, user_id: int, package_uid: str, *, success:
     return {"package_uid": package_uid, "status": package.status,
             "acknowledged_at": _value(package.acknowledged_at),
             "attempt_count": package.attempt_count, "last_error": package.last_error}
+
+
+def exchange_directory_status(db: Session, user_id: int) -> dict:
+    """Return a safe, read-only view of files available for manual cloud sync.
+
+    The cloud provider remains an asynchronous file exchange layer. Files are
+    only considered ready after an atomic rename into inbox/outbox, so a
+    partially copied package is never presented as importable.
+    """
+    root = workspace_dir()
+    result = {"inbox": [], "outbox": []}
+    for direction in result:
+        folder = root / direction
+        for path in sorted(folder.glob("*.pwshare"), key=lambda item: item.stat().st_mtime, reverse=True):
+            package = db.query(SyncPackage).filter_by(path=str(path)).first()
+            result[direction].append({
+                "name": path.name, "path": str(path), "size": path.stat().st_size,
+                "modified_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+                "package_uid": package.package_uid if package else path.stem,
+                "status": package.status if package else "unregistered",
+                "file_hash": package.file_hash if package else None,
+            })
+    return result
 
 
 def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:
