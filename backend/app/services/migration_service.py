@@ -10,11 +10,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import getpass
+import gzip
 import hashlib
 import json
 import os
 from pathlib import Path
 import sqlite3
+import shutil
+import tempfile
 from uuid import uuid4
 from typing import Iterable, Sequence
 
@@ -361,14 +364,19 @@ def _backup_database(bind: Engine, backup_dir: Path, version: str) -> Path | Non
         return None
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = utc_now_naive().strftime("%Y%m%dT%H%M%S%fZ")
-    backup_path = backup_dir / f"patwiki-migration-{version}-{stamp}.db"
+    backup_path = backup_dir / f"patwiki-migration-{version}-{stamp}.db.gz"
+    snapshot_path = backup_dir / f".patwiki-migration-{version}-{stamp}.db"
     bind.dispose()
     source = sqlite3.connect(str(source_path))
     try:
         # A compact, consistent snapshot excludes unused freelist pages.
-        source.execute("VACUUM INTO ?", (str(backup_path),))
+        source.execute("VACUUM INTO ?", (str(snapshot_path),))
+        with snapshot_path.open("rb") as raw, gzip.open(backup_path, "wb", compresslevel=6) as compressed:
+            shutil.copyfileobj(raw, compressed, 1024 * 1024)
+        snapshot_path.unlink(missing_ok=True)
     except Exception:
         backup_path.unlink(missing_ok=True)
+        snapshot_path.unlink(missing_ok=True)
         raise
     finally:
         source.close()
@@ -379,14 +387,26 @@ def _restore_database(bind: Engine, backup_path: Path) -> None:
     database_path = _sqlite_path(bind)
     if database_path is None:
         raise RuntimeError("SQLite backup restore requires a file-backed database")
+    # Close pooled SQLite handles before replacing the file on Windows.
     bind.dispose()
-    source = sqlite3.connect(str(backup_path))
+    temporary_path = None
+    source_path = backup_path
+    if backup_path.suffix == ".gz":
+        fd, temporary_name = tempfile.mkstemp(prefix="patwiki-restore-", suffix=".db")
+        os.close(fd)
+        temporary_path = Path(temporary_name)
+        with gzip.open(backup_path, "rb") as compressed, temporary_path.open("wb") as raw:
+            shutil.copyfileobj(compressed, raw, 1024 * 1024)
+        source_path = temporary_path
+    source = sqlite3.connect(str(source_path))
     target = sqlite3.connect(str(database_path))
     try:
         source.backup(target)
     finally:
         target.close()
         source.close()
+        if temporary_path:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _record_start(bind: Engine, version: str, checksum: str, operator: str, backup_path: Path | None) -> int:

@@ -1128,10 +1128,11 @@ def _create_apply_backup(db: Session, package_uid: str) -> Path | None:
     backup_dir = source_path.parent / "backups" / "collaboration-sync"
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = utc_now_naive().strftime("%Y%m%dT%H%M%S%fZ")
-    backup_path = backup_dir / f"patwiki-sync-{package_uid}-{stamp}.db"
+    backup_path = backup_dir / f"patwiki-sync-{package_uid}-{stamp}.db.gz"
+    snapshot_path = backup_dir / f".patwiki-sync-{package_uid}-{stamp}.db"
     try:
         source = sqlite3.connect(str(source_path))
-        target = sqlite3.connect(str(backup_path))
+        target = sqlite3.connect(str(snapshot_path))
         try:
             source.backup(target)
             result = target.execute("PRAGMA integrity_check").fetchone()
@@ -1140,8 +1141,12 @@ def _create_apply_backup(db: Session, package_uid: str) -> Path | None:
         finally:
             target.close()
             source.close()
+        with snapshot_path.open("rb") as raw, gzip.open(backup_path, "wb", compresslevel=6) as compressed:
+            shutil.copyfileobj(raw, compressed, 1024 * 1024)
+        snapshot_path.unlink(missing_ok=True)
     except Exception:
         backup_path.unlink(missing_ok=True)
+        snapshot_path.unlink(missing_ok=True)
         raise
     return backup_path
 
