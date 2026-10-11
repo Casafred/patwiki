@@ -6,6 +6,7 @@ import base64
 import hashlib
 import gzip
 import json
+import hashlib
 import shutil
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -1976,10 +1977,51 @@ def archive_lineage_data(db: Session, user_id: int, *, before: str | None = None
                 count += 1
             counts[model.__tablename__] = count
     size = output.stat().st_size
-    return {"path": str(output), "size": size, "counts": counts,
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    manifest_path = output.with_suffix(".manifest.json")
+    manifest_path.write_text(json.dumps({"archive": str(output), "sha256": digest,
+        "counts": counts, "before": cutoff.isoformat() if cutoff else None}, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"path": str(output), "manifest_path": str(manifest_path), "size": size, "sha256": digest, "counts": counts,
             "before": cutoff.isoformat() if cutoff else None,
             "deletion_performed": False,
             "message": "已生成压缩归档；源数据未删除，验证归档后再执行清理。"}
+
+
+def verify_lineage_archive(db: Session, user_id: int, archive_path: str) -> dict:
+    if not roles(db, user_id) & PRIVILEGED:
+        raise HTTPException(403, "只有部门管理员可以校验归档")
+    root = (workspace_dir() / "snapshots" / "lineage").resolve()
+    path = Path(archive_path).resolve()
+    if root not in path.parents or path.suffix != ".gz":
+        raise HTTPException(400, "归档路径无效")
+    manifest_path = path.with_suffix(".manifest.json")
+    if not path.is_file() or not manifest_path.is_file():
+        raise HTTPException(404, "归档或归档清单不存在")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    counts = {}
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        for line in stream:
+            item = json.loads(line)
+            table = item.get("table")
+            counts[table] = counts.get(table, 0) + 1
+    valid = digest == manifest.get("sha256") and counts == manifest.get("counts")
+    return {"valid": valid, "path": str(path), "sha256": digest, "counts": counts,
+            "before": manifest.get("before"), "deletion_performed": False}
+
+
+def cleanup_lineage_archive(db: Session, user_id: int, archive_path: str) -> dict:
+    report = verify_lineage_archive(db, user_id, archive_path)
+    if not report["valid"] or not report.get("before"):
+        raise HTTPException(409, "归档校验失败，或归档没有截止时间，不能清理源数据")
+    cutoff = _parse_datetime(report["before"])
+    deleted = {}
+    for model in (PatentHistory, ImportSourceRow, FieldObservation):
+        result = db.query(model).filter(model.created_at < cutoff).delete(synchronize_session=False)
+        deleted[model.__tablename__] = result
+    db.commit()
+    compact = compact_storage(db, user_id)
+    return {**report, "deletion_performed": True, "deleted": deleted, "compact": compact}
 
 
 def package_records(db: Session, user_id: int, package_uid: str) -> list[dict]:

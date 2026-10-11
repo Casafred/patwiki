@@ -97,6 +97,8 @@ export default function CollaborationSyncPanel() {
   const [selectedRecords, setSelectedRecords] = useState<unknown[]>([])
   const [observations, setObservations] = useState<Array<Record<string, unknown>>>([])
   const [storageReport, setStorageReport] = useState<Record<string, unknown> | null>(null)
+  const [archivePath, setArchivePath] = useState('')
+  const [archiveVerified, setArchiveVerified] = useState(false)
   const [sharedSources, setSharedSources] = useState<Array<{ database_uid: string; name: string }>>([])
   const [applyPackageUid, setApplyPackageUid] = useState('')
   const [applyDatabaseId, setApplyDatabaseId] = useState('')
@@ -581,7 +583,8 @@ export default function CollaborationSyncPanel() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button style={buttonStyle} disabled={busy} onClick={() => void collaborationSyncApi.storageReport().then(setStorageReport).catch(error => setMessage(getErrorMessage(error)))}>查看存储占用</button>
           <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.compactStorage().then(result => { setMessage(`数据库压缩完成，回收 ${result.reclaimed_bytes} 字节`); return collaborationSyncApi.storageReport() }).then(setStorageReport).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>压缩数据库空闲页</button>
-          <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.archiveLineage().then(result => setMessage(`已生成归档：${String(result.path)}`)).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>生成历史压缩归档</button>
+          <button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.archiveLineage(new Date().toISOString()).then(result => { setArchivePath(String(result.path)); setArchiveVerified(false); setMessage(`已生成归档：${String(result.path)}`) }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>生成历史压缩归档</button>
+          {archivePath && <><button style={buttonStyle} disabled={busy} onClick={() => { setBusy(true); void collaborationSyncApi.verifyArchive(archivePath).then(result => { setArchiveVerified(Boolean(result.valid)); setMessage(result.valid ? '归档校验通过，可清理源数据' : '归档校验失败') }).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>校验归档</button><button style={{ ...buttonStyle, color: '#9f1239' }} disabled={busy || !archiveVerified} onClick={() => { if (!window.confirm('已校验归档，确认删除截止时间之前的历史和原始导入记录？')) return; setBusy(true); void collaborationSyncApi.cleanupArchive(archivePath).then(result => { setArchiveVerified(false); setMessage(`归档源数据已清理：${JSON.stringify(result.deleted || {})}`); return collaborationSyncApi.storageReport() }).then(setStorageReport).catch(error => setMessage(getErrorMessage(error))).finally(() => setBusy(false)) }}>校验后清理源数据</button></>}
           <button style={buttonStyle} disabled={busy} onClick={() => void collaborationSyncApi.exchangeStatus().then(result => setMessage(`交换目录：收到 ${result.inbox.length} 个，待发 ${result.outbox.length} 个`)).catch(error => setMessage(getErrorMessage(error)))}>刷新交换目录</button>
         </div>
         {storageReport && <div style={{ marginTop: 8, fontSize: 11, color: '#475569' }}>数据库：{String(storageReport.bytes)} 字节 · 页数：{String(storageReport.page_count)} · 空闲页：{String(storageReport.freelist_count)}<pre style={{ maxHeight: 150, overflow: 'auto', background: '#f8fafc', padding: 8 }}>{JSON.stringify((storageReport.tables as unknown[])?.slice(0, 8), null, 2)}</pre></div>}
