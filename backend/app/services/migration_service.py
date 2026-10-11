@@ -407,6 +407,7 @@ def _restore_database(bind: Engine, backup_path: Path) -> None:
         source.close()
         if temporary_path:
             temporary_path.unlink(missing_ok=True)
+        bind.dispose()
 
 
 def _record_start(bind: Engine, version: str, checksum: str, operator: str, backup_path: Path | None) -> int:
