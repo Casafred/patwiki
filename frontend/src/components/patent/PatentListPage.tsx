@@ -1704,10 +1704,24 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     setReplenishmentExporting(true)
     try {
       const blob = await exportApi.replenishment(isGlobalMasterTable ? null : activeDatabaseId)
+      if (!(blob instanceof Blob) || blob.size === 0) throw new Error('服务器返回的补库清单为空')
       const filename = `patwiki_replenishment_${new Date().toISOString().slice(0, 10)}.xlsx`
       if ('__TAURI_INTERNALS__' in window) {
         const path = await saveDesktopFile({ defaultPath: filename, filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }] })
-        if (path) await writeDesktopFile(path, new Uint8Array(await blob.arrayBuffer()))
+        if (!path) return
+        try {
+          await writeDesktopFile(path, new Uint8Array(await blob.arrayBuffer()))
+        } catch (writeError: unknown) {
+          // A selected path can still be rejected by the Tauri fs scope or by
+          // a locked/read-only location. Keep the export usable via browser download.
+          const fallbackUrl = URL.createObjectURL(blob)
+          const fallbackAnchor = document.createElement('a')
+          fallbackAnchor.href = fallbackUrl
+          fallbackAnchor.download = filename
+          fallbackAnchor.click()
+          window.setTimeout(() => URL.revokeObjectURL(fallbackUrl), 2000)
+          console.warn('桌面文件写入失败，已回退到浏览器下载', writeError)
+        }
       } else {
         const url = URL.createObjectURL(blob)
         const anchor = document.createElement('a')
