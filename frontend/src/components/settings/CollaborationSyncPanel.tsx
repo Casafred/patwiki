@@ -217,6 +217,7 @@ export default function CollaborationSyncPanel() {
     localStorage.removeItem(TOKEN_KEY)
     setIdentity(null)
     setAccounts([])
+    setActiveTab('sync')
     setPassword('')
     setMessage('已退出协同账号')
   }
@@ -403,7 +404,7 @@ export default function CollaborationSyncPanel() {
   return <section style={panelStyle} aria-label="部门协同同步">
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 12, marginBottom: 14 }}>
       <div><h3 style={{ margin: 0, fontSize: 15, color: '#1f2937' }}>部门协同与数据同步</h3><div style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>加密文件交换 · 默认只读 · 本地留存审计记录</div></div>
-      {identity && <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 12, color: '#334155' }}>{identity.display_name || identity.username} · {identity.roles.join(', ') || '成员'}</span><button style={buttonStyle} onClick={() => void handleLogout()}>登出协同账号</button>{isAdmin && <a href="#collaboration-accounts" style={{ fontSize: 12 }}>账号管理与删除</a>}</div>}
+      {identity && <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 12, color: '#334155' }}>{identity.display_name || identity.username} · {identity.roles.join(', ') || '成员'}</span><button style={buttonStyle} onClick={() => void handleLogout()}>登出协同账号</button>{isAdmin && <button style={buttonStyle} onClick={() => setActiveTab('accounts')}>账号管理与删除</button>}</div>}
     </div>
 
     {!identity && <div style={{ display: 'grid', gap: 10, maxWidth: 680 }}>
