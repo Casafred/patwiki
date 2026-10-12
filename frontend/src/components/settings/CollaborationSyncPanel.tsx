@@ -59,6 +59,7 @@ export default function CollaborationSyncPanel() {
   const [products, setProducts] = useState<Product[]>([])
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [activeTab, setActiveTab] = useState<'sync' | 'accounts' | 'storage'>('sync')
   const [loginName, setLoginName] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [employeeNo, setEmployeeNo] = useState('')
@@ -223,7 +224,12 @@ export default function CollaborationSyncPanel() {
   const handleDeleteAccount = async (account: CollaborationIdentity) => {
     if (!window.confirm(`确认删除协同账号“${account.display_name || account.username}”？登录和协同权限将被移除，历史记录保留。`)) return
     setBusy(true)
-    try { await collaborationSyncApi.deleteAccount(account.id); setMessage(`账号 ${account.username} 已删除`); await loadAdminData() }
+    try {
+      await collaborationSyncApi.deleteAccount(account.id)
+      if (account.id === identity?.id) await handleLogout()
+      else await loadAdminData()
+      setMessage(`账号 ${account.username} 已删除，历史来源记录保留`)
+    }
     catch (error: unknown) { setMessage(getErrorMessage(error, '删除账号失败')) }
     finally { setBusy(false) }
   }
@@ -427,6 +433,9 @@ export default function CollaborationSyncPanel() {
     </div>}
 
     {identity && <>
+      <div role="tablist" aria-label="协同管理" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        {([{ key: 'sync', label: '数据同步' }, ...(isAdmin ? [{ key: 'accounts', label: '成员与权限' }, { key: 'storage', label: '存储维护' }] : [])] as Array<{ key: 'sync' | 'accounts' | 'storage'; label: string }>).map(tab => <button key={tab.key} role="tab" aria-selected={activeTab === tab.key} style={{ ...buttonStyle, borderBottom: activeTab === tab.key ? '2px solid #0f766e' : '1px solid #a8bacb' }} onClick={() => setActiveTab(tab.key)}>{tab.label}</button>)}
+      </div>
       <details style={{ marginBottom: 14 }}>
         <summary style={{ cursor: 'pointer', fontSize: 12, color: '#334155' }}>修改协同密码</summary>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, maxWidth: 780, paddingTop: 8 }}>
@@ -436,7 +445,7 @@ export default function CollaborationSyncPanel() {
           <button style={buttonStyle} disabled={busy || currentPassword.length < 10 || newPassword.length < 10 || newPassword !== confirmNewPassword} onClick={() => void handleChangePassword()}>保存新密码</button>
         </div>
       </details>
-      {isAdmin && <div style={{ borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0', padding: '10px 0', marginBottom: 14 }}>
+      {isAdmin && activeTab === 'accounts' && <details style={{ marginBottom: 14 }}><summary style={{ cursor: 'pointer', fontSize: 13 }}>高级设备信任</summary><div style={{ padding: '10px 0' }}>
         <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>可信同步设备</h4>
         {deviceIdentity && <div style={{ display: 'grid', gap: 6, marginBottom: 10, fontSize: 11 }}>
           <div>本机指纹：<code style={{ overflowWrap: 'anywhere' }}>{deviceIdentity.fingerprint}</code> <button style={buttonStyle} onClick={() => void navigator.clipboard?.writeText(deviceIdentity.fingerprint)}>复制指纹</button></div>
@@ -449,8 +458,8 @@ export default function CollaborationSyncPanel() {
           <button style={buttonStyle} disabled={busy || !trustedDeviceName.trim() || !trustedDevicePublicKey.trim()} onClick={() => void handleTrustDevice()}>登记可信设备</button>
         </div>
         <div style={{ marginTop: 8, maxHeight: 130, overflow: 'auto', fontSize: 11 }}>{trustedDevices.map(device => <div key={device.fingerprint} style={{ display: 'grid', gridTemplateColumns: 'minmax(90px, auto) minmax(0, 1fr) auto', alignItems: 'center', gap: 8, borderTop: '1px solid #edf0f3', padding: '5px 0' }}><span>{device.name} · {device.revoked ? '已撤销' : '有效'}</span><code style={{ overflowWrap: 'anywhere' }}>{device.fingerprint}</code>{!device.revoked && <button style={buttonStyle} disabled={busy} onClick={() => void handleRevokeDevice(device.fingerprint)}>撤销</button>}</div>)}</div>
-      </div>}
-      {isAdmin && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 18 }}>
+      </div></details>}
+      {isAdmin && activeTab === 'accounts' && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 18 }}>
         <div style={{ borderTop: '2px solid #0f766e', paddingTop: 10 }}>
           <h4 id="collaboration-accounts" style={{ margin: '0 0 8px', fontSize: 13 }}>协同账号管理与删除</h4>
           <div style={{ display: 'grid', gap: 7, marginBottom: 10 }}>
@@ -477,10 +486,10 @@ export default function CollaborationSyncPanel() {
             <span><strong>{account.display_name || account.username}</strong><small>{account.username}</small></span>
             <select style={inputStyle} aria-label={`${account.username} 的角色`} disabled={!account.active || busy} value={account.roles[0] || 'member'} onChange={event => { const role = event.target.value; const unitId = account.role_assignments?.find(item => item.role === 'group_leader')?.unit_id || (newUnit ? Number(newUnit) : undefined); void collaborationSyncApi.setAccountRole(account.id, role, unitId).then(loadAdminData).catch(error => setMessage(getErrorMessage(error))) }}><option value="member">组员</option><option value="group_leader">组长</option><option value="department_leader">部门领导</option><option value="system_admin">维护管理员</option><option value="viewer">只读协作者</option></select>
             <button className="btn btn-sm btn-secondary" disabled={busy} onClick={() => void collaborationSyncApi.setAccountActive(account.id, !account.active).then(loadAdminData).catch(error => setMessage(getErrorMessage(error)))}>{account.active ? '停用' : '启用'}</button>
-            <button className="btn btn-sm btn-ghost" title={`删除 ${account.username}`} aria-label={`删除 ${account.username}`} disabled={busy || account.id === identity.id} onClick={() => void handleDeleteAccount(account)}><Icon name="trash" /></button>
+            <button className="btn btn-sm btn-ghost" title={account.id === identity.id && accounts.filter(item => item.active && item.roles.some(role => role === 'system_admin' || role === 'department_leader')).length <= 1 ? '唯一管理员不能删除，请先创建另一位管理员' : `删除 ${account.username}`} aria-label={`删除 ${account.username}`} disabled={busy || (account.id === identity.id && accounts.filter(item => item.active && item.roles.some(role => role === 'system_admin' || role === 'department_leader')).length <= 1)} onClick={() => void handleDeleteAccount(account)}><Icon name="trash" /></button>
           </div>)}</div>
           <div style={{ marginTop: 6, color: '#64748b', fontSize: 11 }}>管理员和部门领导拥有本机协同管理权限；组长、组员按品类和字段授权同步；只读协作者不能应用到主表。</div>
-          <div style={{ marginTop: 6, color: '#64748b', fontSize: 11 }}>删除账号请点击成员行的垃圾桶。当前登录账号须由另一位管理员删除；唯一的管理员不能删除。</div>
+          <div style={{ marginTop: 6, color: '#64748b', fontSize: 11 }}>唯一管理员不能删除。存在另一位可用管理员时，删除当前账号后自动退出，专利和历史来源记录保留。</div>
         </div>
 
         <div style={{ borderTop: '2px solid #0f766e', paddingTop: 10 }}>
@@ -515,7 +524,7 @@ export default function CollaborationSyncPanel() {
         </div>
       </div>}
 
-      <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18 }}>
+      <div hidden={activeTab !== 'sync'} style={{ borderTop: '1px solid #e2e8f0', paddingTop: 14, display: activeTab === 'sync' ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18 }}>
         <div>
           <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>生成加密共享文件</h4>
           <div style={{ display: 'grid', gap: 8 }}>
@@ -546,8 +555,8 @@ export default function CollaborationSyncPanel() {
         </div>
       </div>
 
-      {isAdmin && <SyncAggregationPanel databases={databases} packages={packages} />}
-      <div style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 12 }}>
+      {isAdmin && activeTab === 'sync' && <SyncAggregationPanel databases={databases} packages={packages} />}
+      <div hidden={activeTab !== 'sync'} style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 12 }}>
         <h4 style={{ fontSize: 13 }}>导入来源共享库</h4>
         <select aria-label="选择共享同步包" style={inputStyle} value={selectedPackage} onChange={event => { const value = event.target.value; setSelectedPackage(value); setSharedSources([]); if (value) void collaborationSyncApi.packageSources(value).then(result => setSharedSources(result.items)).catch(error => setMessage(getErrorMessage(error))) }}>
           <option value="">选择已导入的成员文件</option>{packages.filter(item => item.direction === 'inbox' && ['imported', 'partially_applied'].includes(item.status)).map(item => <option key={item.package_uid} value={item.package_uid}>{item.package_uid}</option>)}
@@ -581,7 +590,7 @@ export default function CollaborationSyncPanel() {
           {observations.length === 0 ? <div style={{ fontSize: 12, color: '#94a3b8' }}>暂无字段观察记录</div> : <div style={{ maxHeight: 260, overflow: 'auto' }}>{observations.slice(0, 100).map(item => <div key={String(item.observation_uid)} style={{ borderTop: '1px solid #edf0f3', padding: '7px 0', fontSize: 11 }}><strong>{String(item.entity_uid)} · {String(item.field_key)}</strong><div style={{ overflowWrap: 'anywhere' }}>值：{JSON.stringify(item.value)} · 来源：{String(item.source_username || item.source_user_uid || '未知用户')} · 时间：{String(item.changed_at || item.received_at || '')}</div><div style={{ color: '#64748b' }}>库：{String(item.source_database_uid || '-')} · 视图：{String(item.source_view_name || item.source_view_id || '-')} · 包：{String(item.package_uid || '-')}</div></div>)}</div>}
         </div>
       </div>
-      {isAdmin && <div style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 12 }}>
+      {isAdmin && activeTab === 'storage' && <div style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 12 }}>
         <h4 style={{ fontSize: 13, margin: '0 0 6px' }}>同步存储维护</h4>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button style={buttonStyle} disabled={busy} onClick={() => void collaborationSyncApi.storageReport().then(setStorageReport).catch(error => setMessage(getErrorMessage(error)))}>查看存储占用</button>

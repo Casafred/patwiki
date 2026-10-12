@@ -221,13 +221,14 @@ export default function SharingPage() {
       </div>
 
       <CollaborationSyncPanel />
-
+      <details style={{ marginTop: 16 }}>
+      <summary style={{ cursor: 'pointer', padding: '12px 0', fontSize: 13 }}>本地身份与库成员（兼容管理）</summary>
       {/* 当前用户 */}
       <div style={{
         background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
         padding: 16, marginBottom: 20,
       }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>当前身份</h3>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>本地操作身份</h3>
         {currentUser ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
@@ -683,6 +684,7 @@ export default function SharingPage() {
           </table>
         )}
       </div>
+      </details>
       </div>
     </div>
   )
