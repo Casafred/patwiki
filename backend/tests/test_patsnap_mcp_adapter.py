@@ -65,6 +65,9 @@ class PatsnapAdapterTest(unittest.TestCase):
     def test_discovered_tool_mapping_and_business_error(self):
         self.assertIn("claims", tool_mappable_fields("claims"))
         self.assertIn("family_members", tool_mappable_fields("family"))
+        self.assertIn("mcp_abstract_figure", tool_mappable_fields("abstract_image"))
+        self.assertIn("mcp_description_figures", tool_mappable_fields("fulltext_image"))
+        self.assertIn("mcp_intelligent_figures", tool_mappable_fields("intelligent_image"))
 
         class ErrorTransport(FixtureTransport):
             def call_tool(self, service, tool, arguments):

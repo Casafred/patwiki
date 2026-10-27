@@ -834,4 +834,13 @@ def get_all_fields_meta(db) -> list[FieldMeta]:
         return FIELD_REGISTRY.list_fields(None)
     from app.services.field_policy_service import enrich_field_policies
     from app.services.tag_service import classification_fields
-    return [*enrich_field_policies(db, [*FIELD_REGISTRY.list_fields(db), *get_pending_import_fields(db)]), *classification_fields(db)]
+    fields = [*FIELD_REGISTRY.list_fields(db), *get_pending_import_fields(db)]
+    from app.services.sync_support import MCP_CUSTOM_FIELDS
+    known = {field["key"] for field in fields}
+    labels = {'mcp_record_fields': '完整著录数据', 'mcp_priority_claims': '优先权原始数据', 'mcp_classification_details': '分类原始数据', 'mcp_party_details': '主体原始数据', 'mcp_claim_metadata': '权利要求原始数据', 'mcp_description_metadata': '说明书原始数据', 'mcp_legal_event_details': '法律事件原始数据', 'mcp_family_members': '完整同族数据（保留族类型）', 'mcp_citation_data': '被引用原始数据', 'mcp_pdf_original': 'PDF 原文（保存到附件）', 'mcp_abstract_figure': '摘要附图（保存到附图）', 'mcp_description_figures': '全文附图（保存到附图）', 'mcp_intelligent_figures': '智能附图与部件解析（保存到附图）', 'mcp_abstract_translation': '摘要译文（中文）', 'mcp_claim_translation': '权利要求译文（中文）', 'mcp_description_translation': '说明书译文（中文）', 'mcp_reexamination_invalidation': '复审与无效记录', 'mcp_license_events': '许可记录', 'mcp_transfer_events': '转让记录', 'mcp_pledge_events': '质押记录', 'mcp_customs_data': '海关备案', 'mcp_award_data': '获奖记录', 'mcp_tech_summary': '技术三要素原始数据'}
+    for key, label in labels.items():
+        if key not in known and key in MCP_CUSTOM_FIELDS:
+            fields.append({"key": key, "name": label, "field_type": "longtext", "group_name": "MCP 来源数据",
+                           "width": 260, "sortable": False, "filterable": False, "editable": False,
+                           "visible": False, "is_system": False, "is_ai": False, "is_formula": False})
+    return [*enrich_field_policies(db, fields), *classification_fields(db)]

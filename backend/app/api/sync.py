@@ -111,7 +111,7 @@ def fetch_intelligent_images(body: IntelligentImageRequest, db: Session = Depend
             created.append(AttachmentService.create_from_bytes(
                 db, body.database_id, patent.id, "patent_figures",
                 f"{number}-智能附图-{index + 1}{extension}", content, mime,
-                uploaded_by="patsnap-intelligent-image", source_type="mcp", source_url=str(url),
+                uploaded_by="patsnap-intelligent-image", source_type="mcp", source_url=str(url).split("?", 1)[0],
                 commit=False,
             ))
         db.commit()

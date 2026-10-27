@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { EXTERNAL_UPDATE_PRESETS_STORAGE_KEY, HIMMPAT_UPDATE_FIELD_GROUPS, type ExternalUpdateField, type ExternalUpdateFieldGroup } from '../../lib/externalSync'
+import { EXTERNAL_UPDATE_PRESETS_STORAGE_KEY, HIMMPAT_UPDATE_FIELD_GROUPS, PATSNAP_UPDATE_FIELD_GROUPS, type ExternalUpdateField, type ExternalUpdateFieldGroup } from '../../lib/externalSync'
 import Icon from '../common/Icon'
 
 interface FieldPreset {
@@ -30,7 +30,8 @@ export default function McpFieldSelection({ fields, selectedFields, onChange, di
 
   const groups = useMemo(() => {
     const allowed = new Map(fields.map(field => [field.key, field]))
-    const result: ExternalUpdateFieldGroup[] = HIMMPAT_UPDATE_FIELD_GROUPS.map(group => ({
+    const providerGroups = allowed.has('mcp_intelligent_figures') ? PATSNAP_UPDATE_FIELD_GROUPS : HIMMPAT_UPDATE_FIELD_GROUPS
+    const result: ExternalUpdateFieldGroup[] = providerGroups.map(group => ({
       label: group.label,
       fields: group.fields.map(field => allowed.get(field.key)).filter((field): field is ExternalUpdateField => Boolean(field)),
     })).filter(group => group.fields.length)
@@ -100,7 +101,7 @@ export default function McpFieldSelection({ fields, selectedFields, onChange, di
         }}>{currentGroup.fields.every(field => selectedFields.includes(field.key)) ? '取消本组' : '勾选本组'}</button>
       </div>
       <div className="mcp-target-fields-grid">
-        {currentGroup.fields.map(field => <label key={field.key} title={field.key}>
+        {currentGroup.fields.map(field => <label key={field.key} title={field.tool ? `智慧芽工具：${field.tool}` : field.key}>
           <input type="checkbox" disabled={disabled} checked={selectedFields.includes(field.key)} onChange={() => toggleField(field.key)} />
           {field.label}<small>{field.key}</small>
         </label>)}

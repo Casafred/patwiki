@@ -53,7 +53,8 @@ class SyncUpdateService:
         defaults = sorted(allowed - set(MCP_CUSTOM_FIELDS) - EXTERNAL_RELATION_FIELDS - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect", "agent", "priority_number", "priority_date"}) if allowed is not None else DEFAULT_UPDATE_FIELDS
         requested = list(dict.fromkeys(fields if fields is not None else defaults))
         aliases = {"mcp_family_members": "family_members", "mcp_cited_patents": "cited_patents"}
-        requested = list(dict.fromkeys(aliases.get(field, field) for field in requested))
+        if not connector or connector.provider_type not in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"}:
+            requested = list(dict.fromkeys(aliases.get(field, field) for field in requested))
         invalid = sorted(set(requested) - EXPLICIT_UPDATE_FIELDS)
         if invalid:
             raise BadRequestException("外部更新不允许覆盖字段：" + ", ".join(invalid))
@@ -144,7 +145,7 @@ class SyncUpdateService:
     @staticmethod
     def _materialize_mcp_resources(db: Session, batch: SyncUpdateBatch, patent: Patent, candidates: dict[str, Any], fields: list[str], confirmed_by: str) -> None:
         """Download selected PDF/images into PatWiki's attachment store."""
-        resource_fields = {"mcp_pdf_original", "mcp_abstract_figure", "mcp_description_figures"}
+        resource_fields = {"mcp_pdf_original", "mcp_abstract_figure", "mcp_description_figures", "mcp_intelligent_figures"}
         selected = resource_fields.intersection(fields)
         if not selected:
             return
@@ -153,6 +154,10 @@ class SyncUpdateService:
         from app.models import Attachment
         runtime = get_connector(batch.connector)
         try:
+            is_patsnap = batch.connector.provider_type in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"}
+            if is_patsnap:
+                # Preview stores stable URLs only. Refresh expiring signatures in memory.
+                runtime.fetch_patent_fields(ProviderIdentifier("publication", patent.publication_number), selected)
             for field in sorted(selected):
                 raw = candidates.get(field)
                 resources = raw if isinstance(raw, list) else [raw]
@@ -175,12 +180,12 @@ class SyncUpdateService:
                     ).first()
                     if duplicate:
                         continue
-                    extension = ".pdf" if kind == "pdf" else (".png" if mime == "image/png" else ".jpg")
+                    extension = ".pdf" if kind == "pdf" else (".png" if mime == "image/png" else ".webp" if mime == "image/webp" else ".jpg")
                     filename = f"{patent.publication_number or patent.id}-{field}{resource.get('figure_index', '')}{extension}"
                     AttachmentService.create_from_bytes(
                         db, batch.database_id, patent.id, target_field, filename, content, mime,
                         uploaded_by=confirmed_by, source_type="mcp",
-                        source_url=f"himmpat://{kind}/{resource['path']}", commit=False,
+                        source_url=str(resource["path"]) if is_patsnap else f"himmpat://{kind}/{resource['path']}", commit=False,
                     )
         finally:
             close = getattr(runtime, "close", None)

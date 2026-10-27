@@ -29,6 +29,8 @@ MCP_CUSTOM_FIELDS = {
     "mcp_transfer_events", "mcp_license_events", "mcp_pledge_events", "mcp_preservation_events",
     "mcp_value_evaluation", "mcp_technology_value", "mcp_legal_value", "mcp_market_value",
     "mcp_strategic_value", "mcp_pdf_original", "mcp_abstract_figure", "mcp_description_figures",
+    "mcp_intelligent_figures", "mcp_abstract_translation", "mcp_claim_translation", "mcp_description_translation",
+    "mcp_reexamination_invalidation", "mcp_customs_data", "mcp_award_data", "mcp_tech_summary",
 }
 
 EXTERNAL_RELATION_FIELDS = {"family_members", "cited_patents", "citing_patents"}
