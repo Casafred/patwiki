@@ -332,6 +332,7 @@ export const syncApi = {
   resolvePublications: (data: { database_id: number; publications?: string[]; patent_ids?: number[] }): Promise<{ matched: { patent_id: number; publication_number?: string; application_number?: string; title: string; country?: string; ungranted: boolean }[]; unmatched: string[] }> => api.post('/sync/resolve-publications', data),
   classifyPublications: (databaseId: number): Promise<{ updated: number }> => api.post(`/sync/databases/${databaseId}/classify-publications`),
   connectors: (): Promise<{ items: SyncConnector[]; archived_items?: SyncConnector[] }> => api.get('/sync/connectors'),
+  intelligentImages: (data: { connector_id: number; database_id: number; patent_id: number; lang?: string; limit?: number }): Promise<{ items: AttachmentMeta[]; count: number; source: string; patent_id: number }> => api.post('/sync/intelligent-images', data),
   createConnector: (data: {
     code: string
     name: string

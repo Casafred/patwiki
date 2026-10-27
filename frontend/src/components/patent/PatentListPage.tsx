@@ -31,6 +31,8 @@ import {
   GENERIC_UPDATE_FIELD_OPTIONS,
   HIMMPAT_OPTIONAL_FIELDS,
   HIMMPAT_UPDATE_FIELD_OPTIONS,
+  PATSNAP_OPTIONAL_FIELDS,
+  PATSNAP_UPDATE_FIELD_OPTIONS,
   type ExternalUpdateField,
 } from '../../lib/externalSync'
 import { formatApiDate, parseApiDate } from '../../lib/date'
@@ -70,6 +72,8 @@ type FilterOperator = 'contains' | 'eq' | 'starts_with' | 'ends_with' | 'is_empt
 function getExternalUpdateOptions(providerType: string | undefined, fields: FieldMeta[]): ExternalUpdateField[] {
   const options = providerType === 'himmpat_mcp'
     ? HIMMPAT_UPDATE_FIELD_OPTIONS
+    : providerType === 'patsnap_mcp' || providerType === 'mcp_patsnap' || providerType === 'zhihuiya_mcp'
+      ? PATSNAP_UPDATE_FIELD_OPTIONS
     : GENERIC_UPDATE_FIELD_OPTIONS.filter(option => fields.some(field => field.key === option.key))
   return options.map(option => ({
     ...option,
@@ -78,8 +82,13 @@ function getExternalUpdateOptions(providerType: string | undefined, fields: Fiel
 }
 
 function getDefaultExternalUpdateFields(providerType: string | undefined, options: ExternalUpdateField[]): string[] {
+  const optionalFields = providerType === 'himmpat_mcp'
+    ? HIMMPAT_OPTIONAL_FIELDS
+    : providerType === 'patsnap_mcp' || providerType === 'mcp_patsnap' || providerType === 'zhihuiya_mcp'
+      ? PATSNAP_OPTIONAL_FIELDS
+      : new Set<string>()
   return options
-    .filter(option => providerType !== 'himmpat_mcp' || !HIMMPAT_OPTIONAL_FIELDS.has(option.key))
+    .filter(option => !optionalFields.has(option.key))
     .map(option => option.key)
 }
 

@@ -11,6 +11,7 @@ PatWiki 的外部专利数据接入统一经过连接器和同步流水线。MCP
 - MCP 连接器注册：`provider_type=himmpat_mcp`、`transport=mcp`
 - MCP 工具目录发现和脱敏快照：`POST /api/sync/connectors/{id}/discover`
 - HimmPat 检索、按号码映射、著录项读取、可选法律状态补全
+- PatSnap（智慧芽）单端点 MCP 适配器，可替换 HimmPat 作为同步数据源
 - 标准化 MCP 只读连接器：供应商已能返回 PatWiki 标准记录时可直接复用
 
 ## 2. 分层规则
@@ -82,6 +83,39 @@ SQLite 只能保存 `env://VARIABLE` 或 `keyring://service/account` 引用，�
 7. 更新本文件和迁移说明，运行完整后端和前端验证。
 
 如果供应商已经返回标准的 `external_record_id`、`identifiers`、`fields` 结构，可以使用 `provider_type=mcp_standard` 和 `McpTransportReadonlyConnector`；只要存在供应商字段映射、业务状态码或特殊参数，就必须建立独立适配器。
+
+## 5.1 PatSnap（智慧芽）接入约定
+
+PatSnap 通过一个 Streamable HTTP MCP 端点提供专利工具，默认配置为：
+
+| 配置项 | 值 |
+| --- | --- |
+| `provider_type` | `patsnap_mcp`（兼容别名：`mcp_patsnap`、`zhihuiya_mcp`） |
+| `endpoint` | `https://connect.zhihuiya.com/1458a4/mcp` |
+| `protocol_version` | `2025-03-26` |
+| `transport` | `mcp` |
+| 认证 | 使用 `credential_ref` 引用本机安全凭证，不在 SQLite 保存 API key |
+
+连接流程与其他 MCP 供应商一致：`initialize` → `tools/list` → `tools/call`。PatSnap 的业务响应位于 `result.content[].text`，文本解析后应满足 `{success, error_code, data}`；只有 `success=true` 且 `error_code=0` 才视为业务成功。适配器会保留脱敏后的响应快照，并把错误转换为统一的 `ConnectorError`。
+
+已验证可发现的 20 个工具为：
+
+`search_patents`、`bibliography`、`family`、`forward_citation`、`claims`、`description`、`abstract_image`、`get_patent_legal_status`、`abstract_translated`、`claim_translated`、`description_translated`、`legal_data`、`reexamination_invalidation`、`license_data`、`transfer_data`、`pledge_data`、`customs_data`、`award_data`、`pdf`、`fulltext_image`。
+
+当前同步适配器使用的核心工具与参数如下：
+
+| 用途 | 工具 | 主要参数 |
+| --- | --- | --- |
+| 检索 | `search_patents` | 必填 `query_text`；分页使用 `offset`、`limit`，并传 `collapse_type=ALL` |
+| 著录项 | `bibliography` | 优先传 `patent_number`，也支持 `patent_id` |
+| 同族 | `family` | `patent_number` 或 `patent_id` |
+| 权利要求 | `claims` | `patent_number` 或 `patent_id`；可选 `replace_by_related` |
+| 说明书 | `description` | `patent_number` 或 `patent_id`；可选 `replace_by_related` |
+| 简单法律状态 | `get_patent_legal_status` | `patent_number` 或 `patent_id` |
+| 法律数据 | `legal_data` | `patent_number` 或 `patent_id` |
+| 附图 | `abstract_image`、`fulltext_image` | `patent_number` 或 `patent_id`；`fulltext_image` 支持 `offset`、`limit` |
+
+PatSnap 适配器位于 `backend/app/integrations/patsnap.py`，与 HimmPat 使用相同的 `PatentConnector` 契约、同步更新字段和 MCP 发现/映射 API。UI 中选择 PatSnap 后会切换到对应字段清单和 provider 类型；因此已有 HimmPat 连接器可以通过替换 provider 配置切换到 PatSnap，调用方无需改动同步流水线。
 
 ## 6. 当前限制
 

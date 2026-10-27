@@ -80,6 +80,28 @@ export const HIMMPAT_OPTIONAL_FIELDS = new Set([
   ...HIMMPAT_UPDATE_FIELDS.filter(key => key.startsWith('mcp_')),
 ])
 
+// PatSnap exposes the same provider-neutral update fields through its
+// documented bibliography/family/claims/description/legal tools.  Keeping a
+// separate list lets the UI prevent selecting HimmPat-only enrichments while
+// the backend still validates the final field set.
+export const PATSNAP_UPDATE_FIELD_OPTIONS: ExternalUpdateField[] = [
+  { key: 'publication_date', label: '公开日' }, { key: 'grant_date', label: '授权日' }, { key: 'legal_status', label: '法律状态' },
+  { key: 'application_number', label: '申请号' }, { key: 'publication_number', label: '公开号' }, { key: 'title', label: '标题' },
+  { key: 'abstract', label: '摘要' }, { key: 'applicant', label: '申请人' }, { key: 'assignee', label: '受让人' },
+  { key: 'inventor', label: '发明人' }, { key: 'filing_date', label: '申请日' }, { key: 'country', label: '国家/地区' },
+  { key: 'ipc_all', label: 'IPC 分类' }, { key: 'priority_date', label: '优先权日' }, { key: 'priority_number', label: '优先权号' },
+  { key: 'claims', label: '权利要求全文' }, { key: 'description_full', label: '说明书全文' },
+  { key: 'family_members', label: '同族成员' }, { key: 'legal_status_details', label: '法律状态详情' },
+  { key: 'mcp_record_fields', label: '完整著录数据' }, { key: 'mcp_priority_claims', label: '优先权原始数据' },
+  { key: 'mcp_classification_details', label: '分类原始数据' }, { key: 'mcp_party_details', label: '主体原始数据' },
+  { key: 'mcp_claim_metadata', label: '权利要求原始数据' }, { key: 'mcp_description_metadata', label: '说明书原始数据' },
+  { key: 'mcp_legal_event_details', label: '法律事件原始数据' },
+]
+export const PATSNAP_OPTIONAL_FIELDS = new Set(PATSNAP_UPDATE_FIELD_OPTIONS.map(field => field.key).filter(key => ![
+  'publication_date', 'application_number', 'publication_number', 'title', 'abstract', 'applicant', 'assignee',
+  'inventor', 'filing_date', 'country', 'ipc_all', 'legal_status', 'grant_date',
+].includes(key)))
+
 export const GENERIC_UPDATE_FIELD_OPTIONS: ExternalUpdateField[] = [
   { key: 'publication_number', label: '公开号' }, { key: 'application_number', label: '申请号' },
   { key: 'grant_number', label: '授权号' }, { key: 'title', label: '标题' }, { key: 'abstract', label: '摘要' },

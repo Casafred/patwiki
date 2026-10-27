@@ -15,6 +15,7 @@ from app.integrations.rest_json import RestJsonConnector
 from app.integrations.mcp_readonly import McpReadonlyConnector, McpTransportReadonlyConnector
 from app.integrations.mcp_transport import McpTransport
 from app.integrations.himmpat import HimmPatMcpAdapter
+from app.integrations.patsnap import PatsnapMcpAdapter
 from app.integrations.registry import get_connector
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
     "McpTransportReadonlyConnector",
     "McpTransport",
     "HimmPatMcpAdapter",
+    "PatsnapMcpAdapter",
     "get_connector",
 ]

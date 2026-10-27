@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { attachmentApi } from '../../api'
+import { attachmentApi, syncApi } from '../../api'
 import { BACKEND_URL } from '../../lib/api'
 import type { AttachmentMeta, JsonValue } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
@@ -37,6 +37,7 @@ export default function PatentFiguresField({ patentId, databaseId, value, onChan
   const [attachments, setAttachments] = useState<AttachmentMeta[]>(normalize(value))
   const [syncedValue, setSyncedValue] = useState(value)
   const [busy, setBusy] = useState(false)
+  const [intelligentBusy, setIntelligentBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -91,6 +92,22 @@ export default function PatentFiguresField({ patentId, databaseId, value, onChan
     }
   }
 
+  const fetchIntelligentImages = async () => {
+    if (!databaseId) { setError('该专利未归属数据库，无法获取智能附图'); return }
+    setIntelligentBusy(true); setError(null)
+    try {
+      const connectors = await syncApi.connectors()
+      const connector = connectors.items.find(item => item.enabled && ['patsnap_mcp', 'mcp_patsnap', 'zhihuiya_mcp'].includes(item.provider_type))
+      if (!connector) throw new Error('请先在外部同步中启用智慧芽 PatSnap 连接器')
+      const result = await syncApi.intelligentImages({ connector_id: connector.id, database_id: databaseId, patent_id: patentId, limit: 6 })
+      const next = [...attachments, ...result.items]
+      setAttachments(next); onChange?.(next)
+      if (!result.count) setError('智慧芽未返回可下载的智能附图')
+    } catch (requestError: unknown) {
+      setError(getErrorMessage(requestError, '智能附图获取失败'))
+    } finally { setIntelligentBusy(false) }
+  }
+
   return (
     <div className="patent-figures-field" onClick={event => event.stopPropagation()}>
       <div className="patent-figures-toolbar">
@@ -106,6 +123,9 @@ export default function PatentFiguresField({ patentId, databaseId, value, onChan
             onChange={event => { const files = event.target.files; if (files && files.length) void upload(files); event.target.value = '' }}
           />
         </label>
+        <button type="button" className="btn btn-secondary" disabled={busy || intelligentBusy || !databaseId} onClick={() => void fetchIntelligentImages()}>
+          {intelligentBusy ? '智能附图获取中...' : '智慧芽智能附图'}
+        </button>
       </div>
       {images.length === 0 ? (
         <div className="patent-figures-empty">暂无附图。Excel 导入、MCP 更新与手动上传的图片都会汇总在这里。</div>

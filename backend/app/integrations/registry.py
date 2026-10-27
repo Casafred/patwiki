@@ -44,6 +44,21 @@ def get_connector(definition: ConnectorDefinition):
             endpoint=definition.endpoint,
             credential_ref=(selected_credential.credential_ref if selected_credential else auth.get("credential_ref") or config.get("credential_ref")),
         )
+    if definition.provider_type in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"}:
+        from app.integrations.patsnap import PatsnapMcpAdapter
+        config = definition.config_json or {}
+        auth = config.get("auth") or {}
+        selected_credential = None
+        credential_id = auth.get("credential_id")
+        for credential in getattr(definition, "credentials", []) or []:
+            if credential_id is None or credential.id == credential_id:
+                selected_credential = credential
+                break
+        return PatsnapMcpAdapter(
+            config,
+            endpoint=definition.endpoint,
+            credential_ref=(selected_credential.credential_ref if selected_credential else auth.get("credential_ref") or config.get("credential_ref")),
+        )
     if definition.provider_type in {"mcp_readonly", "mcp_standard"} and definition.transport == "mcp":
         from app.integrations.mcp_readonly import McpTransportReadonlyConnector
         from app.integrations.demo import record_from_payload

@@ -5,7 +5,7 @@ import { fieldService as fieldApi } from '../../services'
 import { getErrorMessage } from '../../lib/errors'
 import { useAppStore } from '../../store'
 import type { ExternalObservation, FieldMeta, JsonObject, SyncConnector, SyncRecord, SyncRun, SyncSubscription } from '../../types'
-import { HIMMPAT_UPDATE_FIELD_OPTIONS } from '../../lib/externalSync'
+import { HIMMPAT_UPDATE_FIELD_OPTIONS, PATSNAP_UPDATE_FIELD_OPTIONS } from '../../lib/externalSync'
 import McpFieldUpdate from './McpFieldUpdate'
 import McpFieldSelection from './McpFieldSelection'
 
@@ -42,6 +42,7 @@ export default function ExternalSyncPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [mcpProvider, setMcpProvider] = useState<'himmpat' | 'patsnap'>('himmpat')
   const [mcpCode, setMcpCode] = useState('himmpat-mcp')
   const [mcpName, setMcpName] = useState('HimmPat MCP')
   const [mcpEndpoint, setMcpEndpoint] = useState('https://www.himmpat.com')
@@ -53,7 +54,14 @@ export default function ExternalSyncPage() {
   const [runRecords, setRunRecords] = useState<SyncRecord[]>([])
   const [runObservations, setRunObservations] = useState<ExternalObservation[]>([])
   const [runDetailBusy, setRunDetailBusy] = useState(false)
-  const updateFields = HIMMPAT_UPDATE_FIELD_OPTIONS.map(field => ({
+  const selectedConnector = connectors.find(item => item.id === selectedConnectorId)
+  const activeProviderType = activeTab === 'connectors'
+    ? (mcpProvider === 'patsnap' ? 'patsnap_mcp' : 'himmpat_mcp')
+    : selectedConnector?.provider_type || 'himmpat_mcp'
+  const providerFields = activeProviderType === 'patsnap_mcp' || activeProviderType === 'mcp_patsnap' || activeProviderType === 'zhihuiya_mcp'
+    ? PATSNAP_UPDATE_FIELD_OPTIONS
+    : HIMMPAT_UPDATE_FIELD_OPTIONS
+  const updateFields = providerFields.map(field => ({
     ...field,
     label: fields.find(meta => meta.key === field.key)?.name || field.label,
   }))
@@ -98,6 +106,10 @@ export default function ExternalSyncPage() {
       if (currentDatabaseId) void syncApi.resolvePublications({ database_id: currentDatabaseId, patent_ids: ids }).then(result => setPublicationMatches(result.matched)).catch(() => undefined)
     }
   }, [searchParams, currentDatabaseId])
+
+  useEffect(() => {
+    setTargetFields(current => current.filter(key => updateFields.some(field => field.key === key)))
+  }, [activeProviderType])
 
   const createSubscription = async () => {
     if (!currentDatabaseId || !selectedConnectorId || !name.trim()) return
@@ -180,14 +192,14 @@ export default function ExternalSyncPage() {
     } finally { setBusy(false) }
   }
 
-  const createHimmPatConnector = async () => {
+  const createMcpConnector = async () => {
     setBusy(true); setError(''); setMessage('')
     try {
       await syncApi.createConnector({
         code: mcpCode.trim(),
         name: mcpName.trim(),
         transport: 'mcp',
-        provider_type: 'himmpat_mcp',
+        provider_type: mcpProvider === 'patsnap' ? 'patsnap_mcp' : 'himmpat_mcp',
         endpoint: mcpEndpoint.trim(),
         capabilities_json: { search: true, fetch_patent: true, legal_events: mcpEnrichLegal, cursor_pagination: true },
         config_json: {
@@ -199,7 +211,7 @@ export default function ExternalSyncPage() {
         enabled: true,
       })
       setMcpApiKey('')
-      setMessage('HimmPat MCP 连接器已创建。请先执行工具发现或健康检查。')
+      setMessage(`${mcpProvider === 'patsnap' ? 'PatSnap' : 'HimmPat'} MCP 连接器已创建。请先执行工具发现或健康检查。`)
       await load()
     } catch (createError: unknown) {
       setError(getErrorMessage(createError, 'MCP 连接器创建失败'))
@@ -314,7 +326,7 @@ export default function ExternalSyncPage() {
               ))}
             </div>
           ) : (
-            <div className="empty-state">暂无连接器。可在下方接入 HimmPat MCP。</div>
+            <div className="empty-state">暂无连接器。可在下方接入 HimmPat 或 PatSnap MCP。</div>
           )}
 
           {archivedConnectors.length > 0 && (
@@ -331,16 +343,17 @@ export default function ExternalSyncPage() {
 
           <div className="mcp-access-layout">
             <section className="mcp-panel">
-              <div className="section-heading"><h3>接入 HimmPat MCP</h3><span>主站地址 + API Key</span></div>
-              <p className="mcp-panel-hint">填写 HimmPat 主站地址和 API Key。应用会分别调用检索、著录项和法律状态服务。</p>
+              <div className="section-heading"><h3>接入专利 MCP</h3><span>HimmPat / PatSnap</span></div>
+              <p className="mcp-panel-hint">选择供应商并填写 MCP 入口和 API Key。两者都映射到同一套检索、著录项、全文、同族和法律状态更新流程。</p>
               <div className="mcp-form-grid">
+                <label className="mcp-form-full">供应商<select className="form-input" value={mcpProvider} onChange={event => { const provider = event.target.value as 'himmpat' | 'patsnap'; setMcpProvider(provider); if (provider === 'patsnap') { setMcpCode('patsnap-mcp'); setMcpName('PatSnap MCP'); setMcpEndpoint('https://connect.zhihuiya.com/1458a4/mcp') } else { setMcpCode('himmpat-mcp'); setMcpName('HimmPat MCP'); setMcpEndpoint('https://www.himmpat.com') } }}><option value="himmpat">HimmPat</option><option value="patsnap">PatSnap / 智慧芽</option></select></label>
                 <label>连接器 code<input className="form-input" value={mcpCode} onChange={event => setMcpCode(event.target.value)} /><small>唯一且稳定的机器标识，用来保留连接器及历史引用；相同 code 不能创建两条连接。</small></label>
                 <label>连接器名称<input className="form-input" value={mcpName} onChange={event => setMcpName(event.target.value)} /><small>供用户识别的展示名称，可以调整；provider_type 决定实际调用的适配器。</small></label>
                 <label className="mcp-form-full">MCP 服务入口<input className="form-input" value={mcpEndpoint} onChange={event => setMcpEndpoint(event.target.value)} /></label>
                 <label className="mcp-form-full">API Key<input className="form-input" type="password" value={mcpApiKey} onChange={event => setMcpApiKey(event.target.value)} placeholder="Bearer 后面的 API Key" /></label>
                 <label className="checkbox-label mcp-form-full"><input type="checkbox" checked={mcpEnrichLegal} onChange={event => setMcpEnrichLegal(event.target.checked)} />同步时补全法律状态（可能产生额外供应商调用）</label>
               </div>
-              <button className="btn btn-primary" disabled={busy || !mcpCode.trim() || !mcpName.trim() || !mcpEndpoint.trim() || !mcpApiKey.trim()} onClick={() => void createHimmPatConnector()}>创建并连接 HimmPat MCP</button>
+              <button className="btn btn-primary" disabled={busy || !mcpCode.trim() || !mcpName.trim() || !mcpEndpoint.trim() || !mcpApiKey.trim()} onClick={() => void createMcpConnector()}>创建并连接 {mcpProvider === 'patsnap' ? 'PatSnap' : 'HimmPat'} MCP</button>
             </section>
 
             <McpFieldUpdate connectors={connectors} databaseId={currentDatabaseId} fields={updateFields} selectedFields={targetFields} onChange={setTargetFields} onUpdated={load} />

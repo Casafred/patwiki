@@ -41,9 +41,13 @@ class SyncUpdateService:
     @staticmethod
     def _validate_fields(fields: list[str] | None, connector: ConnectorDefinition | None = None) -> list[str]:
         allowed: set[str] | None = None
-        if connector and connector.provider_type in {"himmpat_mcp", "mcp_himmpat"}:
-            from app.integrations.himmpat import DOSSIER_UPDATE_FIELDS
-            allowed = set(DOSSIER_UPDATE_FIELDS) | {"legal_status", "grant_date"}
+        if connector and connector.provider_type in {"himmpat_mcp", "mcp_himmpat", "patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"}:
+            if connector.provider_type in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"}:
+                from app.integrations.patsnap import UPDATE_FIELDS
+                allowed = set(UPDATE_FIELDS) | {"legal_status", "grant_date"}
+            else:
+                from app.integrations.himmpat import DOSSIER_UPDATE_FIELDS
+                allowed = set(DOSSIER_UPDATE_FIELDS) | {"legal_status", "grant_date"}
             if (connector.config_json or {}).get("enrich_legal_on_fetch") or (connector.config_json or {}).get("enrich_legal_status"):
                 allowed.update({"legal_status", "grant_date"})
         defaults = sorted(allowed - set(MCP_CUSTOM_FIELDS) - EXTERNAL_RELATION_FIELDS - {"claims", "description_full", "technical_problem", "technical_solution", "technical_effect", "agent", "priority_number", "priority_date"}) if allowed is not None else DEFAULT_UPDATE_FIELDS
@@ -132,8 +136,10 @@ class SyncUpdateService:
 
     @staticmethod
     def _family_numbers(value: Any) -> str:
-        from app.integrations.himmpat import HimmPatMcpAdapter
-        return ", ".join(HimmPatMcpAdapter._patent_numbers(value))
+        if isinstance(value, str):
+            return value
+        from app.integrations.patsnap import _numbers
+        return ", ".join(_numbers(value))
 
     @staticmethod
     def _materialize_mcp_resources(db: Session, batch: SyncUpdateBatch, patent: Patent, candidates: dict[str, Any], fields: list[str], confirmed_by: str) -> None:

@@ -64,6 +64,70 @@ class McpToolRequest(BaseModel):
     arguments: dict = Field(default_factory=dict)
 
 
+class IntelligentImageRequest(BaseModel):
+    connector_id: int
+    database_id: int
+    patent_id: int
+    lang: str = Field(default="CN", min_length=2, max_length=8)
+    limit: int = Field(default=6, ge=1, le=30)
+
+
+@router.post("/intelligent-images")
+def fetch_intelligent_images(body: IntelligentImageRequest, db: Session = Depends(get_db)):
+    """Fetch briefing-MCP intelligent figures into the patent figure field."""
+    _require_database(db, body.database_id)
+    connector = _require_connector(db, body.connector_id)
+    if connector.provider_type not in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"}:
+        raise BadRequestException("智能附图目前需要智慧芽 PatSnap 连接器")
+    patent = db.query(Patent).filter(Patent.id == body.patent_id, in_database(body.database_id)).first()
+    if not patent:
+        raise NotFoundException("专利不存在或不属于指定数据库")
+    number = patent.publication_number or patent.application_number
+    if not number:
+        raise BadRequestException("专利缺少可用于智能附图的公开号或申请号")
+    runtime = None
+    try:
+        runtime = get_connector(connector)
+        result, _evidence = runtime.intelligent_images(number, lang=body.lang)
+        candidates = []
+        if isinstance(result, dict):
+            candidates = list(result.get("patent_images") or []) + list(result.get("pdf_images") or [])
+        from app.services.attachment_service import AttachmentService
+        from app.models import Attachment
+        created = []
+        seen = set()
+        for index, drawing in enumerate(candidates[:body.limit]):
+            if not isinstance(drawing, dict):
+                continue
+            url = drawing.get("path") or drawing.get("storage_path")
+            if not url or str(url).split("?", 1)[0] in seen:
+                continue
+            seen.add(str(url).split("?", 1)[0])
+            content, mime = runtime.download_intelligent_image(str(url))
+            digest = __import__("hashlib").sha256(content).hexdigest()
+            if db.query(Attachment.id).filter(Attachment.database_id == body.database_id, Attachment.patent_id == patent.id, Attachment.field_key == "patent_figures", Attachment.sha256 == digest, Attachment.deleted_at.is_(None)).first():
+                continue
+            extension = ".png" if mime == "image/png" else (".webp" if mime == "image/webp" else ".jpg")
+            created.append(AttachmentService.create_from_bytes(
+                db, body.database_id, patent.id, "patent_figures",
+                f"{number}-智能附图-{index + 1}{extension}", content, mime,
+                uploaded_by="patsnap-intelligent-image", source_type="mcp", source_url=str(url),
+                commit=False,
+            ))
+        db.commit()
+        return {"items": created, "count": len(created), "source": "intelligent_image", "patent_id": body.patent_id}
+    except BadRequestException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise BadRequestException(f"智能附图获取失败：{exc}") from exc
+    finally:
+        if runtime is not None:
+            close = getattr(runtime, "close", None)
+            if callable(close):
+                close()
+
+
 @router.post("/resolve-publications")
 def resolve_publications(body: PublicationMatchRequest, db: Session = Depends(get_db)):
     _require_database(db, body.database_id)
@@ -273,7 +337,10 @@ def discover_connector_tools(connector_id: int, db: Session = Depends(get_db)):
         if not callable(discover):
             raise BadRequestException("该连接器不支持 MCP 工具发现")
         catalog = discover()
-        from app.integrations.himmpat import tool_mappable_fields
+        if connector.provider_type in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"}:
+            from app.integrations.patsnap import tool_mappable_fields
+        else:
+            from app.integrations.himmpat import tool_mappable_fields
         for service in catalog.get("services", []):
             for tool in service.get("tools", []):
                 tool["mappable_fields"] = tool_mappable_fields(tool.get("name"))
@@ -333,7 +400,8 @@ def call_connector_tool(connector_id: int, body: McpToolRequest, db: Session = D
         snapshot = ExternalSnapshot(connector_id=connector.id,
                                     sync_run_id=run.id,
                                     request_metadata={"mode": "mcp_tool", "service": body.service, "tool": body.tool},
-                                    payload_json=evidence, payload_hash=hash_payload(evidence), source_version="himmpat-mcp")
+                                    payload_json=evidence, payload_hash=hash_payload(evidence),
+                                    source_version="patsnap-mcp" if connector.provider_type in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"} else "himmpat-mcp")
         db.add(snapshot)
         db.commit()
         return {"data": data, "snapshot_id": snapshot.id, "service": body.service, "tool": body.tool}
@@ -369,7 +437,10 @@ def map_tool_result_preview(connector_id: int, body: McpToolMapPreviewRequest, d
         first = errors[0]
         path = ".".join(str(part) for part in first.absolute_path) or "arguments"
         raise BadRequestException(f"工具参数 {path} 不符合规则：{first.validator}")
-    from app.integrations.himmpat import tool_mappable_fields
+    if connector.provider_type in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"}:
+        from app.integrations.patsnap import tool_mappable_fields
+    else:
+        from app.integrations.himmpat import tool_mappable_fields
     mappable = tool_mappable_fields(body.tool)
     if not mappable:
         raise BadRequestException("该工具的结果暂不支持映射到专利字段")
@@ -389,7 +460,7 @@ def map_tool_result_preview(connector_id: int, body: McpToolMapPreviewRequest, d
             external_record_id=str(patent_id or patent.publication_number or patent.id),
             identifiers=tuple(SyncUpdateService._identifiers(patent)),
             fields=mapped,
-            source_version="himmpat-mcp",
+            source_version="patsnap-mcp" if connector.provider_type in {"patsnap_mcp", "mcp_patsnap", "zhihuiya_mcp"} else "himmpat-mcp",
             raw_payload=evidence,
         )
         batch = SyncUpdateService.preview_from_records(
