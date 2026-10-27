@@ -1,3 +1,4 @@
+import PageHeader from '../common/PageHeader'
 import { useState, useEffect, useCallback } from 'react'
 import { sharingApi, databaseApi, departmentApi, productLineApi } from '../../api'
 import { useAppStore } from '../../store'
@@ -215,10 +216,7 @@ export default function SharingPage() {
   return (
     <div className="workspace-page sharing-page">
       <div className="workspace-page-shell sharing-shell">
-      <div className="page-header workspace-page-header">
-        <h2 className="page-title">权限管理与协作</h2>
-        <p className="page-subtitle">管理成员身份、部门归属与专利库访问权限</p>
-      </div>
+      <PageHeader title="权限管理与协作" description="管理成员身份、部门归属与专利库访问权限" />
 
       <CollaborationSyncPanel />
       <details style={{ marginTop: 16 }}>

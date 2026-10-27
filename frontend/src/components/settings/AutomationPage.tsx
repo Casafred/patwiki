@@ -106,7 +106,7 @@ export default function AutomationPage() {
 
   return (
     <div className="page-container automation-page">
-      <div className="page-header dashboard-header">
+      <div className="workspace-heading page-header dashboard-header">
         <div><h2 className="page-title">自动化规则</h2><p className="page-subtitle">把重复的字段更新、提醒和导入后处理交给规则。</p></div>
         <div className="dashboard-header-actions"><button className="btn btn-secondary" disabled={busy || !currentDatabaseId} onClick={() => void runSchedule()}>运行定时规则</button><button className="btn btn-primary" onClick={() => setShowForm(value => !value)}>{showForm ? '收起' : '新建规则'}</button></div>
       </div>

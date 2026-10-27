@@ -150,7 +150,7 @@ export default function ImportHistoryPage() {
   return (
     <div className="workspace-page import-history-page">
       <div className="workspace-page-shell import-history-shell">
-      <div className="page-header workspace-page-header">
+      <div className="workspace-heading page-header workspace-page-header">
         <div>
           <h2 className="page-title">导入历史</h2>
           <p className="page-subtitle">{currentDatabaseName ? `当前库：${currentDatabaseName} · ` : ''}查看文件导入与库间同步的处理结果</p>

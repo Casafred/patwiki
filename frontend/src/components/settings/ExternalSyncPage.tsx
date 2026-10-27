@@ -270,7 +270,7 @@ export default function ExternalSyncPage() {
 
   return (
     <div className="page-container automation-page mcp-page">
-      <div className="page-header dashboard-header">
+      <div className="workspace-heading page-header dashboard-header">
         <div>
           <h2 className="page-title">MCP 外部数据更新</h2>
           <p className="page-subtitle">连接数据源，设置当前库的更新范围、字段与周期；所有变更保留来源和运行记录。</p>

@@ -18,8 +18,8 @@ import type {
   Project,
 } from '../../types'
 import { getErrorMessage } from '../../lib/errors'
-import BrandLogo from '../common/BrandLogo'
-import BrandWordmark from '../common/BrandWordmark'
+import Icon from '../common/Icon'
+import PageHeader from '../common/PageHeader'
 type ManagementTab = 'products' | 'projects' | 'organization' | 'product-lines'
 
 const tabs: Array<{ key: ManagementTab; label: string }> = [
@@ -150,13 +150,7 @@ function ManagementHeader({
   createLabel?: string
 }) {
   return (
-    <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-      <div>
-        <h2 className="page-title">{title}</h2>
-        <p className="page-subtitle">{description}</p>
-      </div>
-      <button className="btn btn-primary" onClick={onCreate}>{createLabel}</button>
-    </div>
+    <PageHeader title={title} description={description} actions={<button className="btn btn-primary" onClick={onCreate}>{createLabel}</button>} />
   )
 }
 
@@ -417,10 +411,7 @@ export default function ManagementPage() {
 
   const renderProducts = () => (
     <>
-      <div className="management-hero">
-        <div><span className="management-kicker">业务资产 · 产品目录</span><h2>产品管理</h2><p>统一维护产品、产品线和负责人，产品会同步成为专利库与项目的业务入口。</p></div>
-        <button className="btn btn-primary" onClick={() => { beginCreate(); setShowProductForm(true) }}>新增产品</button>
-      </div>
+      <ManagementHeader title="产品管理" description="维护产品、产品线和负责人，集中管理业务资产。" onCreate={() => { beginCreate(); setShowProductForm(true) }} createLabel="新增产品" />
       <div className="management-overview-grid">
         <div className="management-overview-card accent"><span>产品总数</span><strong>{products.length}</strong><small>已建立的业务产品</small></div>
         <div className="management-overview-card"><span>启用中</span><strong>{products.filter(item => item.is_active !== false).length}</strong><small>可用于库内关联</small></div>
@@ -451,7 +442,7 @@ export default function ManagementPage() {
       {filteredProducts.length > 0 ? <div className="management-product-grid">{filteredProducts.map(product => {
         const owner = accounts.find(account => account.id === product.owner_user_id)?.display_name || accounts.find(account => account.id === product.owner_user_id)?.username || personNameById.get(product.owner_id ?? 0)
         return <article className="management-product-card" key={product.id}>
-          <div className="management-product-card-top"><div className="management-product-mark"><BrandLogo size={28} decorative /></div><div className="management-product-title"><strong>{product.name}</strong><span>{product.code || '未设置编码'}</span></div><span className={`management-status-dot ${product.is_active === false ? 'inactive' : ''}`}>{product.is_active === false ? '停用' : '启用'}</span></div>
+          <div className="management-product-card-top"><div className="management-product-mark"><Icon name="database" size={22} /></div><div className="management-product-title"><strong>{product.name}</strong><span>{product.code || '未设置编码'}</span></div><span className={`management-status-dot ${product.is_active === false ? 'inactive' : ''}`}>{product.is_active === false ? '停用' : '启用'}</span></div>
           <div className="management-product-tags"><span>{productLineNameById.get(product.product_line_id ?? 0) || '未关联产品线'}</span>{product.category && <span>{product.category}</span>}</div>
           <p>{product.description || '暂无产品描述，编辑后可补充业务定位。'}</p>
           <div className="management-product-stats"><div><strong>{product.patent_count ?? 0}</strong><span>关联专利</span></div><div><strong>{owner || '—'}</strong><span>负责人</span></div></div>
@@ -488,7 +479,7 @@ export default function ManagementPage() {
       <TableShell><TableHead><Th>项目</Th><Th>项目分类</Th><Th>等级 / 类型</Th><Th>产品线</Th><Th>阶段 / 状态</Th><Th>专利数</Th><Th>操作</Th></TableHead><tbody>{projects.map(project => {
         const legacyStatus = project.status === 'active' || project.status === 'planned' ? 'in_progress' : project.status === 'completed' ? 'shipped' : project.status === 'archived' ? 'paused' : project.status
         const productLinesForProject = productLines.filter(line => (project.product_line_ids || []).includes(line.id)).map(line => line.name).join('、')
-        return <tr key={project.id}><Td><span className="management-project-name"><BrandLogo size={22} decorative /><button type="button" onClick={() => navigate(`/projects/${project.id}`)} style={{ border: 0, background: 'transparent', color: '#1d4ed8', padding: 0, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }}>{project.name}</button></span>{(project.project_no || project.code) && <div style={{ color: '#94a3b8', marginTop: 3, marginLeft: 30 }}>{project.project_no || project.code}</div>}</Td><Td>{project.product_category || productNameById.get(project.product_id ?? 0) || '-'}</Td><Td>{[project.project_level, project.project_type].filter(Boolean).join(' / ') || '-'}</Td><Td>{productLinesForProject || '-'}</Td><Td>{project.current_stage || '-'} · {legacyStatus === 'paused' ? '暂停' : legacyStatus === 'shipped' ? '已出货' : '进行中'}</Td><Td>{project.patent_count ?? 0}</Td><Td><RowActions onEdit={() => { setEditingProjectId(project.id); setProjectForm({ ...emptyProject, name: project.name, project_no: project.project_no || project.code || '', product_id: project.product_id ? String(project.product_id) : '', product_category: project.product_category || '', product_line_ids: (project.product_line_ids || []).map(String), project_level: project.project_level || '', project_type: project.project_type || '', brands: (project.brands || []).join(', '), project_manager: project.project_manager || '', research_owner: project.research_owner || '', shipping_regions: project.shipping_regions || '', current_stage: project.current_stage || '', product_model: project.product_model || '', module: project.module || '', status: legacyStatus || 'in_progress', start_date: project.start_date || '', end_date: project.end_date || '', description: project.description || '' }) }} onDelete={() => void remove(`项目“${project.name}”`, () => projectApi.delete(project.id), () => setProjects(current => current.filter(item => item.id !== project.id)))} /></Td></tr>
+        return <tr key={project.id}><Td><span className="management-project-name"><Icon name="file" size={18} /><button type="button" onClick={() => navigate(`/projects/${project.id}`)} style={{ border: 0, background: 'transparent', color: '#1d4ed8', padding: 0, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }}>{project.name}</button></span>{(project.project_no || project.code) && <div style={{ color: '#94a3b8', marginTop: 3, marginLeft: 30 }}>{project.project_no || project.code}</div>}</Td><Td>{project.product_category || productNameById.get(project.product_id ?? 0) || '-'}</Td><Td>{[project.project_level, project.project_type].filter(Boolean).join(' / ') || '-'}</Td><Td>{productLinesForProject || '-'}</Td><Td>{project.current_stage || '-'} · {legacyStatus === 'paused' ? '暂停' : legacyStatus === 'shipped' ? '已出货' : '进行中'}</Td><Td>{project.patent_count ?? 0}</Td><Td><RowActions onEdit={() => { setEditingProjectId(project.id); setProjectForm({ ...emptyProject, name: project.name, project_no: project.project_no || project.code || '', product_id: project.product_id ? String(project.product_id) : '', product_category: project.product_category || '', product_line_ids: (project.product_line_ids || []).map(String), project_level: project.project_level || '', project_type: project.project_type || '', brands: (project.brands || []).join(', '), project_manager: project.project_manager || '', research_owner: project.research_owner || '', shipping_regions: project.shipping_regions || '', current_stage: project.current_stage || '', product_model: project.product_model || '', module: project.module || '', status: legacyStatus || 'in_progress', start_date: project.start_date || '', end_date: project.end_date || '', description: project.description || '' }) }} onDelete={() => void remove(`项目“${project.name}”`, () => projectApi.delete(project.id), () => setProjects(current => current.filter(item => item.id !== project.id)))} /></Td></tr>
       })}</tbody></TableShell>{projects.length === 0 && <EmptyState text="暂无项目" />}
     </>
   )
@@ -515,7 +506,6 @@ export default function ManagementPage() {
 
   return (
     <div className="management-page">
-      <div className="management-brandline"><BrandWordmark width={190} decorative /><span>产品与项目管理</span></div>
       <div className="management-tabs" role="tablist" aria-label="管理资源">
         {tabs.map(item => <button key={item.key} className={`management-tab ${tab === item.key ? 'active' : ''}`} onClick={() => { setTab(item.key); setError('') }}><span>{item.label}</span><small>{item.key === 'products' ? products.length : item.key === 'projects' ? projects.length : item.key === 'organization' ? people.length : productLines.length}</small></button>)}
       </div>

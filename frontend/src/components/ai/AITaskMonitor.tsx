@@ -1,3 +1,4 @@
+import PageHeader from '../common/PageHeader'
 import { useState, useEffect, useCallback } from 'react'
 import { aiApi } from '../../api'
 import type { AITask, AITaskRequestSample, AITaskResponseSample, CustomField } from '../../types'
@@ -118,12 +119,7 @@ export default function AITaskMonitor() {
 
   return (
     <div className="ai-task-monitor-page">
-      <div className="page-header">
-        <h2 className="page-title">AI抽取任务记录</h2>
-        <p className="page-subtitle">
-          查看 AI 字段抽取任务进度
-        </p>
-      </div>
+      <PageHeader title="AI抽取任务记录" description="查看 AI 字段抽取任务进度" />
 
       <div className="toolbar">
         <select

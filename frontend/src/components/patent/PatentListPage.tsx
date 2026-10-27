@@ -778,6 +778,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [translationResult, setTranslationResult] = useState<{ content?: string; loading: boolean; error?: string } | null>(null)
   const [cellSelection, setCellSelection] = useState<{ start: { row: number; col: number }; end: { row: number; col: number } } | null>(null)
   const dragSelectingRef = useRef(false)
+  const [selectionCopyMessage, setSelectionCopyMessage] = useState('')
   const isCellSelected = (row: number, col: number) => {
     if (!cellSelection) return false
     const minRow = Math.min(cellSelection.start.row, cellSelection.end.row)
@@ -848,6 +849,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     mode: tableViewMode,
     page: tableViewMode === 'continuous' ? null : page,
   })}`
+
+  useEffect(() => {
+    dragSelectingRef.current = false
+    setCellSelection(null)
+    setSelectionCopyMessage('')
+  }, [tableScopeKey])
 
   const detailConfigKey = `${activeView?.id ?? `database-${activeDatabaseId ?? 'global'}`}`
   const configuredDetailKeys = detailFieldConfig[detailConfigKey]
@@ -3081,31 +3088,58 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       })
   })()
 
-  const copySelectedCellRange = useCallback(async () => {
-    if (!cellSelection) return false
+  const selectedRangeText = () => {
+    if (!cellSelection) return ''
     const minRow = Math.min(cellSelection.start.row, cellSelection.end.row)
     const maxRow = Math.max(cellSelection.start.row, cellSelection.end.row)
     const minCol = Math.min(cellSelection.start.col, cellSelection.end.col)
     const maxCol = Math.max(cellSelection.start.col, cellSelection.end.col)
-    const rows = patents.slice(minRow, maxRow + 1).map(patent =>
-      visibleFields.slice(minCol, maxCol + 1).map(field => toTsvCell(columnValueText(patent, field.key))).join('\t'),
-    )
-    if (!rows.length) return false
-    await writeClipboardText(rows.join('\r\n'))
-    return true
-  }, [cellSelection, patents, visibleFields])
+    // Only copy rendered data rows: collapsed groups and image rows are excluded.
+    const renderedRows = new Set(Array.from(tableWrapperRef.current?.querySelectorAll<HTMLElement>('[data-range-row]') || [])
+      .map(cell => Number(cell.dataset.rangeRow)))
+    return familyDisplayPatents.slice(minRow, maxRow + 1)
+      .filter((_, index) => renderedRows.has(minRow + index))
+      .map(patent => visibleFields.slice(minCol, maxCol + 1)
+        .map(field => toTsvCell(columnValueText(patent, field.key))).join('\t')).join('\r\n')
+  }
+  const copySelectedCellRange = async () => {
+    const text = selectedRangeText()
+    if (!text) return
+    try { await writeClipboardText(text); setSelectionCopyMessage('已复制，可粘贴到 Excel 或其他应用') }
+    catch { setSelectionCopyMessage('复制失败，请使用 Ctrl/Cmd + C 重试') }
+  }
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c' || !cellSelection) return
+    const onCopy = (event: ClipboardEvent) => {
+      if (!cellSelection || !event.clipboardData) return
       const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      if (target?.closest('input, textarea, [contenteditable="true"], [role="dialog"]')) return
+      // Preserve normal text copying in other panels.
+      if (window.getSelection()?.toString()) return
       event.preventDefault()
-      void copySelectedCellRange().catch(() => alert('复制选中单元格失败，请重试'))
+      event.clipboardData.setData('text/plain', selectedRangeText())
+      setSelectionCopyMessage('已复制，可粘贴到 Excel 或其他应用')
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [cellSelection, copySelectedCellRange])
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.closest('.data-grid-wrapper, .cell-selection-status, .context-menu')) {
+        setCellSelection(null)
+        dragSelectingRef.current = false
+      }
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setCellSelection(null); dragSelectingRef.current = false }
+    }
+    document.addEventListener('copy', onCopy)
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('copy', onCopy)
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
+  })
+
   const detailVisibleFields = configuredDetailKeys
     ? configuredDetailKeys.map(key => fields.find(field => field.key === key)).filter((field): field is FieldMeta => Boolean(field))
     : fields.filter(field => DEFAULT_DETAIL_FIELD_KEYS.includes(field.key)).length > 0
@@ -3669,7 +3703,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         </div>
       )}
 
-      {cellSelection && <div className="cell-selection-status" role="status"><span>已选择 {Math.abs(cellSelection.end.row - cellSelection.start.row) + 1} × {Math.abs(cellSelection.end.col - cellSelection.start.col) + 1} 个单元格</span><kbd>Ctrl/Cmd + C</kbd> 复制为 TSV</div>}
+      {cellSelection && <div className="cell-selection-status" role="status"><span>已选择 {Math.abs(cellSelection.end.row - cellSelection.start.row) + 1} × {Math.abs(cellSelection.end.col - cellSelection.start.col) + 1} 个单元格</span><kbd>Ctrl/Cmd + C</kbd><button type="button" className="btn btn-xs btn-secondary" onClick={() => void copySelectedCellRange()}>复制选区</button><span>{selectionCopyMessage || '按行列复制文本，可粘贴到 Excel'}</span><button type="button" className="btn btn-xs btn-ghost" onClick={() => setCellSelection(null)}>取消选区</button></div>}
       <div ref={tableWrapperRef} className={`data-grid-wrapper${cellSelection ? ' has-cell-selection' : ''}`} onScroll={handleTableScroll} style={{ zoom: tableZoom / 100 }}>
         {activeView?.layout_type === 'kanban' ? (
           <KanbanView
@@ -4249,6 +4283,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     return (
                     <td
                       key={field.key}
+                      data-range-row={rowIdx}
                       className={`${isFrozen ? 'col-frozen' : ''} ${field.editable ? 'cell-editable' : ''} ${cellIsEditing ? 'cell-editing' : ''} ${activeCell?.patentId === p.id ? 'crosshair-row-cell' : ''} ${activeCell?.fieldKey === field.key ? 'crosshair-column-cell' : ''} ${activeCell?.patentId === p.id && activeCell?.fieldKey === field.key ? 'crosshair-cell' : ''} ${isCellSelected(rowIdx, visibleFields.findIndex(item => item.key === field.key)) ? 'cell-range-selected' : ''}`}
                       style={{
                         width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
@@ -4264,6 +4299,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                       onMouseDown={(event) => {
                         if (event.button !== 0 || cellIsEditing || (event.target as HTMLElement).closest('button, input, select, textarea, a, [contenteditable="true"]')) return
                         event.preventDefault()
+                        setSelectionCopyMessage('')
+                        window.getSelection()?.removeAllRanges()
                         dragSelectingRef.current = true
                         const col = visibleFields.findIndex(item => item.key === field.key)
                         setCellSelection({ start: { row: rowIdx, col }, end: { row: rowIdx, col } })
@@ -4271,7 +4308,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                       }}
                       onMouseEnter={() => {
                         if (!dragSelectingRef.current || !cellSelection) return
-                        setCellSelection({ ...cellSelection, end: { row: rowIdx, col: visibleFields.findIndex(item => item.key === field.key) } })
+                        setCellSelection(previous => previous ? { ...previous, end: { row: rowIdx, col: visibleFields.findIndex(item => item.key === field.key) } } : null)
                       }}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -5062,6 +5099,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     <div className="menu-heading">
                       {patent.title?.slice(0, 30) || `#${patent.id}`}
                     </div>
+                    {cellSelection && <div className="menu-item" onClick={() => void copySelectedCellRange()}><Icon name="copy" /> 复制选中单元格</div>}
                     <div className="menu-item" onClick={openContextPatent}>
                       <Icon name="file" /> 查看详情
                     </div>

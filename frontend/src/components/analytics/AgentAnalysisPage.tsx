@@ -1,3 +1,4 @@
+import PageHeader from '../common/PageHeader'
 import { useEffect, useState } from 'react'
 import { analyticsApi, databaseApi, fieldApi } from '../../api'
 import { useAppStore } from '../../store'
@@ -68,10 +69,7 @@ export default function AgentAnalysisPage() {
 
   return (
     <div className="page-container agent-analysis-page">
-      <div className="page-header">
-        <h2 className="page-title">AGENTAI 智能分析看板</h2>
-        <p className="page-subtitle">输入分析需求，指定数据范围，系统会先做基层代码统计，再交给AI做多维分析</p>
-      </div>
+      <PageHeader title="智能分析" description="指定数据范围，分析专利布局、技术方向与竞争态势" />
 
       {/* 分析需求输入区 */}
       <div style={{

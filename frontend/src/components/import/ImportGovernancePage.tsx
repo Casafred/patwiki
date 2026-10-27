@@ -227,7 +227,7 @@ export default function ImportGovernancePage() {
 
   return (
     <div className="management-page gov-page">
-      <div className="page-header">
+      <div className="workspace-heading page-header">
         <div>
           <h2 className="page-title">数据治理</h2>
           <p className="page-subtitle">来源差异与字段取舍</p>

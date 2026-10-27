@@ -1,3 +1,4 @@
+import PageHeader from '../common/PageHeader'
 import { useState, useEffect, useCallback } from 'react'
 import { settingsApi } from '../../api'
 import { getErrorMessage } from '../../lib/errors'
@@ -121,10 +122,7 @@ export default function SettingsPage({ onSemanticModels }: { onSemanticModels?: 
   return (
     <div className="workspace-page settings-page">
       <div className="workspace-page-shell settings-shell">
-      <div className="page-header settings-page-header">
-        <h2 className="page-title">设置</h2>
-        <p className="page-subtitle">配置 LLM API 以启用 AI 字段抽取功能</p>
-      </div>
+      <PageHeader title="设置" description="配置 LLM API 以启用 AI 字段抽取功能" />
 
       {/* LLM 配置卡片 */}
       {onSemanticModels && <div className="semantic-model-actions" style={{ marginBottom: 16 }}><button className="btn btn-secondary" onClick={onSemanticModels}><Icon name="database" />Embedding / Rerank 模型配置</button></div>}

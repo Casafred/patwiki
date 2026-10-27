@@ -115,7 +115,7 @@ export default function AttachmentLibraryPage() {
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url) }, [preview])
 
   return <section className="attachment-library-page">
-    <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', gap: 16 }}>
+    <div className="workspace-heading page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', gap: 16 }}>
       <div><h2 className="page-title">附件库</h2><p className="page-subtitle">按文件类型、所属对象和来源集中管理附件。</p></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><input className="form-input" style={{ width: 280 }} placeholder="搜索文件、所属对象或备注" value={query} onChange={event => setQuery(event.target.value)} /><button className="btn btn-secondary" onClick={() => { setShowTrash(value => !value); setSelected(new Set()) }}>{showTrash ? '返回附件库' : '打开回收站'}</button></div>
     </div>
