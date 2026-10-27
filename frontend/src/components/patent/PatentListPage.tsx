@@ -778,6 +778,36 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
   const [translationResult, setTranslationResult] = useState<{ content?: string; loading: boolean; error?: string } | null>(null)
   const [cellSelection, setCellSelection] = useState<{ start: { row: number; col: number }; end: { row: number; col: number } } | null>(null)
   const dragSelectingRef = useRef(false)
+  const [cellPreview, setCellPreview] = useState<{ x: number; y: number; fieldName: string; content: string } | null>(null)
+  const cellPreviewTimerRef = useRef<number | null>(null)
+  const clearCellPreviewTimer = () => {
+    if (cellPreviewTimerRef.current !== null) {
+      window.clearTimeout(cellPreviewTimerRef.current)
+      cellPreviewTimerRef.current = null
+    }
+  }
+  const scheduleCellPreview = (event: React.PointerEvent<HTMLTableCellElement>, patent: Patent, field: FieldMeta) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    clearCellPreviewTimer()
+    setCellPreview(null)
+    const target = event.target as HTMLElement
+    if (target.closest('button, input, select, textarea, a, [contenteditable="true"]')) return
+    const content = columnValueText(patent, field.key)
+    if (!content.trim()) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    cellPreviewTimerRef.current = window.setTimeout(() => {
+      const width = Math.min(520, window.innerWidth - 24)
+      const height = Math.min(420, window.innerHeight - 24)
+      setCellPreview({
+        x: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
+        y: Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - height - 12)),
+        fieldName: field.name,
+        content,
+      })
+      cellPreviewTimerRef.current = null
+    }, 450)
+  }
+  useEffect(() => () => clearCellPreviewTimer(), [])
   const [selectionCopyMessage, setSelectionCopyMessage] = useState('')
   const isCellSelected = (row: number, col: number) => {
     if (!cellSelection) return false
@@ -3125,10 +3155,12 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
       if (!target.closest('.data-grid-wrapper, .cell-selection-status, .context-menu')) {
         setCellSelection(null)
         dragSelectingRef.current = false
+        clearCellPreviewTimer()
       }
+      if (!target.closest('.cell-content-preview')) setCellPreview(null)
     }
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setCellSelection(null); dragSelectingRef.current = false }
+      if (event.key === 'Escape') { setCellSelection(null); dragSelectingRef.current = false; setCellPreview(null); clearCellPreviewTimer() }
     }
     document.addEventListener('copy', onCopy)
     document.addEventListener('pointerdown', dismiss)
@@ -4296,6 +4328,11 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                         ...(isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 5, background: '#fff' } : {}),
                         ...getConditionalCellStyle(field.key, getFieldValue(p, field.key)),
                       }}
+                      onPointerDown={(event) => scheduleCellPreview(event, p, field)}
+                      onPointerUp={clearCellPreviewTimer}
+                      onPointerCancel={clearCellPreviewTimer}
+                      onPointerMove={clearCellPreviewTimer}
+                      onPointerLeave={clearCellPreviewTimer}
                       onMouseDown={(event) => {
                         if (event.button !== 0 || cellIsEditing || (event.target as HTMLElement).closest('button, input, select, textarea, a, [contenteditable="true"]')) return
                         event.preventDefault()
@@ -5066,6 +5103,27 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}><button className="btn btn-primary" onClick={() => void writeClipboardText(translationResult.content || '').catch(() => alert('复制失败，请手动选择译文复制'))}><Icon name="copy" /> 一键复制</button></div>
         </>}
       </Modal>}
+
+      {cellPreview && (
+        <div
+          className="cell-content-preview"
+          style={{ left: cellPreview.x, top: cellPreview.y }}
+          role="dialog"
+          aria-label={`${cellPreview.fieldName}完整内容`}
+          onPointerDown={event => event.stopPropagation()}
+        >
+          <div className="cell-content-preview-header">
+            <strong>{cellPreview.fieldName}</strong>
+            <button type="button" aria-label="关闭" onClick={() => setCellPreview(null)}>×</button>
+          </div>
+          <div className="cell-content-preview-body">{cellPreview.content}</div>
+          <div className="cell-content-preview-actions">
+            <button type="button" className="btn btn-xs btn-secondary" onClick={() => void writeClipboardText(cellPreview.content)}>
+              <Icon name="copy" /> 复制全部内容
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 右键上下文菜单 */}
       {contextMenu && (

@@ -8928,3 +8928,51 @@ body {
   max-width: calc(100vw - 48px); padding: 8px 12px; border-radius: 8px;
   box-shadow: 0 4px 18px rgba(15, 23, 42, .12);
 }
+
+.cell-content-preview {
+  position: fixed;
+  z-index: 1300;
+  width: min(520px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, .18);
+}
+.cell-content-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b;
+  font-size: 13px;
+}
+.cell-content-preview-header button {
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+.cell-content-preview-body {
+  max-height: 330px;
+  overflow: auto;
+  padding: 14px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.cell-content-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 1px solid #e2e8f0;
+}
