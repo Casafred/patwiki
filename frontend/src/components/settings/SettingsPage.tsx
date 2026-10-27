@@ -21,6 +21,8 @@ export default function SettingsPage({ onSemanticModels }: { onSemanticModels?: 
   })
   const [aiBatchConcurrency, setAiBatchConcurrency] = useState(3)
   const [aiUseCache, setAiUseCache] = useState(true)
+  const [translation, setTranslation] = useState({ translation_provider: 'openai', translation_api_key: '', translation_model: 'gpt-4o-mini', translation_base_url: 'https://api.openai.com/v1', translation_temperature: 0.2, translation_max_tokens: 4000 })
+  const [translationKeyEdited, setTranslationKeyEdited] = useState(false)
 
   // 用户是否手动改过 API key（避免把脱敏值回传）
   const [apiKeyEdited, setApiKeyEdited] = useState(false)
@@ -33,6 +35,7 @@ export default function SettingsPage({ onSemanticModels }: { onSemanticModels?: 
       const llmData = data.llm
       if (llmData && typeof llmData === 'object' && !Array.isArray(llmData)) {
         setLLM((prev) => ({ ...prev, ...(llmData as Partial<typeof prev>) }))
+        setTranslation((prev) => ({ ...prev, ...(llmData as Partial<typeof prev>) }))
       }
       if (typeof data.has_api_key === 'boolean') setHasApiKey(data.has_api_key)
       if (typeof data.ai_batch_concurrency === 'number') setAiBatchConcurrency(data.ai_batch_concurrency)
@@ -59,6 +62,12 @@ export default function SettingsPage({ onSemanticModels }: { onSemanticModels?: 
           ...llm,
           // 若用户没改 api_key，传空字符串让后端保留原值
           llm_api_key: apiKeyEdited ? llm.llm_api_key : '',
+          ...(translationKeyEdited ? { translation_api_key: translation.translation_api_key } : { translation_api_key: '' }),
+          translation_provider: translation.translation_provider,
+          translation_model: translation.translation_model,
+          translation_base_url: translation.translation_base_url,
+          translation_temperature: translation.translation_temperature,
+          translation_max_tokens: translation.translation_max_tokens,
         },
         ai_batch_concurrency: aiBatchConcurrency,
         ai_use_cache: aiUseCache,
@@ -320,6 +329,20 @@ export default function SettingsPage({ onSemanticModels }: { onSemanticModels?: 
               {saveMsg}
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="settings-panel">
+        <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>独立 AI 翻译模型</h3>
+        <div style={{ display: 'grid', gap: 14 }}>
+          <select className="form-input" value={translation.translation_provider} onChange={e => setTranslation({ ...translation, translation_provider: e.target.value })}>
+            <option value="openai">OpenAI 兼容</option><option value="deepseek">DeepSeek</option><option value="custom">自定义</option>
+          </select>
+          <input type="password" className="form-input" value={translation.translation_api_key} onChange={e => { setTranslation({ ...translation, translation_api_key: e.target.value }); setTranslationKeyEdited(true) }} placeholder="翻译模型 API Key" />
+          <input className="form-input" value={translation.translation_base_url} onChange={e => setTranslation({ ...translation, translation_base_url: e.target.value })} placeholder="https://api.openai.com/v1" />
+          <input className="form-input" value={translation.translation_model} onChange={e => setTranslation({ ...translation, translation_model: e.target.value })} placeholder="gpt-4o-mini" />
+          <div style={{ display: 'flex', gap: 16 }}><input type="number" step="0.1" min="0" max="2" className="form-input" value={translation.translation_temperature} onChange={e => setTranslation({ ...translation, translation_temperature: Number(e.target.value) })} /><input type="number" min="1" className="form-input" value={translation.translation_max_tokens} onChange={e => setTranslation({ ...translation, translation_max_tokens: Number(e.target.value) })} /></div>
+          <div style={{ fontSize: 11, color: '#94a3b8' }}>主表单元格右键菜单中的“AI 翻译”会使用此独立模型。</div>
         </div>
       </div>
 

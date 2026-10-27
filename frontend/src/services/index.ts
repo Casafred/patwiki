@@ -76,6 +76,7 @@ export const aiService = {
   overrideValue: (...args: Parameters<typeof aiApi.overrideValue>) => aiApi.overrideValue(...args),
   clearOverride: (...args: Parameters<typeof aiApi.clearOverride>) => aiApi.clearOverride(...args),
   jevAnalyze: (...args: Parameters<typeof aiApi.jevAnalyze>) => aiApi.jevAnalyze(...args),
+  translate: (...args: Parameters<typeof aiApi.translate>) => aiApi.translate(...args),
 }
 
 export const metadataService = {

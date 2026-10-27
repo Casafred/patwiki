@@ -801,6 +801,8 @@ export const aiApi = {
     answers: JsonObject
     usage?: JsonObject | null
   }> => api.post('/ai/jev-analyze', params),
+  translate: (payload: { content: string; source_language?: string; target_language?: string; field_name?: string }): Promise<{ content: string; model: string; usage?: JsonValue }> =>
+    api.post('/ai/translate', payload),
 }
 
 export const exportApi = {

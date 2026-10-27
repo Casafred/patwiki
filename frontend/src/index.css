@@ -285,6 +285,26 @@ input, select, textarea {
   margin-bottom: 0;
 }
 
+/* Shared title treatment for AI, automation, and system management pages. */
+.page-container > .page-header,
+.workspace-page-shell > .page-header,
+.management-page > .page-header,
+.ai-capability-center .ai-center-hero {
+  border-radius: 14px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%);
+  border: 1px solid #dbeafe;
+}
+.page-header .page-title, .ai-center-hero .page-title { margin: 0; }
+.page-header .page-subtitle, .ai-center-hero .page-subtitle { margin: 6px 0 0; color: #64748b; }
+.cell-range-selected { background: #dbeafe !important; box-shadow: inset 0 0 0 1px #60a5fa; }
+.translation-markdown { max-height: 420px; overflow: auto; color: #1e293b; line-height: 1.7; }
+.translation-markdown p { margin: 0 0 10px; }
+.translation-markdown p:last-child { margin-bottom: 0; }
+.translation-markdown pre { padding: 10px; overflow: auto; border-radius: 6px; background: #f1f5f9; }
+.translation-markdown code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
 .page-title {
   font-size: 18px;
   font-weight: 600;

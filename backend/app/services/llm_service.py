@@ -40,6 +40,9 @@ class LLMConfig:
     reasoning_effort: str = "low"
 
 
+TranslationConfig = LLMConfig
+
+
 def normalize_base_url(value: str | None) -> str:
     base_url = (value or "https://api.openai.com/v1").strip().rstrip("/")
     for suffix in ("/chat/completions", "/completions"):
@@ -94,6 +97,36 @@ def load_llm_config(overrides: dict[str, Any] | None = None) -> LLMConfig:
         thinking_mode=str(thinking_mode),
         reasoning_effort=str(reasoning_effort),
     )
+
+
+def load_translation_config(overrides: dict[str, Any] | None = None) -> TranslationConfig:
+    from app.api.settings import get_app_settings
+    settings = get_app_settings().llm
+    overrides = overrides or {}
+    provider = str(overrides.get("provider") or settings.translation_provider or "openai").strip().lower()
+    api_key = overrides.get("api_key") or settings.translation_api_key
+    if not api_key:
+        raise LLMServiceError("未配置独立翻译模型 API Key，请先在设置页保存翻译配置")
+    model = overrides.get("model") or settings.translation_model
+    if not model:
+        raise LLMServiceError("未配置翻译模型名称")
+    return TranslationConfig(
+        provider=provider,
+        api_key=str(api_key),
+        model=normalize_model(provider, str(model)),
+        base_url=normalize_base_url(str(overrides.get("base_url") or settings.translation_base_url)),
+        temperature=min(2.0, max(0.0, float(overrides.get("temperature", settings.translation_temperature) or 0))),
+        max_tokens=max(1, int(overrides.get("max_tokens", settings.translation_max_tokens) or 1)),
+    )
+
+
+def translate_text(content: str, *, source_language: str = "auto", target_language: str = "中文",
+                  field_name: str = "", config: TranslationConfig | None = None) -> dict[str, Any]:
+    if not content.strip():
+        raise LLMServiceError("待翻译内容不能为空")
+    config = config or load_translation_config()
+    prompt = f"请将以下内容从{source_language}翻译为{target_language}。保留 Markdown、专利编号、公式和列表结构，只输出翻译结果。字段：{field_name or '未指定'}\n\n{content}"
+    return chat_completion(prompt, config, max_tokens=config.max_tokens)
 
 
 def _build_payload(prompt: str, config: LLMConfig, *, max_tokens: int | None,

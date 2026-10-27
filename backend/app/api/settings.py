@@ -18,7 +18,7 @@ MAX_AI_BATCH_CONCURRENCY = 50
 SETTINGS_FILE = settings.DATA_DIR / "settings.json"
 
 # 敏感字段：返回时做脱敏
-SENSITIVE_KEYS = {"llm_api_key", "embedding_api_key"}
+SENSITIVE_KEYS = {"llm_api_key", "embedding_api_key", "translation_api_key"}
 
 
 class LLMSettings(BaseModel):
@@ -36,6 +36,13 @@ class LLMSettings(BaseModel):
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_base_url: str = ""
+    # 独立翻译模型配置
+    translation_provider: str = "openai"
+    translation_api_key: str = ""
+    translation_model: str = "gpt-4o-mini"
+    translation_base_url: str = "https://api.openai.com/v1"
+    translation_temperature: float = 0.2
+    translation_max_tokens: int = 4000
 
 
 class AppSettings(BaseModel):

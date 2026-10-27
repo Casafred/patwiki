@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 import json
@@ -14,6 +15,24 @@ from app.core.time import utc_now_naive
 from app.services.field_registry import SYSTEM_FIELD_KEYS
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+class TranslateRequest(BaseModel):
+    content: str
+    source_language: str = "auto"
+    target_language: str = "中文"
+    field_name: str = ""
+
+
+@router.post("/translate")
+def translate(req: TranslateRequest):
+    try:
+        from app.services.llm_service import translate_text
+        result = translate_text(req.content, source_language=req.source_language,
+                                target_language=req.target_language, field_name=req.field_name)
+        return {"content": result["content"], "model": result["model"], "usage": result.get("usage")}
+    except Exception as exc:
+        raise BadRequestException(str(exc)) from exc
 
 
 @router.post("/jev-analyze")

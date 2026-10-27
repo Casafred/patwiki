@@ -1,3 +1,5 @@
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import TableDropdownOverlay, { TableDropdown } from '../common/TableDropdown'
 import { Fragment, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
@@ -773,6 +775,23 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     patentId?: number
     fieldKey?: string
   } | null>(null)
+  const [translationResult, setTranslationResult] = useState<{ content?: string; loading: boolean; error?: string } | null>(null)
+  const [cellSelection, setCellSelection] = useState<{ start: { row: number; col: number }; end: { row: number; col: number } } | null>(null)
+  const dragSelectingRef = useRef(false)
+  const isCellSelected = (row: number, col: number) => {
+    if (!cellSelection) return false
+    const minRow = Math.min(cellSelection.start.row, cellSelection.end.row)
+    const maxRow = Math.max(cellSelection.start.row, cellSelection.end.row)
+    const minCol = Math.min(cellSelection.start.col, cellSelection.end.col)
+    const maxCol = Math.max(cellSelection.start.col, cellSelection.end.col)
+    return row >= minRow && row <= maxRow && col >= minCol && col <= maxCol
+  }
+  useEffect(() => {
+    const stop = () => { dragSelectingRef.current = false }
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('blur', stop)
+    return () => { window.removeEventListener('mouseup', stop); window.removeEventListener('blur', stop) }
+  }, [])
   const [groupedGroups, setGroupedGroups] = useState<ViewGroup[]>([])
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set())
   const [collapsedFamilyKeys, setCollapsedFamilyKeys] = useState<Set<string>>(new Set())
@@ -2613,6 +2632,18 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
     })
   }
 
+  const handleTranslateCell = async (patentId: number, fieldKey: string) => {
+    setContextMenu(null)
+    const patent = patents.find(item => item.id === patentId)
+    const value = patent ? columnValueText(patent, fieldKey) : ''
+    if (!value.trim()) { setTranslationResult({ loading: false, error: '该单元格没有可翻译内容' }); return }
+    setTranslationResult({ loading: true })
+    try {
+      const result = await aiApi.translate({ content: value, field_name: fields.find(item => item.key === fieldKey)?.name || fieldKey })
+      setTranslationResult({ loading: false, content: result.content })
+    } catch (error: unknown) { setTranslationResult({ loading: false, error: getErrorMessage(error, '翻译失败') }) }
+  }
+
   const handleAddToView = async () => {
     if (!addToViewId || selectedIds.length === 0) return
     try {
@@ -4191,7 +4222,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                     return (
                     <td
                       key={field.key}
-                      className={`${isFrozen ? 'col-frozen' : ''} ${field.editable ? 'cell-editable' : ''} ${cellIsEditing ? 'cell-editing' : ''} ${activeCell?.patentId === p.id ? 'crosshair-row-cell' : ''} ${activeCell?.fieldKey === field.key ? 'crosshair-column-cell' : ''} ${activeCell?.patentId === p.id && activeCell?.fieldKey === field.key ? 'crosshair-cell' : ''}`}
+                      className={`${isFrozen ? 'col-frozen' : ''} ${field.editable ? 'cell-editable' : ''} ${cellIsEditing ? 'cell-editing' : ''} ${activeCell?.patentId === p.id ? 'crosshair-row-cell' : ''} ${activeCell?.fieldKey === field.key ? 'crosshair-column-cell' : ''} ${activeCell?.patentId === p.id && activeCell?.fieldKey === field.key ? 'crosshair-cell' : ''} ${isCellSelected(rowIdx, visibleFields.findIndex(item => item.key === field.key)) ? 'cell-range-selected' : ''}`}
                       style={{
                         width: columnWidths[field.key] || DEFAULT_COLUMN_WIDTH,
                         padding: field.field_type === 'longtext' ? '8px 10px' : '6px 10px',
@@ -4203,7 +4234,18 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                         ...(isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 5, background: '#fff' } : {}),
                         ...getConditionalCellStyle(field.key, getFieldValue(p, field.key)),
                       }}
-                      onMouseDown={() => setActiveCell({ patentId: p.id, fieldKey: field.key })}
+                      onMouseDown={(event) => {
+                        if (event.button !== 0 || cellIsEditing || (event.target as HTMLElement).closest('button, input, select, textarea, a, [contenteditable="true"]')) return
+                        event.preventDefault()
+                        dragSelectingRef.current = true
+                        const col = visibleFields.findIndex(item => item.key === field.key)
+                        setCellSelection({ start: { row: rowIdx, col }, end: { row: rowIdx, col } })
+                        setActiveCell({ patentId: p.id, fieldKey: field.key })
+                      }}
+                      onMouseEnter={() => {
+                        if (!dragSelectingRef.current || !cellSelection) return
+                        setCellSelection({ ...cellSelection, end: { row: rowIdx, col: visibleFields.findIndex(item => item.key === field.key) } })
+                      }}
                       onClick={(e) => {
                         e.stopPropagation()
                         setActiveCell({ patentId: p.id, fieldKey: field.key })
@@ -4954,6 +4996,13 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         </Modal>
       )}
 
+      {translationResult && <Modal title="AI 翻译结果" onClose={() => setTranslationResult(null)} width={620}>
+        {translationResult.loading ? <div className="loading-spinner">翻译中...</div> : translationResult.error ? <div style={{ color: '#b91c1c' }}>{translationResult.error}</div> : <>
+          <div className="translation-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{translationResult.content || ''}</ReactMarkdown></div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}><button className="btn btn-primary" onClick={() => void writeClipboardText(translationResult.content || '').catch(() => alert('复制失败，请手动选择译文复制'))}><Icon name="copy" /> 一键复制</button></div>
+        </>}
+      </Modal>}
+
       {/* 右键上下文菜单 */}
       {contextMenu && (
         <div
@@ -4999,6 +5048,7 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
                         <Icon name="sparkles" /> 用此单元格作为 AI 输入
                       </div>
                     )}
+                    {contextMenu.fieldKey && <div className="menu-item menu-item-ai" onClick={() => void handleTranslateCell(contextMenu.patentId!, contextMenu.fieldKey!)}><Icon name="sparkles" /> AI 翻译该单元格内容</div>}
                     <div className="menu-divider" />
                     <div className="menu-item" style={{ color: '#dc2626' }} onClick={() => handleDeletePatent(contextMenu.patentId!)}>
                       <Icon name="trash" /> 删除此行
