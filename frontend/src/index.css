@@ -305,6 +305,80 @@ input, select, textarea {
 .translation-markdown pre { padding: 10px; overflow: auto; border-radius: 6px; background: #f1f5f9; }
 .translation-markdown code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 
+/* Unified page composition: one quiet title row, no decorative banners or
+   product marks in the management and AI workspaces. */
+.page-container > .page-header,
+.workspace-page-shell > .page-header,
+.management-page > .page-header,
+.ai-center-hero,
+.semantic-workbench-header,
+.project-wiki-hero,
+.management-hero {
+  box-sizing: border-box;
+  min-height: 76px;
+  margin: 0 0 18px !important;
+  padding: 18px 22px !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: #fff !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .03) !important;
+}
+.page-container > .page-header .page-title,
+.workspace-page-shell > .page-header .page-title,
+.management-page > .page-header .page-title,
+.ai-center-hero .page-title,
+.project-wiki-hero h2,
+.management-hero h2 { color: #111827 !important; font-size: 21px !important; line-height: 1.25; letter-spacing: 0 !important; }
+.page-container > .page-header .page-subtitle,
+.workspace-page-shell > .page-header .page-subtitle,
+.management-page > .page-header .page-subtitle,
+.ai-center-hero .page-subtitle,
+.project-wiki-hero p,
+.management-hero p { color: #6b7280 !important; font-size: 12px !important; margin-top: 5px !important; }
+.management-hero .management-kicker,
+.ai-center-eyebrow,
+.project-wiki-eyebrow { display: none !important; }
+.semantic-workbench-header { min-height: 64px; }
+.semantic-workbench-header .workspace-subtabs { border-bottom: 0 !important; }
+.project-wiki-hero-meta { margin-top: 10px !important; color: #6b7280 !important; }
+.management-hero .btn-primary { background: #2563eb !important; color: #fff !important; }
+
+.data-grid-wrapper.has-cell-selection { cursor: crosshair; }
+.data-grid-wrapper.has-cell-selection .data-grid td { user-select: none; }
+.cell-range-selected { position: relative; background: #dbeafe !important; box-shadow: inset 0 0 0 1px #60a5fa !important; }
+.cell-range-selected::after { content: ''; position: absolute; inset: 0; pointer-events: none; border: 1px solid rgba(37, 99, 235, .35); }
+.cell-selection-status { display: flex; align-items: center; gap: 10px; min-height: 28px; margin: 8px 0; padding: 6px 10px; color: #1e40af; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 12px; }
+.cell-selection-status kbd { padding: 2px 5px; color: #334155; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-family: inherit; font-size: 11px; }
+
+/* Final shared workspace overrides. Keep these at the end so legacy page
+   specific banners cannot reintroduce different title treatments. */
+.page-container > .page-header,
+.workspace-page-shell > .page-header,
+.management-page > .page-header,
+.attachment-library-page > .page-header,
+.automation-page > .page-header,
+.mcp-page > .page-header,
+.gov-page .page-header,
+.ai-center-hero,
+.semantic-workbench-header,
+.project-wiki-hero,
+.management-hero {
+  background: #fff !important;
+  background-image: none !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .03) !important;
+}
+.management-hero { color: inherit !important; }
+.management-hero h2, .management-hero p { color: inherit !important; }
+.data-grid td { cursor: cell; }
+.data-grid td button, .data-grid td input, .data-grid td select, .data-grid td textarea, .data-grid td a { cursor: auto; }
+.data-grid-wrapper.has-cell-selection, .data-grid-wrapper.has-cell-selection .data-grid td { cursor: crosshair; }
+
 .page-title {
   font-size: 18px;
   font-weight: 600;

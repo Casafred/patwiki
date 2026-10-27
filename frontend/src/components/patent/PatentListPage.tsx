@@ -3080,6 +3080,32 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         return aOrder - bOrder
       })
   })()
+
+  const copySelectedCellRange = useCallback(async () => {
+    if (!cellSelection) return false
+    const minRow = Math.min(cellSelection.start.row, cellSelection.end.row)
+    const maxRow = Math.max(cellSelection.start.row, cellSelection.end.row)
+    const minCol = Math.min(cellSelection.start.col, cellSelection.end.col)
+    const maxCol = Math.max(cellSelection.start.col, cellSelection.end.col)
+    const rows = patents.slice(minRow, maxRow + 1).map(patent =>
+      visibleFields.slice(minCol, maxCol + 1).map(field => toTsvCell(columnValueText(patent, field.key))).join('\t'),
+    )
+    if (!rows.length) return false
+    await writeClipboardText(rows.join('\r\n'))
+    return true
+  }, [cellSelection, patents, visibleFields])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c' || !cellSelection) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      event.preventDefault()
+      void copySelectedCellRange().catch(() => alert('复制选中单元格失败，请重试'))
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [cellSelection, copySelectedCellRange])
   const detailVisibleFields = configuredDetailKeys
     ? configuredDetailKeys.map(key => fields.find(field => field.key === key)).filter((field): field is FieldMeta => Boolean(field))
     : fields.filter(field => DEFAULT_DETAIL_FIELD_KEYS.includes(field.key)).length > 0
@@ -3643,7 +3669,8 @@ export default function PatentListPage({ onPatentClick, viewId = null, onOpenImp
         </div>
       )}
 
-      <div ref={tableWrapperRef} className="data-grid-wrapper" onScroll={handleTableScroll} style={{ zoom: tableZoom / 100 }}>
+      {cellSelection && <div className="cell-selection-status" role="status"><span>已选择 {Math.abs(cellSelection.end.row - cellSelection.start.row) + 1} × {Math.abs(cellSelection.end.col - cellSelection.start.col) + 1} 个单元格</span><kbd>Ctrl/Cmd + C</kbd> 复制为 TSV</div>}
+      <div ref={tableWrapperRef} className={`data-grid-wrapper${cellSelection ? ' has-cell-selection' : ''}`} onScroll={handleTableScroll} style={{ zoom: tableZoom / 100 }}>
         {activeView?.layout_type === 'kanban' ? (
           <KanbanView
             view={activeView}
